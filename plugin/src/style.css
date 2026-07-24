@@ -15,7 +15,7 @@ body {
 }
 
 #app {
-  max-width: 720px;
+  max-width: 760px;
   margin: 0 auto;
   padding: 2rem;
 }
@@ -38,53 +38,80 @@ h1 {
   opacity: 0.75;
 }
 
-.probe {
+.status {
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background-color: var(--query-editor-bg);
+  font-size: 0.9rem;
+}
+
+.status.error {
+  border-color: var(--brand-danger);
+  color: var(--brand-danger);
+}
+
+.proposal {
   margin-top: 1.5rem;
-  padding-top: 1.5rem;
-  border-top: 1px solid var(--border-color);
 }
 
-.probe:first-of-type {
-  margin-top: 0;
-  padding-top: 0;
-  border-top: none;
+.intent {
+  margin: 0 0 0.75rem;
 }
 
-h2 {
-  margin: 0 0 0.25rem;
-  font-size: 1.1rem;
-  color: var(--text-dark);
-}
-
-.hint {
+.sql {
   margin: 0 0 1rem;
-  font-size: 0.85rem;
-  opacity: 0.7;
+  padding: 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background-color: var(--query-editor-bg);
+  color: var(--text-dark);
+  font-family: monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
-code {
-  font-family: monospace;
-  font-size: 0.9em;
+.blocked {
+  margin: 0 0 1rem;
+  color: var(--brand-danger);
+  font-weight: 500;
+}
+
+.actions {
+  display: flex;
+  gap: 0.75rem;
 }
 
 .primary-btn {
   background-color: var(--theme-primary);
   color: black;
   border: none;
-  padding: 0.75rem 1.5rem;
+  padding: 0.6rem 1.25rem;
   border-radius: 4px;
-  font-size: 1rem;
+  font-size: 0.95rem;
   font-weight: 500;
   cursor: pointer;
 }
 
-.primary-btn:disabled {
-  opacity: 0.6;
+.secondary-btn {
+  background-color: transparent;
+  color: var(--text-dark);
+  border: 1px solid var(--border-color);
+  padding: 0.6rem 1.25rem;
+  border-radius: 4px;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.primary-btn:disabled,
+.secondary-btn:disabled {
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
 .output {
-  margin-top: 1.5rem;
+  margin-top: 1rem;
   padding: 1rem;
   border: 1px solid var(--border-color);
   border-radius: 4px;
