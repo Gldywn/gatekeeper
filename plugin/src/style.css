@@ -1,0 +1,101 @@
+:root {
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background-color: var(--query-editor-bg);
+  color: var(--text-dark);
+}
+
+#app {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+.container {
+  background-color: var(--theme-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 2rem;
+}
+
+h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.75rem;
+  color: var(--text-dark);
+}
+
+.subtitle {
+  margin: 0 0 1.5rem;
+  opacity: 0.75;
+}
+
+.probe {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.probe:first-of-type {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+h2 {
+  margin: 0 0 0.25rem;
+  font-size: 1.1rem;
+  color: var(--text-dark);
+}
+
+.hint {
+  margin: 0 0 1rem;
+  font-size: 0.85rem;
+  opacity: 0.7;
+}
+
+code {
+  font-family: monospace;
+  font-size: 0.9em;
+}
+
+.primary-btn {
+  background-color: var(--theme-primary);
+  color: black;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 4px;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.primary-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.output {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background-color: var(--query-editor-bg);
+  color: var(--text-dark);
+  font-family: monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.output.error {
+  border-color: var(--brand-danger);
+  color: var(--brand-danger);
+}

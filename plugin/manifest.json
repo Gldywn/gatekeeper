@@ -1,0 +1,30 @@
+{
+  "id": "gatekeeper",
+  "name": "Gatekeeper",
+  "version": "0.0.1",
+  "minAppVersion": "5.4.0",
+  "manifestVersion": 2,
+  "description": "Human-approved, read-only SQL bridge. Spike A: proves the plugin loads and runQuery returns data.",
+  "author": {
+    "name": "Gatekeeper"
+  },
+  "icon": "shield",
+  "capabilities": {
+    "views": [
+      {
+        "id": "main",
+        "name": "Gatekeeper",
+        "type": "base-tab",
+        "entry": "dist/index.html"
+      }
+    ],
+    "menu": [
+      {
+        "command": "open-gatekeeper",
+        "name": "Gatekeeper",
+        "view": "main",
+        "placement": "menubar.tools"
+      }
+    ]
+  }
+}

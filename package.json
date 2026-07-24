@@ -1,0 +1,5 @@
+{
+  "name": "gatekeeper",
+  "private": true,
+  "description": "Human-approved, LLM-agnostic bridge for running read-only SQL through Beekeeper Studio's connection."
+}
