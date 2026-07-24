@@ -1,5 +1,10 @@
 {
   "name": "gatekeeper",
   "private": true,
-  "description": "Human-approved, LLM-agnostic bridge for running read-only SQL through Beekeeper Studio's connection."
+  "description": "Human-approved, LLM-agnostic bridge for running read-only SQL through Beekeeper Studio's connection.",
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=20.19",
+    "pnpm": ">=11"
+  }
 }

@@ -9,11 +9,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@beekeeperstudio/plugin": "^1.7.1"
+    "@beekeeperstudio/plugin": "1.7.1"
   },
   "devDependencies": {
-    "@beekeeperstudio/vite-plugin": "^1.1.0",
-    "typescript": "~5.8.3",
-    "vite": "^7.1.2"
+    "@beekeeperstudio/vite-plugin": "1.1.0",
+    "typescript": "5.8.3",
+    "vite": "7.3.6"
   }
 }
