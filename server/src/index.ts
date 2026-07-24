@@ -1,31 +1,51 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { ProposalQueue } from "./queue.js";
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+import { randomBytes } from "node:crypto";
+import { RequestStore } from "./store.js";
 import { createBroker } from "./broker.js";
 import { createMcpServer } from "./mcp.js";
-
-const BROKER_HOST = "127.0.0.1";
-const BROKER_PORT = Number(process.env.GATEKEEPER_BROKER_PORT ?? 9999);
+import {
+  BROKER_HOST,
+  MAX_PENDING_PER_SESSION,
+  PROPOSAL_TTL_MS,
+  SWEEP_INTERVAL_MS,
+  brokerPort,
+  dbPath,
+} from "./config.js";
 
 async function main(): Promise<void> {
-  const queue = new ProposalQueue();
+  const path = dbPath();
+  if (path !== ":memory:") {
+    mkdirSync(dirname(path), { recursive: true });
+  }
+  const store = new RequestStore({
+    path,
+    proposalTtlMs: PROPOSAL_TTL_MS,
+    maxPendingPerSession: MAX_PENDING_PER_SESSION,
+  });
+  const pluginId = `plugin_${randomBytes(6).toString("hex")}`;
 
-  const broker = createBroker(queue);
+  const broker = createBroker(store, pluginId);
+  const port = brokerPort();
   await new Promise<void>((resolve, reject) => {
     broker.once("error", reject);
-    broker.listen(BROKER_PORT, BROKER_HOST, () => {
+    broker.listen(port, BROKER_HOST, () => {
       broker.off("error", reject);
       // stdout is the MCP stdio channel, so all logs go to stderr.
-      console.error(
-        `[gatekeeper] broker listening on http://${BROKER_HOST}:${BROKER_PORT}`,
-      );
+      console.error(`[gatekeeper] broker on http://${BROKER_HOST}:${port} (db: ${path})`);
       resolve();
     });
   });
 
-  // Exit when the MCP client disconnects (stdin closes) so we do not linger
-  // holding the broker port after the session ends.
+  const sweep = setInterval(() => store.sweep(), SWEEP_INTERVAL_MS);
+  sweep.unref();
+
+  // Exit when the MCP client disconnects so we do not hold the broker port.
   const shutdown = () => {
+    clearInterval(sweep);
     broker.close();
+    store.close();
     process.exit(0);
   };
   process.stdin.on("end", shutdown);
@@ -33,7 +53,7 @@ async function main(): Promise<void> {
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 
-  const mcp = createMcpServer(queue);
+  const mcp = createMcpServer(store);
   await mcp.connect(new StdioServerTransport());
   console.error("[gatekeeper] MCP server ready on stdio");
 }

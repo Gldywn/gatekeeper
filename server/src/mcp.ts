@@ -1,63 +1,117 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import type { ProposalQueue, ProposalResult } from "./queue.js";
+import { randomBytes } from "node:crypto";
+import { StoreError, type RequestStore } from "./store.js";
+import {
+  cancelQuery,
+  getQueryResult,
+  ServiceError,
+  submitQuery,
+  type Ticket,
+} from "./service.js";
+import { MAX_WAIT_MS } from "./config.js";
 
-const APPROVAL_TIMEOUT_MS = 5 * 60 * 1000;
-
-export function createMcpServer(queue: ProposalQueue): McpServer {
+export function createMcpServer(store: RequestStore): McpServer {
+  // One stdio client per process; this identifies its request ownership.
+  const sessionId = `sess_${randomBytes(9).toString("hex")}`;
   const server = new McpServer({ name: "gatekeeper", version: "0.0.1" });
+
+  server.registerTool(
+    "submit_query",
+    {
+      title: "Propose a read-only SQL query for human approval",
+      description:
+        "Enqueue a read-only SQL SELECT for a human to approve in Beekeeper Studio. Returns immediately with a request_id; poll get_query_result for the outcome. Non-blocking, so you can submit several queries and collect their results as they resolve.",
+      inputSchema: {
+        sql: z.string().describe("The read-only SQL SELECT to propose."),
+        intent: z.string().optional().describe("A short, human-readable reason for the query."),
+        idempotency_key: z
+          .string()
+          .optional()
+          .describe("Optional key so a retried submission returns the same request."),
+      },
+    },
+    async ({ sql, intent, idempotency_key }) => {
+      try {
+        return ok(submitQuery(store, { sessionId, sql, intent, idempotencyKey: idempotency_key }));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "get_query_result",
+    {
+      title: "Get the result of a proposed query",
+      description:
+        "Read a submitted query by request_id. Optionally waits up to wait_ms (bounded) for a terminal state. States: pending, leased, executing, approved, rejected, failed, expired, cancelled.",
+      inputSchema: {
+        request_id: z.string(),
+        wait_ms: z.number().int().min(0).max(MAX_WAIT_MS).optional(),
+      },
+    },
+    async ({ request_id, wait_ms }) => {
+      try {
+        return ok(await getQueryResult(store, sessionId, request_id, wait_ms ?? 0));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "cancel_query",
+    {
+      title: "Cancel a pending query",
+      description: "Withdraw a pending or leased query you submitted.",
+      inputSchema: { request_id: z.string() },
+    },
+    async ({ request_id }) => {
+      try {
+        return ok(cancelQuery(store, sessionId, request_id));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
 
   server.registerTool(
     "run_query",
     {
-      title: "Run a human-approved, read-only SQL query",
+      title: "Run a read-only query and wait for the human decision",
       description:
-        "Propose a read-only SQL SELECT to run against the user's database. A human reviews the SQL in Beekeeper Studio and approves or rejects it before it runs on their connection. Returns the resulting rows on approval.",
+        "Convenience wrapper that submits a query and waits (bounded) for the terminal result. It serializes one query at a time; prefer submit_query + get_query_result when you want concurrency.",
       inputSchema: {
-        sql: z.string().describe("The read-only SQL SELECT to run."),
-        intent: z
-          .string()
-          .optional()
-          .describe("A short, human-readable reason for the query."),
+        sql: z.string(),
+        intent: z.string().optional(),
       },
     },
     async ({ sql, intent }) => {
-      let result: ProposalResult;
       try {
-        result = await queue.enqueue(sql, intent, APPROVAL_TIMEOUT_MS);
+        const submitted = submitQuery(store, { sessionId, sql, intent });
+        return ok(await getQueryResult(store, sessionId, submitted.requestId, MAX_WAIT_MS));
       } catch (err) {
-        return errorResult(err instanceof Error ? err.message : String(err));
+        return fail(err);
       }
-
-      if (result.status === "approved") {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(
-                { rows: result.rows, fields: result.fields },
-                null,
-                2,
-              ),
-            },
-          ],
-        };
-      }
-      if (result.status === "rejected") {
-        return errorResult(
-          `Query rejected by the human${result.reason ? `: ${result.reason}` : "."}`,
-        );
-      }
-      return errorResult(`Query failed to execute: ${result.error}`);
     },
   );
 
   return server;
 }
 
-function errorResult(message: string) {
+function ok(ticket: Ticket) {
+  return { content: [{ type: "text" as const, text: JSON.stringify(ticket, null, 2) }] };
+}
+
+function fail(err: unknown) {
+  const code =
+    err instanceof ServiceError || err instanceof StoreError ? err.code : "ERROR";
+  const message = err instanceof Error ? err.message : String(err);
   return {
-    content: [{ type: "text" as const, text: message }],
+    content: [
+      { type: "text" as const, text: JSON.stringify({ error: { code, message } }, null, 2) },
+    ],
     isError: true,
   };
 }

@@ -4,69 +4,120 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import type { ProposalQueue, ProposalResult } from "./queue.js";
+import { StoreError, type Outcome, type RequestStore } from "./store.js";
+import { BROKER_HOST, LEASE_MS, brokerPort } from "./config.js";
 
-// We own the broker, so we grant CORS to the plugin's `plugin://` origin.
-const CORS_HEADERS: Record<string, string> = {
+const CORS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
 };
+const MAX_BODY_BYTES = 32 * 1024 * 1024;
 
-// Result payloads carry the query rows, so the cap is generous.
-const MAX_BODY_BYTES = 256 * 1024 * 1024;
-
-export function createBroker(queue: ProposalQueue): Server {
+export function createBroker(store: RequestStore, pluginId: string): Server {
+  const port = brokerPort();
+  const allowedHosts = new Set([`${BROKER_HOST}:${port}`, `localhost:${port}`]);
   return createServer((req, res) => {
-    handle(queue, req, res).catch((err) => {
-      sendJson(res, 500, {
-        error: err instanceof Error ? err.message : String(err),
-      });
+    handle(store, pluginId, allowedHosts, req, res).catch((err) => {
+      send(res, 500, { error: err instanceof Error ? err.message : String(err) });
     });
   });
 }
 
 async function handle(
-  queue: ProposalQueue,
+  store: RequestStore,
+  pluginId: string,
+  allowedHosts: Set<string>,
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
+  // DNS-rebinding defense: only serve loopback Host headers.
+  const host = req.headers.host;
+  if (host && !allowedHosts.has(host)) {
+    send(res, 421, { error: "unexpected Host header" });
+    return;
+  }
+
   if (req.method === "OPTIONS") {
-    res.writeHead(204, CORS_HEADERS);
+    res.writeHead(204, baseHeaders());
     res.end();
     return;
   }
 
-  if (req.method === "GET" && req.url === "/pending") {
-    const proposal = queue.claimNext();
+  const url = new URL(req.url ?? "/", `http://${BROKER_HOST}`);
+
+  if (req.method === "GET" && url.pathname === "/pending") {
+    const proposal = store.claimNext(pluginId, LEASE_MS);
     if (!proposal) {
-      res.writeHead(204, CORS_HEADERS);
+      res.writeHead(204, baseHeaders());
       res.end();
       return;
     }
-    sendJson(res, 200, proposal);
+    send(res, 200, {
+      id: proposal.id,
+      sql: proposal.sql,
+      intent: proposal.intent,
+      createdAt: proposal.createdAt,
+      leaseId: proposal.leaseId,
+      leaseExpiresAt: proposal.leaseExpiresAt,
+    });
     return;
   }
 
-  if (req.method === "POST" && req.url === "/result") {
+  if (req.method === "POST" && url.pathname === "/executing") {
     const body = await readJson(req);
-    const result = toResult(body);
-    if (!result || typeof body.id !== "string") {
-      sendJson(res, 400, { error: "invalid result payload" });
-      return;
-    }
-    const matched = queue.resolve(body.id, result);
-    sendJson(res, matched ? 200 : 404, { ok: matched });
+    guarded(res, () => {
+      store.markExecuting(String(body.id), String(body.leaseId));
+      send(res, 200, { ok: true });
+    });
     return;
   }
 
-  sendJson(res, 404, { error: "not found" });
+  if (req.method === "POST" && url.pathname === "/result") {
+    const body = await readJson(req);
+    guarded(res, () => {
+      store.resolve(String(body.id), String(body.leaseId), toOutcome(body));
+      send(res, 200, { ok: true });
+    });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/lease/renew") {
+    const body = await readJson(req);
+    guarded(res, () => {
+      const renewed = store.renewLease(String(body.id), String(body.leaseId), LEASE_MS);
+      send(res, 200, { leaseExpiresAt: renewed.leaseExpiresAt });
+    });
+    return;
+  }
+
+  send(res, 404, { error: "not found" });
 }
 
-function toResult(body: any): ProposalResult | null {
-  if (body?.status === "approved") {
+function guarded(res: ServerResponse, fn: () => void): void {
+  try {
+    fn();
+  } catch (err) {
+    if (err instanceof StoreError) {
+      const status =
+        err.code === "NOT_FOUND"
+          ? 404
+          : err.code === "NOT_OWNER"
+            ? 403
+            : err.code === "LEASE_CONFLICT" || err.code === "INVALID_STATE"
+              ? 409
+              : 400;
+      send(res, status, { error: err.message, code: err.code });
+      return;
+    }
+    send(res, 500, { error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+function toOutcome(body: Record<string, unknown>): Outcome {
+  if (body.status === "approved") {
     if (body.error) {
-      return { status: "error", error: String(body.error) };
+      return { status: "failed", error: String(body.error) };
     }
     return {
       status: "approved",
@@ -74,21 +125,22 @@ function toResult(body: any): ProposalResult | null {
       fields: Array.isArray(body.fields) ? body.fields : [],
     };
   }
-  if (body?.status === "rejected") {
-    return {
-      status: "rejected",
-      reason: typeof body.reason === "string" ? body.reason : undefined,
-    };
-  }
-  return null;
+  return {
+    status: "rejected",
+    reason: typeof body.reason === "string" ? body.reason : undefined,
+  };
 }
 
-function sendJson(res: ServerResponse, status: number, payload: unknown): void {
-  res.writeHead(status, { ...CORS_HEADERS, "Content-Type": "application/json" });
+function baseHeaders(): Record<string, string> {
+  return { ...CORS, "Cache-Control": "no-store" };
+}
+
+function send(res: ServerResponse, status: number, payload: unknown): void {
+  res.writeHead(status, { ...baseHeaders(), "Content-Type": "application/json" });
   res.end(JSON.stringify(payload));
 }
 
-function readJson(req: IncomingMessage): Promise<any> {
+function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
