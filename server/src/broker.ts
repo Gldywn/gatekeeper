@@ -66,6 +66,7 @@ async function handle(
       sql: proposal.sql,
       intent: proposal.intent,
       createdAt: proposal.createdAt,
+      expiresAt: proposal.expiresAt,
       leaseId: proposal.leaseId,
       leaseExpiresAt: proposal.leaseExpiresAt,
     });
