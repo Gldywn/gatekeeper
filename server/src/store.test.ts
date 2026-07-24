@@ -115,6 +115,15 @@ describe("lease recovery", () => {
     // it must NOT be re-offered
     expect(store.claimNext("plugin-b", LEASE)).toBeNull();
   });
+
+  it("rejects lease operations once the lease has expired, before any sweep", () => {
+    const { store, clock } = makeStore();
+    store.submit({ sessionId: "s1", sql: "SELECT 1" });
+    const claimed = store.claimNext("plugin-a", LEASE)!;
+    clock.t += LEASE + 1;
+    // no sweep has run yet; the expired lease must still be refused
+    expect(() => store.markExecuting(claimed.id, claimed.leaseId!)).toThrowError(/expired/);
+  });
 });
 
 describe("cancel + expiry + ownership", () => {

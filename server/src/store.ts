@@ -503,6 +503,11 @@ export class RequestStore {
     if (row.leaseId !== leaseId) {
       throw new StoreError("LEASE_CONFLICT", `Lease ${leaseId} does not hold request ${id}`);
     }
+    // Refuse an expired lease even before the sweep re-offers it, so a stalled
+    // holder cannot mark executing or resolve on a lease it has effectively lost.
+    if (row.leaseExpiresAt !== null && row.leaseExpiresAt < this.now()) {
+      throw new StoreError("LEASE_CONFLICT", `Lease ${leaseId} on request ${id} has expired`);
+    }
     return row;
   }
 }

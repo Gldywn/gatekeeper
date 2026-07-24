@@ -312,7 +312,10 @@ export class Gatekeeper {
 
   private async renew(): Promise<void> {
     for (const card of [...this.cards]) {
-      if (card.state !== "ready") {
+      // Renew while a human deliberates (ready) and while the approved query
+      // runs (executing). An unrenewed executing card would expire mid-query
+      // and be failed as execution_unknown even though it actually succeeded.
+      if (card.state !== "ready" && card.state !== "executing") {
         continue;
       }
       try {
@@ -415,7 +418,13 @@ export class Gatekeeper {
       return;
     }
     this.setCardState(id, "executing");
-    await this.postExecuting(card);
+    // If the broker refuses the executing transition (the request was cancelled,
+    // or the lease was lost), do not run the query: its result could never be
+    // delivered, and the human approval no longer maps to a live proposal.
+    if (!(await this.postExecuting(card))) {
+      this.finish(id, "no", "lease lost");
+      return;
+    }
     try {
       const { rows, fields } = await runApprovedQuery(card.sql);
       this.setCardState(id, "posting");
@@ -438,15 +447,17 @@ export class Gatekeeper {
     this.finish(id, "no", "declined");
   }
 
-  private async postExecuting(card: Card): Promise<void> {
+  private async postExecuting(card: Card): Promise<boolean> {
     try {
-      await this.broker("/executing", {
+      const res = await this.broker("/executing", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: card.id, leaseId: card.leaseId }),
       });
+      return res.ok;
     } catch (err) {
       log.error(err instanceof Error ? err : String(err));
+      return false;
     }
   }
 
