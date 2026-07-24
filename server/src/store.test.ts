@@ -142,3 +142,39 @@ describe("cancel + expiry + ownership", () => {
     expect(() => store.getForSession("req_missing", "s1")).toThrowError(/NOT_FOUND/);
   });
 });
+
+describe("audit trail", () => {
+  it("records the full lifecycle of an approved request", () => {
+    const { store } = makeStore();
+    const req = store.submit({ sessionId: "s1", sql: "SELECT 1" });
+    const claimed = store.claimNext("plugin-a", LEASE)!;
+    store.markExecuting(claimed.id, claimed.leaseId!);
+    store.resolve(claimed.id, claimed.leaseId!, {
+      status: "approved",
+      rows: [{}, {}],
+      fields: [],
+    });
+    const trail = store.readAudit(req.id);
+    expect(trail.map((e) => e.event)).toEqual(["submitted", "claimed", "executing", "approved"]);
+    expect(trail.find((e) => e.event === "approved")?.detail).toBe("2 rows");
+    expect(trail.find((e) => e.event === "submitted")?.sqlDigest).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it("records execution_unknown when an executing lease is swept", () => {
+    const { store, clock } = makeStore();
+    const req = store.submit({ sessionId: "s1", sql: "SELECT 1" });
+    const claimed = store.claimNext("p", LEASE)!;
+    store.markExecuting(claimed.id, claimed.leaseId!);
+    clock.t += LEASE + 1;
+    store.sweep();
+    expect(store.readAudit(req.id).map((e) => e.event)).toContain("execution_unknown");
+  });
+
+  it("never stores the raw SQL", () => {
+    const { store } = makeStore();
+    const req = store.submit({ sessionId: "s1", sql: "SELECT secret FROM users" });
+    for (const entry of store.readAudit(req.id)) {
+      expect(JSON.stringify(entry)).not.toContain("secret");
+    }
+  });
+});

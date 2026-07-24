@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
 export type RequestState =
   | "pending"
@@ -45,6 +45,19 @@ export interface GatekeeperRequest {
   expiresAt: number;
 }
 
+export interface AuditEntry {
+  id: number;
+  ts: number;
+  requestId: string;
+  event: string;
+  fromState: string | null;
+  toState: string;
+  sessionId: string | null;
+  pluginId: string | null;
+  sqlDigest: string | null;
+  detail: string | null;
+}
+
 export type Outcome =
   | { status: "approved"; rows: unknown[]; fields: unknown[] }
   | { status: "rejected"; reason?: string }
@@ -82,6 +95,39 @@ const OPEN_STATES = "('pending','leased','executing')";
 
 function token(prefix: string): string {
   return `${prefix}_${randomBytes(6).toString("hex")}`;
+}
+
+// Store a digest, never the raw SQL, so the audit trail carries no PII.
+function digest(sql: string): string {
+  return createHash("sha256").update(sql).digest("hex").slice(0, 16);
+}
+
+interface RawAudit {
+  id: number;
+  ts: number;
+  request_id: string;
+  event: string;
+  from_state: string | null;
+  to_state: string;
+  session_id: string | null;
+  plugin_id: string | null;
+  sql_digest: string | null;
+  detail: string | null;
+}
+
+function toAudit(raw: RawAudit): AuditEntry {
+  return {
+    id: raw.id,
+    ts: raw.ts,
+    requestId: raw.request_id,
+    event: raw.event,
+    fromState: raw.from_state,
+    toState: raw.to_state,
+    sessionId: raw.session_id,
+    pluginId: raw.plugin_id,
+    sqlDigest: raw.sql_digest,
+    detail: raw.detail,
+  };
 }
 
 function toRequest(raw: RawRow): GatekeeperRequest {
@@ -143,6 +189,20 @@ export class RequestStore {
       CREATE INDEX IF NOT EXISTS idx_requests_state ON requests(state, created_at);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_requests_idem
         ON requests(session_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+
+      CREATE TABLE IF NOT EXISTS audit (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts INTEGER NOT NULL,
+        request_id TEXT NOT NULL,
+        event TEXT NOT NULL,
+        from_state TEXT,
+        to_state TEXT NOT NULL,
+        session_id TEXT,
+        plugin_id TEXT,
+        sql_digest TEXT,
+        detail TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_audit_request ON audit(request_id, id);
     `);
   }
 
@@ -206,6 +266,13 @@ export class RequestStore {
            @lease_id, @lease_expires_at, @plugin_id, @decided_at, @result_json, @policy_json, @expires_at)`,
       )
       .run(row);
+    this.logAudit({
+      requestId: row.id,
+      event: "submitted",
+      toState: "pending",
+      sessionId: row.session_id,
+      sqlDigest: digest(row.sql),
+    });
     return toRequest(row);
   }
 
@@ -230,6 +297,13 @@ export class RequestStore {
            WHERE id = ?`,
         )
         .run(leaseId, now + leaseMs, pluginId, oldest.id);
+      this.logAudit({
+        requestId: oldest.id,
+        event: "claimed",
+        fromState: "pending",
+        toState: "leased",
+        pluginId,
+      });
       return toRequest({
         ...oldest,
         state: "leased",
@@ -258,6 +332,12 @@ export class RequestStore {
       throw new StoreError("INVALID_STATE", `Cannot execute from state ${row.state}`);
     }
     this.db.prepare("UPDATE requests SET state = 'executing' WHERE id = ?").run(id);
+    this.logAudit({
+      requestId: id,
+      event: "executing",
+      fromState: "leased",
+      toState: "executing",
+    });
     return { ...row, state: "executing" };
   }
 
@@ -282,6 +362,18 @@ export class RequestStore {
         "UPDATE requests SET state = ?, result_json = ?, decided_at = ?, lease_id = NULL, lease_expires_at = NULL WHERE id = ?",
       )
       .run(state, JSON.stringify(result), now, id);
+    this.logAudit({
+      requestId: id,
+      event: state,
+      fromState: row.state,
+      toState: state,
+      detail:
+        outcome.status === "approved"
+          ? `${outcome.rows.length} rows`
+          : outcome.status === "rejected"
+            ? (outcome.reason ?? null)
+            : outcome.error,
+    });
     return { ...row, state, result, decidedAt: now, leaseId: null, leaseExpiresAt: null };
   }
 
@@ -297,6 +389,12 @@ export class RequestStore {
         "UPDATE requests SET state = 'cancelled', decided_at = ?, lease_id = NULL, lease_expires_at = NULL WHERE id = ?",
       )
       .run(now, id);
+    this.logAudit({
+      requestId: id,
+      event: "cancelled",
+      fromState: row.state,
+      toState: "cancelled",
+    });
     return { ...row, state: "cancelled", decidedAt: now, leaseId: null, leaseExpiresAt: null };
   }
 
@@ -322,21 +420,66 @@ export class RequestStore {
   // as execution_unknown, because the query may already have run.
   sweep(): void {
     const now = this.now();
+    const reoffered = this.db
+      .prepare(
+        "UPDATE requests SET state = 'pending', lease_id = NULL, lease_expires_at = NULL, plugin_id = NULL WHERE state = 'leased' AND lease_expires_at < ? RETURNING id",
+      )
+      .all(now) as { id: string }[];
+    for (const row of reoffered) {
+      this.logAudit({ requestId: row.id, event: "lease_expired", fromState: "leased", toState: "pending" });
+    }
+    const unknown = this.db
+      .prepare(
+        "UPDATE requests SET state = 'failed', result_json = ?, decided_at = ?, lease_id = NULL, lease_expires_at = NULL WHERE state = 'executing' AND lease_expires_at < ? RETURNING id",
+      )
+      .all(JSON.stringify({ error: "execution_unknown" }), now, now) as { id: string }[];
+    for (const row of unknown) {
+      this.logAudit({ requestId: row.id, event: "execution_unknown", fromState: "executing", toState: "failed" });
+    }
+    const expired = this.db
+      .prepare(
+        "UPDATE requests SET state = 'expired', decided_at = ? WHERE state = 'pending' AND expires_at < ? RETURNING id",
+      )
+      .all(now, now) as { id: string }[];
+    for (const row of expired) {
+      this.logAudit({ requestId: row.id, event: "expired", fromState: "pending", toState: "expired" });
+    }
+  }
+
+  /** Read the append-only audit trail, optionally scoped to one request. */
+  readAudit(requestId?: string): AuditEntry[] {
+    const rows = requestId
+      ? this.db.prepare("SELECT * FROM audit WHERE request_id = ? ORDER BY id ASC").all(requestId)
+      : this.db.prepare("SELECT * FROM audit ORDER BY id ASC").all();
+    return (rows as RawAudit[]).map(toAudit);
+  }
+
+  private logAudit(entry: {
+    requestId: string;
+    event: string;
+    fromState?: string | null;
+    toState: string;
+    sessionId?: string | null;
+    pluginId?: string | null;
+    sqlDigest?: string | null;
+    detail?: string | null;
+  }): void {
     this.db
       .prepare(
-        "UPDATE requests SET state = 'pending', lease_id = NULL, lease_expires_at = NULL, plugin_id = NULL WHERE state = 'leased' AND lease_expires_at < ?",
+        `INSERT INTO audit (ts, request_id, event, from_state, to_state, session_id, plugin_id, sql_digest, detail)
+         VALUES (@ts, @request_id, @event, @from_state, @to_state, @session_id, @plugin_id, @sql_digest, @detail)`,
       )
-      .run(now);
-    this.db
-      .prepare(
-        "UPDATE requests SET state = 'failed', result_json = ?, decided_at = ?, lease_id = NULL, lease_expires_at = NULL WHERE state = 'executing' AND lease_expires_at < ?",
-      )
-      .run(JSON.stringify({ error: "execution_unknown" }), now, now);
-    this.db
-      .prepare(
-        "UPDATE requests SET state = 'expired', decided_at = ? WHERE state = 'pending' AND expires_at < ?",
-      )
-      .run(now, now);
+      .run({
+        ts: this.now(),
+        request_id: entry.requestId,
+        event: entry.event,
+        from_state: entry.fromState ?? null,
+        to_state: entry.toState,
+        session_id: entry.sessionId ?? null,
+        plugin_id: entry.pluginId ?? null,
+        sql_digest: entry.sqlDigest ?? null,
+        detail: entry.detail ?? null,
+      });
   }
 
   close(): void {
