@@ -1,4 +1,5 @@
 import "./style.css";
+import type { RunQueryResult } from "@beekeeperstudio/plugin";
 import {
   addNotificationListener,
   appStorage,
@@ -7,7 +8,7 @@ import {
   log,
   runQuery,
 } from "@beekeeperstudio/plugin";
-import type { RunQueryResult } from "@beekeeperstudio/plugin";
+import { Parser } from "node-sql-parser";
 
 const BROKER_URL = "http://localhost:9999";
 const POLL_MS = 1000;
@@ -43,9 +44,26 @@ interface HistItem {
   time: string;
 }
 
-// The plugin is the only component that can call runQuery, so the read-only
-// rule lives here. Conservative and fails closed; extension point to harden.
-export function isReadOnlyQuery(sql: string): boolean {
+const parser = new Parser();
+const FORBIDDEN =
+  /"type"\s*:\s*"(delete|update|insert|replace|create|drop|alter|truncate|call|use|grant|revoke|set|lock)"/i;
+
+function mapDialect(databaseType: string): string {
+  switch (databaseType) {
+    case "sqlserver":
+      return "transactsql";
+    case "mariadb":
+    case "mysql":
+    case "sqlite":
+    case "bigquery":
+    case "snowflake":
+      return databaseType;
+    default:
+      return "postgresql";
+  }
+}
+
+function conservativeReadOnly(sql: string): boolean {
   const stripped = sql
     .replace(/\/\*[\s\S]*?\*\//g, " ")
     .replace(/--[^\n]*/g, " ")
@@ -58,6 +76,25 @@ export function isReadOnlyQuery(sql: string): boolean {
     return false;
   }
   return /^(select|with)\b/i.test(single);
+}
+
+// The plugin is the only component that can call runQuery, so the read-only rule
+// lives here. A dialect-aware parse fails closed: exactly one SELECT with no
+// data-modifying node anywhere. Parser gaps fall back to a leading-keyword check.
+export function isReadOnlyQuery(sql: string, dialect = "postgresql"): boolean {
+  try {
+    const ast = parser.astify(sql, { database: dialect });
+    const statements = Array.isArray(ast) ? ast : [ast];
+    if (statements.length !== 1) {
+      return false;
+    }
+    if ((statements[0] as { type?: string }).type !== "select") {
+      return false;
+    }
+    return !FORBIDDEN.test(JSON.stringify(ast));
+  } catch {
+    return conservativeReadOnly(sql);
+  }
 }
 
 async function runApprovedQuery(
@@ -121,6 +158,7 @@ export class Gatekeeper {
   private token: string | null = null;
   private connectionName = "";
   private readOnly = false;
+  private dialect = "postgresql";
   private readonly cards: Card[] = [];
   private readonly history: HistItem[] = [];
   private polling = false;
@@ -136,6 +174,7 @@ export class Gatekeeper {
       const conn = await getConnectionInfo();
       this.connectionName = conn.connectionName || conn.databaseName || "connection";
       this.readOnly = conn.readOnlyMode;
+      this.dialect = mapDialect(conn.databaseType);
     } catch {
       // Connection info is best-effort; the queue still works without it.
     }
@@ -183,7 +222,9 @@ export class Gatekeeper {
       window.setInterval(() => void this.renew(), RENEW_MS);
       window.setInterval(() => this.tick(), TICK_MS);
     };
-    this.root.querySelector<HTMLButtonElement>("#pair-btn")!.addEventListener("click", () => void save());
+    this.root
+      .querySelector<HTMLButtonElement>("#pair-btn")!
+      .addEventListener("click", () => void save());
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         void save();
@@ -321,7 +362,7 @@ export class Gatekeeper {
   }
 
   private cardHtml(card: Card): string {
-    const readOnly = isReadOnlyQuery(card.sql);
+    const readOnly = isReadOnlyQuery(card.sql, this.dialect);
     const remaining = card.expiresAt - Date.now();
     const actions =
       card.state === "ready"
@@ -362,11 +403,14 @@ export class Gatekeeper {
 
   private async approve(id: string): Promise<void> {
     const card = this.cards.find((c) => c.id === id);
-    if (!card || card.state !== "ready") {
+    if (card?.state !== "ready") {
       return;
     }
-    if (!isReadOnlyQuery(card.sql)) {
-      await this.postResult(card, { status: "rejected", reason: "Blocked: not a read-only SELECT." });
+    if (!isReadOnlyQuery(card.sql, this.dialect)) {
+      await this.postResult(card, {
+        status: "rejected",
+        reason: "Blocked: not a read-only SELECT.",
+      });
       this.finish(id, "no", "blocked");
       return;
     }
@@ -386,7 +430,7 @@ export class Gatekeeper {
 
   private async reject(id: string): Promise<void> {
     const card = this.cards.find((c) => c.id === id);
-    if (!card || card.state !== "ready") {
+    if (card?.state !== "ready") {
       return;
     }
     this.setCardState(id, "rejecting");

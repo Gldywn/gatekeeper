@@ -9,7 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@beekeeperstudio/plugin": "1.7.1"
+    "@beekeeperstudio/plugin": "1.7.1",
+    "node-sql-parser": "5.4.0"
   },
   "devDependencies": {
     "@beekeeperstudio/vite-plugin": "1.1.0",
