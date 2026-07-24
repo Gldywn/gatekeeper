@@ -16,3 +16,7 @@ export function brokerPort(): number {
 export function dbPath(): string {
   return process.env.GATEKEEPER_DB ?? join(homedir(), ".gatekeeper", "requests.db");
 }
+
+export function tokenPath(): string {
+  return join(homedir(), ".gatekeeper", "broker-token");
+}

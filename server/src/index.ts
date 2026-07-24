@@ -1,5 +1,5 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { randomBytes } from "node:crypto";
 import { RequestStore } from "./store.js";
@@ -12,7 +12,24 @@ import {
   SWEEP_INTERVAL_MS,
   brokerPort,
   dbPath,
+  tokenPath,
 } from "./config.js";
+
+function loadOrCreateToken(): string {
+  const fromEnv = process.env.GATEKEEPER_TOKEN;
+  if (fromEnv) {
+    return fromEnv;
+  }
+  const file = tokenPath();
+  try {
+    return readFileSync(file, "utf8").trim();
+  } catch {
+    const token = randomBytes(32).toString("base64url");
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, token, { mode: 0o600 });
+    return token;
+  }
+}
 
 async function main(): Promise<void> {
   const path = dbPath();
@@ -25,8 +42,9 @@ async function main(): Promise<void> {
     maxPendingPerSession: MAX_PENDING_PER_SESSION,
   });
   const pluginId = `plugin_${randomBytes(6).toString("hex")}`;
+  const token = loadOrCreateToken();
 
-  const broker = createBroker(store, pluginId);
+  const broker = createBroker(store, pluginId, token);
   const port = brokerPort();
   await new Promise<void>((resolve, reject) => {
     broker.once("error", reject);
@@ -34,6 +52,9 @@ async function main(): Promise<void> {
       broker.off("error", reject);
       // stdout is the MCP stdio channel, so all logs go to stderr.
       console.error(`[gatekeeper] broker on http://${BROKER_HOST}:${port} (db: ${path})`);
+      if (!process.env.GATEKEEPER_TOKEN) {
+        console.error(`[gatekeeper] pair the plugin with the token at ${tokenPath()}`);
+      }
       resolve();
     });
   });

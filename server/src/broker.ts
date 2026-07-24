@@ -10,15 +10,15 @@ import { BROKER_HOST, LEASE_MS, brokerPort } from "./config.js";
 const CORS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
 const MAX_BODY_BYTES = 32 * 1024 * 1024;
 
-export function createBroker(store: RequestStore, pluginId: string): Server {
+export function createBroker(store: RequestStore, pluginId: string, token: string): Server {
   const port = brokerPort();
   const allowedHosts = new Set([`${BROKER_HOST}:${port}`, `localhost:${port}`]);
   return createServer((req, res) => {
-    handle(store, pluginId, allowedHosts, req, res).catch((err) => {
+    handle(store, pluginId, allowedHosts, token, req, res).catch((err) => {
       send(res, 500, { error: err instanceof Error ? err.message : String(err) });
     });
   });
@@ -28,6 +28,7 @@ async function handle(
   store: RequestStore,
   pluginId: string,
   allowedHosts: Set<string>,
+  token: string,
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
@@ -41,6 +42,13 @@ async function handle(
   if (req.method === "OPTIONS") {
     res.writeHead(204, baseHeaders());
     res.end();
+    return;
+  }
+
+  // Any local process can reach loopback, so require the shared capability
+  // token on every non-preflight request.
+  if (req.headers.authorization !== `Bearer ${token}`) {
+    send(res, 401, { error: "unauthorized" });
     return;
   }
 
