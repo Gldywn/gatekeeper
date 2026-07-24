@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
+import { cancelQuery, getQueryResult, submitQuery } from "./service.js";
 import { RequestStore } from "./store.js";
-import { submitQuery, getQueryResult, cancelQuery } from "./service.js";
 
 function fresh() {
   return new RequestStore({ proposalTtlMs: 10_000 });

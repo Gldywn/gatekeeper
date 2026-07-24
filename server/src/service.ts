@@ -1,6 +1,6 @@
-import type { GatekeeperRequest, RequestState, RequestStore } from "./store.js";
-import { assessReadOnly } from "./policy.js";
 import { MAX_WAIT_MS, POLL_MS } from "./config.js";
+import { assessReadOnly } from "./policy.js";
+import type { GatekeeperRequest, RequestState, RequestStore } from "./store.js";
 
 const TERMINAL_STATES: ReadonlySet<RequestState> = new Set([
   "approved",
@@ -123,10 +123,6 @@ export async function getQueryResult(
 }
 
 /** Withdraw a pending or leased request the agent no longer wants. */
-export function cancelQuery(
-  store: RequestStore,
-  sessionId: string,
-  requestId: string,
-): Ticket {
+export function cancelQuery(store: RequestStore, sessionId: string, requestId: string): Ticket {
   return toTicket(store.cancel(requestId, sessionId));
 }

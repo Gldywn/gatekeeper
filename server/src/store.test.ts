@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { RequestStore, StoreError } from "./store.js";
 
 function makeStore(overrides: Record<string, unknown> = {}) {
@@ -36,9 +36,7 @@ describe("submit", () => {
     const { store } = makeStore({ maxPendingPerSession: 2 });
     store.submit({ sessionId: "s1", sql: "SELECT 1" });
     store.submit({ sessionId: "s1", sql: "SELECT 2" });
-    expect(() => store.submit({ sessionId: "s1", sql: "SELECT 3" })).toThrowError(
-      StoreError,
-    );
+    expect(() => store.submit({ sessionId: "s1", sql: "SELECT 3" })).toThrowError(StoreError);
     // a different session is unaffected
     expect(store.submit({ sessionId: "s2", sql: "SELECT 9" }).state).toBe("pending");
   });

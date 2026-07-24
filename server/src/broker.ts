@@ -1,11 +1,6 @@
-import {
-  createServer,
-  type IncomingMessage,
-  type Server,
-  type ServerResponse,
-} from "node:http";
-import { StoreError, type Outcome, type RequestStore } from "./store.js";
-import { BROKER_HOST, LEASE_MS, brokerPort } from "./config.js";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { BROKER_HOST, brokerPort, LEASE_MS } from "./config.js";
+import { type Outcome, type RequestStore, StoreError } from "./store.js";
 
 const CORS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",

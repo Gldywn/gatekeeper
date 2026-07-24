@@ -1,5 +1,5 @@
-import Database from "better-sqlite3";
 import { createHash, randomBytes } from "node:crypto";
+import Database from "better-sqlite3";
 
 export type RequestState =
   | "pending"
@@ -218,9 +218,7 @@ export class RequestStore {
 
     if (input.idempotencyKey) {
       const existing = this.db
-        .prepare(
-          "SELECT * FROM requests WHERE session_id = ? AND idempotency_key = ?",
-        )
+        .prepare("SELECT * FROM requests WHERE session_id = ? AND idempotency_key = ?")
         .get(input.sessionId, input.idempotencyKey) as RawRow | undefined;
       if (existing) {
         return toRequest(existing);
@@ -281,9 +279,7 @@ export class RequestStore {
     const claim = this.db.transaction((): GatekeeperRequest | null => {
       this.sweep();
       const oldest = this.db
-        .prepare(
-          "SELECT * FROM requests WHERE state = 'pending' ORDER BY created_at ASC LIMIT 1",
-        )
+        .prepare("SELECT * FROM requests WHERE state = 'pending' ORDER BY created_at ASC LIMIT 1")
         .get() as RawRow | undefined;
       if (!oldest) {
         return null;
@@ -319,9 +315,7 @@ export class RequestStore {
   renewLease(id: string, leaseId: string, leaseMs: number): GatekeeperRequest {
     const row = this.requireLease(id, leaseId);
     const expires = this.now() + leaseMs;
-    this.db
-      .prepare("UPDATE requests SET lease_expires_at = ? WHERE id = ?")
-      .run(expires, id);
+    this.db.prepare("UPDATE requests SET lease_expires_at = ? WHERE id = ?").run(expires, id);
     return { ...row, leaseExpiresAt: expires };
   }
 
@@ -426,7 +420,12 @@ export class RequestStore {
       )
       .all(now) as { id: string }[];
     for (const row of reoffered) {
-      this.logAudit({ requestId: row.id, event: "lease_expired", fromState: "leased", toState: "pending" });
+      this.logAudit({
+        requestId: row.id,
+        event: "lease_expired",
+        fromState: "leased",
+        toState: "pending",
+      });
     }
     const unknown = this.db
       .prepare(
@@ -434,7 +433,12 @@ export class RequestStore {
       )
       .all(JSON.stringify({ error: "execution_unknown" }), now, now) as { id: string }[];
     for (const row of unknown) {
-      this.logAudit({ requestId: row.id, event: "execution_unknown", fromState: "executing", toState: "failed" });
+      this.logAudit({
+        requestId: row.id,
+        event: "execution_unknown",
+        fromState: "executing",
+        toState: "failed",
+      });
     }
     const expired = this.db
       .prepare(
@@ -442,7 +446,12 @@ export class RequestStore {
       )
       .all(now, now) as { id: string }[];
     for (const row of expired) {
-      this.logAudit({ requestId: row.id, event: "expired", fromState: "pending", toState: "expired" });
+      this.logAudit({
+        requestId: row.id,
+        event: "expired",
+        fromState: "pending",
+        toState: "expired",
+      });
     }
   }
 
@@ -492,10 +501,7 @@ export class RequestStore {
       throw new StoreError("NOT_FOUND", `Unknown request ${id}`);
     }
     if (row.leaseId !== leaseId) {
-      throw new StoreError(
-        "LEASE_CONFLICT",
-        `Lease ${leaseId} does not hold request ${id}`,
-      );
+      throw new StoreError("LEASE_CONFLICT", `Lease ${leaseId} does not hold request ${id}`);
     }
     return row;
   }

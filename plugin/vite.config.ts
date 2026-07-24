@@ -1,5 +1,5 @@
-import { defineConfig } from "vite";
 import bks from "@beekeeperstudio/vite-plugin";
+import { defineConfig } from "vite";
 
 export default defineConfig({
   plugins: [

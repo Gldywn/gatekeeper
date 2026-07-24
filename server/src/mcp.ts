@@ -1,15 +1,9 @@
+import { randomBytes } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { randomBytes } from "node:crypto";
-import { StoreError, type RequestStore } from "./store.js";
-import {
-  cancelQuery,
-  getQueryResult,
-  ServiceError,
-  submitQuery,
-  type Ticket,
-} from "./service.js";
 import { MAX_WAIT_MS } from "./config.js";
+import { cancelQuery, getQueryResult, ServiceError, submitQuery, type Ticket } from "./service.js";
+import { type RequestStore, StoreError } from "./store.js";
 
 export function createMcpServer(store: RequestStore): McpServer {
   // One stdio client per process; this identifies its request ownership.
@@ -105,8 +99,7 @@ function ok(ticket: Ticket) {
 }
 
 function fail(err: unknown) {
-  const code =
-    err instanceof ServiceError || err instanceof StoreError ? err.code : "ERROR";
+  const code = err instanceof ServiceError || err instanceof StoreError ? err.code : "ERROR";
   const message = err instanceof Error ? err.message : String(err);
   return {
     content: [

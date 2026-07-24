@@ -6,3 +6,8 @@ dist/
 .DS_Store
 .cache/
 .pnpm-store/
+
+# Local agent/skill tooling, not part of the product
+.claude/
+.agents/
+skills-lock.json

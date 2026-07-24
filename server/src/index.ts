@@ -1,19 +1,19 @@
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { randomBytes } from "node:crypto";
-import { RequestStore } from "./store.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createBroker } from "./broker.js";
-import { createMcpServer } from "./mcp.js";
 import {
   BROKER_HOST,
+  brokerPort,
+  dbPath,
   MAX_PENDING_PER_SESSION,
   PROPOSAL_TTL_MS,
   SWEEP_INTERVAL_MS,
-  brokerPort,
-  dbPath,
   tokenPath,
 } from "./config.js";
+import { createMcpServer } from "./mcp.js";
+import { RequestStore } from "./store.js";
 
 function loadOrCreateToken(): string {
   const fromEnv = process.env.GATEKEEPER_TOKEN;
