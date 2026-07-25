@@ -16,6 +16,12 @@ const POLL_MS = 1000;
 const RENEW_MS = 15_000;
 const TICK_MS = 1000;
 const TOKEN_KEY = "gatekeeper.token";
+const HIST_MAX = 20;
+// Results are held in the iframe only to power the detail view, so bound them:
+// per item by rows and serialized bytes, and across all items by total bytes.
+const HIST_MAX_ROWS = 200;
+const HIST_MAX_ITEM_BYTES = 512 * 1024;
+const HIST_MAX_TOTAL_BYTES = 2 * 1024 * 1024;
 
 type CardState = "ready" | "approving" | "executing" | "posting" | "rejecting";
 
@@ -37,12 +43,20 @@ interface Field {
   name: string;
 }
 
+interface HistResult {
+  fields: Field[];
+  rows: Record<string, unknown>[];
+  rowCount: number;
+  truncated: boolean;
+}
+
 interface HistItem {
   id: string;
   status: "ok" | "no";
   note: string;
   sql: string;
   time: string;
+  result?: HistResult;
 }
 
 const parser = new Parser();
@@ -107,6 +121,29 @@ async function runApprovedQuery(
     rows: first?.rows ?? [],
     fields: (first?.fields ?? []).map((f) => ({ name: f.name })),
   };
+}
+
+// Keep at most HIST_MAX_ROWS, then shrink further until the serialized payload
+// fits the per-item byte budget; the flag lets the detail view say it truncated.
+function capResult(rows: Record<string, unknown>[], fields: Field[]): HistResult {
+  const rowCount = rows.length;
+  let kept = rows.slice(0, HIST_MAX_ROWS);
+  let truncated = rows.length > kept.length;
+  while (kept.length > 0 && JSON.stringify(kept).length > HIST_MAX_ITEM_BYTES) {
+    kept = kept.slice(0, Math.floor(kept.length / 2));
+    truncated = true;
+  }
+  return { fields, rows: kept, rowCount, truncated };
+}
+
+function cell(value: unknown): string {
+  if (value === null || value === undefined) {
+    return "NULL";
+  }
+  if (typeof value === "object") {
+    return JSON.stringify(value);
+  }
+  return String(value);
 }
 
 // The broker token is a capability secret, so it lives in Beekeeper's encrypted
@@ -194,6 +231,11 @@ export class Gatekeeper {
 
   constructor(root: HTMLElement) {
     this.root = root;
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        this.closeDetail();
+      }
+    });
   }
 
   async start(): Promise<void> {
@@ -271,6 +313,7 @@ export class Gatekeeper {
           <button class="disclosure" id="htoggle" aria-expanded="true"><span class="chev">&#9662;</span> Recently resolved</button>
           <div class="hist" id="hist"></div>
         </section>
+        <div class="detail" id="detail" hidden></div>
       </div>`;
     const conn = this.root.querySelector<HTMLSpanElement>("#conn")!;
     conn.innerHTML = `${escapeHtml(this.connectionName)}${this.readOnly ? ' <span class="ro">read-only</span>' : ""}`;
@@ -289,6 +332,24 @@ export class Gatekeeper {
         void this.approve(a.getAttribute("data-approve")!);
       } else if (r) {
         void this.reject(r.getAttribute("data-reject")!);
+      }
+    });
+    hist.addEventListener("click", (e) => {
+      const row = (e.target as HTMLElement).closest<HTMLElement>("[data-hist]");
+      if (!row) {
+        return;
+      }
+      const item = this.history.find((h) => h.id === row.getAttribute("data-hist"));
+      if (item) {
+        this.openDetail(item);
+      }
+    });
+    const detail = this.root.querySelector<HTMLDivElement>("#detail")!;
+    detail.addEventListener("click", (e) => {
+      const target = e.target as HTMLElement;
+      // Close on the backdrop or the close button, not on the card itself.
+      if (target === detail || target.closest("[data-close]")) {
+        this.closeDetail();
       }
     });
     this.renderQueue();
@@ -470,7 +531,7 @@ export class Gatekeeper {
       const { rows, fields } = await runApprovedQuery(card.sql);
       this.setCardState(id, "posting");
       await this.postResult(card, { status: "approved", rows, fields });
-      this.finish(id, "ok", `${rows.length} rows`);
+      this.finish(id, "ok", `${rows.length} rows`, capResult(rows, fields));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       await this.postResult(card, { status: "approved", error: message });
@@ -522,7 +583,7 @@ export class Gatekeeper {
     }
   }
 
-  private finish(id: string, status: "ok" | "no", note: string): void {
+  private finish(id: string, status: "ok" | "no", note: string, result?: HistResult): void {
     const card = this.cards.find((c) => c.id === id);
     if (!card) {
       return;
@@ -530,10 +591,11 @@ export class Gatekeeper {
     const el = this.root.querySelector<HTMLElement>(`[data-card="${id}"]`);
     const commit = () => {
       this.drop(id);
-      this.history.unshift({ id, status, note, sql: card.sql.split("\n")[0], time: "just now" });
-      if (this.history.length > 20) {
+      this.history.unshift({ id, status, note, sql: card.sql, time: "just now", result });
+      if (this.history.length > HIST_MAX) {
         this.history.pop();
       }
+      this.enforceHistoryBudget();
       this.renderHistory();
     };
     if (el && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
@@ -541,6 +603,23 @@ export class Gatekeeper {
       window.setTimeout(commit, 200);
     } else {
       commit();
+    }
+  }
+
+  // Retain the newest results within the total byte budget; older items keep
+  // their row and SQL but shed their rows so memory stays bounded.
+  private enforceHistoryBudget(): void {
+    let total = 0;
+    for (const item of this.history) {
+      if (!item.result || item.result.rows.length === 0) {
+        continue;
+      }
+      const size = JSON.stringify(item.result.rows).length;
+      if (total + size > HIST_MAX_TOTAL_BYTES) {
+        item.result = { ...item.result, rows: [], truncated: true };
+      } else {
+        total += size;
+      }
     }
   }
 
@@ -552,14 +631,66 @@ export class Gatekeeper {
     hist.innerHTML = this.history
       .map(
         (h) => `
-        <div class="hrow">
+        <button class="hrow" type="button" data-hist="${escapeHtml(h.id)}">
           <span class="hid">${escapeHtml(h.id)}</span>
           <span class="hstatus ${h.status}">${h.status === "ok" ? "approved" : "rejected"}</span>
-          <span class="hsql">${escapeHtml(h.sql)}</span>
+          <span class="hsql">${escapeHtml(h.sql.split("\n")[0])}</span>
           <span class="htime">${escapeHtml(h.note)} &middot; ${h.time}</span>
-        </div>`,
+        </button>`,
       )
       .join("");
+  }
+
+  private openDetail(item: HistItem): void {
+    const panel = this.root.querySelector<HTMLDivElement>("#detail");
+    if (!panel) {
+      return;
+    }
+    panel.innerHTML = this.detailHtml(item);
+    panel.hidden = false;
+  }
+
+  private closeDetail(): void {
+    const panel = this.root.querySelector<HTMLDivElement>("#detail");
+    if (panel) {
+      panel.hidden = true;
+      panel.innerHTML = "";
+    }
+  }
+
+  private detailHtml(item: HistItem): string {
+    const grid = item.result ? this.gridHtml(item.result) : "";
+    return `
+      <div class="detail-card">
+        <div class="detail-head">
+          <span class="detail-id">${escapeHtml(item.id)}</span>
+          <span class="hstatus ${item.status}">${item.status === "ok" ? "approved" : "rejected"}</span>
+          <span class="detail-note">${escapeHtml(item.note)}</span>
+          <button class="detail-close" type="button" data-close aria-label="Close detail">&times;</button>
+        </div>
+        <pre class="sql">${highlight(item.sql)}</pre>
+        ${grid}
+      </div>`;
+  }
+
+  private gridHtml(result: HistResult): string {
+    if (result.rowCount === 0) {
+      return '<p class="detail-empty">No rows returned.</p>';
+    }
+    if (result.rows.length === 0) {
+      return `<p class="detail-empty">${result.rowCount} rows returned, no longer held in memory.</p>`;
+    }
+    const cols = result.fields.length
+      ? result.fields.map((f) => f.name)
+      : Object.keys(result.rows[0]);
+    const head = cols.map((c) => `<th>${escapeHtml(c)}</th>`).join("");
+    const body = result.rows
+      .map((row) => `<tr>${cols.map((c) => `<td>${escapeHtml(cell(row[c]))}</td>`).join("")}</tr>`)
+      .join("");
+    const note = result.truncated
+      ? `<p class="detail-note">Showing ${result.rows.length} of ${result.rowCount} rows.</p>`
+      : "";
+    return `<div class="grid-wrap"><table class="grid"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>${note}`;
   }
 }
 
