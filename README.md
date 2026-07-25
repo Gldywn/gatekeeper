@@ -5,177 +5,190 @@ Studio's existing database connection.
 
 An MCP server lets any MCP client (Claude Code, Codex CLI, OpenCode, ...) propose a
 SQL query. A Beekeeper Studio plugin surfaces that query for a human to approve. On
-approval, the query runs on the connection Beekeeper already holds, and the result
-flows back to the agent. The agent never holds database credentials, and no query
-runs without a human looking at it first.
+approval the query runs on the connection Beekeeper already holds, and the result
+flows back to the agent. The agent never holds database credentials, and nothing runs
+without a human approving it first.
 
 ## Why
 
 During investigations (support triage, debugging, data checks) an agent often needs
-to read from the database. Today the human copy-pastes the agent's SQL into a client,
-runs it, and pastes the result back. Gatekeeper automates that transport while keeping
-the human as the approval gate:
+to read from the database. The manual version is: the human copy-pastes the agent's
+SQL into a client, runs it, pastes the result back. Gatekeeper automates that
+transport while keeping the human as the approval gate:
 
-- The human eyeballs every `SELECT` before it runs. That is the PII / safety check.
-- Queries run through Beekeeper's already-authenticated, read-replica connection, so
-  the agent never touches credentials.
-- Read-only by construction (`SELECT`-only, enforced in the plugin).
+- The human eyeballs every query before it runs. That is the PII and safety check.
+- Queries run through Beekeeper's already-authenticated connection, so the agent never
+  touches credentials. Point Beekeeper at a read replica or a read-only role for a hard
+  backstop.
+- Read-only is enforced in the plugin with a dialect-aware SQL parser (single `SELECT`
+  only).
 
 ## Architecture
 
-Three components, two independent communication channels.
+Three components, two independent channels.
 
 ```
-  MCP client (Claude / Codex / OpenCode)      Broker (localhost)            Beekeeper Studio
- ┌──────────────────────────────────┐   MCP  ┌──────────────────┐  fetch   ┌──────────────────┐
- │  run_query(sql, intent)          │ ─────► │ MCP server       │ ◄─────── │  Plugin (iframe)  │
- │                                  │        │ + HTTP broker    │  poll    │  1. show SQL      │
- │                                  │ ◄───── │ /pending /result │ ───────► │  2. human approves│
- └──────────────────────────────────┘  rows  └──────────────────┘  result  │  3. runQuery()    │
-                                                                             │  4. post result   │
-                                                                             └──────────────────┘
+  MCP client                     Gatekeeper server (127.0.0.1)          Beekeeper Studio
+ ┌────────────────────┐   MCP    ┌───────────────────────────┐  fetch   ┌────────────────────┐
+ │ submit_query(sql)  │ ───────► │ MCP server + HTTP broker  │ ◄─────── │ Plugin (iframe)    │
+ │ get_query_result() │ ◄─────── │ SQLite lease queue + audit│  poll    │ 1. show SQL        │
+ │ cancel_query()     │          │ /pending /executing       │ ───────► │ 2. human approves  │
+ │                    │          │ /result  /lease/renew     │  result  │ 3. runQuery()      │
+ └────────────────────┘          └───────────────────────────┘          │ 4. post result     │
+                                                                         └────────────────────┘
 ```
 
-### The two channels (the key mental model)
+### Two channels (the core mental model)
 
-The plugin runs inside a sandboxed `<iframe>`. It cannot *receive* inbound
-connections (it can never be a server), but it can *initiate* outbound ones like any
-web page. There are two separate pipes, and the plugin glues them:
+The plugin runs inside a sandboxed iframe. It cannot *receive* inbound connections (it
+can never be a server), but it can *initiate* outbound ones like any web page. There
+are two separate pipes, and the plugin glues them:
 
 - **Channel 1, plugin <-> Beekeeper** (`postMessage`): the `@beekeeperstudio/plugin`
-  API. `runQuery`, `getTables`, `confirm()` live here. Fully internal to Beekeeper;
-  never reaches the outside world.
-- **Channel 2, plugin <-> broker** (`fetch` over `http://localhost`): a plain web
-  request, unrelated to Beekeeper. The plugin is the **client**; it **pulls** work by
-  polling the broker. Nothing is ever pushed to the iframe. This pull model is what
-  makes the whole thing sandbox-compatible.
+  API. `runQuery`, `getConnectionInfo`, `appStorage` live here. Fully internal to
+  Beekeeper.
+- **Channel 2, plugin <-> broker** (`fetch` over `http://127.0.0.1`): a plain web
+  request. The plugin is the **client** and **pulls** work by polling the broker.
+  Nothing is ever pushed into the iframe, which is what makes the design
+  sandbox-compatible.
 
-### The loop
+### The loop (non-blocking)
 
-1. An MCP client calls the `run_query(sql)` tool.
-2. The MCP server (= the broker) enqueues the proposal and blocks.
-3. The plugin polls `GET /pending` (Channel 2) and picks up the proposal.
-4. The plugin renders the SQL. The human approves (or rejects).
-5. On approval, the plugin calls `runQuery(sql)` (Channel 1). Beekeeper executes it on
-   the user's connection.
-6. The plugin posts the result to `POST /result` (Channel 2).
-7. The broker unblocks the MCP call and returns the rows to the client.
+1. The agent calls `submit_query(sql, intent)`. The server enqueues the proposal and
+   returns a `request_id` immediately; it does not block.
+2. The plugin polls `GET /pending`, claims the oldest proposal under a lease, and
+   renders the SQL.
+3. The human approves or rejects. On approval the plugin calls `runQuery(sql)`
+   (Channel 1); Beekeeper runs it on the user's connection.
+4. The plugin posts the outcome to `POST /result` (Channel 2).
+5. The agent reads the outcome with `get_query_result(request_id)`, optionally waiting
+   up to a bounded window.
 
-Approval is **pre-execution**, on the SQL text: the human checks the `SELECT` for PII
-before it runs. The result then flows back without a second gate (see MVP scope).
+Because submit and read are separate, an agent can keep several proposals in flight and
+collect each result as its human decision lands. Approval is **pre-execution**, on the
+SQL text.
 
-## MVP scope
+## MCP tools
 
-**In:**
+- `submit_query({ sql, intent?, idempotency_key? })` -> ticket. Enqueues a read-only
+  proposal and returns immediately with `request_id` and `state`.
+- `get_query_result({ request_id, wait_ms? })` -> ticket. Reads a proposal, optionally
+  waiting (bounded) for a terminal state: `approved`, `rejected`, `failed`, `expired`,
+  `cancelled`.
+- `cancel_query({ request_id })` -> ticket. Withdraws a pending or leased proposal.
+- `run_query({ sql, intent? })` -> ticket. Convenience wrapper that submits and waits
+  for the terminal result. It serializes one query at a time; prefer
+  `submit_query` + `get_query_result` for concurrency.
+- `get_connection_info()` -> snapshot. Non-sensitive context about the connected
+  database (dialect, database, schema, read-only, captured-at). Never includes host,
+  user, or credentials; informational only.
 
-- Broker (localhost HTTP) + MCP server, in one process.
-- Beekeeper plugin: poll, render SQL + intent, human Approve / Reject, `runQuery` on
-  approve, post the result back.
-- Read-only: `SELECT`-only, hardcoded in the plugin (the only component that can call
-  `runQuery`), simple but with a clean extension point.
+A ticket is `{ requestId, state, createdAt, expiresAt, terminal? }`, where `terminal`
+carries the `rows` and `fields` of an approved query.
 
-**Explicitly deferred (do not build yet):**
+## Security
 
-- Release-gate (a second human approval on the result rows). The human's eyes are on
-  the `SELECT`, that is enough for now.
-- Automatic PII linter. Replaced by human eyes.
-- Auth on the broker. Localhost-only for the MVP.
-- Multiple concurrent plugins / queue fairness.
+- **Read-only enforcement.** The plugin is the only component that can call `runQuery`,
+  so the guard lives there: `node-sql-parser` parses each query in the connection's
+  dialect and rejects anything that is not a single `SELECT`, with a conservative
+  fallback when parsing fails. The server also preflights with a regex before enqueueing.
+- **Capability token.** The broker requires an `Authorization: Bearer` token on every
+  request (`401` otherwise). It is generated on first run and stored at
+  `~/.gatekeeper/broker-token` (`0600`); the plugin keeps it in Beekeeper's encrypted
+  storage.
+- **Loopback only, DNS-rebinding defense.** The broker binds `127.0.0.1` and rejects
+  unexpected `Host` headers (`421`).
+- **Owner-only state.** `~/.gatekeeper` is created `0700`, covering the token, the
+  SQLite database, and its WAL side files.
+- **Minimal retention.** The audit log records the lifecycle (decision, timestamps, SQL
+  digest, row count) with no raw SQL and no rows. Approved result rows are stripped from
+  the database 10 minutes after the decision.
 
-## Design decisions
+See [`SECURITY.md`](./SECURITY.md) for the supply-chain policy and the read-only
+database boundary.
 
-- **LLM-agnostic.** A standard MCP server, no vendor-specific code, no "Claude"
-  anywhere. Any MCP client connects through its own `mcp_servers` config.
-- **Reuse Beekeeper's connection.** `runQuery` executes on the connection the user
-  already opened. Point Beekeeper at a read replica.
-- **The plugin is the only DB touchpoint.** Since `runQuery` is only callable from the
-  plugin, the `SELECT`-only guard belongs there, at the source.
-- **Pull, not push.** The sandboxed iframe cannot receive inbound connections, so it
-  polls the broker.
+## Durability
 
-## Technical validation (already done, do not redo)
+Proposals live in a SQLite queue with a lease state machine
+(`pending -> leased -> executing -> terminal`). A claimed proposal is leased to one
+plugin for 30 seconds and renewed while its card is open. If a plugin dies mid-decision
+the lease expires and the proposal is re-offered; if it dies mid-execution the proposal
+is failed as `execution_unknown` and never re-run, so a query is never silently executed
+twice.
 
-Verified against the Beekeeper Studio source (`master`):
+## Getting started
 
-- iframe: `sandbox="allow-scripts allow-same-origin allow-forms"`,
-  `allow="clipboard-read; clipboard-write;"`
-  (`apps/studio/src/components/plugins/IsolatedPluginView.vue`).
-- `plugin://` scheme:
-  `registerSchemesAsPrivileged([{scheme:'plugin', privileges:{secure:true, standard:true}}])`
-  (`apps/studio/src-commercial/entrypoints/main.ts`). Real, secure, standard origin.
-- No `connect-src` and no `Content-Security-Policy` anywhere in the repo.
-- `http://localhost` is a "potentially trustworthy" origin, exempt from mixed-content
-  blocking, so a secure `plugin://` context can fetch it.
-- CORS is under our control (we own the broker): respond with
-  `Access-Control-Allow-Origin` for the plugin origin (or `*`) and handle the `OPTIONS`
-  preflight.
+Prerequisites: Node >= 20.19, pnpm, Beekeeper Studio >= 5.4.
 
-**Conclusion:** outbound `fetch` from the plugin to a localhost broker should work.
-Confirm empirically with Spike B before building the full loop. Guaranteed fallback if
-it is ever blocked: the clipboard bridge (clipboard access is explicitly granted to
-the iframe).
+1. Install and build:
+   ```
+   pnpm install
+   pnpm build
+   ```
+2. **Register the MCP server** with your client. Copy `.mcp.json.example` and point
+   `args` at the absolute path of `server/dist/index.js`. The client launches the server
+   over stdio.
+3. **Install the plugin** into Beekeeper Studio. Symlink the `plugin/` directory into
+   Beekeeper's plugins folder (see Beekeeper's plugin development docs) under the name
+   `gatekeeper`; the folder name must match the manifest `id`.
+4. **Pair the plugin.** Open Gatekeeper from Beekeeper's Tools menu, read the token with
+   `cat ~/.gatekeeper/broker-token`, and paste it into the pairing screen.
+5. **Use it.** The agent calls `submit_query`; the plugin shows the SQL; approve it; the
+   rows return to the agent.
 
-## API contracts (MVP, a starting point)
+Environment variables:
 
-MCP tool (agent-facing):
+- `GATEKEEPER_TOKEN`: use a fixed token instead of the generated file.
+- `GATEKEEPER_BROKER_PORT`: broker port (default `9999`).
+- `GATEKEEPER_DB`: SQLite path (default `~/.gatekeeper/requests.db`).
 
-- `run_query({ sql: string, intent?: string })` -> `{ rows: object[], fields: {name: string}[] }`
-  Enqueues a proposal, blocks until the human approves (returns rows), rejects
-  (returns a rejection with reason), or it times out.
-
-Broker HTTP (plugin-facing, bind `127.0.0.1`):
-
-- `GET /pending` -> `{ id, sql, intent, createdAt }` or `204 No Content`
-  Returns the oldest un-claimed pending proposal and marks it claimed. MVP: short-poll
-  every ~1s.
-- `POST /result` `{ id, status: "approved" | "rejected", rows?, fields?, error?, reason? }` -> `200`
-  Resolves the blocked `run_query` call.
-
-## Suggested repo structure
+## Repo layout
 
 ```
-gatekeeper/
-  README.md
-  pnpm-workspace.yaml
-  plugin/                Beekeeper Studio plugin (Vite + TS, based on bks-sample-plugin)
-    manifest.json
-    index.html
-    src/main.ts
-    vite.config.ts
-  server/                broker + MCP server, one Node process
-    package.json
-    src/
-      queue.ts           in-memory proposal queue + result resolution
-      broker.ts          HTTP /pending, /result
-      mcp.ts             MCP run_query tool (@modelcontextprotocol/sdk)
-      index.ts           wires broker + mcp together
-  .gitignore
+server/
+  src/
+    index.ts       broker + MCP wiring, token, shutdown
+    broker.ts      loopback HTTP endpoints
+    mcp.ts         MCP tools
+    service.ts     submit / get / cancel, ticket shaping, read-only preflight
+    store.ts       durable SQLite lease queue + audit trail
+    connection.ts  non-sensitive connection snapshot
+    policy.ts      server-side read-only preflight
+    config.ts      environment and constants
+plugin/
+  manifest.json
+  index.html
+  src/
+    main.ts        UI, polling, lease renewal, approve / reject, history
+    readonly.ts    dialect-aware read-only guard
+    result.ts      history result caps
+    style.css
+  DESIGN.md        plugin design system
+.mcp.json.example  MCP client stub
+biome.json         lint + format
+SECURITY.md        supply-chain policy + DB boundary
 ```
 
-Keep dependencies minimal. No UI framework required for the plugin MVP.
+## Development
+
+```
+pnpm build     # build both packages
+pnpm test      # server + plugin test suites (vitest)
+pnpm lint      # biome check
+pnpm format    # biome format --write
+```
 
 ## Tech stack
 
-- **Plugin:** TypeScript, Vite, `@beekeeperstudio/plugin`. Copy `bks-sample-plugin` as
-  the starting skeleton. Requires Beekeeper Studio >= 5.4, Node >= 20.19.
-- **Server:** TypeScript, `@modelcontextprotocol/sdk`, Node's built-in `http` (or a
-  micro-framework) for the broker.
-
-## Build path
-
-1. **Spike A** - minimal plugin from `bks-sample-plugin`, a button that calls
-   `runQuery('SELECT 1')` and renders the result. Proves Channel 1.
-2. **Spike B** - from the same plugin, `fetch('http://localhost:9999/ping')` against a
-   throwaway node server; confirm success in dev tools. Proves Channel 2. Fallback:
-   clipboard.
-3. **Spike C** - build the broker + MCP + polling + approval UI, wire the full loop
-   end to end.
-
-Start with Spike A.
+- **Plugin:** TypeScript, Vite, `@beekeeperstudio/plugin`, `node-sql-parser`. Requires
+  Beekeeper Studio >= 5.4.
+- **Server:** TypeScript, `@modelcontextprotocol/sdk`, `better-sqlite3`, Node's built-in
+  `http`. Requires Node >= 20.19.
+- **Tooling:** Biome (lint + format), Vitest, pnpm workspaces with an exact-pin,
+  quarantined supply-chain policy.
 
 ## References
 
 - Plugin API: https://docs.beekeeperstudio.io/plugin_development/api-reference/
 - Plugin architecture: https://docs.beekeeperstudio.io/plugin_development/
-- Sample plugin: https://github.com/beekeeper-studio/bks-sample-plugin
 - MCP: https://modelcontextprotocol.io
