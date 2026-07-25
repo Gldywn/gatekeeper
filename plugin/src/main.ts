@@ -223,6 +223,13 @@ export class Gatekeeper {
   private connectionName = "";
   private readOnly = false;
   private dialect = "postgresql";
+  private conn: {
+    connectionName: string;
+    databaseType: string;
+    databaseName: string;
+    schema: string | null;
+    readOnly: boolean;
+  } | null = null;
   private readonly cards: Card[] = [];
   private readonly history: HistItem[] = [];
   private polling = false;
@@ -245,6 +252,13 @@ export class Gatekeeper {
       this.connectionName = conn.connectionName || conn.databaseName || "connection";
       this.readOnly = conn.readOnlyMode;
       this.dialect = mapDialect(conn.databaseType);
+      this.conn = {
+        connectionName: conn.connectionName,
+        databaseType: conn.databaseType,
+        databaseName: conn.databaseName,
+        schema: conn.defaultSchema ?? null,
+        readOnly: conn.readOnlyMode,
+      };
     } catch {
       // Connection info is best-effort; the queue still works without it.
     }
@@ -255,8 +269,26 @@ export class Gatekeeper {
     this.renderShell();
     this.polling = true;
     void this.poll();
+    void this.reportConnection();
     window.setInterval(() => void this.renew(), RENEW_MS);
     window.setInterval(() => this.tick(), TICK_MS);
+  }
+
+  // Hand the agent non-sensitive context (dialect, database, schema, read-only)
+  // so it can target the right database; never host, user, or credentials.
+  private async reportConnection(): Promise<void> {
+    if (!this.conn) {
+      return;
+    }
+    try {
+      await this.broker("/connection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(this.conn),
+      });
+    } catch (err) {
+      log.error(err instanceof Error ? err : String(err));
+    }
   }
 
   private async broker(path: string, init?: RequestInit): Promise<Response> {
@@ -289,6 +321,7 @@ export class Gatekeeper {
       this.polling = true;
       this.renderShell();
       void this.poll();
+      void this.reportConnection();
       window.setInterval(() => void this.renew(), RENEW_MS);
       window.setInterval(() => this.tick(), TICK_MS);
     };

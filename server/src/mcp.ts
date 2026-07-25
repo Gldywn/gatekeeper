@@ -2,10 +2,11 @@ import { randomBytes } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { MAX_WAIT_MS } from "./config.js";
+import type { ConnectionState } from "./connection.js";
 import { cancelQuery, getQueryResult, ServiceError, submitQuery, type Ticket } from "./service.js";
 import { type RequestStore, StoreError } from "./store.js";
 
-export function createMcpServer(store: RequestStore): McpServer {
+export function createMcpServer(store: RequestStore, connection: ConnectionState): McpServer {
   // One stdio client per process; this identifies its request ownership.
   const sessionId = `sess_${randomBytes(9).toString("hex")}`;
   const server = new McpServer({ name: "gatekeeper", version: "0.0.1" });
@@ -67,6 +68,21 @@ export function createMcpServer(store: RequestStore): McpServer {
       } catch (err) {
         return fail(err);
       }
+    },
+  );
+
+  server.registerTool(
+    "get_connection_info",
+    {
+      title: "Get non-sensitive context about the connected database",
+      description:
+        "Return informational context about the database the plugin is connected to: dialect, database name, default schema, read-only mode, and when it was captured. Never contains host, user, or credentials. Informational only; do not treat it as an authorization boundary.",
+      inputSchema: {},
+    },
+    async () => {
+      const info = connection.get();
+      const payload = info ?? { connected: false };
+      return { content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }] };
     },
   );
 

@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { BROKER_HOST, brokerPort, LEASE_MS } from "./config.js";
+import type { ConnectionState } from "./connection.js";
 import { type Outcome, type RequestStore, StoreError } from "./store.js";
 
 const CORS: Record<string, string> = {
@@ -9,11 +10,16 @@ const CORS: Record<string, string> = {
 };
 const MAX_BODY_BYTES = 32 * 1024 * 1024;
 
-export function createBroker(store: RequestStore, pluginId: string, token: string): Server {
+export function createBroker(
+  store: RequestStore,
+  pluginId: string,
+  token: string,
+  connection: ConnectionState,
+): Server {
   const port = brokerPort();
   const allowedHosts = new Set([`${BROKER_HOST}:${port}`, `localhost:${port}`]);
   return createServer((req, res) => {
-    handle(store, pluginId, allowedHosts, token, req, res).catch((err) => {
+    handle(store, pluginId, allowedHosts, token, connection, req, res).catch((err) => {
       send(res, 500, { error: err instanceof Error ? err.message : String(err) });
     });
   });
@@ -24,6 +30,7 @@ async function handle(
   pluginId: string,
   allowedHosts: Set<string>,
   token: string,
+  connection: ConnectionState,
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
@@ -83,6 +90,13 @@ async function handle(
       store.resolve(String(body.id), String(body.leaseId), toOutcome(body));
       send(res, 200, { ok: true });
     });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/connection") {
+    const body = await readJson(req);
+    connection.set(body);
+    send(res, 200, { ok: true });
     return;
   }
 
