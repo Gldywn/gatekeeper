@@ -108,6 +108,32 @@ async function runApprovedQuery(
   };
 }
 
+// The broker token is a capability secret, so it lives in Beekeeper's encrypted
+// store (appStorage's `encrypted` option maps to setEncryptedData/getEncryptedData).
+async function loadToken(): Promise<string | null> {
+  const encrypted = await appStorage.getItem<string>(TOKEN_KEY, { encrypted: true });
+  if (encrypted) {
+    return encrypted;
+  }
+  // Migrate a token an earlier build wrote in the clear, then wipe the plaintext.
+  const legacy = await appStorage.getItem<string>(TOKEN_KEY);
+  if (legacy) {
+    await appStorage.setItem(TOKEN_KEY, legacy, { encrypted: true });
+    await appStorage.setItem(TOKEN_KEY, "");
+    return legacy;
+  }
+  return null;
+}
+
+async function storeToken(value: string): Promise<void> {
+  await appStorage.setItem(TOKEN_KEY, value, { encrypted: true });
+}
+
+async function clearToken(): Promise<void> {
+  await appStorage.setItem(TOKEN_KEY, "", { encrypted: true });
+  await appStorage.setItem(TOKEN_KEY, "");
+}
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, "&amp;")
@@ -169,7 +195,7 @@ export class Gatekeeper {
   }
 
   async start(): Promise<void> {
-    this.token = (await appStorage.getItem<string>(TOKEN_KEY)) || null;
+    this.token = await loadToken();
     try {
       const conn = await getConnectionInfo();
       this.connectionName = conn.connectionName || conn.databaseName || "connection";
@@ -214,7 +240,7 @@ export class Gatekeeper {
       if (!value) {
         return;
       }
-      await appStorage.setItem(TOKEN_KEY, value);
+      await storeToken(value);
       this.token = value;
       this.polling = true;
       this.renderShell();
@@ -284,7 +310,7 @@ export class Gatekeeper {
       if (res.status === 401) {
         this.polling = false;
         this.token = null;
-        await appStorage.setItem(TOKEN_KEY, "");
+        await clearToken();
         this.renderPairing("Token rejected. Paste the current one.");
         return;
       }
