@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createBroker } from "./broker.js";
@@ -15,6 +15,19 @@ import {
 import { createMcpServer } from "./mcp.js";
 import { RequestStore } from "./store.js";
 
+// ~/.gatekeeper holds the capability token and the results DB (with WAL side
+// files), so keep the whole directory owner-only rather than chasing per-file
+// modes that sqlite recreates.
+function ensureSecureDir(dir: string): void {
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  // mkdir does not tighten an already-existing directory; enforce it explicitly.
+  try {
+    chmodSync(dir, 0o700);
+  } catch {
+    // best-effort on filesystems that do not support chmod
+  }
+}
+
 function loadOrCreateToken(): string {
   const fromEnv = process.env.GATEKEEPER_TOKEN;
   if (fromEnv) {
@@ -25,7 +38,7 @@ function loadOrCreateToken(): string {
     return readFileSync(file, "utf8").trim();
   } catch {
     const token = randomBytes(32).toString("base64url");
-    mkdirSync(dirname(file), { recursive: true });
+    ensureSecureDir(dirname(file));
     writeFileSync(file, token, { mode: 0o600 });
     return token;
   }
@@ -34,7 +47,7 @@ function loadOrCreateToken(): string {
 async function main(): Promise<void> {
   const path = dbPath();
   if (path !== ":memory:") {
-    mkdirSync(dirname(path), { recursive: true });
+    ensureSecureDir(dirname(path));
   }
   const store = new RequestStore({
     path,
