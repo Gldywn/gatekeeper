@@ -9,6 +9,8 @@ import {
   dbPath,
   MAX_PENDING_PER_SESSION,
   PROPOSAL_TTL_MS,
+  REBIND_INTERVAL_MS,
+  REBIND_JITTER_MS,
   RESULT_TTL_MS,
   SWEEP_INTERVAL_MS,
   tokenPath,
@@ -63,24 +65,74 @@ async function main(): Promise<void> {
 
   const broker = createBroker(store, pluginId, token, connection);
   const port = brokerPort();
-  await new Promise<void>((resolve, reject) => {
-    broker.once("error", reject);
-    broker.listen(port, BROKER_HOST, () => {
-      broker.off("error", reject);
-      // stdout is the MCP stdio channel, so all logs go to stderr.
-      console.error(`[gatekeeper] broker on http://${BROKER_HOST}:${port} (db: ${path})`);
-      if (!process.env.GATEKEEPER_TOKEN) {
-        console.error(`[gatekeeper] pair the plugin with the token at ${tokenPath()}`);
-      }
-      resolve();
-    });
-  });
+  let brokerOwner = false;
+  let shuttingDown = false;
 
-  const sweep = setInterval(() => store.sweep(), SWEEP_INTERVAL_MS);
+  // Only one process can own the broker port; the others run MCP-only and share
+  // the same SQLite queue, so a taken port is expected here, not fatal.
+  const tryBind = (): Promise<boolean> =>
+    new Promise((resolve) => {
+      const onError = (err: NodeJS.ErrnoException) => {
+        if (err.code !== "EADDRINUSE") {
+          console.error(`[gatekeeper] broker listen error: ${err.message}`);
+        }
+        resolve(false);
+      };
+      broker.once("error", onError);
+      broker.listen(port, BROKER_HOST, () => {
+        broker.off("error", onError);
+        resolve(true);
+      });
+    });
+
+  brokerOwner = await tryBind();
+  if (brokerOwner) {
+    // stdout is the MCP stdio channel, so all logs go to stderr.
+    console.error(`[gatekeeper] broker on http://${BROKER_HOST}:${port} (db: ${path})`);
+    if (!process.env.GATEKEEPER_TOKEN) {
+      console.error(`[gatekeeper] pair the plugin with the token at ${tokenPath()}`);
+    }
+  } else {
+    console.error(
+      `[gatekeeper] ${BROKER_HOST}:${port} is owned by another instance; running MCP-only, will take over if it exits`,
+    );
+  }
+
+  // Failover: a non-owner retries the port on a jittered cadence and takes over
+  // if the current owner exits.
+  const scheduleRebind = (): void => {
+    if (brokerOwner || shuttingDown) {
+      return;
+    }
+    const delay = REBIND_INTERVAL_MS + Math.floor(Math.random() * REBIND_JITTER_MS);
+    const timer = setTimeout(() => {
+      if (brokerOwner || shuttingDown) {
+        return;
+      }
+      void tryBind().then((won) => {
+        brokerOwner = won;
+        if (won) {
+          console.error(`[gatekeeper] took over the broker on ${BROKER_HOST}:${port}`);
+        } else {
+          scheduleRebind();
+        }
+      });
+    }, delay);
+    timer.unref();
+  };
+  scheduleRebind();
+
+  // Only the broker owner sweeps, to avoid redundant cross-process writes.
+  const sweep = setInterval(() => {
+    if (brokerOwner) {
+      store.sweep();
+    }
+  }, SWEEP_INTERVAL_MS);
   sweep.unref();
 
-  // Exit when the MCP client disconnects so we do not hold the broker port.
+  // Exit when the MCP client disconnects so we release the broker port.
   const shutdown = () => {
+    shuttingDown = true;
     clearInterval(sweep);
     broker.close();
     store.close();

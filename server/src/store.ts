@@ -165,6 +165,9 @@ export class RequestStore {
     if (options.path && options.path !== ":memory:") {
       this.db.pragma("journal_mode = WAL");
     }
+    // Multiple gatekeeper processes share one DB file; wait for the write lock
+    // instead of failing immediately with SQLITE_BUSY.
+    this.db.pragma("busy_timeout = 5000");
     this.now = options.now ?? Date.now;
     this.ttl = options.proposalTtlMs ?? 15 * 60_000;
     this.maxPending = options.maxPendingPerSession ?? 32;
