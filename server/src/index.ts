@@ -9,6 +9,7 @@ import {
   dbPath,
   MAX_PENDING_PER_SESSION,
   PROPOSAL_TTL_MS,
+  RESULT_TTL_MS,
   SWEEP_INTERVAL_MS,
   tokenPath,
 } from "./config.js";
@@ -53,6 +54,7 @@ async function main(): Promise<void> {
     path,
     proposalTtlMs: PROPOSAL_TTL_MS,
     maxPendingPerSession: MAX_PENDING_PER_SESSION,
+    resultTtlMs: RESULT_TTL_MS,
   });
   const pluginId = `plugin_${randomBytes(6).toString("hex")}`;
   const token = loadOrCreateToken();

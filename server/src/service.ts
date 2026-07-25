@@ -30,6 +30,8 @@ export interface TerminalResult {
   fields?: unknown[];
   reason?: string;
   error?: string;
+  /** True when the result rows were stripped after the retention window. */
+  purged?: boolean;
 }
 
 export interface Ticket {
@@ -46,9 +48,13 @@ function terminalOf(req: GatekeeperRequest): TerminalResult {
     fields?: unknown[];
     reason?: string | null;
     error?: string;
+    purged?: boolean;
   };
   switch (req.state) {
     case "approved":
+      if (result.purged) {
+        return { status: "approved", purged: true, rows: [], fields: [] };
+      }
       return { status: "approved", rows: result.rows ?? [], fields: result.fields ?? [] };
     case "rejected":
       return { status: "rejected", reason: result.reason ?? undefined };

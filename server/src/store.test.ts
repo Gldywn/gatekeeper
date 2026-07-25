@@ -185,3 +185,40 @@ describe("audit trail", () => {
     }
   });
 });
+
+describe("result retention", () => {
+  it("strips approved result rows after the retention window", () => {
+    const { store, clock } = makeStore({ resultTtlMs: 1_000 });
+    store.submit({ sessionId: "s1", sql: "SELECT 1" });
+    const claimed = store.claimNext("p", LEASE)!;
+    store.resolve(claimed.id, claimed.leaseId!, {
+      status: "approved",
+      rows: [{ ok: 1 }],
+      fields: [{ name: "ok" }],
+    });
+    // within the window the rows are intact
+    store.sweep();
+    const before = store.get(claimed.id)!;
+    expect((before.result as { rows?: unknown[] }).rows).toEqual([{ ok: 1 }]);
+
+    clock.t += 1_001;
+    store.sweep();
+    const after = store.get(claimed.id)!;
+    expect(after.state).toBe("approved");
+    expect((after.result as { purged?: boolean; rows?: unknown[] }).purged).toBe(true);
+    expect((after.result as { rows?: unknown[] }).rows).toBeUndefined();
+    expect(store.readAudit(claimed.id).map((e) => e.event)).toContain("result_purged");
+  });
+
+  it("does not re-purge or touch rejected results", () => {
+    const { store, clock } = makeStore({ resultTtlMs: 1_000 });
+    store.submit({ sessionId: "s1", sql: "SELECT 1" });
+    const claimed = store.claimNext("p", LEASE)!;
+    store.resolve(claimed.id, claimed.leaseId!, { status: "rejected", reason: "no" });
+    clock.t += 5_000;
+    store.sweep();
+    store.sweep();
+    // a rejected outcome carries no rows to strip and logs no purge
+    expect(store.readAudit(claimed.id).filter((e) => e.event === "result_purged")).toHaveLength(0);
+  });
+});

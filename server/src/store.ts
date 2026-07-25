@@ -72,6 +72,8 @@ export interface StoreOptions {
   proposalTtlMs?: number;
   /** Cap on un-terminal proposals per session (backpressure). */
   maxPendingPerSession?: number;
+  /** How long an approved result is retained before its rows are stripped. */
+  resultTtlMs?: number;
 }
 
 interface RawRow {
@@ -154,6 +156,7 @@ export class RequestStore {
   private readonly now: () => number;
   private readonly ttl: number;
   private readonly maxPending: number;
+  private readonly resultTtl: number;
 
   constructor(options: StoreOptions = {}) {
     this.db = new Database(options.path ?? ":memory:");
@@ -165,6 +168,7 @@ export class RequestStore {
     this.now = options.now ?? Date.now;
     this.ttl = options.proposalTtlMs ?? 15 * 60_000;
     this.maxPending = options.maxPendingPerSession ?? 32;
+    this.resultTtl = options.resultTtlMs ?? 10 * 60_000;
     this.migrate();
   }
 
@@ -451,6 +455,24 @@ export class RequestStore {
         event: "expired",
         fromState: "pending",
         toState: "expired",
+      });
+    }
+    // Strip approved result rows once their retention window passes. The audit
+    // trail already recorded the decision and row count, so no PII lingers and
+    // the request stays queryable as an approved-but-purged terminal.
+    const stripped = this.db
+      .prepare(
+        `UPDATE requests SET result_json = ?
+           WHERE state = 'approved' AND decided_at IS NOT NULL AND decided_at < ?
+             AND result_json LIKE '{"rows":%' RETURNING id`,
+      )
+      .all(JSON.stringify({ purged: true }), now - this.resultTtl) as { id: string }[];
+    for (const row of stripped) {
+      this.logAudit({
+        requestId: row.id,
+        event: "result_purged",
+        fromState: "approved",
+        toState: "approved",
       });
     }
   }
