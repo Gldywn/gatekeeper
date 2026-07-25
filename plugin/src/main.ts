@@ -9,7 +9,8 @@ import {
   runQuery,
   setTabTitle,
 } from "@beekeeperstudio/plugin";
-import { Parser } from "node-sql-parser";
+import { isReadOnlyQuery, mapDialect } from "./readonly";
+import { capResult, cell, type Field, type HistResult } from "./result";
 
 const BROKER_URL = "http://localhost:9999";
 const POLL_MS = 1000;
@@ -17,10 +18,8 @@ const RENEW_MS = 15_000;
 const TICK_MS = 1000;
 const TOKEN_KEY = "gatekeeper.token";
 const HIST_MAX = 20;
-// Results are held in the iframe only to power the detail view, so bound them:
-// per item by rows and serialized bytes, and across all items by total bytes.
-const HIST_MAX_ROWS = 200;
-const HIST_MAX_ITEM_BYTES = 512 * 1024;
+// Results are held in the iframe only to power the detail view; bound the total
+// across all items here (the per-item caps live in ./result).
 const HIST_MAX_TOTAL_BYTES = 2 * 1024 * 1024;
 
 type CardState = "ready" | "approving" | "executing" | "posting" | "rejecting";
@@ -39,17 +38,6 @@ interface Card extends Proposal {
   state: CardState;
 }
 
-interface Field {
-  name: string;
-}
-
-interface HistResult {
-  fields: Field[];
-  rows: Record<string, unknown>[];
-  rowCount: number;
-  truncated: boolean;
-}
-
 interface HistItem {
   id: string;
   status: "ok" | "no";
@@ -57,59 +45,6 @@ interface HistItem {
   sql: string;
   time: string;
   result?: HistResult;
-}
-
-const parser = new Parser();
-const FORBIDDEN =
-  /"type"\s*:\s*"(delete|update|insert|replace|create|drop|alter|truncate|call|use|grant|revoke|set|lock)"/i;
-
-function mapDialect(databaseType: string): string {
-  switch (databaseType) {
-    case "sqlserver":
-      return "transactsql";
-    case "mariadb":
-    case "mysql":
-    case "sqlite":
-    case "bigquery":
-    case "snowflake":
-      return databaseType;
-    default:
-      return "postgresql";
-  }
-}
-
-function conservativeReadOnly(sql: string): boolean {
-  const stripped = sql
-    .replace(/\/\*[\s\S]*?\*\//g, " ")
-    .replace(/--[^\n]*/g, " ")
-    .trim();
-  if (stripped.length === 0) {
-    return false;
-  }
-  const single = stripped.replace(/;\s*$/, "");
-  if (single.includes(";")) {
-    return false;
-  }
-  return /^(select|with)\b/i.test(single);
-}
-
-// The plugin is the only component that can call runQuery, so the read-only rule
-// lives here. A dialect-aware parse fails closed: exactly one SELECT with no
-// data-modifying node anywhere. Parser gaps fall back to a leading-keyword check.
-export function isReadOnlyQuery(sql: string, dialect = "postgresql"): boolean {
-  try {
-    const ast = parser.astify(sql, { database: dialect });
-    const statements = Array.isArray(ast) ? ast : [ast];
-    if (statements.length !== 1) {
-      return false;
-    }
-    if ((statements[0] as { type?: string }).type !== "select") {
-      return false;
-    }
-    return !FORBIDDEN.test(JSON.stringify(ast));
-  } catch {
-    return conservativeReadOnly(sql);
-  }
 }
 
 async function runApprovedQuery(
@@ -121,29 +56,6 @@ async function runApprovedQuery(
     rows: first?.rows ?? [],
     fields: (first?.fields ?? []).map((f) => ({ name: f.name })),
   };
-}
-
-// Keep at most HIST_MAX_ROWS, then shrink further until the serialized payload
-// fits the per-item byte budget; the flag lets the detail view say it truncated.
-function capResult(rows: Record<string, unknown>[], fields: Field[]): HistResult {
-  const rowCount = rows.length;
-  let kept = rows.slice(0, HIST_MAX_ROWS);
-  let truncated = rows.length > kept.length;
-  while (kept.length > 0 && JSON.stringify(kept).length > HIST_MAX_ITEM_BYTES) {
-    kept = kept.slice(0, Math.floor(kept.length / 2));
-    truncated = true;
-  }
-  return { fields, rows: kept, rowCount, truncated };
-}
-
-function cell(value: unknown): string {
-  if (value === null || value === undefined) {
-    return "NULL";
-  }
-  if (typeof value === "object") {
-    return JSON.stringify(value);
-  }
-  return String(value);
 }
 
 // The broker token is a capability secret, so it lives in Beekeeper's encrypted
