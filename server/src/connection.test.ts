@@ -1,14 +1,17 @@
+import { rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ConnectionState } from "./connection.js";
+import { RequestStore } from "./store.js";
 
-describe("ConnectionState", () => {
-  it("is empty until the plugin reports", () => {
-    expect(new ConnectionState(() => 1000).get()).toBeNull();
+describe("connection snapshot", () => {
+  it("is null until the plugin reports", () => {
+    expect(new RequestStore({ now: () => 1000 }).getConnection()).toBeNull();
   });
 
   it("captures only the whitelisted fields with a timestamp", () => {
-    const state = new ConnectionState(() => 1000);
-    state.set({
+    const store = new RequestStore({ now: () => 1000 });
+    store.setConnection({
       connectionName: "prod",
       databaseType: "postgresql",
       databaseName: "app",
@@ -17,7 +20,7 @@ describe("ConnectionState", () => {
       // an unexpected field (e.g. a credential) must be dropped
       password: "secret",
     });
-    expect(state.get()).toEqual({
+    expect(store.getConnection()).toEqual({
       connectionName: "prod",
       databaseType: "postgresql",
       databaseName: "app",
@@ -28,9 +31,9 @@ describe("ConnectionState", () => {
   });
 
   it("coerces missing or wrong-typed fields safely", () => {
-    const state = new ConnectionState(() => 5);
-    state.set({ databaseType: 123, readOnly: "yes" });
-    expect(state.get()).toEqual({
+    const store = new RequestStore({ now: () => 5 });
+    store.setConnection({ databaseType: 123, readOnly: "yes" });
+    expect(store.getConnection()).toEqual({
       connectionName: "",
       databaseType: "",
       databaseName: "",
@@ -38,5 +41,24 @@ describe("ConnectionState", () => {
       readOnly: false,
       capturedAt: 5,
     });
+  });
+
+  it("is visible across processes (two connections, one file)", () => {
+    const path = join(tmpdir(), `gk-conn-${Math.random().toString(36).slice(2)}.db`);
+    const writer = new RequestStore({ path, now: () => 42 });
+    const reader = new RequestStore({ path, now: () => 99 });
+    try {
+      writer.setConnection({ databaseType: "mysql", databaseName: "shop", readOnly: true });
+      const seen = reader.getConnection();
+      expect(seen?.databaseType).toBe("mysql");
+      expect(seen?.databaseName).toBe("shop");
+      expect(seen?.capturedAt).toBe(42);
+    } finally {
+      writer.close();
+      reader.close();
+      for (const suffix of ["", "-wal", "-shm"]) {
+        rmSync(`${path}${suffix}`, { force: true });
+      }
+    }
   });
 });

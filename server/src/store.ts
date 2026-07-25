@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import Database from "better-sqlite3";
+import { type ConnectionSnapshot, sanitizeConnection } from "./connection.js";
 
 export type RequestState =
   | "pending"
@@ -218,6 +219,11 @@ export class RequestStore {
         detail TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_audit_request ON audit(request_id, id);
+
+      CREATE TABLE IF NOT EXISTS connection (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        snapshot_json TEXT NOT NULL
+      );
     `);
   }
 
@@ -579,6 +585,22 @@ export class RequestStore {
         sql_digest: entry.sqlDigest ?? null,
         detail: entry.detail ?? null,
       });
+  }
+
+  /** Persist the plugin's non-sensitive connection context, shared across processes. */
+  setConnection(input: Record<string, unknown>): ConnectionSnapshot {
+    const snapshot = sanitizeConnection(input, this.now());
+    this.db
+      .prepare("INSERT OR REPLACE INTO connection (id, snapshot_json) VALUES (1, ?)")
+      .run(JSON.stringify(snapshot));
+    return snapshot;
+  }
+
+  getConnection(): ConnectionSnapshot | null {
+    const row = this.db.prepare("SELECT snapshot_json FROM connection WHERE id = 1").get() as
+      | { snapshot_json: string }
+      | undefined;
+    return row ? (JSON.parse(row.snapshot_json) as ConnectionSnapshot) : null;
   }
 
   close(): void {

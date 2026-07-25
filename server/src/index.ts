@@ -15,7 +15,6 @@ import {
   SWEEP_INTERVAL_MS,
   tokenPath,
 } from "./config.js";
-import { ConnectionState } from "./connection.js";
 import { createMcpServer } from "./mcp.js";
 import { RequestStore } from "./store.js";
 
@@ -61,9 +60,8 @@ async function main(): Promise<void> {
   });
   const pluginId = `plugin_${randomBytes(6).toString("hex")}`;
   const token = loadOrCreateToken();
-  const connection = new ConnectionState();
 
-  const broker = createBroker(store, pluginId, token, connection);
+  const broker = createBroker(store, pluginId, token);
   const port = brokerPort();
   let brokerOwner = false;
   let shuttingDown = false;
@@ -143,7 +141,7 @@ async function main(): Promise<void> {
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 
-  const mcp = createMcpServer(store, connection);
+  const mcp = createMcpServer(store);
   await mcp.connect(new StdioServerTransport());
   console.error("[gatekeeper] MCP server ready on stdio");
 }
