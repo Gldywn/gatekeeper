@@ -7,6 +7,7 @@ import {
   getConnectionInfo,
   log,
   runQuery,
+  setTabTitle,
 } from "@beekeeperstudio/plugin";
 import { Parser } from "node-sql-parser";
 
@@ -188,6 +189,7 @@ export class Gatekeeper {
   private readonly cards: Card[] = [];
   private readonly history: HistItem[] = [];
   private polling = false;
+  private lastTitle = "";
   private readonly root: HTMLElement;
 
   constructor(root: HTMLElement) {
@@ -388,6 +390,19 @@ export class Gatekeeper {
     queue.innerHTML = this.cards.length
       ? this.cards.map((c) => this.cardHtml(c)).join("")
       : '<div class="empty">Waiting for a query proposal...</div>';
+    this.updateTabTitle();
+  }
+
+  // Surface the count of queries awaiting a decision in the Beekeeper tab so it
+  // reads from the tab strip; only touch the host when the count changes.
+  private updateTabTitle(): void {
+    const pending = this.cards.filter((c) => c.state === "ready").length;
+    const title = pending > 0 ? `Gatekeeper · ${pending}` : "Gatekeeper";
+    if (title === this.lastTitle) {
+      return;
+    }
+    this.lastTitle = title;
+    void setTabTitle(title);
   }
 
   private cardHtml(card: Card): string {
