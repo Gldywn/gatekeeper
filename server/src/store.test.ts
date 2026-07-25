@@ -1,3 +1,6 @@
+import { rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { RequestStore, StoreError } from "./store.js";
 
@@ -220,5 +223,81 @@ describe("result retention", () => {
     store.sweep();
     // a rejected outcome carries no rows to strip and logs no purge
     expect(store.readAudit(claimed.id).filter((e) => e.event === "result_purged")).toHaveLength(0);
+  });
+});
+
+describe("multi-process (two connections, one file)", () => {
+  function tmpDbPath(): string {
+    return join(tmpdir(), `gk-mp-${Math.random().toString(36).slice(2)}.db`);
+  }
+  function cleanup(path: string): void {
+    for (const suffix of ["", "-wal", "-shm"]) {
+      rmSync(`${path}${suffix}`, { force: true });
+    }
+  }
+
+  it("shares the queue between two connections", () => {
+    const path = tmpDbPath();
+    const now = () => 1000;
+    const a = new RequestStore({ path, now });
+    const b = new RequestStore({ path, now });
+    try {
+      const req = a.submit({ sessionId: "s1", sql: "SELECT 1" });
+      expect(b.get(req.id)?.state).toBe("pending");
+    } finally {
+      a.close();
+      b.close();
+      cleanup(path);
+    }
+  });
+
+  it("never lets two connections claim the same proposal", () => {
+    const path = tmpDbPath();
+    const now = () => 1000;
+    const a = new RequestStore({ path, now });
+    const b = new RequestStore({ path, now });
+    try {
+      a.submit({ sessionId: "s1", sql: "SELECT 1" });
+      const first = a.claimNext("plugin-a", 1000);
+      const second = b.claimNext("plugin-b", 1000);
+      expect(first).not.toBeNull();
+      expect(second).toBeNull();
+    } finally {
+      a.close();
+      b.close();
+      cleanup(path);
+    }
+  });
+
+  it("refuses a stale lease holder after the proposal is re-offered to another connection", () => {
+    const path = tmpDbPath();
+    const clock = { t: 1000 };
+    const now = () => clock.t;
+    const a = new RequestStore({ path, now });
+    const b = new RequestStore({ path, now });
+    try {
+      const req = a.submit({ sessionId: "s1", sql: "SELECT 1" });
+      const held = a.claimNext("plugin-a", 1000)!;
+      clock.t += 1001; // a's lease expires
+      b.sweep(); // b re-offers it
+      const reclaimed = b.claimNext("plugin-b", 1000)!;
+      expect(reclaimed.id).toBe(req.id);
+      // a is now a stale writer; its lease must be refused
+      expect(() =>
+        a.resolve(held.id, held.leaseId!, { status: "approved", rows: [], fields: [] }),
+      ).toThrowError(/LEASE_CONFLICT|does not hold/);
+      // b, the current owner, resolves fine
+      expect(
+        b.resolve(reclaimed.id, reclaimed.leaseId!, {
+          status: "approved",
+          rows: [],
+          fields: [],
+        }).state,
+      ).toBe("approved");
+    } finally {
+      a.close();
+      b.close();
+      cleanup(path);
+    }
   });
 });

@@ -104,6 +104,14 @@ function digest(sql: string): string {
   return createHash("sha256").update(sql).digest("hex").slice(0, 16);
 }
 
+function isUniqueViolation(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    (err as { code?: string }).code === "SQLITE_CONSTRAINT_UNIQUE"
+  );
+}
+
 interface RawAudit {
   id: number;
   ts: number;
@@ -221,64 +229,82 @@ export class RequestStore {
     idempotencyKey?: string;
     policy?: unknown;
   }): GatekeeperRequest {
-    this.sweep();
+    // IMMEDIATE so the idempotency check, the backpressure count, and the insert
+    // are one atomic unit across processes; a lost idempotency race falls back to
+    // the row the other process inserted.
+    const run = this.db.transaction((): GatekeeperRequest => {
+      this.sweep();
 
-    if (input.idempotencyKey) {
-      const existing = this.db
-        .prepare("SELECT * FROM requests WHERE session_id = ? AND idempotency_key = ?")
-        .get(input.sessionId, input.idempotencyKey) as RawRow | undefined;
-      if (existing) {
-        return toRequest(existing);
+      if (input.idempotencyKey) {
+        const existing = this.db
+          .prepare("SELECT * FROM requests WHERE session_id = ? AND idempotency_key = ?")
+          .get(input.sessionId, input.idempotencyKey) as RawRow | undefined;
+        if (existing) {
+          return toRequest(existing);
+        }
       }
-    }
 
-    const pending = this.db
-      .prepare(
-        `SELECT count(*) AS n FROM requests WHERE session_id = ? AND state IN ${OPEN_STATES}`,
-      )
-      .get(input.sessionId) as { n: number };
-    if (pending.n >= this.maxPending) {
-      throw new StoreError(
-        "QUEUE_FULL",
-        `Session has ${pending.n} open requests (max ${this.maxPending})`,
-      );
-    }
+      const pending = this.db
+        .prepare(
+          `SELECT count(*) AS n FROM requests WHERE session_id = ? AND state IN ${OPEN_STATES}`,
+        )
+        .get(input.sessionId) as { n: number };
+      if (pending.n >= this.maxPending) {
+        throw new StoreError(
+          "QUEUE_FULL",
+          `Session has ${pending.n} open requests (max ${this.maxPending})`,
+        );
+      }
 
-    const now = this.now();
-    const row: RawRow = {
-      id: token("req"),
-      created_at: now,
-      session_id: input.sessionId,
-      sql: input.sql,
-      intent: input.intent ?? null,
-      idempotency_key: input.idempotencyKey ?? null,
-      state: "pending",
-      lease_id: null,
-      lease_expires_at: null,
-      plugin_id: null,
-      decided_at: null,
-      result_json: null,
-      policy_json: input.policy === undefined ? null : JSON.stringify(input.policy),
-      expires_at: now + this.ttl,
-    };
-    this.db
-      .prepare(
-        `INSERT INTO requests
-          (id, created_at, session_id, sql, intent, idempotency_key, state,
-           lease_id, lease_expires_at, plugin_id, decided_at, result_json, policy_json, expires_at)
-         VALUES
-          (@id, @created_at, @session_id, @sql, @intent, @idempotency_key, @state,
-           @lease_id, @lease_expires_at, @plugin_id, @decided_at, @result_json, @policy_json, @expires_at)`,
-      )
-      .run(row);
-    this.logAudit({
-      requestId: row.id,
-      event: "submitted",
-      toState: "pending",
-      sessionId: row.session_id,
-      sqlDigest: digest(row.sql),
+      const now = this.now();
+      const row: RawRow = {
+        id: token("req"),
+        created_at: now,
+        session_id: input.sessionId,
+        sql: input.sql,
+        intent: input.intent ?? null,
+        idempotency_key: input.idempotencyKey ?? null,
+        state: "pending",
+        lease_id: null,
+        lease_expires_at: null,
+        plugin_id: null,
+        decided_at: null,
+        result_json: null,
+        policy_json: input.policy === undefined ? null : JSON.stringify(input.policy),
+        expires_at: now + this.ttl,
+      };
+      try {
+        this.db
+          .prepare(
+            `INSERT INTO requests
+              (id, created_at, session_id, sql, intent, idempotency_key, state,
+               lease_id, lease_expires_at, plugin_id, decided_at, result_json, policy_json, expires_at)
+             VALUES
+              (@id, @created_at, @session_id, @sql, @intent, @idempotency_key, @state,
+               @lease_id, @lease_expires_at, @plugin_id, @decided_at, @result_json, @policy_json, @expires_at)`,
+          )
+          .run(row);
+      } catch (err) {
+        if (input.idempotencyKey && isUniqueViolation(err)) {
+          const existing = this.db
+            .prepare("SELECT * FROM requests WHERE session_id = ? AND idempotency_key = ?")
+            .get(input.sessionId, input.idempotencyKey) as RawRow | undefined;
+          if (existing) {
+            return toRequest(existing);
+          }
+        }
+        throw err;
+      }
+      this.logAudit({
+        requestId: row.id,
+        event: "submitted",
+        toState: "pending",
+        sessionId: row.session_id,
+        sqlDigest: digest(row.sql),
+      });
+      return toRequest(row);
     });
-    return toRequest(row);
+    return run.immediate();
   }
 
   /** Claim the oldest pending proposal under a fresh lease (non-destructive). */
@@ -293,13 +319,18 @@ export class RequestStore {
       }
       const now = this.now();
       const leaseId = token("lease");
-      this.db
+      // Conditional on state so a concurrent claim in another process is never
+      // overwritten (IMMEDIATE below already serializes; this is the guard).
+      const info = this.db
         .prepare(
           `UPDATE requests
              SET state = 'leased', lease_id = ?, lease_expires_at = ?, plugin_id = ?
-           WHERE id = ?`,
+           WHERE id = ? AND state = 'pending'`,
         )
         .run(leaseId, now + leaseMs, pluginId, oldest.id);
+      if (info.changes !== 1) {
+        return null;
+      }
       this.logAudit({
         requestId: oldest.id,
         event: "claimed",
@@ -315,14 +346,25 @@ export class RequestStore {
         plugin_id: pluginId,
       });
     });
-    return claim();
+    // BEGIN IMMEDIATE takes the write lock up front, so the read-then-write is
+    // not racy across processes.
+    return claim.immediate();
   }
 
   /** Extend a held lease; the plugin calls this while a card stays open. */
   renewLease(id: string, leaseId: string, leaseMs: number): GatekeeperRequest {
     const row = this.requireLease(id, leaseId);
-    const expires = this.now() + leaseMs;
-    this.db.prepare("UPDATE requests SET lease_expires_at = ? WHERE id = ?").run(expires, id);
+    const now = this.now();
+    const expires = now + leaseMs;
+    const info = this.db
+      .prepare(
+        `UPDATE requests SET lease_expires_at = ?
+           WHERE id = ? AND lease_id = ? AND state IN ('leased', 'executing') AND lease_expires_at >= ?`,
+      )
+      .run(expires, id, leaseId, now);
+    if (info.changes !== 1) {
+      throw new StoreError("LEASE_CONFLICT", `Lease on request ${id} changed concurrently`);
+    }
     return { ...row, leaseExpiresAt: expires };
   }
 
@@ -332,13 +374,24 @@ export class RequestStore {
     if (row.state !== "leased") {
       throw new StoreError("INVALID_STATE", `Cannot execute from state ${row.state}`);
     }
-    this.db.prepare("UPDATE requests SET state = 'executing' WHERE id = ?").run(id);
-    this.logAudit({
-      requestId: id,
-      event: "executing",
-      fromState: "leased",
-      toState: "executing",
-    });
+    const now = this.now();
+    this.db.transaction(() => {
+      const info = this.db
+        .prepare(
+          `UPDATE requests SET state = 'executing'
+             WHERE id = ? AND lease_id = ? AND state = 'leased' AND lease_expires_at >= ?`,
+        )
+        .run(id, leaseId, now);
+      if (info.changes !== 1) {
+        throw new StoreError("LEASE_CONFLICT", `Request ${id} changed concurrently`);
+      }
+      this.logAudit({
+        requestId: id,
+        event: "executing",
+        fromState: "leased",
+        toState: "executing",
+      });
+    })();
     return { ...row, state: "executing" };
   }
 
@@ -358,23 +411,29 @@ export class RequestStore {
           ? { reason: outcome.reason ?? null }
           : { error: outcome.error };
     const now = this.now();
-    this.db
-      .prepare(
-        "UPDATE requests SET state = ?, result_json = ?, decided_at = ?, lease_id = NULL, lease_expires_at = NULL WHERE id = ?",
-      )
-      .run(state, JSON.stringify(result), now, id);
-    this.logAudit({
-      requestId: id,
-      event: state,
-      fromState: row.state,
-      toState: state,
-      detail:
-        outcome.status === "approved"
-          ? `${outcome.rows.length} rows`
-          : outcome.status === "rejected"
-            ? (outcome.reason ?? null)
-            : outcome.error,
-    });
+    this.db.transaction(() => {
+      const info = this.db
+        .prepare(
+          `UPDATE requests SET state = ?, result_json = ?, decided_at = ?, lease_id = NULL, lease_expires_at = NULL
+             WHERE id = ? AND lease_id = ? AND state IN ('leased', 'executing') AND lease_expires_at >= ?`,
+        )
+        .run(state, JSON.stringify(result), now, id, leaseId, now);
+      if (info.changes !== 1) {
+        throw new StoreError("LEASE_CONFLICT", `Request ${id} changed concurrently`);
+      }
+      this.logAudit({
+        requestId: id,
+        event: state,
+        fromState: row.state,
+        toState: state,
+        detail:
+          outcome.status === "approved"
+            ? `${outcome.rows.length} rows`
+            : outcome.status === "rejected"
+              ? (outcome.reason ?? null)
+              : outcome.error,
+      });
+    })();
     return { ...row, state, result, decidedAt: now, leaseId: null, leaseExpiresAt: null };
   }
 
@@ -385,17 +444,23 @@ export class RequestStore {
       throw new StoreError("INVALID_STATE", `Cannot cancel from state ${row.state}`);
     }
     const now = this.now();
-    this.db
-      .prepare(
-        "UPDATE requests SET state = 'cancelled', decided_at = ?, lease_id = NULL, lease_expires_at = NULL WHERE id = ?",
-      )
-      .run(now, id);
-    this.logAudit({
-      requestId: id,
-      event: "cancelled",
-      fromState: row.state,
-      toState: "cancelled",
-    });
+    this.db.transaction(() => {
+      const info = this.db
+        .prepare(
+          `UPDATE requests SET state = 'cancelled', decided_at = ?, lease_id = NULL, lease_expires_at = NULL
+             WHERE id = ? AND session_id = ? AND state IN ('pending', 'leased')`,
+        )
+        .run(now, id, sessionId);
+      if (info.changes !== 1) {
+        throw new StoreError("INVALID_STATE", `Request ${id} changed concurrently`);
+      }
+      this.logAudit({
+        requestId: id,
+        event: "cancelled",
+        fromState: row.state,
+        toState: "cancelled",
+      });
+    })();
     return { ...row, state: "cancelled", decidedAt: now, leaseId: null, leaseExpiresAt: null };
   }
 
