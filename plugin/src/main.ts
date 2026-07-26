@@ -158,6 +158,7 @@ export class Gatekeeper {
   private lastTitle = "";
   private renewTimer?: number;
   private tickTimer?: number;
+  private pollFailures = 0;
   private readonly root: HTMLElement;
 
   constructor(root: HTMLElement) {
@@ -352,9 +353,15 @@ export class Gatekeeper {
       if (res.status === 200) {
         this.claim((await res.json()) as Proposal);
       }
+      this.pollFailures = 0;
       this.setStatus("");
     } catch (err) {
-      this.setStatus(`Broker unreachable at ${BROKER_URL}. Retrying...`, true);
+      // Stay quiet through a brief blip (e.g. the broker failing over during an
+      // MCP reconnect); only surface the error once it has actually persisted.
+      this.pollFailures++;
+      if (this.pollFailures >= 3) {
+        this.setStatus(`Broker unreachable at ${BROKER_URL}. Retrying...`, true);
+      }
       log.error(err instanceof Error ? err : String(err));
     }
     window.setTimeout(() => void this.poll(), POLL_MS);
