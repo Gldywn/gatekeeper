@@ -52,7 +52,7 @@ body {
 .bar {
   position: relative;
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: var(--s3);
   padding: var(--s3);
   border-radius: var(--r);
@@ -73,6 +73,7 @@ body {
   width: 24px;
   height: 26px;
   flex: none;
+  align-self: center;
   color: var(--amber);
 }
 .wordmark {
@@ -85,11 +86,9 @@ body {
   font-size: 11.5px;
   color: var(--muted);
   display: inline-flex;
-  align-items: center;
+  align-items: baseline;
   gap: 6px;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .conn .ro {
@@ -100,6 +99,7 @@ body {
 }
 .count {
   margin-left: auto;
+  align-self: center;
   z-index: 1;
   display: inline-flex;
   align-items: center;
@@ -338,7 +338,7 @@ body {
 }
 .group-head {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: var(--s2);
   padding: 2px var(--s1) var(--s2);
 }
@@ -346,6 +346,7 @@ body {
   display: inline-flex;
   width: 15px;
   height: 15px;
+  align-self: center;
   color: var(--amber);
   flex: none;
 }
