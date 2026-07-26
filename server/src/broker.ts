@@ -64,6 +64,8 @@ async function handle(
       expiresAt: proposal.expiresAt,
       leaseId: proposal.leaseId,
       leaseExpiresAt: proposal.leaseExpiresAt,
+      sessionId: proposal.sessionId,
+      session: store.getSession(proposal.sessionId),
     });
     return;
   }

@@ -85,6 +85,9 @@ export interface SubmitInput {
   sql: string;
   intent?: string;
   idempotencyKey?: string;
+  harness?: string | null;
+  harnessVersion?: string | null;
+  project?: string | null;
 }
 
 /** Preflight the policy and enqueue a read-only proposal, returning a ticket. */
@@ -96,6 +99,12 @@ export function submitQuery(store: RequestStore, input: SubmitInput): Ticket {
       policy.reason ?? "Only read-only SELECT queries are allowed",
     );
   }
+  store.upsertSession({
+    sessionId: input.sessionId,
+    harness: input.harness,
+    harnessVersion: input.harnessVersion,
+    project: input.project,
+  });
   const req = store.submit({
     sessionId: input.sessionId,
     sql: input.sql,

@@ -64,6 +64,15 @@ export type Outcome =
   | { status: "rejected"; reason?: string }
   | { status: "failed"; error: string };
 
+export interface SessionMeta {
+  sessionId: string;
+  harness: string | null;
+  harnessVersion: string | null;
+  project: string | null;
+  createdAt: number;
+  lastSeen: number;
+}
+
 export interface StoreOptions {
   /** File path, or omit for a private in-memory database (tests). */
   path?: string;
@@ -223,6 +232,15 @@ export class RequestStore {
       CREATE TABLE IF NOT EXISTS connection (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         snapshot_json TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS sessions (
+        session_id TEXT PRIMARY KEY,
+        harness TEXT,
+        harness_version TEXT,
+        project TEXT,
+        created_at INTEGER NOT NULL,
+        last_seen INTEGER NOT NULL
       );
     `);
   }
@@ -601,6 +619,57 @@ export class RequestStore {
       | { snapshot_json: string }
       | undefined;
     return row ? (JSON.parse(row.snapshot_json) as ConnectionSnapshot) : null;
+  }
+
+  /** Record or refresh an agent session's identity (harness, project) for grouping. */
+  upsertSession(input: {
+    sessionId: string;
+    harness?: string | null;
+    harnessVersion?: string | null;
+    project?: string | null;
+  }): void {
+    const now = this.now();
+    this.db
+      .prepare(
+        `INSERT INTO sessions (session_id, harness, harness_version, project, created_at, last_seen)
+         VALUES (@session_id, @harness, @harness_version, @project, @now, @now)
+         ON CONFLICT(session_id) DO UPDATE SET
+           harness = COALESCE(excluded.harness, sessions.harness),
+           harness_version = COALESCE(excluded.harness_version, sessions.harness_version),
+           project = COALESCE(excluded.project, sessions.project),
+           last_seen = excluded.last_seen`,
+      )
+      .run({
+        session_id: input.sessionId,
+        harness: input.harness ?? null,
+        harness_version: input.harnessVersion ?? null,
+        project: input.project ?? null,
+        now,
+      });
+  }
+
+  getSession(sessionId: string): SessionMeta | null {
+    const row = this.db.prepare("SELECT * FROM sessions WHERE session_id = ?").get(sessionId) as
+      | {
+          session_id: string;
+          harness: string | null;
+          harness_version: string | null;
+          project: string | null;
+          created_at: number;
+          last_seen: number;
+        }
+      | undefined;
+    if (!row) {
+      return null;
+    }
+    return {
+      sessionId: row.session_id,
+      harness: row.harness,
+      harnessVersion: row.harness_version,
+      project: row.project,
+      createdAt: row.created_at,
+      lastSeen: row.last_seen,
+    };
   }
 
   close(): void {

@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { basename } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { MAX_WAIT_MS } from "./config.js";
@@ -9,6 +10,14 @@ export function createMcpServer(store: RequestStore): McpServer {
   // One stdio client per process; this identifies its request ownership.
   const sessionId = `sess_${randomBytes(9).toString("hex")}`;
   const server = new McpServer({ name: "gatekeeper", version: "0.0.1" });
+
+  // Identify the connected harness (claude-code, codex, opencode, ...) and the
+  // project it runs in, so the plugin can group pending proposals by session.
+  const project = basename(process.cwd());
+  const identity = () => {
+    const client = server.server.getClientVersion();
+    return { harness: client?.name ?? null, harnessVersion: client?.version ?? null, project };
+  };
 
   server.registerTool(
     "submit_query",
@@ -27,7 +36,15 @@ export function createMcpServer(store: RequestStore): McpServer {
     },
     async ({ sql, intent, idempotency_key }) => {
       try {
-        return ok(submitQuery(store, { sessionId, sql, intent, idempotencyKey: idempotency_key }));
+        return ok(
+          submitQuery(store, {
+            sessionId,
+            sql,
+            intent,
+            idempotencyKey: idempotency_key,
+            ...identity(),
+          }),
+        );
       } catch (err) {
         return fail(err);
       }
@@ -98,7 +115,7 @@ export function createMcpServer(store: RequestStore): McpServer {
     },
     async ({ sql, intent }) => {
       try {
-        const submitted = submitQuery(store, { sessionId, sql, intent });
+        const submitted = submitQuery(store, { sessionId, sql, intent, ...identity() });
         return ok(await getQueryResult(store, sessionId, submitted.requestId, MAX_WAIT_MS));
       } catch (err) {
         return fail(err);

@@ -301,3 +301,31 @@ describe("multi-process (two connections, one file)", () => {
     }
   });
 });
+
+describe("session identity", () => {
+  it("records and refreshes a session's harness and project", () => {
+    const { store, clock } = makeStore();
+    store.upsertSession({
+      sessionId: "s1",
+      harness: "claude-code",
+      harnessVersion: "1.2.3",
+      project: "gatekeeper",
+    });
+    expect(store.getSession("s1")).toMatchObject({
+      sessionId: "s1",
+      harness: "claude-code",
+      harnessVersion: "1.2.3",
+      project: "gatekeeper",
+    });
+    // a later partial upsert keeps prior non-null values and bumps last_seen
+    clock.t += 100;
+    store.upsertSession({ sessionId: "s1", project: "gatekeeper" });
+    const s = store.getSession("s1")!;
+    expect(s.harness).toBe("claude-code");
+    expect(s.lastSeen).toBe(clock.t);
+  });
+
+  it("returns null for an unknown session", () => {
+    expect(makeStore().store.getSession("nope")).toBeNull();
+  });
+});
