@@ -9,6 +9,7 @@ import {
   runQuery,
   setTabTitle,
 } from "@beekeeperstudio/plugin";
+import { harnessIcon } from "./icons";
 import { isReadOnlyQuery, mapDialect } from "./readonly";
 import { capResult, cell, type Field, type HistResult } from "./result";
 
@@ -24,6 +25,13 @@ const HIST_MAX_TOTAL_BYTES = 2 * 1024 * 1024;
 
 type CardState = "ready" | "approving" | "executing" | "posting" | "rejecting";
 
+interface SessionMeta {
+  sessionId: string;
+  harness: string | null;
+  harnessVersion: string | null;
+  project: string | null;
+}
+
 interface Proposal {
   id: string;
   sql: string;
@@ -32,6 +40,8 @@ interface Proposal {
   expiresAt: number;
   leaseId: string;
   leaseExpiresAt: number;
+  sessionId: string;
+  session: SessionMeta | null;
 }
 
 interface Card extends Proposal {
@@ -392,13 +402,50 @@ export class Gatekeeper {
       count.textContent = n > 0 ? `${n} pending` : "idle";
     }
     const queue = this.root.querySelector<HTMLDivElement>("#queue");
-    if (!queue) {
-      return;
+    if (queue) {
+      queue.innerHTML = this.queueHtml();
     }
-    queue.innerHTML = this.cards.length
-      ? this.cards.map((c) => this.cardHtml(c)).join("")
-      : '<div class="empty">Waiting for a query proposal...</div>';
     this.updateTabTitle();
+  }
+
+  private queueHtml(): string {
+    if (!this.cards.length) {
+      return '<div class="empty">Waiting for a query proposal...</div>';
+    }
+    // Group by session, keeping the arrival order of both groups and cards. One
+    // session stays flat; several render as labelled groups.
+    const groups: { session: SessionMeta | null; cards: Card[] }[] = [];
+    for (const card of this.cards) {
+      let group = groups.find((g) => g.cards[0]?.sessionId === card.sessionId);
+      if (!group) {
+        group = { session: card.session, cards: [] };
+        groups.push(group);
+      }
+      group.cards.push(card);
+    }
+    if (groups.length <= 1) {
+      return this.cards.map((c) => this.cardHtml(c)).join("");
+    }
+    return groups.map((g) => this.groupHtml(g.session, g.cards)).join("");
+  }
+
+  private groupHtml(session: SessionMeta | null, cards: Card[]): string {
+    const project = session?.project?.trim();
+    const harness = session?.harness?.trim() || null;
+    const label = project
+      ? `${escapeHtml(project)}${harness ? ` <span class="group-harness">${escapeHtml(harness)}</span>` : ""}`
+      : harness
+        ? escapeHtml(harness)
+        : escapeHtml(cards[0].sessionId ?? "session");
+    return `
+      <section class="group">
+        <div class="group-head">
+          <span class="harness-badge">${harnessIcon(harness)}</span>
+          <span class="group-label">${label}</span>
+          <span class="group-count">${cards.length}</span>
+        </div>
+        ${cards.map((c) => this.cardHtml(c)).join("")}
+      </section>`;
   }
 
   // Surface the count of queries awaiting a decision in the Beekeeper tab so it

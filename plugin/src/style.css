@@ -333,6 +333,51 @@ body {
   padding: var(--s3) 0;
 }
 
+.group {
+  margin-bottom: var(--s4);
+}
+.group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 2px var(--s1) var(--s2);
+}
+.harness-badge {
+  display: inline-flex;
+  width: 15px;
+  height: 15px;
+  color: var(--amber);
+  flex: none;
+}
+.harness-badge svg {
+  width: 100%;
+  height: 100%;
+}
+.group-label {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 560;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.group-harness {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--faint);
+  margin-left: 6px;
+}
+.group-count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--faint);
+  flex: none;
+}
+
 .history {
   margin-top: var(--s5);
 }
