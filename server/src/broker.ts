@@ -50,7 +50,12 @@ async function handle(
   const url = new URL(req.url ?? "/", `http://${BROKER_HOST}`);
 
   if (req.method === "GET" && url.pathname === "/pending") {
-    const proposal = store.claimNext(pluginId, LEASE_MS);
+    const headerConn = req.headers["x-gatekeeper-connection"];
+    const connection =
+      typeof headerConn === "string" && headerConn
+        ? headerConn
+        : store.getConnection()?.connectionName || null;
+    const proposal = store.claimNext(pluginId, LEASE_MS, connection);
     if (!proposal) {
       res.writeHead(204, baseHeaders());
       res.end();

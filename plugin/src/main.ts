@@ -337,7 +337,11 @@ export class Gatekeeper {
       return;
     }
     try {
-      const res = await this.broker("/pending");
+      const res = await this.broker("/pending", {
+        headers: this.conn?.connectionName
+          ? { "X-Gatekeeper-Connection": this.conn.connectionName }
+          : {},
+      });
       if (res.status === 401) {
         this.polling = false;
         this.token = null;

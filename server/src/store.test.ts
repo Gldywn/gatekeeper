@@ -353,3 +353,33 @@ describe("retention", () => {
     expect(store.get(req.id)?.state).toBe("rejected");
   });
 });
+
+describe("connection binding", () => {
+  function setConn(store: RequestStore, name: string): void {
+    store.setConnection({
+      connectionName: name,
+      databaseType: "postgresql",
+      databaseName: name,
+      readOnly: false,
+    });
+  }
+
+  it("offers a proposal only on the connection it was submitted under", () => {
+    const { store } = makeStore();
+    setConn(store, "prod");
+    const a = store.submit({ sessionId: "s1", sql: "SELECT 1" });
+    setConn(store, "local");
+    const b = store.submit({ sessionId: "s1", sql: "SELECT 2" });
+    // a plugin on "local" gets only the local-stamped proposal
+    expect(store.claimNext("p", LEASE, "local")?.id).toBe(b.id);
+    expect(store.claimNext("p", LEASE, "local")).toBeNull();
+    // the prod-stamped one waits for a prod plugin
+    expect(store.claimNext("p", LEASE, "prod")?.id).toBe(a.id);
+  });
+
+  it("still offers unstamped proposals to any connection", () => {
+    const { store } = makeStore();
+    const req = store.submit({ sessionId: "s1", sql: "SELECT 1" });
+    expect(store.claimNext("p", LEASE, "whatever")?.id).toBe(req.id);
+  });
+});

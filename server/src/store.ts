@@ -44,6 +44,7 @@ export interface GatekeeperRequest {
   result: unknown;
   policy: unknown;
   expiresAt: number;
+  connection: string | null;
 }
 
 export interface AuditEntry {
@@ -103,6 +104,7 @@ interface RawRow {
   result_json: string | null;
   policy_json: string | null;
   expires_at: number;
+  connection: string | null;
 }
 
 const OPEN_STATES = "('pending','leased','executing')";
@@ -168,6 +170,7 @@ function toRequest(raw: RawRow): GatekeeperRequest {
     result: raw.result_json === null ? null : JSON.parse(raw.result_json),
     policy: raw.policy_json === null ? null : JSON.parse(raw.policy_json),
     expiresAt: raw.expires_at,
+    connection: raw.connection,
   };
 }
 
@@ -213,7 +216,8 @@ export class RequestStore {
         decided_at INTEGER,
         result_json TEXT,
         policy_json TEXT,
-        expires_at INTEGER NOT NULL
+        expires_at INTEGER NOT NULL,
+        connection TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_requests_state ON requests(state, created_at);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_requests_idem
@@ -247,6 +251,12 @@ export class RequestStore {
         last_seen INTEGER NOT NULL
       );
     `);
+    // Add columns introduced after the first release to pre-existing databases.
+    try {
+      this.db.exec("ALTER TABLE requests ADD COLUMN connection TEXT");
+    } catch {
+      // already present
+    }
   }
 
   /** Enqueue a proposal, or return the existing one for a repeated idempotency key. */
@@ -300,16 +310,17 @@ export class RequestStore {
         result_json: null,
         policy_json: input.policy === undefined ? null : JSON.stringify(input.policy),
         expires_at: now + this.ttl,
+        connection: this.getConnection()?.connectionName || null,
       };
       try {
         this.db
           .prepare(
             `INSERT INTO requests
               (id, created_at, session_id, sql, intent, idempotency_key, state,
-               lease_id, lease_expires_at, plugin_id, decided_at, result_json, policy_json, expires_at)
+               lease_id, lease_expires_at, plugin_id, decided_at, result_json, policy_json, expires_at, connection)
              VALUES
               (@id, @created_at, @session_id, @sql, @intent, @idempotency_key, @state,
-               @lease_id, @lease_expires_at, @plugin_id, @decided_at, @result_json, @policy_json, @expires_at)`,
+               @lease_id, @lease_expires_at, @plugin_id, @decided_at, @result_json, @policy_json, @expires_at, @connection)`,
           )
           .run(row);
       } catch (err) {
@@ -336,12 +347,23 @@ export class RequestStore {
   }
 
   /** Claim the oldest pending proposal under a fresh lease (non-destructive). */
-  claimNext(pluginId: string, leaseMs: number): GatekeeperRequest | null {
+  claimNext(
+    pluginId: string,
+    leaseMs: number,
+    connection: string | null = null,
+  ): GatekeeperRequest | null {
     const claim = this.db.transaction((): GatekeeperRequest | null => {
       this.sweep();
+      // Offer a proposal only if it is unstamped or stamped with the plugin's
+      // current connection, so a query submitted for one database never runs on
+      // another after a connection switch.
       const oldest = this.db
-        .prepare("SELECT * FROM requests WHERE state = 'pending' ORDER BY created_at ASC LIMIT 1")
-        .get() as RawRow | undefined;
+        .prepare(
+          `SELECT * FROM requests
+             WHERE state = 'pending' AND (connection IS NULL OR connection = ?)
+           ORDER BY created_at ASC LIMIT 1`,
+        )
+        .get(connection) as RawRow | undefined;
       if (!oldest) {
         return null;
       }
