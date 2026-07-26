@@ -156,6 +156,8 @@ export class Gatekeeper {
   private readonly history: HistItem[] = [];
   private polling = false;
   private lastTitle = "";
+  private renewTimer?: number;
+  private tickTimer?: number;
   private readonly root: HTMLElement;
 
   constructor(root: HTMLElement) {
@@ -192,8 +194,7 @@ export class Gatekeeper {
     this.polling = true;
     void this.poll();
     void this.reportConnection();
-    window.setInterval(() => void this.renew(), RENEW_MS);
-    window.setInterval(() => this.tick(), TICK_MS);
+    this.startTimers();
   }
 
   // Hand the agent non-sensitive context (dialect, database, schema, read-only)
@@ -211,6 +212,19 @@ export class Gatekeeper {
     } catch (err) {
       log.error(err instanceof Error ? err : String(err));
     }
+  }
+
+  // Recreated on every (re-)pair; clear the old handles so re-pairing does not
+  // stack duplicate renew/tick intervals for the life of the tab.
+  private startTimers(): void {
+    if (this.renewTimer !== undefined) {
+      window.clearInterval(this.renewTimer);
+    }
+    if (this.tickTimer !== undefined) {
+      window.clearInterval(this.tickTimer);
+    }
+    this.renewTimer = window.setInterval(() => void this.renew(), RENEW_MS);
+    this.tickTimer = window.setInterval(() => this.tick(), TICK_MS);
   }
 
   private async broker(path: string, init?: RequestInit): Promise<Response> {
@@ -244,8 +258,7 @@ export class Gatekeeper {
       this.renderShell();
       void this.poll();
       void this.reportConnection();
-      window.setInterval(() => void this.renew(), RENEW_MS);
-      window.setInterval(() => this.tick(), TICK_MS);
+      this.startTimers();
     };
     this.root
       .querySelector<HTMLButtonElement>("#pair-btn")!
