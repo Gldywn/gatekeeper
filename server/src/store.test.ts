@@ -329,3 +329,27 @@ describe("session identity", () => {
     expect(makeStore().store.getSession("nope")).toBeNull();
   });
 });
+
+describe("retention", () => {
+  it("deletes terminal requests, audit, and dead sessions past the window", () => {
+    const { store, clock } = makeStore({ retentionMs: 1_000 });
+    const req = store.submit({ sessionId: "s1", sql: "SELECT 1" });
+    const claimed = store.claimNext("p", LEASE)!;
+    store.resolve(claimed.id, claimed.leaseId!, { status: "rejected", reason: "no" });
+    store.upsertSession({ sessionId: "s1", harness: "codex" });
+    clock.t += 1_001;
+    store.sweep();
+    expect(store.get(req.id)).toBeNull();
+    expect(store.readAudit(req.id)).toHaveLength(0);
+    expect(store.getSession("s1")).toBeNull();
+  });
+
+  it("keeps terminal rows within the window", () => {
+    const { store } = makeStore({ retentionMs: 60_000 });
+    const req = store.submit({ sessionId: "s1", sql: "SELECT 1" });
+    const claimed = store.claimNext("p", LEASE)!;
+    store.resolve(claimed.id, claimed.leaseId!, { status: "rejected", reason: "no" });
+    store.sweep();
+    expect(store.get(req.id)?.state).toBe("rejected");
+  });
+});

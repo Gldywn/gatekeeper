@@ -12,6 +12,7 @@ import {
   REBIND_INTERVAL_MS,
   REBIND_JITTER_MS,
   RESULT_TTL_MS,
+  RETENTION_MS,
   SWEEP_INTERVAL_MS,
   tokenPath,
 } from "./config.js";
@@ -40,10 +41,20 @@ function loadOrCreateToken(): string {
   try {
     return readFileSync(file, "utf8").trim();
   } catch {
-    const token = randomBytes(32).toString("base64url");
-    ensureSecureDir(dirname(file));
-    writeFileSync(file, token, { mode: 0o600 });
+    // fall through to create it
+  }
+  ensureSecureDir(dirname(file));
+  const token = randomBytes(32).toString("base64url");
+  try {
+    // O_EXCL: if a concurrent process created it first, read the winner's token
+    // so the broker owner and the plugin agree on the same value.
+    writeFileSync(file, token, { mode: 0o600, flag: "wx" });
     return token;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "EEXIST") {
+      return readFileSync(file, "utf8").trim();
+    }
+    throw err;
   }
 }
 
@@ -57,6 +68,7 @@ async function main(): Promise<void> {
     proposalTtlMs: PROPOSAL_TTL_MS,
     maxPendingPerSession: MAX_PENDING_PER_SESSION,
     resultTtlMs: RESULT_TTL_MS,
+    retentionMs: RETENTION_MS,
   });
   const pluginId = `plugin_${randomBytes(6).toString("hex")}`;
   const token = loadOrCreateToken();

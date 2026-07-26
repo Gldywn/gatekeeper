@@ -29,7 +29,7 @@ async function handle(
 ): Promise<void> {
   // DNS-rebinding defense: only serve loopback Host headers.
   const host = req.headers.host;
-  if (host && !allowedHosts.has(host)) {
+  if (!host || !allowedHosts.has(host)) {
     send(res, 421, { error: "unexpected Host header" });
     return;
   }

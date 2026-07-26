@@ -131,7 +131,6 @@ export async function getQueryResult(
   const deadline = now() + Math.max(0, Math.min(waitMs, MAX_WAIT_MS));
   while (!isTerminal(req.state) && now() < deadline) {
     await sleep(POLL_MS);
-    store.sweep();
     req = store.getForSession(requestId, sessionId);
   }
   return toTicket(req);

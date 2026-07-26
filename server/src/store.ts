@@ -84,6 +84,8 @@ export interface StoreOptions {
   maxPendingPerSession?: number;
   /** How long an approved result is retained before its rows are stripped. */
   resultTtlMs?: number;
+  /** How long terminal rows, old audit, and dead sessions are kept. */
+  retentionMs?: number;
 }
 
 interface RawRow {
@@ -175,6 +177,7 @@ export class RequestStore {
   private readonly ttl: number;
   private readonly maxPending: number;
   private readonly resultTtl: number;
+  private readonly retention: number;
 
   constructor(options: StoreOptions = {}) {
     this.db = new Database(options.path ?? ":memory:");
@@ -190,6 +193,7 @@ export class RequestStore {
     this.ttl = options.proposalTtlMs ?? 15 * 60_000;
     this.maxPending = options.maxPendingPerSession ?? 32;
     this.resultTtl = options.resultTtlMs ?? 10 * 60_000;
+    this.retention = options.retentionMs ?? 24 * 60 * 60_000;
     this.migrate();
   }
 
@@ -567,6 +571,15 @@ export class RequestStore {
         toState: "approved",
       });
     }
+
+    // Retention: drop terminal requests, old audit rows, and dead sessions so a
+    // long-lived database stays bounded.
+    const cutoff = now - this.retention;
+    this.db
+      .prepare("DELETE FROM requests WHERE decided_at IS NOT NULL AND decided_at < ?")
+      .run(cutoff);
+    this.db.prepare("DELETE FROM audit WHERE ts < ?").run(cutoff);
+    this.db.prepare("DELETE FROM sessions WHERE last_seen < ?").run(cutoff);
   }
 
   /** Read the append-only audit trail, optionally scoped to one request. */
