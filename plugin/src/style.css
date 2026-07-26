@@ -101,17 +101,29 @@ body {
 .count {
   margin-left: auto;
   z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   white-space: nowrap;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
   flex: none;
 }
-.count b {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  color: var(--amber);
-  font-weight: 620;
-  font-size: 13px;
+.count::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--faint);
+  flex: none;
+}
+.count.busy {
+  color: var(--text);
+}
+.count.busy::before {
+  background: var(--amber);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--amber) 22%, transparent);
 }
 
 .status {
@@ -194,8 +206,8 @@ body {
   border-radius: 4px;
   padding: var(--s3);
   margin: 0 0 var(--s3);
-  overflow-x: auto;
-  white-space: pre;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .sql::before,
 .sql::after {
@@ -456,7 +468,10 @@ body {
 .detail-note {
   font-size: 11px;
   color: var(--muted);
-  margin: var(--s2) 0 0;
+  margin: 0;
+}
+.grid-wrap + .detail-note {
+  margin-top: var(--s2);
 }
 .detail-close {
   margin-left: auto;
@@ -496,7 +511,9 @@ body {
 .grid td {
   padding: 5px var(--s2);
   text-align: left;
-  white-space: nowrap;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+  max-width: 24ch;
   border-bottom: 1px solid var(--edge);
 }
 .grid th {

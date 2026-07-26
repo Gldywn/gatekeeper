@@ -387,7 +387,9 @@ export class Gatekeeper {
   private renderQueue(): void {
     const count = this.root.querySelector<HTMLSpanElement>("#count");
     if (count) {
-      count.innerHTML = this.cards.length ? `<b>${this.cards.length}</b> pending` : "clear";
+      const n = this.cards.length;
+      count.classList.toggle("busy", n > 0);
+      count.textContent = n > 0 ? `${n} pending` : "idle";
     }
     const queue = this.root.querySelector<HTMLDivElement>("#queue");
     if (!queue) {
