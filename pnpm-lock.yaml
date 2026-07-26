@@ -23,6 +23,9 @@ importers:
       '@beekeeperstudio/plugin':
         specifier: 1.7.1
         version: 1.7.1
+      '@thesvg/icons':
+        specifier: 3.2.8
+        version: 3.2.8
       node-sql-parser:
         specifier: 5.4.0
         version: 5.4.0
@@ -452,6 +455,10 @@ packages:
 
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
+
+  '@thesvg/icons@3.2.8':
+    resolution: {integrity: sha512-DgWnfBOPdeOLDx7RXXNCYVJx7yFpLAqd3vDsVdLMb/M6C7tlsab4a/jkB9PmSiHJpUwfIe6+rEDqNJQJAEKGug==}
+    engines: {node: '>=18'}
 
   '@types/better-sqlite3@7.6.13':
     resolution: {integrity: sha512-NMv9ASNARoKksWtsq/SHakpYAYnhBrQgGD8zkLYk/jaK8jUGn08CfEdTRgYhMypUQAfzSP8W6gNLe0q19/t4VA==}
@@ -1407,6 +1414,8 @@ snapshots:
     optional: true
 
   '@standard-schema/spec@1.1.0': {}
+
+  '@thesvg/icons@3.2.8': {}
 
   '@types/better-sqlite3@7.6.13':
     dependencies:

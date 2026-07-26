@@ -353,6 +353,10 @@ body {
   width: 100%;
   height: 100%;
 }
+.harness-badge svg,
+.harness-badge svg * {
+  fill: currentColor;
+}
 .group-label {
   min-width: 0;
   overflow: hidden;
