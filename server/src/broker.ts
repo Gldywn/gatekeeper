@@ -52,13 +52,13 @@ async function handle(
 
   const url = new URL(req.url ?? "/", `http://${BROKER_HOST}`);
 
+  if (req.method === "GET" && url.pathname === "/sessions") {
+    send(res, 200, { sessions: store.listSessions(resolveConnection(store, req)) });
+    return;
+  }
+
   if (req.method === "GET" && url.pathname === "/pending") {
-    const headerConn = req.headers["x-gatekeeper-connection"];
-    const connection =
-      typeof headerConn === "string" && headerConn
-        ? headerConn
-        : store.getConnection()?.connectionName || null;
-    const proposal = store.claimNext(pluginId, LEASE_MS, connection);
+    const proposal = store.claimNext(pluginId, LEASE_MS, resolveConnection(store, req));
     if (!proposal) {
       res.writeHead(204, baseHeaders());
       res.end();
@@ -113,6 +113,13 @@ async function handle(
   }
 
   send(res, 404, { error: "not found" });
+}
+
+function resolveConnection(store: RequestStore, req: IncomingMessage): string | null {
+  const header = req.headers["x-gatekeeper-connection"];
+  return typeof header === "string" && header
+    ? header
+    : store.getConnection()?.connectionName || null;
 }
 
 function guarded(res: ServerResponse, fn: () => void): void {

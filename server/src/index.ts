@@ -72,6 +72,7 @@ async function main(): Promise<void> {
   });
   const pluginId = `plugin_${randomBytes(6).toString("hex")}`;
   const token = loadOrCreateToken();
+  const { server: mcp, sessionId } = createMcpServer(store);
 
   const broker = createBroker(store, pluginId, token);
   const port = brokerPort();
@@ -144,6 +145,9 @@ async function main(): Promise<void> {
   const shutdown = () => {
     shuttingDown = true;
     clearInterval(sweep);
+    // Record the clean disconnect before closing so the roster shows this agent
+    // as gone at once, rather than only after its heartbeat goes stale.
+    store.markSessionLeft(sessionId);
     broker.close();
     store.close();
     process.exit(0);
@@ -153,7 +157,6 @@ async function main(): Promise<void> {
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 
-  const mcp = createMcpServer(store);
   await mcp.connect(new StdioServerTransport());
   console.error("[gatekeeper] MCP server ready on stdio");
 }

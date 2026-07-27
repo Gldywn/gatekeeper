@@ -72,6 +72,13 @@ export interface SessionMeta {
   project: string | null;
   createdAt: number;
   lastSeen: number;
+  lastActive: number;
+  connection: string | null;
+  leftAt: number | null;
+}
+
+export interface SessionRoster extends SessionMeta {
+  pendingCount: number;
 }
 
 export interface StoreOptions {
@@ -107,10 +114,37 @@ interface RawRow {
   connection: string | null;
 }
 
+interface SessionRow {
+  session_id: string;
+  harness: string | null;
+  harness_version: string | null;
+  project: string | null;
+  created_at: number;
+  last_seen: number;
+  last_active: number | null;
+  connection: string | null;
+  left_at: number | null;
+}
+
 const OPEN_STATES = "('pending','leased','executing')";
 
 function token(prefix: string): string {
   return `${prefix}_${randomBytes(6).toString("hex")}`;
+}
+
+function toSessionMeta(row: SessionRow): SessionMeta {
+  return {
+    sessionId: row.session_id,
+    harness: row.harness,
+    harnessVersion: row.harness_version,
+    project: row.project,
+    createdAt: row.created_at,
+    lastSeen: row.last_seen,
+    // Rows created before the presence columns fall back to last_seen.
+    lastActive: row.last_active ?? row.last_seen,
+    connection: row.connection,
+    leftAt: row.left_at,
+  };
 }
 
 // Store a digest, never the raw SQL, so the audit trail carries no PII.
@@ -248,14 +282,24 @@ export class RequestStore {
         harness_version TEXT,
         project TEXT,
         created_at INTEGER NOT NULL,
-        last_seen INTEGER NOT NULL
+        last_seen INTEGER NOT NULL,
+        last_active INTEGER,
+        connection TEXT,
+        left_at INTEGER
       );
     `);
     // Add columns introduced after the first release to pre-existing databases.
-    try {
-      this.db.exec("ALTER TABLE requests ADD COLUMN connection TEXT");
-    } catch {
-      // already present
+    for (const alter of [
+      "ALTER TABLE requests ADD COLUMN connection TEXT",
+      "ALTER TABLE sessions ADD COLUMN last_active INTEGER",
+      "ALTER TABLE sessions ADD COLUMN connection TEXT",
+      "ALTER TABLE sessions ADD COLUMN left_at INTEGER",
+    ]) {
+      try {
+        this.db.exec(alter);
+      } catch {
+        // already present
+      }
     }
   }
 
@@ -664,47 +708,67 @@ export class RequestStore {
     project?: string | null;
   }): void {
     const now = this.now();
+    const connection = this.getConnection()?.connectionName ?? null;
     this.db
       .prepare(
-        `INSERT INTO sessions (session_id, harness, harness_version, project, created_at, last_seen)
-         VALUES (@session_id, @harness, @harness_version, @project, @now, @now)
+        `INSERT INTO sessions (session_id, harness, harness_version, project, created_at, last_seen, last_active, connection, left_at)
+         VALUES (@session_id, @harness, @harness_version, @project, @now, @now, @now, @connection, NULL)
          ON CONFLICT(session_id) DO UPDATE SET
            harness = COALESCE(excluded.harness, sessions.harness),
            harness_version = COALESCE(excluded.harness_version, sessions.harness_version),
            project = COALESCE(excluded.project, sessions.project),
-           last_seen = excluded.last_seen`,
+           last_seen = excluded.last_seen,
+           last_active = excluded.last_active,
+           connection = COALESCE(excluded.connection, sessions.connection),
+           left_at = NULL`,
       )
       .run({
         session_id: input.sessionId,
         harness: input.harness ?? null,
         harness_version: input.harnessVersion ?? null,
         project: input.project ?? null,
+        connection,
         now,
       });
   }
 
+  /** Presence ping: keep last_seen fresh while the agent's stdio pipe is open. */
+  heartbeatSession(sessionId: string): void {
+    const connection = this.getConnection()?.connectionName ?? null;
+    this.db
+      .prepare(
+        "UPDATE sessions SET last_seen = ?, connection = COALESCE(?, connection) WHERE session_id = ?",
+      )
+      .run(this.now(), connection, sessionId);
+  }
+
+  /** Record a clean disconnect so the roster shows the agent as gone at once. */
+  markSessionLeft(sessionId: string): void {
+    this.db
+      .prepare("UPDATE sessions SET left_at = ? WHERE session_id = ?")
+      .run(this.now(), sessionId);
+  }
+
+  /** Sessions for a connection, each with its count of still-open requests. */
+  listSessions(connection: string | null): SessionRoster[] {
+    const rows = this.db
+      .prepare(
+        `SELECT s.*,
+           (SELECT count(*) FROM requests r
+              WHERE r.session_id = s.session_id AND r.state IN ${OPEN_STATES}) AS pending_count
+         FROM sessions s
+         WHERE s.connection IS NULL OR s.connection = ?
+         ORDER BY s.created_at ASC`,
+      )
+      .all(connection) as (SessionRow & { pending_count: number })[];
+    return rows.map((row) => ({ ...toSessionMeta(row), pendingCount: row.pending_count }));
+  }
+
   getSession(sessionId: string): SessionMeta | null {
     const row = this.db.prepare("SELECT * FROM sessions WHERE session_id = ?").get(sessionId) as
-      | {
-          session_id: string;
-          harness: string | null;
-          harness_version: string | null;
-          project: string | null;
-          created_at: number;
-          last_seen: number;
-        }
+      | SessionRow
       | undefined;
-    if (!row) {
-      return null;
-    }
-    return {
-      sessionId: row.session_id,
-      harness: row.harness,
-      harnessVersion: row.harness_version,
-      project: row.project,
-      createdAt: row.created_at,
-      lastSeen: row.last_seen,
-    };
+    return row ? toSessionMeta(row) : null;
   }
 
   close(): void {

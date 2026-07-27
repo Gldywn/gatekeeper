@@ -2,11 +2,11 @@ import { randomBytes } from "node:crypto";
 import { basename } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { MAX_WAIT_MS } from "./config.js";
+import { MAX_WAIT_MS, SESSION_HEARTBEAT_MS } from "./config.js";
 import { cancelQuery, getQueryResult, ServiceError, submitQuery, type Ticket } from "./service.js";
 import { type RequestStore, StoreError } from "./store.js";
 
-export function createMcpServer(store: RequestStore): McpServer {
+export function createMcpServer(store: RequestStore): { server: McpServer; sessionId: string } {
   // One stdio client per process; this identifies its request ownership.
   const sessionId = `sess_${randomBytes(9).toString("hex")}`;
   const server = new McpServer({ name: "gatekeeper", version: "0.0.1" });
@@ -17,6 +17,15 @@ export function createMcpServer(store: RequestStore): McpServer {
   const identity = () => {
     const client = server.server.getClientVersion();
     return { harness: client?.name ?? null, harnessVersion: client?.version ?? null, project };
+  };
+
+  // Register the session the moment the handshake completes, so an agent shows in
+  // the roster even before it submits anything, and heartbeat it for the life of
+  // the stdio connection so an idle-but-connected agent stays live.
+  server.server.oninitialized = () => {
+    store.upsertSession({ sessionId, ...identity() });
+    const heartbeat = setInterval(() => store.heartbeatSession(sessionId), SESSION_HEARTBEAT_MS);
+    heartbeat.unref();
   };
 
   server.registerTool(
@@ -64,6 +73,7 @@ export function createMcpServer(store: RequestStore): McpServer {
     },
     async ({ request_id, wait_ms }) => {
       try {
+        store.upsertSession({ sessionId, ...identity() });
         return ok(await getQueryResult(store, sessionId, request_id, wait_ms ?? 0));
       } catch (err) {
         return fail(err);
@@ -80,6 +90,7 @@ export function createMcpServer(store: RequestStore): McpServer {
     },
     async ({ request_id }) => {
       try {
+        store.upsertSession({ sessionId, ...identity() });
         return ok(cancelQuery(store, sessionId, request_id));
       } catch (err) {
         return fail(err);
@@ -96,6 +107,7 @@ export function createMcpServer(store: RequestStore): McpServer {
       inputSchema: {},
     },
     async () => {
+      store.upsertSession({ sessionId, ...identity() });
       const info = store.getConnection();
       const payload = info ?? { connected: false };
       return { content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }] };
@@ -123,7 +135,7 @@ export function createMcpServer(store: RequestStore): McpServer {
     },
   );
 
-  return server;
+  return { server, sessionId };
 }
 
 function ok(ticket: Ticket) {

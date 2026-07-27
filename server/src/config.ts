@@ -12,6 +12,9 @@ export const RESULT_TTL_MS = 10 * 60_000;
 export const RETENTION_MS = 24 * 60 * 60_000;
 export const MAX_PENDING_PER_SESSION = 32;
 export const SWEEP_INTERVAL_MS = 5_000;
+// The MCP server pings its session row on this cadence while its stdio pipe is
+// open, so an idle-but-connected agent keeps a fresh last_seen (presence).
+export const SESSION_HEARTBEAT_MS = 10_000;
 export const BROKER_HOST = "127.0.0.1";
 // A process that loses the race for the broker port retries on this cadence, so
 // the broker role fails over to a live process if the current owner exits.

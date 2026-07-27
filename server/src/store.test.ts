@@ -383,3 +383,58 @@ describe("connection binding", () => {
     expect(store.claimNext("p", LEASE, "whatever")?.id).toBe(req.id);
   });
 });
+
+describe("presence", () => {
+  function setConn(store: RequestStore, name: string): void {
+    store.setConnection({
+      connectionName: name,
+      databaseType: "postgresql",
+      databaseName: name,
+      readOnly: false,
+    });
+  }
+
+  it("records identity and activity on upsert; heartbeat refreshes presence only", () => {
+    const { store, clock } = makeStore();
+    store.upsertSession({ sessionId: "s1", harness: "claude-code", project: "gatekeeper" });
+    const created = store.getSession("s1");
+    expect(created?.harness).toBe("claude-code");
+    expect(created?.lastActive).toBe(clock.t);
+    expect(created?.leftAt).toBeNull();
+
+    clock.t += 5_000;
+    store.heartbeatSession("s1");
+    const beat = store.getSession("s1");
+    expect(beat?.lastSeen).toBe(clock.t);
+    // A heartbeat is presence, not activity: last_active must not move.
+    expect(beat?.lastActive).toBe(created?.lastActive);
+  });
+
+  it("marks a session as left, and a later upsert revives it", () => {
+    const { store, clock } = makeStore();
+    store.upsertSession({ sessionId: "s1" });
+    clock.t += 1_000;
+    store.markSessionLeft("s1");
+    expect(store.getSession("s1")?.leftAt).toBe(clock.t);
+    store.upsertSession({ sessionId: "s1" });
+    expect(store.getSession("s1")?.leftAt).toBeNull();
+  });
+
+  it("lists sessions for a connection with their open request counts", () => {
+    const { store } = makeStore();
+    setConn(store, "staging");
+    store.upsertSession({ sessionId: "s1", harness: "claude-code" });
+    store.submit({ sessionId: "s1", sql: "SELECT 1" });
+    setConn(store, "other");
+    store.upsertSession({ sessionId: "s2", harness: "codex" });
+
+    const staging = store.listSessions("staging");
+    expect(staging.map((s) => s.sessionId)).toEqual(["s1"]);
+    expect(staging[0].pendingCount).toBe(1);
+    expect(staging[0].connection).toBe("staging");
+
+    const other = store.listSessions("other");
+    expect(other.map((s) => s.sessionId)).toEqual(["s2"]);
+    expect(other[0].pendingCount).toBe(0);
+  });
+});
