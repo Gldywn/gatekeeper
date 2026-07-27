@@ -25,6 +25,15 @@ const HIST_MAX_TOTAL_BYTES = 2 * 1024 * 1024;
 
 type CardState = "ready" | "approving" | "executing" | "posting" | "rejecting";
 
+type ConnectionState = "connecting" | "reconnecting" | "connected" | "error";
+
+const CONNECTION_LABEL: Record<ConnectionState, string> = {
+  connecting: "Connecting...",
+  reconnecting: "Reconnecting...",
+  connected: "Connected",
+  error: "Unreachable",
+};
+
 interface SessionMeta {
   sessionId: string;
   harness: string | null;
@@ -137,6 +146,7 @@ const HEADER = `
     </svg>
     <span class="wordmark">Gatekeeper</span>
     <span class="conn" id="conn"></span>
+    <span class="conn-status" id="connStatus" aria-live="polite"></span>
     <span class="count" id="count" aria-live="polite"></span>
   </header>`;
 
@@ -159,6 +169,7 @@ export class Gatekeeper {
   private renewTimer?: number;
   private tickTimer?: number;
   private pollFailures = 0;
+  private connectionState: ConnectionState = "connecting";
   private readonly root: HTMLElement;
 
   constructor(root: HTMLElement) {
@@ -275,7 +286,6 @@ export class Gatekeeper {
     this.root.innerHTML = `
       <div class="gk">
         ${HEADER}
-        <div class="status" id="status"></div>
         <p class="label">Pending approval</p>
         <div class="queue" id="queue"></div>
         <section class="history">
@@ -323,13 +333,21 @@ export class Gatekeeper {
     });
     this.renderQueue();
     this.renderHistory();
+    // Rebuilt DOM has a blank pill; force it back to the initial state (the
+    // guard in setConnectionState would otherwise skip writing the new node).
+    this.setConnectionState("connecting", "", true);
   }
 
-  private setStatus(text: string, isError = false): void {
-    const el = this.root.querySelector<HTMLDivElement>("#status");
+  private setConnectionState(state: ConnectionState, detail = "", force = false): void {
+    if (!force && this.connectionState === state) {
+      return;
+    }
+    this.connectionState = state;
+    const el = this.root.querySelector<HTMLSpanElement>("#connStatus");
     if (el) {
-      el.textContent = text;
-      el.classList.toggle("err", isError);
+      el.dataset.state = state;
+      el.textContent = CONNECTION_LABEL[state];
+      el.title = detail;
     }
   }
 
@@ -354,13 +372,15 @@ export class Gatekeeper {
         this.claim((await res.json()) as Proposal);
       }
       this.pollFailures = 0;
-      this.setStatus("");
+      this.setConnectionState("connected");
     } catch (err) {
       // Stay quiet through a brief blip (e.g. the broker failing over during an
       // MCP reconnect); only surface the error once it has actually persisted.
       this.pollFailures++;
       if (this.pollFailures >= 3) {
-        this.setStatus(`Broker unreachable at ${BROKER_URL}. Retrying...`, true);
+        this.setConnectionState("error", `Broker unreachable at ${BROKER_URL}. Retrying...`);
+      } else if (this.connectionState !== "connecting") {
+        this.setConnectionState("reconnecting");
       }
       log.error(err instanceof Error ? err : String(err));
     }
@@ -436,8 +456,9 @@ export class Gatekeeper {
     if (!this.cards.length) {
       return '<div class="empty">Waiting for a query proposal...</div>';
     }
-    // Group by session, keeping the arrival order of both groups and cards. One
-    // session stays flat; several render as labelled groups.
+    // Group by session, keeping the arrival order of both groups and cards.
+    // Always render the session header, even for a single session, so the human
+    // can see which agent is asking.
     const groups: { session: SessionMeta | null; cards: Card[] }[] = [];
     for (const card of this.cards) {
       let group = groups.find((g) => g.cards[0]?.sessionId === card.sessionId);
@@ -446,9 +467,6 @@ export class Gatekeeper {
         groups.push(group);
       }
       group.cards.push(card);
-    }
-    if (groups.length <= 1) {
-      return this.cards.map((c) => this.cardHtml(c)).join("");
     }
     return groups.map((g) => this.groupHtml(g.session, g.cards)).join("");
   }
