@@ -228,6 +228,7 @@ export class Gatekeeper {
   private lastTitle = "";
   private lastConnCheck = 0;
   private connCheckInFlight = false;
+  private connGeneration = 0;
   private renewTimer?: number;
   private tickTimer?: number;
   private pollFailures = 0;
@@ -311,9 +312,10 @@ export class Gatekeeper {
   }
 
   private onConnectionSwitch(): void {
-    // SAFETY-CRITICAL: approving a card claimed under the OLD connection would
-    // runQuery() against the NEW database, breaking the map from approval to the
-    // SQL the human saw. Drop them; the broker re-offers still-pending proposals.
+    // SAFETY-CRITICAL: a card claimed under the old connection must not run against
+    // the new database. Bump the generation (aborts an in-flight approve) and drop
+    // the cards; the broker re-offers still-pending proposals.
+    this.connGeneration++;
     this.cards.length = 0;
     // History and roster are connection-scoped; reset so the old one cannot leak
     // in. The roster re-fetches on its own timer.
@@ -780,10 +782,13 @@ export class Gatekeeper {
   }
 
   private async approve(id: string): Promise<void> {
+    // Catch a switch since the last throttled poll before touching the database.
+    await this.checkConnection();
     const card = this.cards.find((c) => c.id === id);
     if (card?.state !== "ready") {
       return;
     }
+    const gen = this.connGeneration;
     if (!isReadOnlyQuery(card.sql, this.dialect)) {
       await this.postResult(card, {
         status: "rejected",
@@ -800,8 +805,16 @@ export class Gatekeeper {
       this.finish(id, "no", "lease lost");
       return;
     }
+    if (gen !== this.connGeneration) {
+      return;
+    }
     try {
       const { rows, fields } = await runApprovedQuery(card.sql);
+      // The query may have hit the new database after a switch; never deliver its
+      // rows against the old proposal.
+      if (gen !== this.connGeneration) {
+        return;
+      }
       this.setCardState(id, "posting");
       await this.postResult(card, { status: "approved", rows, fields });
       this.finish(id, "ok", `${rows.length} rows`, capResult(rows, fields));
