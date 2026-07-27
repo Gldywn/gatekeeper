@@ -50,12 +50,49 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 .gk {
-  max-width: 560px;
-  margin: 0 auto;
-  padding: var(--s4) var(--s4) var(--s5);
+  max-width: min(94vw, 1180px);
+  margin-inline: auto;
+  padding-inline: clamp(var(--s4), 2.4vw, var(--s5));
+  padding-block: var(--s4) var(--s5);
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-areas:
+    "header"
+    "rail"
+    "main";
+}
+
+/* The rail (roster + connection card) and the queue/history main column each
+   own a container context so their tiers react to their real width, not the
+   viewport. The shell switch stays a viewport media query on purpose: giving
+   .gk a container-type would apply layout containment and trap the fixed
+   .detail overlay it wraps, and an element cannot query its own container. */
+.rail {
+  grid-area: rail;
+  container-type: inline-size;
+  container-name: gk-roster;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+.main {
+  grid-area: main;
+  min-width: 0;
+  container-type: inline-size;
+  container-name: gk-main;
+}
+@media (min-width: 56.25rem) {
+  .gk {
+    grid-template-columns: minmax(13.75rem, 16.25rem) 1fr;
+    grid-template-areas:
+      "header header"
+      "rail main";
+    column-gap: var(--s4);
+  }
 }
 
 .bar {
+  grid-area: header;
   position: relative;
   display: flex;
   align-items: baseline;
@@ -531,6 +568,7 @@ body {
   color: var(--text);
 }
 .roster-intent {
+  display: none;
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -539,6 +577,13 @@ body {
   color: var(--faint);
   font-size: 11px;
 }
+/* Hidden-compact in the ~220-260px rail; shown once the roster is stacked
+   full-width and has room for the task line. */
+@container gk-roster (min-width: 20rem) {
+  .roster-intent {
+    display: block;
+  }
+}
 .roster-meta {
   flex: none;
   font-family: var(--font-mono);
@@ -546,6 +591,51 @@ body {
   color: var(--faint);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+
+/* Connection context for the queue: what database these approvals govern. */
+.conn-card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: var(--s3);
+  border-radius: var(--r);
+  background: var(--surface);
+  border: 1px solid var(--edge);
+  box-shadow: inset 0 1px 0 var(--hi);
+}
+.conn-card:empty {
+  display: none;
+}
+.cc-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cc-dialect {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cc-schema {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cc-ro {
+  align-self: flex-start;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--ok);
 }
 
 .history {
@@ -585,9 +675,13 @@ body {
   gap: 2px;
   margin-top: var(--s1);
 }
+/* Track count MUST equal the number of non-display:none child spans at each
+   tier, or the columns misalign. Keep each visibility toggle in the same block
+   as its column-count change.
+   base: badge status intent time (hwho + hsql hidden). */
 .hrow {
   display: grid;
-  grid-template-columns: 15px 72px 54px 1fr auto;
+  grid-template-columns: 15px 54px 1fr auto;
   gap: var(--s2);
   align-items: baseline;
   width: 100%;
@@ -602,6 +696,38 @@ body {
   cursor: pointer;
   opacity: 0.62;
   transition: opacity var(--dur) var(--ease);
+}
+.hwho,
+.hsql {
+  display: none;
+}
+/* + who: badge who status intent time. */
+@container gk-main (min-width: 23.75rem) {
+  .hrow {
+    grid-template-columns: 15px 72px 54px 1fr auto;
+  }
+  .hwho {
+    display: block;
+  }
+}
+/* + sql: badge who status intent sql time. */
+@container gk-main (min-width: 40rem) {
+  .hrow {
+    grid-template-columns: 15px 72px 54px minmax(0, 1.3fr) minmax(0, 1fr) auto;
+  }
+  .hsql {
+    display: block;
+  }
+}
+/* No standalone intent means .hintent already shows the SQL preview, so the
+   .hsql column is redundant: hide it and drop back one track at the wide tier. */
+.hrow[data-no-intent] .hsql {
+  display: none;
+}
+@container gk-main (min-width: 40rem) {
+  .hrow[data-no-intent] {
+    grid-template-columns: 15px 72px 54px 1fr auto;
+  }
 }
 .hrow:hover {
   opacity: 0.9;
@@ -631,11 +757,20 @@ body {
 .hstatus.no {
   color: var(--danger);
 }
+.hintent {
+  font-weight: 600;
+  color: var(--text);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
 .hsql {
   align-self: center;
   font-family: var(--font-mono);
   font-size: 11px;
-  color: var(--muted);
+  color: var(--faint);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -683,12 +818,36 @@ body {
   border-radius: var(--r);
   box-shadow: inset 0 1px 0 var(--hi);
   padding: var(--s3);
+  max-width: min(96vw, 1320px);
+  margin-inline: auto;
+  container-type: inline-size;
+  container-name: gk-detail;
 }
 .detail-head {
   display: flex;
   align-items: baseline;
   gap: var(--s2);
   margin-bottom: var(--s3);
+}
+.detail-scope {
+  font-size: 11px;
+  color: var(--faint);
+  margin: 0 0 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.detail-intent {
+  font-weight: 620;
+  font-size: 13.5px;
+  color: var(--text);
+  margin: 0 0 var(--s3);
+  overflow-wrap: anywhere;
+}
+/* Cap the detail SQL line length inside the wider detail card; card-level .sql
+   keeps its full width. */
+.detail-card .sql {
+  max-width: min(100%, 900px);
 }
 .detail-id {
   font-family: var(--font-mono);
@@ -710,6 +869,7 @@ body {
   font-size: 10.5px;
   color: var(--faint);
   margin: 0 0 var(--s3);
+  max-width: 80ch;
   overflow-wrap: anywhere;
 }
 .grid-wrap + .detail-note {
@@ -756,7 +916,7 @@ body {
   text-align: left;
   vertical-align: top;
   overflow-wrap: anywhere;
-  max-width: 24ch;
+  max-width: clamp(16ch, 20cqi, 40ch);
   border-bottom: 1px solid var(--edge);
 }
 .grid th {
@@ -819,4 +979,36 @@ body {
   font-size: 12px;
   margin-top: var(--s2);
   min-height: 1em;
+}
+
+/* Container queries are the source of truth for every tier above. Where a
+   browser lacks container-query support, mirror the gk-main breakpoints with
+   viewport-width media queries (the main column ~= the viewport once stacked or
+   at the two-column shell). The shell switch is already a viewport media query,
+   so it needs no restatement here. */
+@supports not (container-type: inline-size) {
+  @media (min-width: 380px) {
+    .hrow {
+      grid-template-columns: 15px 72px 54px 1fr auto;
+    }
+    .hwho {
+      display: block;
+    }
+  }
+  @media (min-width: 640px) {
+    .hrow {
+      grid-template-columns: 15px 72px 54px minmax(0, 1.3fr) minmax(0, 1fr) auto;
+    }
+    .hsql {
+      display: block;
+    }
+    .hrow[data-no-intent] {
+      grid-template-columns: 15px 72px 54px 1fr auto;
+    }
+  }
+  /* 20cqi is meaningless without a container; restore the flat cell cap. */
+  .grid th,
+  .grid td {
+    max-width: 24ch;
+  }
 }

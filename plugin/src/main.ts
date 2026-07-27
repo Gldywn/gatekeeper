@@ -47,6 +47,7 @@ interface SessionMeta {
   harness: string | null;
   harnessVersion: string | null;
   project: string | null;
+  sessionIntent: string | null;
 }
 
 interface SessionRoster {
@@ -99,6 +100,7 @@ interface HistItem {
   resolvedAt: number;
   connection: string | null;
   session: SessionMeta | null;
+  intent?: string;
   result?: HistResult;
 }
 
@@ -260,6 +262,7 @@ export class Gatekeeper {
       return;
     }
     this.renderShell();
+    this.renderConnCard();
     this.polling = true;
     void this.poll();
     void this.pollRoster(++this.pollGeneration);
@@ -324,6 +327,7 @@ export class Gatekeeper {
     this.roster = [];
     this.rosterSig = "";
     this.renderConnLabel();
+    this.renderConnCard();
     void this.reportConnection();
     this.renderQueue();
     this.renderHistory();
@@ -335,6 +339,28 @@ export class Gatekeeper {
     if (conn) {
       conn.innerHTML = `${escapeHtml(this.connectionName)}${this.readOnly ? ' <span class="ro">read-only</span>' : ""}`;
     }
+  }
+
+  // The rail's stacked connection context: what database this queue governs.
+  // Reads this.conn only; renders nothing until a connection snapshot exists.
+  private renderConnCard(): void {
+    const el = this.root.querySelector<HTMLElement>("#connCard");
+    if (!el) {
+      return;
+    }
+    const conn = this.conn;
+    if (!conn) {
+      el.innerHTML = "";
+      return;
+    }
+    const dialect = mapDialect(conn.databaseType);
+    const db = conn.databaseName?.trim();
+    const schema = conn.schema?.trim();
+    el.innerHTML = `
+      <span class="cc-name">${escapeHtml(conn.connectionName || "connection")}</span>
+      <span class="cc-dialect">${escapeHtml(dialect)}${db ? ` &middot; ${escapeHtml(db)}` : ""}</span>
+      ${schema ? `<span class="cc-schema">schema ${escapeHtml(schema)}</span>` : ""}
+      ${conn.readOnly ? '<span class="cc-ro">read-only</span>' : ""}`;
   }
 
   // Hand the agent non-sensitive context (dialect, database, schema, read-only)
@@ -415,16 +441,22 @@ export class Gatekeeper {
     this.root.innerHTML = `
       <div class="gk">
         ${HEADER}
-        <section class="roster" id="roster"></section>
-        <p class="label">Pending approval</p>
-        <div class="queue" id="queue"></div>
-        <section class="history">
-          <button class="disclosure" id="htoggle" aria-expanded="true"><span class="chev">${chevronDown}</span>Recently resolved</button>
-          <div class="hist" id="hist"></div>
-        </section>
+        <div class="rail" id="rail">
+          <section class="roster" id="roster"></section>
+          <section class="conn-card" id="connCard"></section>
+        </div>
+        <div class="main" id="main">
+          <p class="label">Pending approval</p>
+          <div class="queue" id="queue"></div>
+          <section class="history">
+            <button class="disclosure" id="htoggle" aria-expanded="true"><span class="chev">${chevronDown}</span>Recently resolved</button>
+            <div class="hist" id="hist"></div>
+          </section>
+        </div>
         <div class="detail" id="detail" hidden></div>
       </div>`;
     this.renderConnLabel();
+    this.renderConnCard();
     const toggle = this.root.querySelector<HTMLButtonElement>("#htoggle")!;
     const hist = this.root.querySelector<HTMLDivElement>("#hist")!;
     toggle.addEventListener("click", () => {
@@ -906,6 +938,7 @@ export class Gatekeeper {
         resolvedAt: Date.now(),
         connection: this.connectionName || null,
         session: card.session,
+        intent: card.intent,
         result,
       });
       if (this.history.length > HIST_MAX) {
@@ -953,10 +986,11 @@ export class Gatekeeper {
         const harness = h.session?.harness?.trim() || null;
         const who = sessionLabel(h.session, h.id);
         return `
-        <button class="hrow" type="button" data-hist="${escapeHtml(h.id)}" title="${escapeHtml(h.id)}">
+        <button class="hrow" type="button" data-hist="${escapeHtml(h.id)}"${h.intent ? "" : " data-no-intent"} title="${escapeHtml(h.id)}">
           <span class="harness-badge">${harnessIcon(harness)}</span>
           <span class="hwho" title="${escapeHtml(who)}">${escapeHtml(who)}</span>
           <span class="hstatus ${h.status}">${h.status === "ok" ? "approved" : "rejected"}</span>
+          <span class="hintent">${escapeHtml(h.intent || previewSql(h.sql))}</span>
           <span class="hsql">${highlight(previewSql(h.sql))}</span>
           <span class="htime">
             <span class="hnote">${escapeHtml(h.note)}</span>
@@ -1019,6 +1053,8 @@ export class Gatekeeper {
           <span class="detail-note">${escapeHtml(item.note)}</span>
           <button class="detail-close" type="button" data-close aria-label="Close detail">&times;</button>
         </div>
+        ${item.session?.sessionIntent ? `<p class="detail-scope" title="${escapeHtml(item.session.sessionIntent)}">${escapeHtml(item.session.sessionIntent)}</p>` : ""}
+        ${item.intent ? `<p class="detail-intent">${escapeHtml(item.intent)}</p>` : ""}
         <div class="detail-meta">${audit.join(" &middot; ")}</div>
         <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(item.sql)}" aria-label="Copy SQL">${copyIcon}</button>${highlight(item.sql)}</pre>
         ${grid}

@@ -52,6 +52,36 @@ Headings are always roman (no italic display).
 3. **Tonal edges**: containers get a self-colored 1px edge at low opacity plus a
    faint top highlight (`inset 0 1px 0`), never a hard contrasting hairline.
 
+## Responsive
+
+The shell is fluid, not a fixed 560px column: `.gk` caps at `min(94vw, 1180px)`
+and centres, with fluid `padding-inline`. Above `56.25rem` it becomes a two-zone
+layout, a fixed-width `rail` (roster + connection card) beside a fluid `main`
+(the pending queue and history), placed by grid areas. The two zones are a
+first-class decision: the rail is reference context, the queue is the work.
+
+Breakpoints are **CSS container queries**, not viewport media, because a zone's
+width diverges from the viewport once the layout splits: at a 1200px viewport the
+rail is ~240px and `main` is ~900px, so each must react to its own width. Three
+named container contexts carry this:
+
+- `gk-roster` on `.rail`: shows the per-agent task line only when the rail is
+  stacked full-width, hides it in the compact ~220-260px rail.
+- `gk-main` on `.main`: the history row reveals the who / SQL columns as `main`
+  widens (`23.75rem`, then `40rem`), each tier keeping its grid track count equal
+  to its visible spans.
+- `gk-detail` on `.detail-card`: cell caps scale with the card width (`cqi`).
+
+The one exception is the shell split itself, which is a viewport media query
+(`@media (min-width: 56.25rem)`) rather than a shell container: giving `.gk` a
+`container-type` would apply layout containment and trap the fixed `.detail`
+overlay it wraps, and an element cannot query its own container. The shell width
+tracks the viewport at `94vw`, so the viewport query is the right owner there.
+
+A `@supports not (container-type: inline-size)` block mirrors the `gk-main`
+breakpoints as viewport media queries for browsers without container-query
+support (Beekeeper's Chromium has it since 105).
+
 ## Motion
 
 Motion is centralised. JS animation goes through `src/anim.ts` (a thin wrapper on
@@ -71,6 +101,10 @@ Rules:
   pulses (the expiry countdown shifts to amber under 45s, it does not pulse).
 - Content is always visible by default. Never gate a card or control on an
   animation completing.
+- Layout-tier changes are owned by CSS container queries (plus the one viewport
+  media query for the shell split), never a JS resize/`matchMedia` listener that
+  re-renders. A tier change must never retrigger `enter()` or `reveal()`; CSS
+  alone decides visibility and cropping.
 
 The primitives: the executing spinner; the resolved card sliding down into history
 (`transform`, not opacity-to-0); a staggered fade-up of the panel blocks on mount
