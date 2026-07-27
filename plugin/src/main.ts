@@ -9,6 +9,7 @@ import {
   runQuery,
   setTabTitle,
 } from "@beekeeperstudio/plugin";
+import { breathe, enter, type Loop, pulse, reveal } from "./anim";
 import { chevronDown, harnessIcon } from "./icons";
 import { isReadOnlyQuery, mapDialect } from "./readonly";
 import { capResult, cell, type Field, type HistResult } from "./result";
@@ -216,6 +217,10 @@ export class Gatekeeper {
   private readonly cards: Card[] = [];
   private readonly history: HistItem[] = [];
   private roster: SessionRoster[] = [];
+  private rosterSig = "";
+  private rosterLoops: Loop[] = [];
+  private breatheLoop?: Loop;
+  private prevCardIds = new Set<string>();
   private polling = false;
   private lastTitle = "";
   private renewTimer?: number;
@@ -393,6 +398,10 @@ export class Gatekeeper {
     // Rebuilt DOM has a blank pill; force it back to the initial state (the
     // guard in setConnectionState would otherwise skip writing the new node).
     this.setConnectionState("connecting", "", true);
+    const gk = this.root.querySelector(".gk");
+    if (gk) {
+      reveal([...gk.children].filter((c) => !(c as HTMLElement).hidden));
+    }
   }
 
   private setConnectionState(state: ConnectionState, detail = "", force = false): void {
@@ -479,11 +488,26 @@ export class Gatekeeper {
       // human might act on; otherwise drop it so the roster stays current.
       .filter((r) => r.p !== "gone" || r.s.pendingCount > 0)
       .sort((a, b) => PRESENCE_ORDER[a.p] - PRESENCE_ORDER[b.p] || b.s.lastActive - a.s.lastActive);
+    // Skip the rebuild (and the pulse restart) when only the relative ages moved;
+    // tick() keeps those fresh in place.
+    const sig = JSON.stringify(
+      rows.map((r) => [r.s.sessionId, r.p, r.s.pendingCount, r.s.lastIntent]),
+    );
+    if (sig === this.rosterSig) {
+      return;
+    }
+    this.rosterSig = sig;
     const live = rows.filter((r) => r.p !== "gone").length;
     const list = rows.length
       ? rows.map(({ s, p }) => this.rosterRow(s, p)).join("")
       : '<div class="empty">No agents connected.</div>';
     el.innerHTML = `<div class="roster-head"><span class="label">Connected agents</span><span class="roster-count">${live}</span></div><div class="roster-list">${list}</div>`;
+    for (const loop of this.rosterLoops) {
+      loop.stop();
+    }
+    this.rosterLoops = [
+      ...el.querySelectorAll('.roster-row[data-presence="active"] .presence-dot'),
+    ].map((dot) => pulse(dot));
   }
 
   private rosterRow(s: SessionRoster, p: Presence): string {
@@ -498,8 +522,8 @@ export class Gatekeeper {
       p === "active"
         ? `active${pending}`
         : p === "idle"
-          ? `idle ${relAge(s.lastActive)}${pending}`
-          : `left ${relAge(s.leftAt ?? s.lastSeen)}`;
+          ? `idle <span class="rage" data-age="${s.lastActive}">${relAge(s.lastActive)}</span>${pending}`
+          : `left <span class="rage" data-age="${s.leftAt ?? s.lastSeen}">${relAge(s.leftAt ?? s.lastSeen)}</span>`;
     return `
       <div class="roster-row" data-presence="${p}">
         <span class="presence-dot"></span>
@@ -559,11 +583,11 @@ export class Gatekeeper {
         leaseEl.textContent = clock(remaining);
       }
     }
-    // Keep the resolved-history ages current without re-rendering the rows.
-    this.root.querySelectorAll<HTMLSpanElement>("#hist .hage").forEach((el) => {
-      const resolvedAt = Number(el.dataset.age);
-      if (!Number.isNaN(resolvedAt)) {
-        el.textContent = relAge(resolvedAt);
+    // Keep the resolved-history and roster ages current without re-rendering.
+    this.root.querySelectorAll<HTMLSpanElement>("#hist .hage, #roster .rage").forEach((el) => {
+      const t = Number(el.dataset.age);
+      if (!Number.isNaN(t)) {
+        el.textContent = relAge(t);
       }
     });
   }
@@ -577,7 +601,24 @@ export class Gatekeeper {
     }
     const queue = this.root.querySelector<HTMLDivElement>("#queue");
     if (queue) {
+      this.breatheLoop?.stop();
+      this.breatheLoop = undefined;
       queue.innerHTML = this.queueHtml();
+      const waiting = queue.querySelector(".empty");
+      if (waiting) {
+        this.breatheLoop = breathe(waiting);
+      } else {
+        for (const card of queue.querySelectorAll<HTMLElement>(".card")) {
+          if (card.dataset.card && !this.prevCardIds.has(card.dataset.card)) {
+            enter(card);
+          }
+        }
+      }
+      this.prevCardIds = new Set(
+        [...queue.querySelectorAll<HTMLElement>(".card")]
+          .map((c) => c.dataset.card ?? "")
+          .filter(Boolean),
+      );
     }
     this.updateTabTitle();
   }

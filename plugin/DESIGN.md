@@ -54,14 +54,32 @@ Headings are always roman (no italic display).
 
 ## Motion
 
-Three purposeful primitives, all gated behind `prefers-reduced-motion`:
-- the executing spinner,
-- the resolved card sliding down into history (`transform`, not opacity-to-0),
-- the live expiry countdown (a number that counts; it shifts to amber under 45s,
-  it does not pulse).
+Motion is centralised. JS animation goes through `src/anim.ts` (a thin wrapper on
+the `motion` library, Web Animations API, CSP-safe); animation on a pseudo-element
+goes through a gated CSS keyframe. Both draw on the same `style.css` tokens:
+`--ease-out` for entrances, `--ease-in` for exits, `--ease-in-out` for toggles, and
+the `--dur-micro/short/long` buckets. Exits run at roughly 75% of the enter.
 
-Content is always visible by default. Never gate a card or control on an
-animation completing.
+Rules:
+- Animate `transform` and `opacity` only. Nothing that triggers layout.
+- Everything is gated behind `prefers-reduced-motion` (the `anim.ts` helpers no-op
+  under reduce; CSS keyframes live inside `@media (prefers-reduced-motion:
+  no-preference)`).
+- Infinite loops are for functional liveness or waiting indicators only, kept
+  subtle: the active-agent dot and the connecting status dot pulse, the "waiting
+  for a proposal" empty state breathes. Nothing decorative loops, and data never
+  pulses (the expiry countdown shifts to amber under 45s, it does not pulse).
+- Content is always visible by default. Never gate a card or control on an
+  animation completing.
+
+The primitives: the executing spinner; the resolved card sliding down into history
+(`transform`, not opacity-to-0); a staggered fade-up of the panel blocks on mount
+(`reveal`); a fade-up entrance for a fresh proposal card (`enter`); and the
+functional `pulse`/`breathe` loops above.
+
+To add one, reach for an `anim.ts` helper (or a gated CSS keyframe for a
+pseudo-element), reuse the tokens, and keep it only if you can say what it
+communicates. If you cannot, cut it.
 
 ## Anti-slop rules that shaped this (from pols.dev/slop.md)
 

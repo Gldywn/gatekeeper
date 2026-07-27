@@ -24,6 +24,12 @@
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
   --dur: 190ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-micro: 120ms;
+  --dur-short: 220ms;
+  --dur-long: 420ms;
   --r: 7px;
 }
 
@@ -158,6 +164,17 @@ body {
 .conn-status[data-state="error"]::before {
   background: var(--danger);
   box-shadow: 0 0 0 3px color-mix(in oklch, var(--danger) 20%, transparent);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .conn-status[data-state="connecting"]::before,
+  .conn-status[data-state="reconnecting"]::before {
+    animation: conn-pulse 1.4s var(--ease-in-out) infinite;
+  }
+  @keyframes conn-pulse {
+    50% {
+      opacity: 0.45;
+    }
+  }
 }
 
 .label {
