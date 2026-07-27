@@ -3,6 +3,7 @@ import type { ConnectionInfo, RunQueryResult } from "@beekeeperstudio/plugin";
 import {
   addNotificationListener,
   appStorage,
+  clipboard,
   getAppInfo,
   getConnectionInfo,
   log,
@@ -10,7 +11,7 @@ import {
   setTabTitle,
 } from "@beekeeperstudio/plugin";
 import { enter, type Loop, pulse, reveal } from "./anim";
-import { chevronDown, harnessIcon } from "./icons";
+import { checkIcon, chevronDown, copyIcon, harnessIcon } from "./icons";
 import { isReadOnlyQuery, mapDialect } from "./readonly";
 import { capResult, cell, type Field, type HistResult } from "./result";
 
@@ -433,9 +434,12 @@ export class Gatekeeper {
     });
     this.root.querySelector<HTMLDivElement>("#queue")!.addEventListener("click", (e) => {
       const target = e.target as HTMLElement;
+      const copy = target.closest<HTMLElement>("[data-copy-sql]");
       const a = target.closest<HTMLElement>("[data-approve]");
       const r = target.closest<HTMLElement>("[data-reject]");
-      if (a) {
+      if (copy) {
+        this.copySql(copy);
+      } else if (a) {
         void this.approve(a.getAttribute("data-approve")!);
       } else if (r) {
         void this.reject(r.getAttribute("data-reject")!);
@@ -454,6 +458,11 @@ export class Gatekeeper {
     const detail = this.root.querySelector<HTMLDivElement>("#detail")!;
     detail.addEventListener("click", (e) => {
       const target = e.target as HTMLElement;
+      const copy = target.closest<HTMLElement>("[data-copy-sql]");
+      if (copy) {
+        this.copySql(copy);
+        return;
+      }
       // Close on the backdrop or the close button, not on the card itself.
       if (target === detail || target.closest("[data-close]")) {
         this.closeDetail();
@@ -761,7 +770,7 @@ export class Gatekeeper {
           <span class="${remaining <= 45_000 ? "lease low" : "lease"}">${clock(remaining)}</span>
         </div>
         <div class="meta">${escapeHtml(card.id)} &middot; ${relAge(card.createdAt)}</div>
-        <pre class="sql">${highlight(card.sql)}</pre>
+        <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(card.sql)}" aria-label="Copy SQL">${copyIcon}</button>${highlight(card.sql)}</pre>
         ${blockedNote}${actions}
       </div>`;
   }
@@ -976,6 +985,20 @@ export class Gatekeeper {
     }
   }
 
+  private copySql(el: HTMLElement): void {
+    const sql = el.dataset.copySql;
+    if (!sql) {
+      return;
+    }
+    void clipboard.writeText(sql);
+    el.classList.add("copied");
+    el.innerHTML = checkIcon;
+    window.setTimeout(() => {
+      el.classList.remove("copied");
+      el.innerHTML = copyIcon;
+    }, 1200);
+  }
+
   private detailHtml(item: HistItem): string {
     const grid = item.result ? this.gridHtml(item.result) : "";
     const harness = item.session?.harness?.trim() || null;
@@ -997,7 +1020,7 @@ export class Gatekeeper {
           <button class="detail-close" type="button" data-close aria-label="Close detail">&times;</button>
         </div>
         <div class="detail-meta">${audit.join(" &middot; ")}</div>
-        <pre class="sql">${highlight(item.sql)}</pre>
+        <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(item.sql)}" aria-label="Copy SQL">${copyIcon}</button>${highlight(item.sql)}</pre>
         ${grid}
       </div>`;
   }

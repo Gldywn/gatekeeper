@@ -281,6 +281,39 @@ body {
 .sql .st {
   color: var(--ok);
 }
+.copy-sql {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 1;
+  display: inline-flex;
+  padding: 4px;
+  border: none;
+  border-radius: 4px;
+  background: color-mix(in oklch, var(--surface) 65%, transparent);
+  color: var(--faint);
+  cursor: pointer;
+  opacity: 0.4;
+  transition:
+    opacity var(--dur) var(--ease),
+    color var(--dur) var(--ease);
+}
+.sql:hover .copy-sql,
+.copy-sql:hover,
+.copy-sql:focus-visible {
+  opacity: 1;
+}
+.copy-sql:hover {
+  color: var(--text);
+}
+.copy-sql.copied {
+  opacity: 1;
+  color: var(--ok);
+}
+.copy-sql svg {
+  width: 13px;
+  height: 13px;
+}
 .card.blocked .sql::before,
 .card.blocked .sql::after {
   border-color: var(--danger);
