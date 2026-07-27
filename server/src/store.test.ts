@@ -437,4 +437,22 @@ describe("presence", () => {
     expect(other.map((s) => s.sessionId)).toEqual(["s2"]);
     expect(other[0].pendingCount).toBe(0);
   });
+
+  it("scopes each session's pending count to the queried connection", () => {
+    const { store } = makeStore();
+    store.upsertSession({ sessionId: "s1" }); // unstamped: visible on every connection
+    setConn(store, "A");
+    store.submit({ sessionId: "s1", sql: "SELECT 1" }); // request stamped A
+    expect(store.listSessions("A")[0].pendingCount).toBe(1);
+    expect(store.listSessions("B")[0].pendingCount).toBe(0);
+  });
+
+  it("heartbeat does not re-tag the session's connection", () => {
+    const { store } = makeStore();
+    setConn(store, "A");
+    store.upsertSession({ sessionId: "s1" });
+    setConn(store, "B");
+    store.heartbeatSession("s1");
+    expect(store.getSession("s1")?.connection).toBe("A");
+  });
 });

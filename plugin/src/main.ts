@@ -220,6 +220,7 @@ export class Gatekeeper {
   private renewTimer?: number;
   private tickTimer?: number;
   private pollFailures = 0;
+  private pollGeneration = 0;
   private connectionState: ConnectionState = "connecting";
   private readonly root: HTMLElement;
 
@@ -256,7 +257,7 @@ export class Gatekeeper {
     this.renderShell();
     this.polling = true;
     void this.poll();
-    void this.pollRoster();
+    void this.pollRoster(++this.pollGeneration);
     void this.reportConnection();
     this.startTimers();
   }
@@ -321,7 +322,7 @@ export class Gatekeeper {
       this.polling = true;
       this.renderShell();
       void this.poll();
-      void this.pollRoster();
+      void this.pollRoster(++this.pollGeneration);
       void this.reportConnection();
       this.startTimers();
     };
@@ -442,8 +443,10 @@ export class Gatekeeper {
     window.setTimeout(() => void this.poll(), POLL_MS);
   }
 
-  private async pollRoster(): Promise<void> {
-    if (!this.polling) {
+  private async pollRoster(generation: number): Promise<void> {
+    // A stale generation means a re-pair superseded this loop; bail so re-pairing
+    // cannot leave two roster loops running at once.
+    if (!this.polling || generation !== this.pollGeneration) {
       return;
     }
     try {
@@ -460,7 +463,7 @@ export class Gatekeeper {
       // The roster is low-stakes context; a stale one is fine, and its failures
       // must not fight poll() over the connection-status indicator.
     }
-    window.setTimeout(() => void this.pollRoster(), ROSTER_POLL_MS);
+    window.setTimeout(() => void this.pollRoster(generation), ROSTER_POLL_MS);
   }
 
   private renderRoster(): void {

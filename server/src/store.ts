@@ -734,12 +734,11 @@ export class RequestStore {
 
   /** Presence ping: keep last_seen fresh while the agent's stdio pipe is open. */
   heartbeatSession(sessionId: string): void {
-    const connection = this.getConnection()?.connectionName ?? null;
+    // Liveness only: never re-tag the session's connection here, or a passive
+    // agent would be dragged onto whatever connection Beekeeper currently shows.
     this.db
-      .prepare(
-        "UPDATE sessions SET last_seen = ?, connection = COALESCE(?, connection) WHERE session_id = ?",
-      )
-      .run(this.now(), connection, sessionId);
+      .prepare("UPDATE sessions SET last_seen = ? WHERE session_id = ?")
+      .run(this.now(), sessionId);
   }
 
   /** Record a clean disconnect so the roster shows the agent as gone at once. */
@@ -751,16 +750,19 @@ export class RequestStore {
 
   /** Sessions for a connection, each with its count of still-open requests. */
   listSessions(connection: string | null): SessionRoster[] {
+    // Scope pending_count to the queried connection so it matches what claimNext
+    // would actually offer there, not the session's total across connections.
     const rows = this.db
       .prepare(
         `SELECT s.*,
            (SELECT count(*) FROM requests r
-              WHERE r.session_id = s.session_id AND r.state IN ${OPEN_STATES}) AS pending_count
+              WHERE r.session_id = s.session_id AND r.state IN ${OPEN_STATES}
+                AND (r.connection IS NULL OR r.connection = @connection)) AS pending_count
          FROM sessions s
-         WHERE s.connection IS NULL OR s.connection = ?
+         WHERE s.connection IS NULL OR s.connection = @connection
          ORDER BY s.created_at ASC`,
       )
-      .all(connection) as (SessionRow & { pending_count: number })[];
+      .all({ connection }) as (SessionRow & { pending_count: number })[];
     return rows.map((row) => ({ ...toSessionMeta(row), pendingCount: row.pending_count }));
   }
 
