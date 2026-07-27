@@ -1,6 +1,7 @@
-import { svg as claudeSvg } from "@thesvg/icons/anthropic";
-import { svg as geminiSvg } from "@thesvg/icons/google-gemini";
-import { svg as codexSvg } from "@thesvg/icons/openai";
+import { svg as claudeSvg } from "@thesvg/icons/claude-code";
+import { svg as codexSvg } from "@thesvg/icons/codex";
+import { svg as geminiSvg } from "@thesvg/icons/gemini";
+import { svg as kimiSvg } from "@thesvg/icons/kimi";
 import { svg as opencodeSvg } from "@thesvg/icons/opencode";
 
 // Neutral mark for an unrecognised harness. Every icon renders in currentColor
@@ -12,8 +13,11 @@ const MARKS: Record<string, string> = {
   codex: codexSvg,
   opencode: opencodeSvg,
   gemini: geminiSvg,
+  kimi: kimiSvg,
 };
-const BRANDS = ["claude", "codex", "opencode", "gemini"] as const;
+// The harness is the MCP client name (claude-code, codex, opencode, gemini). kimi
+// is kept for the day a harness reports its sub-model; MCP does not expose it today.
+const BRANDS = ["claude", "codex", "opencode", "gemini", "kimi"] as const;
 
 export function harnessIcon(harness: string | null): string {
   const key = (harness ?? "").toLowerCase();
