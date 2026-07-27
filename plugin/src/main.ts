@@ -1,5 +1,5 @@
 import "./style.css";
-import type { RunQueryResult } from "@beekeeperstudio/plugin";
+import type { ConnectionInfo, RunQueryResult } from "@beekeeperstudio/plugin";
 import {
   addNotificationListener,
   appStorage,
@@ -18,6 +18,7 @@ const BROKER_URL = "http://localhost:9999";
 const POLL_MS = 1000;
 const RENEW_MS = 15_000;
 const TICK_MS = 1000;
+const CONN_CHECK_MS = 5000;
 const TOKEN_KEY = "gatekeeper.token";
 const HIST_MAX = 20;
 // Results are held in the iframe only to power the detail view; bound the total
@@ -94,6 +95,7 @@ interface HistItem {
   note: string;
   sql: string;
   resolvedAt: number;
+  connection: string | null;
   session: SessionMeta | null;
   result?: HistResult;
 }
@@ -223,6 +225,8 @@ export class Gatekeeper {
   private prevCardIds = new Set<string>();
   private polling = false;
   private lastTitle = "";
+  private lastConnCheck = 0;
+  private connCheckInFlight = false;
   private renewTimer?: number;
   private tickTimer?: number;
   private pollFailures = 0;
@@ -242,19 +246,11 @@ export class Gatekeeper {
   async start(): Promise<void> {
     this.token = await loadToken();
     try {
-      const conn = await getConnectionInfo();
-      this.connectionName = conn.connectionName || conn.databaseName || "connection";
-      this.readOnly = conn.readOnlyMode;
-      this.dialect = mapDialect(conn.databaseType);
-      this.conn = {
-        connectionName: conn.connectionName,
-        databaseType: conn.databaseType,
-        databaseName: conn.databaseName,
-        schema: conn.defaultSchema ?? null,
-        readOnly: conn.readOnlyMode,
-      };
+      this.applyConnection(await getConnectionInfo());
+      this.lastConnCheck = Date.now();
     } catch {
-      // Connection info is best-effort; the queue still works without it.
+      // Connection info is best-effort; the queue still works without it. A
+      // failed initial read leaves lastConnCheck at 0 so the first tick retries.
     }
     if (!this.token) {
       this.renderPairing();
@@ -266,6 +262,75 @@ export class Gatekeeper {
     void this.pollRoster(++this.pollGeneration);
     void this.reportConnection();
     this.startTimers();
+  }
+
+  // Derive our cached connection fields from a fresh snapshot. Shared by start()
+  // and the connection-switch path so the two can never drift apart.
+  private applyConnection(conn: ConnectionInfo): void {
+    this.connectionName = conn.connectionName || conn.databaseName || "connection";
+    this.readOnly = conn.readOnlyMode;
+    this.dialect = mapDialect(conn.databaseType);
+    this.conn = {
+      connectionName: conn.connectionName,
+      databaseType: conn.databaseType,
+      databaseName: conn.databaseName,
+      schema: conn.defaultSchema ?? null,
+      readOnly: conn.readOnlyMode,
+    };
+  }
+
+  // No connectionChanged notification exists, so a switch is caught by re-reading
+  // getConnectionInfo(): a postMessage round-trip, throttled to ~5s on the tick
+  // (a switch is rare) rather than paid every second.
+  private maybeCheckConnection(): void {
+    const now = Date.now();
+    if (this.connCheckInFlight || now - this.lastConnCheck < CONN_CHECK_MS) {
+      return;
+    }
+    this.lastConnCheck = now;
+    this.connCheckInFlight = true;
+    void this.checkConnection().finally(() => {
+      this.connCheckInFlight = false;
+    });
+  }
+
+  private async checkConnection(): Promise<void> {
+    let conn: ConnectionInfo;
+    try {
+      conn = await getConnectionInfo();
+    } catch {
+      return; // Keep the last known connection; retry on the next throttle window.
+    }
+    const name = conn.connectionName || conn.databaseName || "connection";
+    if (name === this.connectionName) {
+      return;
+    }
+    this.applyConnection(conn);
+    this.onConnectionSwitch();
+  }
+
+  private onConnectionSwitch(): void {
+    // SAFETY-CRITICAL: approving a card claimed under the OLD connection would
+    // runQuery() against the NEW database, breaking the map from approval to the
+    // SQL the human saw. Drop them; the broker re-offers still-pending proposals.
+    this.cards.length = 0;
+    // History and roster are connection-scoped; reset so the old one cannot leak
+    // in. The roster re-fetches on its own timer.
+    this.history.length = 0;
+    this.roster = [];
+    this.rosterSig = "";
+    this.renderConnLabel();
+    void this.reportConnection();
+    this.renderQueue();
+    this.renderHistory();
+    this.renderRoster();
+  }
+
+  private renderConnLabel(): void {
+    const conn = this.root.querySelector<HTMLSpanElement>("#conn");
+    if (conn) {
+      conn.innerHTML = `${escapeHtml(this.connectionName)}${this.readOnly ? ' <span class="ro">read-only</span>' : ""}`;
+    }
   }
 
   // Hand the agent non-sensitive context (dialect, database, schema, read-only)
@@ -355,8 +420,7 @@ export class Gatekeeper {
         </section>
         <div class="detail" id="detail" hidden></div>
       </div>`;
-    const conn = this.root.querySelector<HTMLSpanElement>("#conn")!;
-    conn.innerHTML = `${escapeHtml(this.connectionName)}${this.readOnly ? ' <span class="ro">read-only</span>' : ""}`;
+    this.renderConnLabel();
     const toggle = this.root.querySelector<HTMLButtonElement>("#htoggle")!;
     const hist = this.root.querySelector<HTMLDivElement>("#hist")!;
     toggle.addEventListener("click", () => {
@@ -571,6 +635,7 @@ export class Gatekeeper {
   }
 
   private tick(): void {
+    this.maybeCheckConnection();
     for (const card of [...this.cards]) {
       if (card.state === "ready" && card.expiresAt - Date.now() <= 0) {
         this.finish(card.id, "no", "expired");
@@ -746,14 +811,17 @@ export class Gatekeeper {
     }
   }
 
-  private async reject(id: string): Promise<void> {
+  private async reject(id: string, reason?: string): Promise<void> {
     const card = this.cards.find((c) => c.id === id);
     if (card?.state !== "ready") {
       return;
     }
+    // A future deny-with-reason UI passes a human note here; it goes to the agent
+    // and is reflected back into the history row. Empty falls back to the defaults.
+    const custom = reason?.trim();
     this.setCardState(id, "rejecting");
-    await this.postResult(card, { status: "rejected", reason: "Rejected by user." });
-    this.finish(id, "no", "declined");
+    await this.postResult(card, { status: "rejected", reason: custom || "Rejected by user." });
+    this.finish(id, "no", "declined", undefined, custom || undefined);
   }
 
   private async postExecuting(card: Card): Promise<boolean> {
@@ -790,20 +858,30 @@ export class Gatekeeper {
     }
   }
 
-  private finish(id: string, status: "ok" | "no", note: string, result?: HistResult): void {
+  private finish(
+    id: string,
+    status: "ok" | "no",
+    note: string,
+    result?: HistResult,
+    reason?: string,
+  ): void {
     const card = this.cards.find((c) => c.id === id);
     if (!card) {
       return;
     }
     const el = this.root.querySelector<HTMLElement>(`[data-card="${id}"]`);
+    // A custom reason replaces the terse default label; the row and detail
+    // overlay both read HistItem.note, so nothing here is hardcoded.
+    const displayNote = reason?.trim() || note;
     const commit = () => {
       this.drop(id);
       this.history.unshift({
         id,
         status,
-        note,
+        note: displayNote,
         sql: card.sql,
         resolvedAt: Date.now(),
+        connection: this.connectionName || null,
         session: card.session,
         result,
       });
@@ -843,7 +921,11 @@ export class Gatekeeper {
     if (!hist) {
       return;
     }
+    // Defense in depth: a switch already clears history, but never render a row
+    // stamped under a different connection than the one on screen now.
+    const current = this.connectionName || null;
     hist.innerHTML = this.history
+      .filter((h) => h.connection === current)
       .map((h) => {
         const harness = h.session?.harness?.trim() || null;
         const who = sessionLabel(h.session, h.id);
