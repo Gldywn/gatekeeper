@@ -57,6 +57,7 @@ interface SessionRoster {
   connection: string | null;
   leftAt: number | null;
   pendingCount: number;
+  lastIntent: string | null;
 }
 
 type Presence = "active" | "idle" | "gone";
@@ -491,6 +492,7 @@ export class Gatekeeper {
     const label = project
       ? `${escapeHtml(project)}${harness ? ` <span class="group-harness">${escapeHtml(harness)}</span>` : ""}`
       : escapeHtml(harness || s.sessionId);
+    const intent = s.lastIntent?.trim();
     const pending = s.pendingCount > 0 ? ` &middot; ${s.pendingCount} pending` : "";
     const meta =
       p === "active"
@@ -503,6 +505,7 @@ export class Gatekeeper {
         <span class="presence-dot"></span>
         <span class="harness-badge">${harnessIcon(harness)}</span>
         <span class="roster-label">${label}</span>
+        <span class="roster-intent"${intent ? ` title="${escapeHtml(intent)}"` : ""}>${intent ? escapeHtml(intent) : ""}</span>
         <span class="roster-meta">${meta}</span>
       </div>`;
   }

@@ -447,15 +447,25 @@ body {
   box-shadow: 0 0 0 3px color-mix(in oklch, var(--ok) 20%, transparent);
 }
 .roster-label {
+  flex: 0 1 auto;
   min-width: 0;
+  max-width: 55%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12px;
   color: var(--text);
 }
+.roster-intent {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--faint);
+  font-size: 11px;
+}
 .roster-meta {
-  margin-left: auto;
   flex: none;
   font-family: var(--font-mono);
   font-size: 10.5px;

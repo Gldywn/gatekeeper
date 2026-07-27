@@ -424,7 +424,7 @@ describe("presence", () => {
     const { store } = makeStore();
     setConn(store, "staging");
     store.upsertSession({ sessionId: "s1", harness: "claude-code" });
-    store.submit({ sessionId: "s1", sql: "SELECT 1" });
+    store.submit({ sessionId: "s1", sql: "SELECT 1", intent: "check tables" });
     setConn(store, "other");
     store.upsertSession({ sessionId: "s2", harness: "codex" });
 
@@ -432,6 +432,7 @@ describe("presence", () => {
     expect(staging.map((s) => s.sessionId)).toEqual(["s1"]);
     expect(staging[0].pendingCount).toBe(1);
     expect(staging[0].connection).toBe("staging");
+    expect(staging[0].lastIntent).toBe("check tables");
 
     const other = store.listSessions("other");
     expect(other.map((s) => s.sessionId)).toEqual(["s2"]);

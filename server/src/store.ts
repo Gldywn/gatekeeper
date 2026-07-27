@@ -79,6 +79,7 @@ export interface SessionMeta {
 
 export interface SessionRoster extends SessionMeta {
   pendingCount: number;
+  lastIntent: string | null;
 }
 
 export interface StoreOptions {
@@ -757,13 +758,24 @@ export class RequestStore {
         `SELECT s.*,
            (SELECT count(*) FROM requests r
               WHERE r.session_id = s.session_id AND r.state IN ${OPEN_STATES}
-                AND (r.connection IS NULL OR r.connection = @connection)) AS pending_count
+                AND (r.connection IS NULL OR r.connection = @connection)) AS pending_count,
+           (SELECT r2.intent FROM requests r2
+              WHERE r2.session_id = s.session_id
+                AND (r2.connection IS NULL OR r2.connection = @connection)
+              ORDER BY r2.created_at DESC LIMIT 1) AS last_intent
          FROM sessions s
          WHERE s.connection IS NULL OR s.connection = @connection
          ORDER BY s.created_at ASC`,
       )
-      .all({ connection }) as (SessionRow & { pending_count: number })[];
-    return rows.map((row) => ({ ...toSessionMeta(row), pendingCount: row.pending_count }));
+      .all({ connection }) as (SessionRow & {
+      pending_count: number;
+      last_intent: string | null;
+    })[];
+    return rows.map((row) => ({
+      ...toSessionMeta(row),
+      pendingCount: row.pending_count,
+      lastIntent: row.last_intent,
+    }));
   }
 
   getSession(sessionId: string): SessionMeta | null {
