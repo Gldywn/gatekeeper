@@ -22,16 +22,21 @@ const HIST_MAX = 20;
 // Results are held in the iframe only to power the detail view; bound the total
 // across all items here (the per-item caps live in ./result).
 const HIST_MAX_TOTAL_BYTES = 2 * 1024 * 1024;
+const ROSTER_POLL_MS = 2000;
+// Mirror the server's SESSION_HEARTBEAT_MS margin: active if it acted recently,
+// gone once its presence ping has been silent well past one heartbeat.
+const SESSION_ACTIVE_MS = 30_000;
+const SESSION_GONE_MS = 45_000;
 
 type CardState = "ready" | "approving" | "executing" | "posting" | "rejecting";
 
 type ConnectionState = "connecting" | "reconnecting" | "connected" | "error";
 
 const CONNECTION_LABEL: Record<ConnectionState, string> = {
-  connecting: "Connecting...",
-  reconnecting: "Reconnecting...",
-  connected: "Connected",
-  error: "Unreachable",
+  connecting: "connecting...",
+  reconnecting: "reconnecting...",
+  connected: "connected",
+  error: "unreachable",
 };
 
 interface SessionMeta {
@@ -39,6 +44,30 @@ interface SessionMeta {
   harness: string | null;
   harnessVersion: string | null;
   project: string | null;
+}
+
+interface SessionRoster {
+  sessionId: string;
+  harness: string | null;
+  harnessVersion: string | null;
+  project: string | null;
+  createdAt: number;
+  lastSeen: number;
+  lastActive: number;
+  connection: string | null;
+  leftAt: number | null;
+  pendingCount: number;
+}
+
+type Presence = "active" | "idle" | "gone";
+
+const PRESENCE_ORDER: Record<Presence, number> = { active: 0, idle: 1, gone: 2 };
+
+function presence(s: SessionRoster, now: number): Presence {
+  if (s.leftAt !== null || now - s.lastSeen > SESSION_GONE_MS) {
+    return "gone";
+  }
+  return now - s.lastActive <= SESSION_ACTIVE_MS ? "active" : "idle";
 }
 
 interface Proposal {
@@ -164,6 +193,7 @@ export class Gatekeeper {
   } | null = null;
   private readonly cards: Card[] = [];
   private readonly history: HistItem[] = [];
+  private roster: SessionRoster[] = [];
   private polling = false;
   private lastTitle = "";
   private renewTimer?: number;
@@ -205,6 +235,7 @@ export class Gatekeeper {
     this.renderShell();
     this.polling = true;
     void this.poll();
+    void this.pollRoster();
     void this.reportConnection();
     this.startTimers();
   }
@@ -269,6 +300,7 @@ export class Gatekeeper {
       this.polling = true;
       this.renderShell();
       void this.poll();
+      void this.pollRoster();
       void this.reportConnection();
       this.startTimers();
     };
@@ -286,6 +318,7 @@ export class Gatekeeper {
     this.root.innerHTML = `
       <div class="gk">
         ${HEADER}
+        <section class="roster" id="roster"></section>
         <p class="label">Pending approval</p>
         <div class="queue" id="queue"></div>
         <section class="history">
@@ -333,6 +366,7 @@ export class Gatekeeper {
     });
     this.renderQueue();
     this.renderHistory();
+    this.renderRoster();
     // Rebuilt DOM has a blank pill; force it back to the initial state (the
     // guard in setConnectionState would otherwise skip writing the new node).
     this.setConnectionState("connecting", "", true);
@@ -385,6 +419,68 @@ export class Gatekeeper {
       log.error(err instanceof Error ? err : String(err));
     }
     window.setTimeout(() => void this.poll(), POLL_MS);
+  }
+
+  private async pollRoster(): Promise<void> {
+    if (!this.polling) {
+      return;
+    }
+    try {
+      const res = await this.broker("/sessions", {
+        headers: this.conn?.connectionName
+          ? { "X-Gatekeeper-Connection": this.conn.connectionName }
+          : {},
+      });
+      if (res.status === 200) {
+        this.roster = ((await res.json()) as { sessions: SessionRoster[] }).sessions;
+        this.renderRoster();
+      }
+    } catch {
+      // The roster is low-stakes context; a stale one is fine, and its failures
+      // must not fight poll() over the connection-status indicator.
+    }
+    window.setTimeout(() => void this.pollRoster(), ROSTER_POLL_MS);
+  }
+
+  private renderRoster(): void {
+    const el = this.root.querySelector<HTMLElement>("#roster");
+    if (!el) {
+      return;
+    }
+    const now = Date.now();
+    const rows = this.roster
+      .map((s) => ({ s, p: presence(s, now) }))
+      // Keep a gone agent listed only while it still owns an open request the
+      // human might act on; otherwise drop it so the roster stays current.
+      .filter((r) => r.p !== "gone" || r.s.pendingCount > 0)
+      .sort((a, b) => PRESENCE_ORDER[a.p] - PRESENCE_ORDER[b.p] || b.s.lastActive - a.s.lastActive);
+    const live = rows.filter((r) => r.p !== "gone").length;
+    const list = rows.length
+      ? rows.map(({ s, p }) => this.rosterRow(s, p)).join("")
+      : '<div class="empty">No agents connected.</div>';
+    el.innerHTML = `<p class="label">Connected agents <span class="roster-count">${live}</span></p><div class="roster-list">${list}</div>`;
+  }
+
+  private rosterRow(s: SessionRoster, p: Presence): string {
+    const harness = s.harness?.trim() || null;
+    const project = s.project?.trim();
+    const label = project
+      ? `${escapeHtml(project)}${harness ? ` <span class="group-harness">${escapeHtml(harness)}</span>` : ""}`
+      : escapeHtml(harness || s.sessionId);
+    const pending = s.pendingCount > 0 ? ` &middot; ${s.pendingCount} pending` : "";
+    const meta =
+      p === "active"
+        ? `active${pending}`
+        : p === "idle"
+          ? `idle ${relAge(s.lastActive)}${pending}`
+          : `left ${relAge(s.leftAt ?? s.lastSeen)}`;
+    return `
+      <div class="roster-row" data-presence="${p}">
+        <span class="presence-dot"></span>
+        <span class="harness-badge">${harnessIcon(harness)}</span>
+        <span class="roster-label">${label}</span>
+        <span class="roster-meta">${meta}</span>
+      </div>`;
   }
 
   private claim(proposal: Proposal): void {
@@ -528,10 +624,10 @@ export class Gatekeeper {
   }
 
   private busyLabel(state: CardState): string {
-    if (state === "approving") return "Approving";
-    if (state === "executing") return "Running on connection";
-    if (state === "posting") return "Returning rows";
-    return "Rejecting";
+    if (state === "approving") return "approving";
+    if (state === "executing") return "running on connection";
+    if (state === "posting") return "returning rows";
+    return "rejecting";
   }
 
   private setCardState(id: string, state: CardState): void {
