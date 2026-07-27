@@ -24,3 +24,7 @@ export function harnessIcon(harness: string | null): string {
   }
   return PLACEHOLDER;
 }
+
+// Lucide "chevron-down" (lucide.dev, ISC License), inlined for the strict CSP.
+// It is a stroke icon (not filled), rotated -90deg by CSS for the collapsed state.
+export const chevronDown = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>`;

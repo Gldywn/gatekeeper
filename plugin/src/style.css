@@ -482,8 +482,15 @@ body {
   gap: 7px;
 }
 .disclosure .chev {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  flex: none;
   transition: transform var(--dur) var(--ease);
-  font-size: 10px;
+}
+.disclosure .chev svg {
+  width: 100%;
+  height: 100%;
 }
 .disclosure[aria-expanded="false"] .chev {
   transform: rotate(-90deg);
@@ -496,9 +503,9 @@ body {
 }
 .hrow {
   display: grid;
-  grid-template-columns: auto auto 1fr auto;
-  gap: var(--s3);
-  align-items: center;
+  grid-template-columns: 15px 72px 54px 1fr auto;
+  gap: var(--s2);
+  align-items: baseline;
   width: 100%;
   padding: 5px var(--s1);
   border: none;
@@ -521,10 +528,14 @@ body {
   outline: 2px solid var(--amber);
   outline-offset: -1px;
 }
-.hid {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--faint);
+.hwho {
+  align-self: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--muted);
 }
 .hstatus {
   font-size: 11.5px;
@@ -537,6 +548,7 @@ body {
   color: var(--danger);
 }
 .hsql {
+  align-self: center;
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--muted);
@@ -546,6 +558,9 @@ body {
   min-width: 0;
 }
 .htime {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
   font-family: var(--font-mono);
   font-size: 10.5px;
   color: var(--faint);
@@ -587,7 +602,7 @@ body {
 }
 .detail-head {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: var(--s2);
   margin-bottom: var(--s3);
 }
@@ -605,6 +620,7 @@ body {
   margin-top: var(--s2);
 }
 .detail-close {
+  align-self: center;
   margin-left: auto;
   padding: 0 var(--s1);
   border: none;

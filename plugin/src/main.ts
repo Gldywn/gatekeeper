@@ -9,7 +9,7 @@ import {
   runQuery,
   setTabTitle,
 } from "@beekeeperstudio/plugin";
-import { harnessIcon } from "./icons";
+import { chevronDown, harnessIcon } from "./icons";
 import { isReadOnlyQuery, mapDialect } from "./readonly";
 import { capResult, cell, type Field, type HistResult } from "./result";
 
@@ -91,7 +91,8 @@ interface HistItem {
   status: "ok" | "no";
   note: string;
   sql: string;
-  time: string;
+  resolvedAt: number;
+  session: SessionMeta | null;
   result?: HistResult;
 }
 
@@ -160,6 +161,26 @@ function clock(ms: number): string {
 function relAge(createdAt: number): string {
   const s = Math.max(0, Math.round((Date.now() - createdAt) / 1000));
   return s < 60 ? `${s}s ago` : `${Math.floor(s / 60)}m ago`;
+}
+
+const HIST_SQL_PREVIEW_CHARS = 140;
+
+// Truncate the raw SQL before highlight()/escapeHtml() run, so highlight() only
+// ever wraps complete substrings; slicing already-highlighted HTML could cut a tag.
+function previewSql(sql: string): string {
+  const flat = sql.replace(/\s+/g, " ").trim();
+  return flat.length > HIST_SQL_PREVIEW_CHARS
+    ? `${flat.slice(0, HIST_SQL_PREVIEW_CHARS)}...`
+    : flat;
+}
+
+function sessionLabel(session: SessionMeta | null, fallback: string): string {
+  const project = session?.project?.trim();
+  if (project) {
+    return project;
+  }
+  const harness = session?.harness?.trim();
+  return harness || session?.sessionId || fallback;
 }
 
 const HEADER = `
@@ -322,7 +343,7 @@ export class Gatekeeper {
         <p class="label">Pending approval</p>
         <div class="queue" id="queue"></div>
         <section class="history">
-          <button class="disclosure" id="htoggle" aria-expanded="true"><span class="chev">&#9662;</span> Recently resolved</button>
+          <button class="disclosure" id="htoggle" aria-expanded="true"><span class="chev">${chevronDown}</span>Recently resolved</button>
           <div class="hist" id="hist"></div>
         </section>
         <div class="detail" id="detail" hidden></div>
@@ -532,6 +553,13 @@ export class Gatekeeper {
         leaseEl.textContent = clock(remaining);
       }
     }
+    // Keep the resolved-history ages current without re-rendering the rows.
+    this.root.querySelectorAll<HTMLSpanElement>("#hist .hage").forEach((el) => {
+      const resolvedAt = Number(el.dataset.age);
+      if (!Number.isNaN(resolvedAt)) {
+        el.textContent = relAge(resolvedAt);
+      }
+    });
   }
 
   private renderQueue(): void {
@@ -723,7 +751,15 @@ export class Gatekeeper {
     const el = this.root.querySelector<HTMLElement>(`[data-card="${id}"]`);
     const commit = () => {
       this.drop(id);
-      this.history.unshift({ id, status, note, sql: card.sql, time: "just now", result });
+      this.history.unshift({
+        id,
+        status,
+        note,
+        sql: card.sql,
+        resolvedAt: Date.now(),
+        session: card.session,
+        result,
+      });
       if (this.history.length > HIST_MAX) {
         this.history.pop();
       }
@@ -761,15 +797,22 @@ export class Gatekeeper {
       return;
     }
     hist.innerHTML = this.history
-      .map(
-        (h) => `
-        <button class="hrow" type="button" data-hist="${escapeHtml(h.id)}">
-          <span class="hid">${escapeHtml(h.id)}</span>
+      .map((h) => {
+        const harness = h.session?.harness?.trim() || null;
+        const who = sessionLabel(h.session, h.id);
+        return `
+        <button class="hrow" type="button" data-hist="${escapeHtml(h.id)}" title="${escapeHtml(h.id)}">
+          <span class="harness-badge">${harnessIcon(harness)}</span>
+          <span class="hwho" title="${escapeHtml(who)}">${escapeHtml(who)}</span>
           <span class="hstatus ${h.status}">${h.status === "ok" ? "approved" : "rejected"}</span>
-          <span class="hsql">${escapeHtml(h.sql.split("\n")[0])}</span>
-          <span class="htime">${escapeHtml(h.note)} &middot; ${h.time}</span>
-        </button>`,
-      )
+          <span class="hsql">${highlight(previewSql(h.sql))}</span>
+          <span class="htime">
+            <span class="hnote">${escapeHtml(h.note)}</span>
+            <span aria-hidden="true">&middot;</span>
+            <span class="hage" data-age="${h.resolvedAt}">${relAge(h.resolvedAt)}</span>
+          </span>
+        </button>`;
+      })
       .join("");
   }
 
