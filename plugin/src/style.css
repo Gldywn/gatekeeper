@@ -411,8 +411,14 @@ body {
 .roster {
   margin-top: var(--s3);
 }
-.roster .label {
+.roster-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
   margin: 0 0 var(--s2);
+}
+.roster-head .label {
+  margin: 0;
 }
 .roster-count {
   font-family: var(--font-mono);

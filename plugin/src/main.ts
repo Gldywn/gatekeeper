@@ -483,7 +483,7 @@ export class Gatekeeper {
     const list = rows.length
       ? rows.map(({ s, p }) => this.rosterRow(s, p)).join("")
       : '<div class="empty">No agents connected.</div>';
-    el.innerHTML = `<p class="label">Connected agents <span class="roster-count">${live}</span></p><div class="roster-list">${list}</div>`;
+    el.innerHTML = `<div class="roster-head"><span class="label">Connected agents</span><span class="roster-count">${live}</span></div><div class="roster-list">${list}</div>`;
   }
 
   private rosterRow(s: SessionRoster, p: Presence): string {
