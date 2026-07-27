@@ -456,4 +456,13 @@ describe("presence", () => {
     store.heartbeatSession("s1");
     expect(store.getSession("s1")?.connection).toBe("A");
   });
+
+  it("stores an agent-set session intent surfaced in the roster", () => {
+    const { store } = makeStore();
+    setConn(store, "staging");
+    store.upsertSession({ sessionId: "s1", harness: "claude-code" });
+    expect(store.listSessions("staging")[0].sessionIntent).toBeNull();
+    store.setSessionIntent("s1", "Support SUP-1042");
+    expect(store.listSessions("staging")[0].sessionIntent).toBe("Support SUP-1042");
+  });
 });

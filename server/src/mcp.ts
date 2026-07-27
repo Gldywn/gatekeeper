@@ -135,6 +135,29 @@ export function createMcpServer(store: RequestStore): { server: McpServer; sessi
     },
   );
 
+  server.registerTool(
+    "set_session_intent",
+    {
+      title: "Label what this session is working on",
+      description:
+        "Set a short, human-readable label for this session's current task (e.g. a ticket or goal). It appears in the Beekeeper plugin's connected-agents roster so the human sees each agent's purpose at a glance. Call it once early and update it if the task changes. Never include PII, credentials, or connection details.",
+      inputSchema: {
+        intent: z
+          .string()
+          .describe("A short session scope, e.g. 'Support SUP-1042: identity check'."),
+      },
+    },
+    async ({ intent }) => {
+      try {
+        store.upsertSession({ sessionId, ...identity() });
+        store.setSessionIntent(sessionId, intent);
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true }, null, 2) }] };
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
   return { server, sessionId };
 }
 

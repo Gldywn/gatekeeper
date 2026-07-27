@@ -80,6 +80,7 @@ export interface SessionMeta {
 export interface SessionRoster extends SessionMeta {
   pendingCount: number;
   lastIntent: string | null;
+  sessionIntent: string | null;
 }
 
 export interface StoreOptions {
@@ -125,6 +126,7 @@ interface SessionRow {
   last_active: number | null;
   connection: string | null;
   left_at: number | null;
+  session_intent: string | null;
 }
 
 const OPEN_STATES = "('pending','leased','executing')";
@@ -286,7 +288,8 @@ export class RequestStore {
         last_seen INTEGER NOT NULL,
         last_active INTEGER,
         connection TEXT,
-        left_at INTEGER
+        left_at INTEGER,
+        session_intent TEXT
       );
     `);
     // Add columns introduced after the first release to pre-existing databases.
@@ -295,6 +298,7 @@ export class RequestStore {
       "ALTER TABLE sessions ADD COLUMN last_active INTEGER",
       "ALTER TABLE sessions ADD COLUMN connection TEXT",
       "ALTER TABLE sessions ADD COLUMN left_at INTEGER",
+      "ALTER TABLE sessions ADD COLUMN session_intent TEXT",
     ]) {
       try {
         this.db.exec(alter);
@@ -749,6 +753,13 @@ export class RequestStore {
       .run(this.now(), sessionId);
   }
 
+  /** An agent-set, session-level scope shown in the roster (the task at hand). */
+  setSessionIntent(sessionId: string, intent: string): void {
+    this.db
+      .prepare("UPDATE sessions SET session_intent = ? WHERE session_id = ?")
+      .run(intent, sessionId);
+  }
+
   /** Sessions for a connection, each with its count of still-open requests. */
   listSessions(connection: string | null): SessionRoster[] {
     // Scope pending_count to the queried connection so it matches what claimNext
@@ -775,6 +786,7 @@ export class RequestStore {
       ...toSessionMeta(row),
       pendingCount: row.pending_count,
       lastIntent: row.last_intent,
+      sessionIntent: row.session_intent,
     }));
   }
 
