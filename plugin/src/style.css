@@ -187,7 +187,7 @@ body {
 .queue {
   display: flex;
   flex-direction: column;
-  gap: var(--s3);
+  gap: var(--s4);
 }
 .card {
   border-radius: var(--r);
@@ -374,15 +374,33 @@ body {
   color: var(--faint);
   padding: var(--s3) 0;
 }
+.waiting {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s5) 0;
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.waiting-mark {
+  width: 30px;
+  height: 32px;
+  color: var(--amber);
+  opacity: 0.7;
+}
 
 .group {
-  margin-bottom: var(--s4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
 }
 .group-head {
   display: flex;
   align-items: baseline;
   gap: var(--s2);
-  padding: 2px var(--s1) var(--s2);
+  padding: 2px var(--s1) 0;
 }
 .harness-badge {
   display: inline-flex;
@@ -648,6 +666,18 @@ body {
   font-size: 11px;
   color: var(--muted);
   margin: 0;
+}
+.detail-who {
+  font-size: 12px;
+  font-weight: 560;
+  color: var(--text);
+}
+.detail-meta {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--faint);
+  margin: 0 0 var(--s3);
+  overflow-wrap: anywhere;
 }
 .grid-wrap + .detail-note {
   margin-top: var(--s2);

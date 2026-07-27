@@ -9,7 +9,7 @@ import {
   runQuery,
   setTabTitle,
 } from "@beekeeperstudio/plugin";
-import { breathe, enter, type Loop, pulse, reveal } from "./anim";
+import { enter, type Loop, pulse, reveal } from "./anim";
 import { chevronDown, harnessIcon } from "./icons";
 import { isReadOnlyQuery, mapDialect } from "./readonly";
 import { capResult, cell, type Field, type HistResult } from "./result";
@@ -60,6 +60,7 @@ interface SessionRoster {
   leftAt: number | null;
   pendingCount: number;
   lastIntent: string | null;
+  sessionIntent: string | null;
 }
 
 type Presence = "active" | "idle" | "gone";
@@ -555,7 +556,7 @@ export class Gatekeeper {
     // Skip the rebuild (and the pulse restart) when only the relative ages moved;
     // tick() keeps those fresh in place.
     const sig = JSON.stringify(
-      rows.map((r) => [r.s.sessionId, r.p, r.s.pendingCount, r.s.lastIntent]),
+      rows.map((r) => [r.s.sessionId, r.p, r.s.pendingCount, r.s.sessionIntent, r.s.lastIntent]),
     );
     if (sig === this.rosterSig) {
       return;
@@ -580,7 +581,7 @@ export class Gatekeeper {
     const label = project
       ? `${escapeHtml(project)}${harness ? ` <span class="group-harness">${escapeHtml(harness)}</span>` : ""}`
       : escapeHtml(harness || s.sessionId);
-    const intent = s.lastIntent?.trim();
+    const intent = s.sessionIntent?.trim() || s.lastIntent?.trim();
     const pending = s.pendingCount > 0 ? ` &middot; ${s.pendingCount} pending` : "";
     const meta =
       p === "active"
@@ -669,9 +670,9 @@ export class Gatekeeper {
       this.breatheLoop?.stop();
       this.breatheLoop = undefined;
       queue.innerHTML = this.queueHtml();
-      const waiting = queue.querySelector(".empty");
-      if (waiting) {
-        this.breatheLoop = breathe(waiting);
+      const waitingMark = queue.querySelector(".waiting-mark");
+      if (waitingMark) {
+        this.breatheLoop = pulse(waitingMark);
       } else {
         for (const card of queue.querySelectorAll<HTMLElement>(".card")) {
           if (card.dataset.card && !this.prevCardIds.has(card.dataset.card)) {
@@ -690,7 +691,7 @@ export class Gatekeeper {
 
   private queueHtml(): string {
     if (!this.cards.length) {
-      return '<div class="empty">Waiting for a query proposal...</div>';
+      return `<div class="waiting"><svg class="waiting-mark" viewBox="0 0 24 26" fill="none" aria-hidden="true"><polygon points="12,1.4 22,7 22,19 12,24.6 2,19 2,7" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><polygon points="12,7.4 16.8,10.2 16.8,15.8 12,18.6 7.2,15.8 7.2,10.2" fill="currentColor" fill-opacity="0.85"/></svg><span>Waiting for a query proposal...</span></div>`;
     }
     // Group by session, keeping the arrival order of both groups and cards.
     // Always render the session header, even for a single session, so the human
@@ -964,14 +965,25 @@ export class Gatekeeper {
 
   private detailHtml(item: HistItem): string {
     const grid = item.result ? this.gridHtml(item.result) : "";
+    const harness = item.session?.harness?.trim() || null;
+    const who = sessionLabel(item.session, item.id);
+    const audit = [
+      item.connection ? `on ${escapeHtml(item.connection)}` : "",
+      harness ? escapeHtml(harness) : "",
+      item.session?.sessionId ? escapeHtml(item.session.sessionId) : "",
+      escapeHtml(item.id),
+      escapeHtml(new Date(item.resolvedAt).toLocaleString()),
+    ].filter(Boolean);
     return `
       <div class="detail-card">
         <div class="detail-head">
-          <span class="detail-id">${escapeHtml(item.id)}</span>
+          <span class="harness-badge">${harnessIcon(harness)}</span>
+          <span class="detail-who">${escapeHtml(who)}</span>
           <span class="hstatus ${item.status}">${item.status === "ok" ? "approved" : "rejected"}</span>
           <span class="detail-note">${escapeHtml(item.note)}</span>
           <button class="detail-close" type="button" data-close aria-label="Close detail">&times;</button>
         </div>
+        <div class="detail-meta">${audit.join(" &middot; ")}</div>
         <pre class="sql">${highlight(item.sql)}</pre>
         ${grid}
       </div>`;
