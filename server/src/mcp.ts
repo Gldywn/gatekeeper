@@ -151,7 +151,9 @@ export function createMcpServer(store: RequestStore): { server: McpServer; sessi
       try {
         store.upsertSession({ sessionId, ...identity() });
         store.setSessionIntent(sessionId, intent);
-        return { content: [{ type: "text" as const, text: JSON.stringify({ ok: true }, null, 2) }] };
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({ ok: true }, null, 2) }],
+        };
       } catch (err) {
         return fail(err);
       }

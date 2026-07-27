@@ -464,5 +464,7 @@ describe("presence", () => {
     expect(store.listSessions("staging")[0].sessionIntent).toBeNull();
     store.setSessionIntent("s1", "Support SUP-1042");
     expect(store.listSessions("staging")[0].sessionIntent).toBe("Support SUP-1042");
+    // getSession carries the intent too, so /pending can surface it in detail.
+    expect(store.getSession("s1")?.sessionIntent).toBe("Support SUP-1042");
   });
 });

@@ -75,12 +75,12 @@ export interface SessionMeta {
   lastActive: number;
   connection: string | null;
   leftAt: number | null;
+  sessionIntent: string | null;
 }
 
 export interface SessionRoster extends SessionMeta {
   pendingCount: number;
   lastIntent: string | null;
-  sessionIntent: string | null;
 }
 
 export interface StoreOptions {
@@ -147,6 +147,7 @@ function toSessionMeta(row: SessionRow): SessionMeta {
     lastActive: row.last_active ?? row.last_seen,
     connection: row.connection,
     leftAt: row.left_at,
+    sessionIntent: row.session_intent,
   };
 }
 
@@ -786,7 +787,6 @@ export class RequestStore {
       ...toSessionMeta(row),
       pendingCount: row.pending_count,
       lastIntent: row.last_intent,
-      sessionIntent: row.session_intent,
     }));
   }
 
