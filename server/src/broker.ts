@@ -5,7 +5,10 @@ import { type Outcome, type RequestStore, StoreError } from "./store.js";
 const CORS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Gatekeeper-Connection",
+  // The plugin runs on a secure plugin:// origin; Chromium's Private Network
+  // Access gates its fetch to loopback unless the preflight grants this.
+  "Access-Control-Allow-Private-Network": "true",
 };
 const MAX_BODY_BYTES = 32 * 1024 * 1024;
 
