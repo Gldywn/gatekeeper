@@ -7,17 +7,14 @@ import {
   getColumns,
   getConnectionInfo,
   log,
-  requestFileSave,
   runQuery,
   setTabTitle,
 } from "@beekeeperstudio/plugin";
 import { enter, type Loop, pulse, reveal } from "./anim";
 import { SchemaAnnotator } from "./annotate";
-import { clock, dayKey, escapeHtml, relAge } from "./html";
+import { clock, escapeHtml, relAge } from "./html";
 import { checkIcon, chevronDown, copyIcon, historyIcon } from "./icons";
 import { BrokerClient } from "./net/broker";
-import { activityDaysHtml, activityMarkdown, activityShell } from "./render/activity";
-import { detailHtml } from "./render/detail";
 import { historyRow } from "./render/history";
 import { queueHtml, readyActions, schemaInner } from "./render/queue";
 import { presence, rosterRow } from "./render/roster";
@@ -26,7 +23,6 @@ import { formatSql } from "./sql/format";
 import { highlight } from "./sql/highlight";
 import { isReadOnlyQuery, mapDialect } from "./sql/readonly";
 import type {
-  ActivityEntry,
   Card,
   CardState,
   ConnectionState,
@@ -35,6 +31,8 @@ import type {
   Proposal,
   SessionRoster,
 } from "./types";
+import { ActivityView } from "./views/activity";
+import { DetailView } from "./views/detail";
 
 const BROKER_URL = "http://localhost:9999";
 const POLL_MS = 1000;
@@ -125,10 +123,6 @@ export class Gatekeeper {
   // half-typed reason survives a queue rebuild from a concurrent proposal.
   private readonly denyDrafts = new Map<string, string>();
   private readonly history: HistItem[] = [];
-  // The durable activity feed, fetched fresh each time the overlay opens; the set
-  // tracks which entries have their full SQL expanded in place.
-  private activity: ActivityEntry[] = [];
-  private readonly activityExpanded = new Set<string>();
   private roster: SessionRoster[] = [];
   private rosterSig = "";
   private rosterLoops: Loop[] = [];
@@ -145,18 +139,24 @@ export class Gatekeeper {
   private pollFailures = 0;
   private pollGeneration = 0;
   private connectionState: ConnectionState = "connecting";
-  // The history item whose detail overlay is open, so a late schema fetch only paints
-  // a detail still on screen.
-  private detailItemId: string | null = null;
   private readonly root: HTMLElement;
   private readonly broker = new BrokerClient({ baseUrl: BROKER_URL, tokenKey: TOKEN_KEY });
+  private readonly detailView: DetailView;
+  private readonly activityView: ActivityView;
 
   constructor(root: HTMLElement) {
     this.root = root;
+    this.detailView = new DetailView({ root, annotator: this.annotator });
+    this.activityView = new ActivityView({
+      root,
+      broker: this.broker,
+      connectionName: () => this.connectionName,
+      scope: () => this.conn?.connectionName,
+    });
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
-        this.closeActivity();
-        this.closeDetail();
+        this.activityView.close();
+        this.detailView.close();
       }
     });
     // Refresh the moment the tab is looked at again (reopened or refocused), so
@@ -276,9 +276,7 @@ export class Gatekeeper {
     // cannot leak in. The roster re-fetches on its own timer; the activity overlay
     // is closed because it now shows a different connection's audit trail.
     this.history.length = 0;
-    this.activity = [];
-    this.activityExpanded.clear();
-    this.closeActivity();
+    this.activityView.reset();
     this.roster = [];
     this.rosterSig = "";
     this.renderConnLabel();
@@ -445,7 +443,7 @@ export class Gatekeeper {
       }
       const item = this.history.find((h) => h.id === row.getAttribute("data-hist"));
       if (item) {
-        this.openDetail(item);
+        this.detailView.open(item);
       }
     });
     const detail = this.root.querySelector<HTMLDivElement>("#detail")!;
@@ -458,12 +456,12 @@ export class Gatekeeper {
       }
       // Close on the backdrop or the close button, not on the card itself.
       if (target === detail || target.closest("[data-close]")) {
-        this.closeDetail();
+        this.detailView.close();
       }
     });
     this.root
       .querySelector<HTMLButtonElement>("#activityBtn")!
-      .addEventListener("click", () => void this.openActivity());
+      .addEventListener("click", () => void this.activityView.open());
     const activity = this.root.querySelector<HTMLDivElement>("#activity")!;
     activity.addEventListener("click", (e) => {
       const target = e.target as HTMLElement;
@@ -474,16 +472,16 @@ export class Gatekeeper {
       }
       const exp = target.closest<HTMLElement>("[data-export]");
       if (exp) {
-        void this.exportSession(exp.getAttribute("data-export")!);
+        void this.activityView.exportSession(exp.getAttribute("data-export")!);
         return;
       }
       const sql = target.closest<HTMLElement>("[data-act-sql]");
       if (sql) {
-        this.toggleActivitySql(sql.getAttribute("data-act-sql")!);
+        this.activityView.toggle(sql.getAttribute("data-act-sql")!);
         return;
       }
       if (target === activity || target.closest("[data-close]")) {
-        this.closeActivity();
+        this.activityView.close();
       }
     });
     this.renderQueue();
@@ -967,161 +965,6 @@ export class Gatekeeper {
       .filter((h) => h.connection === current)
       .map((h) => historyRow(h))
       .join("");
-  }
-
-  private openDetail(item: HistItem): void {
-    const panel = this.root.querySelector<HTMLDivElement>("#detail");
-    if (!panel) {
-      return;
-    }
-    this.detailItemId = item.id;
-    panel.innerHTML = detailHtml(item);
-    panel.hidden = false;
-    void this.annotateDetail(item);
-  }
-
-  // Match the pending card: once the schema resolves, show the same reads/PII/client
-  // annotation under the detail SQL and light the sensitive columns in the query text.
-  private async annotateDetail(item: HistItem): Promise<void> {
-    const schema = (await this.annotator.schemaFor(item.sql)) ?? null;
-    if (this.detailItemId !== item.id) {
-      return;
-    }
-    const cs = this.root.querySelector<HTMLElement>("#detail-cs");
-    if (cs) {
-      cs.innerHTML = schemaInner(schema);
-    }
-    const body = this.root.querySelector<HTMLElement>("#detail-sqlbody");
-    if (body) {
-      body.innerHTML = highlight(
-        formatSql(item.sql),
-        schema?.pii,
-        schema?.client,
-        schema?.literals,
-      );
-    }
-  }
-
-  private closeDetail(): void {
-    this.detailItemId = null;
-    const panel = this.root.querySelector<HTMLDivElement>("#detail");
-    if (panel) {
-      panel.hidden = true;
-      panel.innerHTML = "";
-    }
-  }
-
-  // The connection-scoped activity view: a durable, PII-safe audit of what ran on
-  // this connection. It reuses the .detail overlay and is refreshed on every open.
-  private async openActivity(): Promise<void> {
-    const panel = this.root.querySelector<HTMLDivElement>("#activity");
-    if (!panel) {
-      return;
-    }
-    // A fresh open forgets which rows were expanded last time.
-    this.activityExpanded.clear();
-    panel.innerHTML = activityShell(
-      '<p class="act-status">Loading activity...</p>',
-      this.connectionName,
-    );
-    panel.hidden = false;
-    await this.loadActivity();
-  }
-
-  private closeActivity(): void {
-    const panel = this.root.querySelector<HTMLDivElement>("#activity");
-    if (panel && !panel.hidden) {
-      panel.hidden = true;
-      panel.innerHTML = "";
-    }
-  }
-
-  private async loadActivity(): Promise<void> {
-    const panel = this.root.querySelector<HTMLDivElement>("#activity");
-    if (!panel || panel.hidden) {
-      return;
-    }
-    try {
-      const activity = await this.broker.activity(this.conn?.connectionName);
-      if (activity === null) {
-        this.setActivityBody('<p class="act-status">Could not load activity.</p>');
-        return;
-      }
-      this.activity = activity;
-      this.renderActivity();
-    } catch (err) {
-      log.error(err instanceof Error ? err : String(err));
-      this.setActivityBody('<p class="act-status">Broker unreachable.</p>');
-    }
-  }
-
-  private setActivityBody(html: string): void {
-    const body = this.root.querySelector<HTMLElement>("#activity .act-body");
-    if (body) {
-      body.innerHTML = html;
-    }
-  }
-
-  private renderActivity(): void {
-    this.setActivityBody(
-      this.activity.length
-        ? activityDaysHtml(this.activity, this.activityExpanded)
-        : '<p class="act-status">No activity on this connection yet.</p>',
-    );
-  }
-
-  // Toggle a single entry's full SQL in place so expanding one row never rebuilds
-  // the list or loses the scroll position.
-  private toggleActivitySql(id: string): void {
-    const open = this.activityExpanded.has(id);
-    if (open) {
-      this.activityExpanded.delete(id);
-    } else {
-      this.activityExpanded.add(id);
-    }
-    const entry = this.root.querySelector<HTMLElement>(`#activity [data-act="${CSS.escape(id)}"]`);
-    if (!entry) {
-      return;
-    }
-    entry.classList.toggle("open", !open);
-    const detail = entry.querySelector<HTMLElement>(".act-detail");
-    if (detail) {
-      detail.hidden = open;
-    }
-    entry
-      .querySelector<HTMLElement>("[data-act-sql]")
-      ?.setAttribute("aria-expanded", String(!open));
-  }
-
-  // Deliberate human export: write one session-day's timeline as markdown via the
-  // host's save dialog. The SQL is host-side only and no result rows are included;
-  // an approved query contributes just its scalar row count.
-  private async exportSession(key: string): Promise<void> {
-    const sep = key.indexOf("|");
-    if (sep === -1) {
-      return;
-    }
-    const day = key.slice(0, sep);
-    const sessionId = key.slice(sep + 1);
-    const entries = this.activity.filter(
-      (e) => e.sessionId === sessionId && dayKey(e.decidedAt ?? e.createdAt) === day,
-    );
-    if (!entries.length) {
-      return;
-    }
-    const first = entries[0];
-    const who = (first.project?.trim() || first.harness?.trim() || sessionId).toLowerCase();
-    const slug = who.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "session";
-    try {
-      await requestFileSave({
-        data: activityMarkdown(day, sessionId, entries, this.connectionName),
-        fileName: `gatekeeper-activity-${day}-${slug}.md`,
-        encoding: "utf8",
-        filters: [{ name: "Markdown", extensions: ["md"] }],
-      });
-    } catch (err) {
-      log.error(err instanceof Error ? err : String(err));
-    }
   }
 
   private copySql(el: HTMLElement): void {
