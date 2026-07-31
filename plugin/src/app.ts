@@ -11,7 +11,16 @@ import {
 import { enter, type Loop, pulse, reveal } from "./anim";
 import { SchemaAnnotator } from "./annotate";
 import { clock, escapeHtml, relAge } from "./html";
-import { checkIcon, chevronDown, copyIcon, historyIcon } from "./icons";
+import {
+  checkIcon,
+  chevronDown,
+  copyIcon,
+  dbCylinderIcon,
+  externalLinkIcon,
+  gearIcon,
+  historyIcon,
+  lockIcon,
+} from "./icons";
 import { BrokerClient } from "./net/broker";
 import { historyRow } from "./render/history";
 import { queueHtml, readyActions, schemaInner } from "./render/queue";
@@ -82,19 +91,37 @@ function runErrorText(error: unknown): string {
 
 const HEADER = `
   <header class="bar">
-    <svg class="comb" width="118" height="86" viewBox="0 0 118 86" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.1">
-      <defs><polygon id="hx" points="6,0 18,0 24,10.4 18,20.8 6,20.8 0,10.4"/></defs>
-      <use href="#hx" x="64" y="2"/><use href="#hx" x="82" y="12.4"/><use href="#hx" x="82" y="-8"/>
-      <use href="#hx" x="100" y="2"/><use href="#hx" x="100" y="22.8"/><use href="#hx" x="64" y="22.8"/><use href="#hx" x="46" y="12.4"/>
-    </svg>
-    <svg class="mark" viewBox="0 0 24 26" fill="none" aria-hidden="true">
-      <polygon points="12,1.4 22,7 22,19 12,24.6 2,19 2,7" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-      <polygon points="12,7.4 16.8,10.2 16.8,15.8 12,18.6 7.2,15.8 7.2,10.2" fill="currentColor" fill-opacity="0.92"/>
-    </svg>
-    <span class="wordmark">Gatekeeper</span>
-    <span class="conn" id="conn"></span>
-    <span class="conn-status" id="connStatus" aria-live="polite"></span>
-    <span class="count" id="count" aria-live="polite"></span>
+    <span class="brand">
+      <svg class="mark" viewBox="0 0 24 26" fill="none" aria-hidden="true">
+        <polygon points="12,1.4 22,7 22,19 12,24.6 2,19 2,7" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+        <polygon points="12,7.4 16.8,10.2 16.8,15.8 12,18.6 7.2,15.8 7.2,10.2" fill="currentColor" fill-opacity="0.92"/>
+      </svg>
+      <span class="wordmark">Gatekeeper</span>
+    </span>
+    <span class="conn-chip" id="conn"></span>
+    <span class="bar-right">
+      <span class="conn-status" id="connStatus" aria-live="polite"></span>
+      <span class="dsep"></span>
+      <span class="gear-wrap">
+        <button class="gear" id="settingsGear" type="button" aria-label="Settings" aria-haspopup="true" aria-expanded="false">${gearIcon}</button>
+        <div class="settings-pop" id="settingsPop" role="menu" aria-label="Safeguards" hidden>
+          <div class="pop-head">Safeguards</div>
+          <div class="qs-row">
+            <span class="qs-name">Read-only</span>
+            <span class="qs-lock">${lockIcon}enforced</span>
+          </div>
+          <div class="qs-row"><span class="qs-name">PII flagging</span><span class="qs-state">on</span></div>
+          <div class="qs-row"><span class="qs-name">Client-data flagging</span><span class="qs-state">on</span></div>
+          <div class="qs-row"><span class="qs-name">Schema annotation</span><span class="qs-state">on</span></div>
+          <div class="qs-row"><span class="qs-name">Sensitive-value detection</span><span class="qs-state">on</span></div>
+          <div class="qs-row"><span class="qs-name">Request expiry</span><span class="qs-val">15 min</span></div>
+          <div class="qs-row"><span class="qs-name">Activity audit</span><span class="qs-state">on</span></div>
+          <div class="pop-foot">
+            <button class="pop-full" id="settingsAll" type="button" title="Full settings — coming soon">All settings ${externalLinkIcon}</button>
+          </div>
+        </div>
+      </span>
+    </span>
   </header>`;
 
 export class Gatekeeper {
@@ -155,7 +182,21 @@ export class Gatekeeper {
       if (e.key === "Escape") {
         this.activityView.close();
         this.detailView.close();
+        this.setSettingsOpen(false);
       }
+    });
+    // A click anywhere outside the gear or the open popover dismisses it. Bound
+    // once (the gear/popover are re-created per render, so this reads them live).
+    document.addEventListener("click", (e) => {
+      const pop = this.root.querySelector<HTMLElement>("#settingsPop");
+      if (!pop || pop.hidden) {
+        return;
+      }
+      const target = e.target as Node;
+      if (pop.contains(target) || this.root.querySelector("#settingsGear")?.contains(target)) {
+        return;
+      }
+      this.setSettingsOpen(false);
     });
     // Refresh the moment the tab is looked at again (reopened or refocused), so
     // the queue is never stale while the human is watching it.
@@ -299,11 +340,17 @@ export class Gatekeeper {
     const dialect = mapDialect(c.databaseType);
     const db = c.databaseName?.trim();
     const schema = c.schema?.trim();
+    const name = c.connectionName || this.connectionName;
+    const path = [db, schema]
+      .filter((part): part is string => Boolean(part))
+      .map(escapeHtml)
+      .join(" / ");
     el.innerHTML = `
-      <span class="cc-name">${escapeHtml(c.connectionName || this.connectionName)}</span>
-      <span class="cc-dialect">${escapeHtml(dialect)}${db ? ` &middot; ${escapeHtml(db)}` : ""}</span>
-      ${schema ? `<span class="cc-schema">schema ${escapeHtml(schema)}</span>` : ""}
-      ${c.readOnly ? '<span class="cc-ro">read-only</span>' : ""}`;
+      <span class="chip-db" aria-hidden="true">${dbCylinderIcon}</span>
+      <span class="chip-name">${escapeHtml(name)}</span>
+      <span class="badge">${escapeHtml(dialect)}</span>
+      ${path ? `<span class="chip-path">${path}</span>` : ""}
+      <span class="dsep"></span><span class="ro" title="Gatekeeper only executes read-only SELECT queries, whatever the connection's own mode">${lockIcon}read-only</span>`;
   }
 
   // Hand the agent non-sensitive context (dialect, database, schema, read-only)
@@ -378,7 +425,7 @@ export class Gatekeeper {
           <section class="roster" id="roster"></section>
         </div>
         <div class="main" id="main">
-          <p class="label">Pending approval</p>
+          <p class="label">Pending approval <span class="count-badge" id="pendingCount" aria-live="polite"></span></p>
           <div class="queue" id="queue"></div>
           <section class="history">
             <div class="history-head">
@@ -460,6 +507,16 @@ export class Gatekeeper {
     this.root
       .querySelector<HTMLButtonElement>("#activityBtn")!
       .addEventListener("click", () => void this.activityView.open());
+    this.root.querySelector<HTMLButtonElement>("#settingsGear")!.addEventListener("click", (e) => {
+      // Stop the bubble so the document dismiss handler does not immediately
+      // re-close the popover this same click just opened.
+      e.stopPropagation();
+      const pop = this.root.querySelector<HTMLElement>("#settingsPop")!;
+      this.setSettingsOpen(pop.hidden);
+    });
+    this.root.querySelector<HTMLButtonElement>("#settingsAll")!.addEventListener("click", () => {
+      // The full settings page is on hold; keep this a harmless no-op until it ships.
+    });
     const activity = this.root.querySelector<HTMLDivElement>("#activity")!;
     activity.addEventListener("click", (e) => {
       const target = e.target as HTMLElement;
@@ -505,6 +562,19 @@ export class Gatekeeper {
       el.textContent = CONNECTION_LABEL[state];
       el.title = detail;
     }
+  }
+
+  // Show or hide the safeguards popover, keeping the gear's aria-expanded and
+  // open styling in sync. No-ops on screens without the header (e.g. pairing).
+  private setSettingsOpen(open: boolean): void {
+    const gear = this.root.querySelector<HTMLButtonElement>("#settingsGear");
+    const pop = this.root.querySelector<HTMLElement>("#settingsPop");
+    if (!gear || !pop) {
+      return;
+    }
+    pop.hidden = !open;
+    gear.setAttribute("aria-expanded", String(open));
+    gear.classList.toggle("open", open);
   }
 
   private async poll(): Promise<void> {
@@ -602,7 +672,7 @@ export class Gatekeeper {
     const list = rows.length
       ? rows.map(({ s, p }) => rosterRow(s, p)).join("")
       : '<div class="empty">No agents connected.</div>';
-    el.innerHTML = `<div class="roster-head"><span class="label">Connected agents</span><span class="roster-count">${live}</span></div><div class="roster-list">${list}</div>`;
+    el.innerHTML = `<div class="roster-head"><span class="label">Connected agents</span><span class="roster-count count-badge">${live}</span></div><div class="roster-list">${list}</div>`;
     for (const loop of this.rosterLoops) {
       loop.stop();
     }
@@ -667,7 +737,7 @@ export class Gatekeeper {
     this.maybeCheckConnection();
     for (const card of [...this.cards]) {
       if (card.state === "ready" && card.expiresAt - Date.now() <= 0) {
-        this.finish(card.id, "no", "expired");
+        this.finish(card.id, "expired", "expired");
         continue;
       }
       const leaseEl = this.root.querySelector<HTMLSpanElement>(`[data-card="${card.id}"] .lease`);
@@ -687,11 +757,10 @@ export class Gatekeeper {
   }
 
   private renderQueue(): void {
-    const count = this.root.querySelector<HTMLSpanElement>("#count");
+    const count = this.root.querySelector<HTMLSpanElement>("#pendingCount");
     if (count) {
       const n = this.cards.length;
-      count.classList.toggle("busy", n > 0);
-      count.textContent = n > 0 ? `${n} pending` : "idle";
+      count.textContent = n > 0 ? String(n) : "";
     }
     const queue = this.root.querySelector<HTMLDivElement>("#queue");
     if (queue) {
@@ -785,7 +854,7 @@ export class Gatekeeper {
         status: "rejected",
         reason: "Blocked: not a read-only SELECT.",
       });
-      this.finish(id, "no", "blocked");
+      this.finish(id, "failed", "blocked");
       return;
     }
     this.setCardState(id, "executing");
@@ -793,7 +862,7 @@ export class Gatekeeper {
     // or the lease was lost), do not run the query: its result could never be
     // delivered, and the human approval no longer maps to a live proposal.
     if (!(await this.postExecuting(card))) {
-      this.finish(id, "no", "lease lost");
+      this.finish(id, "failed", "lease lost");
       return;
     }
     if (gen !== this.connGeneration) {
@@ -808,11 +877,11 @@ export class Gatekeeper {
       }
       this.setCardState(id, "posting");
       await this.postResult(card, { status: "approved", rows, fields });
-      this.finish(id, "ok", `${rows.length} rows`, capResult(rows, fields));
+      this.finish(id, "approved", `${rows.length} rows`, capResult(rows, fields));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       await this.postResult(card, { status: "approved", error: message });
-      this.finish(id, "no", "query failed", undefined, message);
+      this.finish(id, "failed", "query failed", undefined, message);
     }
   }
 
@@ -826,7 +895,7 @@ export class Gatekeeper {
     const custom = reason?.trim();
     this.setCardState(id, "rejecting");
     await this.postResult(card, { status: "rejected", reason: custom || "Rejected by user." });
-    this.finish(id, "no", "declined", undefined, custom || undefined);
+    this.finish(id, "rejected", "declined", undefined, custom || undefined);
   }
 
   // Swap only this card's action row in place (no renderQueue) so the lease
@@ -894,7 +963,7 @@ export class Gatekeeper {
 
   private finish(
     id: string,
-    status: "ok" | "no",
+    status: "approved" | "rejected" | "failed" | "expired",
     note: string,
     result?: HistResult,
     reason?: string,

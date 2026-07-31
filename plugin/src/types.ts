@@ -51,7 +51,7 @@ export interface Card extends Proposal {
 
 export interface HistItem {
   id: string;
-  status: "ok" | "no";
+  status: "approved" | "rejected" | "failed" | "expired";
   note: string;
   sql: string;
   resolvedAt: number;

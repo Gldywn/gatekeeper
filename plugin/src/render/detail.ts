@@ -18,11 +18,11 @@ export function detailHtml(item: HistItem): string {
   ].filter(Boolean);
   return `
       <div class="detail-card">
-        <div class="detail-head">
+        <div class="detail-head ${item.status}">
           <span class="harness-badge">${harnessIcon(harness)}</span>
           <span class="detail-who">${escapeHtml(who)}</span>
-          <span class="hstatus ${item.status}">${item.status === "ok" ? "approved" : "rejected"}</span>
           ${item.session?.sessionLabel ? `<span class="detail-scope" title="${escapeHtml(capitalize(item.session.sessionLabel))}">${escapeHtml(capitalize(item.session.sessionLabel))}</span>` : ""}
+          <span class="hstatus ${item.status}">${item.status}</span>
           <button class="detail-close" type="button" data-close aria-label="Close detail">&times;</button>
         </div>
         <div class="detail-meta">${audit.join(" &middot; ")}</div>

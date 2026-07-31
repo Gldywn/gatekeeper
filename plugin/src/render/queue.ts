@@ -1,5 +1,5 @@
 import { capitalize, clock, escapeHtml, relAge } from "../html";
-import { buildingIcon, copyIcon, harnessIcon, pencilIcon, sendIcon, warnIcon } from "../icons";
+import { buildingIcon, copyIcon, harnessIcon, messageIcon, sendIcon, warnIcon } from "../icons";
 import { formatSql } from "../sql/format";
 import { highlight } from "../sql/highlight";
 import { isReadOnlyQuery } from "../sql/readonly";
@@ -45,7 +45,7 @@ export function groupHtml(
           <span class="harness-badge">${harnessIcon(harness)}</span>
           <span class="group-label">${label}</span>
           ${intent ? `<span class="group-intent" title="${escapeHtml(capitalize(intent))}">${escapeHtml(capitalize(intent))}</span>` : ""}
-          <span class="group-count">${cards.length}</span>
+          <span class="group-count count-badge">${cards.length}</span>
         </div>
         ${cards.map((c) => cardHtml(c, dialect, denyDrafts)).join("")}
       </section>`;
@@ -83,7 +83,7 @@ export function readyActions(
 ): string {
   const revise = denyDrafts.has(id)
     ? denyField(id, denyDrafts.get(id) ?? "")
-    : `<button class="deny-open" type="button" data-deny-open="${id}" aria-label="Reject and ask the agent to change something" title="Ask the agent to change something">${pencilIcon}</button>`;
+    : `<button class="deny-open" type="button" data-deny-open="${id}" title="Reject and ask the agent to change something">${messageIcon}Request changes</button>`;
   return `<div class="actions">
              <button class="btn approve" type="button" data-approve="${id}" ${readOnly ? "" : "disabled"}>Approve</button>
              <button class="btn reject" type="button" data-reject="${id}">Reject</button>

@@ -91,22 +91,13 @@ body {
   min-width: 0;
   position: relative;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--s3);
   padding: var(--s3);
   border-radius: var(--r);
   background: var(--surface);
   border: 1px solid var(--edge);
   box-shadow: inset 0 1px 0 var(--hi);
-  overflow: hidden;
-}
-.comb {
-  position: absolute;
-  top: -12px;
-  right: -8px;
-  opacity: 0.1;
-  color: var(--amber);
-  pointer-events: none;
 }
 .mark {
   width: 24px;
@@ -120,43 +111,93 @@ body {
   letter-spacing: -0.01em;
   font-size: 15px;
 }
-.conn {
-  display: inline-flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 4px 8px;
-  min-width: 0;
-}
-.count {
-  align-self: center;
-  z-index: 1;
+/* Brand cluster: the hexagon mark and wordmark held together at the bar's left. */
+.brand {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-  color: var(--muted);
-  font-size: 11.5px;
-  font-variant-numeric: tabular-nums;
+  gap: var(--s2);
   flex: none;
 }
-.count::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--faint);
-  flex: none;
+
+/* The connection identity wrapped as one bordered object: db glyph, name,
+   dialect badge, database/schema path, and the read-only lock. */
+.conn-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 5px 10px 5px 9px;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--sunken) 55%, transparent);
 }
-.count.busy {
+.conn-chip:empty {
+  display: none;
+}
+.chip-db {
+  display: inline-flex;
+  flex: none;
+  color: var(--faint);
+}
+.chip-db .ico {
+  width: 15px;
+  height: 15px;
+}
+.chip-name {
+  font-size: 12.5px;
+  font-weight: 600;
   color: var(--text);
 }
-.count.busy::before {
-  background: var(--amber);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--amber) 22%, transparent);
+.chip-path {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+/* Dialect tag inside the chip (postgresql, mysql, ...). */
+.badge {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.01em;
+  padding: 2px 7px;
+  border-radius: 5px;
+  color: var(--amber);
+  background: color-mix(in oklch, var(--amber) 14%, transparent);
+  white-space: nowrap;
+}
+/* Read-only guarantee, shown in the chip and echoed in the popover. */
+.ro {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  font-size: 11px;
+  color: var(--ok);
+  white-space: nowrap;
+}
+.ro .ico {
+  width: 12px;
+  height: 12px;
+}
+/* Hairline divider: between chip segments and inside the right cluster. */
+.dsep {
+  width: 1px;
+  height: 15px;
+  background: var(--edge);
+  flex: none;
+}
+
+/* Right cluster: live status, a divider, and the settings gear. */
+.bar-right {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s3);
+  flex: none;
 }
 
 .conn-status {
-  margin-left: auto;
   align-self: center;
   display: inline-flex;
   align-items: center;
@@ -200,6 +241,151 @@ body {
       opacity: 0.45;
     }
   }
+}
+
+/* Settings gear + its safeguards popover, anchored at the bar's right edge. */
+.gear-wrap {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+.gear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--faint);
+  cursor: pointer;
+  transition:
+    color var(--dur) var(--ease),
+    background var(--dur) var(--ease);
+}
+.gear:hover,
+.gear.open {
+  color: var(--text);
+  background: var(--hi);
+}
+.gear:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 1px;
+}
+.gear svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Safeguards popover: a read-only summary of what Gatekeeper is enforcing. */
+.settings-pop {
+  position: absolute;
+  top: calc(100% + 9px);
+  right: 0;
+  z-index: 6;
+  width: 262px;
+  padding: 11px 13px 10px;
+  background: var(--surface);
+  border: 1px solid var(--edge);
+  border-radius: 9px;
+  box-shadow:
+    0 12px 34px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 var(--hi);
+}
+.settings-pop[hidden] {
+  display: none;
+}
+.settings-pop::before {
+  content: "";
+  position: absolute;
+  top: -5px;
+  right: 10px;
+  width: 9px;
+  height: 9px;
+  background: var(--surface);
+  border-left: 1px solid var(--edge);
+  border-top: 1px solid var(--edge);
+  transform: rotate(45deg);
+}
+.pop-head {
+  margin-bottom: 4px;
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--faint);
+}
+.qs-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 5px 0;
+}
+.qs-name {
+  font-size: 12px;
+  color: var(--text);
+}
+.qs-val {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+.qs-lock {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--ok);
+}
+.qs-lock .ico {
+  width: 11px;
+  height: 11px;
+}
+/* Enabled-safeguard state as a calm pill, not a toggle: these are enforced and
+   not configurable yet, so nothing here should read as switchable. */
+.qs-state {
+  margin-left: auto;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--ok) 12%, transparent);
+  color: var(--ok);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.pop-foot {
+  margin-top: 7px;
+  padding-top: 8px;
+  border-top: 1px solid var(--edge);
+}
+.pop-full {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 3px 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 560;
+  color: var(--amber);
+}
+.pop-full:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.pop-full svg {
+  width: 14px;
+  height: 14px;
 }
 
 .label {
@@ -519,12 +705,15 @@ body {
    click for the common no-reason reject. */
 .deny-open {
   display: inline-flex;
-  margin-left: calc(-1 * var(--s2));
-  padding: 5px;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
   border: none;
-  border-radius: 4px;
+  border-radius: 5px;
   background: none;
   color: var(--faint);
+  font: inherit;
+  font-size: 12px;
   cursor: pointer;
   transition: color var(--dur) var(--ease);
 }
@@ -657,10 +846,16 @@ body {
   opacity: 0.7;
 }
 
+/* A faint container so each agent's group (header + its cards) reads as one block,
+   not a loose stack separated only by a title. Kept subtle, not a heavy card. */
 .group {
   display: flex;
   flex-direction: column;
   gap: var(--s3);
+  padding: var(--s2);
+  border: 1px solid color-mix(in oklch, var(--text) 7%, transparent);
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--surface) 40%, transparent);
 }
 .group-head {
   display: flex;
@@ -709,6 +904,27 @@ body {
   font-size: 11px;
   color: var(--faint);
   flex: none;
+}
+/* Shared pill for a live count: connected agents, a group's pending, the queue
+   total. Hidden when empty so an idle count leaves no stray dot. */
+.count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--text) 10%, transparent);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 10.5px;
+  line-height: 1;
+  flex: none;
+}
+.count-badge:empty {
+  display: none;
 }
 
 .roster {
@@ -788,28 +1004,6 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Connection context, shown once in the header bar. */
-.cc-name {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text);
-}
-.cc-dialect {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--muted);
-}
-.cc-schema {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--faint);
-}
-.cc-ro {
-  margin: 0;
-  font-size: 11px;
-  color: var(--ok);
-}
-
 .history {
   margin-top: var(--s5);
 }
@@ -869,23 +1063,38 @@ body {
   opacity: 0.62;
   transition: opacity var(--dur) var(--ease);
 }
+/* Outcome tint: a faint wash the row keeps at rest; hover restores the neutral. */
+.hrow.approved {
+  background: color-mix(in oklch, var(--ok) 12%, transparent);
+}
+.hrow.rejected {
+  background: color-mix(in oklch, var(--amber) 13%, transparent);
+}
+.hrow.failed {
+  background: color-mix(in oklch, var(--danger) 13%, transparent);
+}
+.hrow.expired {
+  background: color-mix(in oklch, var(--faint) 12%, transparent);
+}
 .hwho,
+.hlabel,
 .hsql {
   display: none;
 }
 /* + who: badge who status intent time. */
 @container gk-main (min-width: 23.75rem) {
   .hrow {
-    grid-template-columns: 15px 72px 54px 1fr auto;
+    grid-template-columns: 15px 72px 72px 54px 1fr auto;
   }
-  .hwho {
+  .hwho,
+  .hlabel {
     display: block;
   }
 }
 /* + sql: badge who status intent sql time. */
 @container gk-main (min-width: 40rem) {
   .hrow {
-    grid-template-columns: 15px 72px 54px minmax(0, 1.3fr) minmax(0, 1fr) auto;
+    grid-template-columns: 15px 72px 72px 54px minmax(0, 1.3fr) minmax(0, 1fr) auto;
   }
   .hsql {
     display: block;
@@ -898,7 +1107,7 @@ body {
 }
 @container gk-main (min-width: 40rem) {
   .hrow[data-no-intent] {
-    grid-template-columns: 15px 72px 54px 1fr auto;
+    grid-template-columns: 15px 72px 72px 54px 1fr auto;
   }
 }
 .hrow:hover {
@@ -919,15 +1128,30 @@ body {
   font-size: 11px;
   color: var(--muted);
 }
+.hlabel {
+  align-self: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--faint);
+}
 .hstatus {
   font-size: 11.5px;
   font-weight: 560;
 }
-.hstatus.ok {
+.hstatus.approved {
   color: var(--ok);
 }
-.hstatus.no {
+.hstatus.rejected {
+  color: var(--amber);
+}
+.hstatus.failed {
   color: var(--danger);
+}
+.hstatus.expired {
+  color: var(--faint);
 }
 .hintent {
   font-weight: 600;
@@ -1000,11 +1224,26 @@ body {
   align-items: baseline;
   gap: var(--s2);
   margin-bottom: var(--s2);
+  padding: var(--s2);
+  border-radius: 6px;
+}
+/* Same outcome tint as the resolved rows, so the title bar signals the result. */
+.detail-head.approved {
+  background: color-mix(in oklch, var(--ok) 12%, transparent);
+}
+.detail-head.rejected {
+  background: color-mix(in oklch, var(--amber) 13%, transparent);
+}
+.detail-head.failed {
+  background: color-mix(in oklch, var(--danger) 13%, transparent);
+}
+.detail-head.expired {
+  background: color-mix(in oklch, var(--faint) 12%, transparent);
 }
 /* The session task rides the head line next to the status; long ones ellipsise
    with the full text on hover. */
 .detail-scope {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1387,21 +1626,22 @@ body {
 @supports not (container-type: inline-size) {
   @media (min-width: 380px) {
     .hrow {
-      grid-template-columns: 15px 72px 54px 1fr auto;
+      grid-template-columns: 15px 72px 72px 54px 1fr auto;
     }
-    .hwho {
+    .hwho,
+    .hlabel {
       display: block;
     }
   }
   @media (min-width: 640px) {
     .hrow {
-      grid-template-columns: 15px 72px 54px minmax(0, 1.3fr) minmax(0, 1fr) auto;
+      grid-template-columns: 15px 72px 72px 54px minmax(0, 1.3fr) minmax(0, 1fr) auto;
     }
     .hsql {
       display: block;
     }
     .hrow[data-no-intent] {
-      grid-template-columns: 15px 72px 54px 1fr auto;
+      grid-template-columns: 15px 72px 72px 54px 1fr auto;
     }
   }
   /* 20cqi is meaningless without a container; restore the flat cell cap. */
