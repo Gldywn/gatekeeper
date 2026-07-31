@@ -2,7 +2,6 @@ import "./style.css";
 import type { Column, ConnectionInfo, RunQueryResult } from "@beekeeperstudio/plugin";
 import {
   addNotificationListener,
-  appStorage,
   clipboard,
   getAppInfo,
   getColumns,
@@ -38,6 +37,7 @@ import {
   sendIcon,
   warnIcon,
 } from "./icons";
+import { BrokerClient } from "./net/broker";
 import { capResult, cell, type Field, type HistResult } from "./result";
 import { formatSql } from "./sql/format";
 import { highlight } from "./sql/highlight";
@@ -120,32 +120,6 @@ function runErrorText(error: unknown): string {
   return "Query execution failed";
 }
 
-// The broker token is a capability secret, so it lives in Beekeeper's encrypted
-// store (appStorage's `encrypted` option maps to setEncryptedData/getEncryptedData).
-async function loadToken(): Promise<string | null> {
-  const encrypted = await appStorage.getItem<string>(TOKEN_KEY, { encrypted: true });
-  if (encrypted) {
-    return encrypted;
-  }
-  // Migrate a token an earlier build wrote in the clear, then wipe the plaintext.
-  const legacy = await appStorage.getItem<string>(TOKEN_KEY);
-  if (legacy) {
-    await appStorage.setItem(TOKEN_KEY, legacy, { encrypted: true });
-    await appStorage.setItem(TOKEN_KEY, "");
-    return legacy;
-  }
-  return null;
-}
-
-async function storeToken(value: string): Promise<void> {
-  await appStorage.setItem(TOKEN_KEY, value, { encrypted: true });
-}
-
-async function clearToken(): Promise<void> {
-  await appStorage.setItem(TOKEN_KEY, "", { encrypted: true });
-  await appStorage.setItem(TOKEN_KEY, "");
-}
-
 const HEADER = `
   <header class="bar">
     <svg class="comb" width="118" height="86" viewBox="0 0 118 86" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.1">
@@ -206,6 +180,7 @@ export class Gatekeeper {
   // a detail still on screen.
   private detailItemId: string | null = null;
   private readonly root: HTMLElement;
+  private readonly broker = new BrokerClient({ baseUrl: BROKER_URL, tokenKey: TOKEN_KEY });
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -227,7 +202,7 @@ export class Gatekeeper {
   }
 
   async start(): Promise<void> {
-    this.token = await loadToken();
+    this.token = await this.broker.loadToken();
     try {
       this.applyConnection(await getConnectionInfo());
       this.lastConnCheck = Date.now();
@@ -255,15 +230,10 @@ export class Gatekeeper {
   private async loadInflight(): Promise<void> {
     try {
       const gen = this.connGeneration;
-      const res = await this.broker("/inflight", {
-        headers: this.conn?.connectionName
-          ? { "X-Gatekeeper-Connection": this.conn.connectionName }
-          : {},
-      });
-      if (res.status !== 200) {
+      const inflight = await this.broker.inflight(this.conn?.connectionName);
+      if (inflight === null) {
         return;
       }
-      const { inflight } = (await res.json()) as { inflight: Proposal[] };
       // A connection switch mid-fetch means these belong to the old database.
       if (gen !== this.connGeneration) {
         return;
@@ -378,11 +348,7 @@ export class Gatekeeper {
       return;
     }
     try {
-      await this.broker("/connection", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(this.conn),
-      });
+      await this.broker.postConnection(this.conn);
     } catch (err) {
       log.error(err instanceof Error ? err : String(err));
     }
@@ -399,13 +365,6 @@ export class Gatekeeper {
     }
     this.renewTimer = window.setInterval(() => void this.renew(), RENEW_MS);
     this.tickTimer = window.setInterval(() => this.tick(), TICK_MS);
-  }
-
-  private async broker(path: string, init?: RequestInit): Promise<Response> {
-    return fetch(`${BROKER_URL}${path}`, {
-      ...init,
-      headers: { ...(init?.headers ?? {}), Authorization: `Bearer ${this.token}` },
-    });
   }
 
   private renderPairing(errorMessage = ""): void {
@@ -426,7 +385,7 @@ export class Gatekeeper {
       if (!value) {
         return;
       }
-      await storeToken(value);
+      await this.broker.setToken(value);
       this.token = value;
       this.polling = true;
       this.renderShell();
@@ -589,15 +548,11 @@ export class Gatekeeper {
     }
     let claimed = false;
     try {
-      const res = await this.broker("/pending", {
-        headers: this.conn?.connectionName
-          ? { "X-Gatekeeper-Connection": this.conn.connectionName }
-          : {},
-      });
+      const res = await this.broker.pending(this.conn?.connectionName);
       if (res.status === 401) {
         this.polling = false;
         this.token = null;
-        await clearToken();
+        await this.broker.clearToken();
         this.renderPairing("Token rejected. Paste the current one.");
         return;
       }
@@ -645,13 +600,9 @@ export class Gatekeeper {
       return;
     }
     try {
-      const res = await this.broker("/sessions", {
-        headers: this.conn?.connectionName
-          ? { "X-Gatekeeper-Connection": this.conn.connectionName }
-          : {},
-      });
-      if (res.status === 200) {
-        this.roster = ((await res.json()) as { sessions: SessionRoster[] }).sessions;
+      const sessions = await this.broker.sessions(this.conn?.connectionName);
+      if (sessions !== null) {
+        this.roster = sessions;
         this.renderRoster();
       }
     } catch {
@@ -801,13 +752,9 @@ export class Gatekeeper {
         continue;
       }
       try {
-        const res = await this.broker("/lease/renew", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: card.id, leaseId: card.leaseId }),
-        });
+        const res = await this.broker.renew(card.id, card.leaseId);
         if (res.ok) {
-          card.leaseExpiresAt = ((await res.json()) as { leaseExpiresAt: number }).leaseExpiresAt;
+          card.leaseExpiresAt = res.leaseExpiresAt;
         } else {
           this.drop(card.id);
         }
@@ -1133,12 +1080,7 @@ export class Gatekeeper {
 
   private async postExecuting(card: Card): Promise<boolean> {
     try {
-      const res = await this.broker("/executing", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: card.id, leaseId: card.leaseId }),
-      });
-      return res.ok;
+      return await this.broker.executing(card.id, card.leaseId);
     } catch (err) {
       log.error(err instanceof Error ? err : String(err));
       return false;
@@ -1147,11 +1089,7 @@ export class Gatekeeper {
 
   private async postResult(card: Card, body: Record<string, unknown>): Promise<void> {
     try {
-      await this.broker("/result", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: card.id, leaseId: card.leaseId, ...body }),
-      });
+      await this.broker.result(card.id, card.leaseId, body);
     } catch (err) {
       log.error(err instanceof Error ? err : String(err));
     }
@@ -1325,16 +1263,12 @@ export class Gatekeeper {
       return;
     }
     try {
-      const res = await this.broker("/activity", {
-        headers: this.conn?.connectionName
-          ? { "X-Gatekeeper-Connection": this.conn.connectionName }
-          : {},
-      });
-      if (res.status !== 200) {
+      const activity = await this.broker.activity(this.conn?.connectionName);
+      if (activity === null) {
         this.setActivityBody('<p class="act-status">Could not load activity.</p>');
         return;
       }
-      this.activity = ((await res.json()) as { activity: ActivityEntry[] }).activity;
+      this.activity = activity;
       this.renderActivity();
     } catch (err) {
       log.error(err instanceof Error ? err : String(err));
