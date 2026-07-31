@@ -3,7 +3,14 @@ import { basename } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { MAX_WAIT_MS, SESSION_HEARTBEAT_MS } from "./config.js";
-import { cancelQuery, getQueryResult, ServiceError, submitQuery, type Ticket } from "./service.js";
+import {
+  cancelQuery,
+  getQueryResult,
+  pollResults,
+  ServiceError,
+  submitQuery,
+  type Ticket,
+} from "./service.js";
 import { type RequestStore, StoreError } from "./store.js";
 
 export function createMcpServer(store: RequestStore): { server: McpServer; sessionId: string } {
@@ -33,7 +40,7 @@ export function createMcpServer(store: RequestStore): { server: McpServer; sessi
     {
       title: "Propose a read-only SQL query for human approval",
       description:
-        "Enqueue a read-only SQL SELECT for a human to approve in Beekeeper Studio. Returns immediately with a request_id; poll get_query_result for the outcome. Non-blocking, so you can submit several queries and collect their results as they resolve.",
+        "Enqueue a read-only SQL SELECT for a human to approve in Beekeeper Studio. Returns immediately with a request_id; it does not run until a human approves it. Requires a session label: call set_session_label first, or this is rejected. Non-blocking: submit several, keep working (investigate, read, propose more) while they await approval, then use poll_results to see which resolved and get_query_result to read one. Do not end your turn with a query still pending; poll or wait for it first.",
       inputSchema: {
         sql: z.string().describe("The read-only SQL SELECT to propose."),
         intent: z.string().optional().describe("A short, human-readable reason for the query."),
@@ -65,7 +72,7 @@ export function createMcpServer(store: RequestStore): { server: McpServer; sessi
     {
       title: "Get the result of a proposed query",
       description:
-        "Read a submitted query by request_id. Optionally waits up to wait_ms (bounded) for a terminal state. States: pending, leased, executing, approved, rejected, failed, expired, cancelled.",
+        "Read a submitted query by request_id. Optionally waits up to wait_ms (bounded) for a terminal state; the wait returns the instant the human decides. States: pending, leased, executing, approved, rejected, failed, expired, cancelled. To check many proposals in one call, use poll_results.",
       inputSchema: {
         request_id: z.string(),
         wait_ms: z.number().int().min(0).max(MAX_WAIT_MS).optional(),
@@ -75,6 +82,29 @@ export function createMcpServer(store: RequestStore): { server: McpServer; sessi
       try {
         store.upsertSession({ sessionId, ...identity() });
         return ok(await getQueryResult(store, sessionId, request_id, wait_ms ?? 0));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "poll_results",
+    {
+      title: "Check all your proposed queries at once",
+      description:
+        "Return the current state of every query this session proposed recently (pending, leased, executing, approved, rejected, failed, expired, cancelled) in one call. Use it to keep working while queries await approval and collect them as they land: submit_query (non-blocking), do other work, then poll_results to see which resolved, and get_query_result to read a resolved one's rows. Optionally wait up to wait_ms (bounded) to return the instant any still-pending one resolves. It returns states only, not rows. Do not end your turn while a query is still pending: poll or wait for it first.",
+      inputSchema: {
+        wait_ms: z.number().int().min(0).max(MAX_WAIT_MS).optional(),
+      },
+    },
+    async ({ wait_ms }) => {
+      try {
+        store.upsertSession({ sessionId, ...identity() });
+        const snapshot = await pollResults(store, sessionId, wait_ms ?? 0);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(snapshot, null, 2) }],
+        };
       } catch (err) {
         return fail(err);
       }
@@ -136,21 +166,21 @@ export function createMcpServer(store: RequestStore): { server: McpServer; sessi
   );
 
   server.registerTool(
-    "set_session_intent",
+    "set_session_label",
     {
       title: "Label what this session is working on",
       description:
-        "Set a short, human-readable label for this session's current task (e.g. a ticket or goal). It appears in the Beekeeper plugin's connected-agents roster so the human sees each agent's purpose at a glance. Call it once early and update it if the task changes. Never include PII, credentials, or connection details.",
+        "Set a short, human-readable label for this session (ideally matching your own session's title so a human can correlate the two). You must call this before any query; Gatekeeper rejects submit_query until a session label is set. It appears in the Beekeeper plugin's connected-agents roster so the human sees each agent's purpose at a glance. Update it if the task changes. Never include PII, credentials, or connection details.",
       inputSchema: {
-        intent: z
+        label: z
           .string()
           .describe("A short session scope, e.g. 'Support SUP-1042: identity check'."),
       },
     },
-    async ({ intent }) => {
+    async ({ label }) => {
       try {
         store.upsertSession({ sessionId, ...identity() });
-        store.setSessionIntent(sessionId, intent);
+        store.setSessionLabel(sessionId, label);
         return {
           content: [{ type: "text" as const, text: JSON.stringify({ ok: true }, null, 2) }],
         };

@@ -15,6 +15,10 @@ export const SWEEP_INTERVAL_MS = 5_000;
 // The MCP server pings its session row on this cadence while its stdio pipe is
 // open, so an idle-but-connected agent keeps a fresh last_seen (presence).
 export const SESSION_HEARTBEAT_MS = 10_000;
+// Drop a session from the roster once it has been idle (no query) this long,
+// even if its process still heartbeats; it reappears on its next action. Keeps
+// the roster to who is actually around rather than yesterday's dead tabs.
+export const ROSTER_IDLE_TTL_MS = 30 * 60_000;
 export const BROKER_HOST = "127.0.0.1";
 // A process that loses the race for the broker port retries on this cadence, so
 // the broker role fails over to a live process if the current owner exits.

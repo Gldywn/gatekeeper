@@ -16,7 +16,7 @@ export function isTerminal(state: RequestState): boolean {
 
 export class ServiceError extends Error {
   constructor(
-    readonly code: "INVALID_SQL_POLICY",
+    readonly code: "INVALID_SQL_POLICY" | "NO_SESSION_LABEL",
     detail: string,
   ) {
     super(`[${code}] ${detail}`);
@@ -99,6 +99,15 @@ export function submitQuery(store: RequestStore, input: SubmitInput): Ticket {
       policy.reason ?? "Only read-only SELECT queries are allowed",
     );
   }
+  // Gate every submission on a session label so a human can tell the agents apart
+  // in the roster before deciding whether to approve their queries.
+  const label = store.getSession(input.sessionId)?.sessionLabel;
+  if (label === null || label === undefined || label.trim() === "") {
+    throw new ServiceError(
+      "NO_SESSION_LABEL",
+      "Set a session label with set_session_label before proposing a query.",
+    );
+  }
   store.upsertSession({
     sessionId: input.sessionId,
     harness: input.harness,
@@ -134,6 +143,46 @@ export async function getQueryResult(
     req = store.getForSession(requestId, sessionId);
   }
   return toTicket(req);
+}
+
+export interface SessionResult {
+  requestId: string;
+  intent: string | null;
+  state: RequestState;
+}
+
+// Status of every recent request in the session at once, optionally waiting
+// (bounded) until at least one still-open one resolves, so the agent can work in
+// parallel and collect approvals as they land instead of blocking on one id.
+export async function pollResults(
+  store: RequestStore,
+  sessionId: string,
+  waitMs = 0,
+  sleep: (ms: number) => Promise<void> = defaultSleep,
+  now: () => number = Date.now,
+): Promise<{ results: SessionResult[]; pending: number }> {
+  const openIds = store
+    .listSessionRequests(sessionId)
+    .filter((r) => !isTerminal(r.state))
+    .map((r) => r.id);
+  const deadline = now() + Math.max(0, Math.min(waitMs, MAX_WAIT_MS));
+  while (openIds.length > 0 && now() < deadline) {
+    const open = new Set(
+      store
+        .listSessionRequests(sessionId)
+        .filter((r) => !isTerminal(r.state))
+        .map((r) => r.id),
+    );
+    if (openIds.some((id) => !open.has(id))) {
+      break;
+    }
+    await sleep(POLL_MS);
+  }
+  const rows = store.listSessionRequests(sessionId);
+  return {
+    results: rows.map((r) => ({ requestId: r.id, intent: r.intent, state: r.state })),
+    pending: rows.filter((r) => !isTerminal(r.state)).length,
+  };
 }
 
 /** Withdraw a pending or leased request the agent no longer wants. */

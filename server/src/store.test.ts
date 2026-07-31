@@ -2,6 +2,7 @@ import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { pollResults } from "./service.js";
 import { RequestStore, StoreError } from "./store.js";
 
 function makeStore(overrides: Record<string, unknown> = {}) {
@@ -126,6 +127,75 @@ describe("lease recovery", () => {
     clock.t += LEASE + 1;
     // no sweep has run yet; the expired lease must still be refused
     expect(() => store.markExecuting(claimed.id, claimed.leaseId!)).toThrowError(/expired/);
+  });
+});
+
+describe("inflight re-hydration", () => {
+  it("returns the leased proposals held by a plugin, scoped to it", () => {
+    const { store } = makeStore();
+    store.submit({ sessionId: "s1", sql: "SELECT 1" });
+    store.submit({ sessionId: "s1", sql: "SELECT 2" });
+    const claimed = store.claimNext("plugin-a", LEASE)!;
+    // only the leased one (not the still-pending sibling), and only for its holder
+    expect(store.listInflight("plugin-a", null).map((p) => p.id)).toEqual([claimed.id]);
+    expect(store.listInflight("plugin-b", null)).toEqual([]);
+  });
+
+  it("omits a proposal whose lease has expired", () => {
+    const { store, clock } = makeStore();
+    store.submit({ sessionId: "s1", sql: "SELECT 1" });
+    store.claimNext("plugin-a", LEASE);
+    clock.t += LEASE + 1;
+    expect(store.listInflight("plugin-a", null)).toEqual([]);
+  });
+
+  it("scopes to the queried connection", () => {
+    const { store } = makeStore();
+    store.setConnection({
+      connectionName: "A",
+      databaseType: "postgresql",
+      databaseName: "A",
+      readOnly: false,
+    });
+    store.submit({ sessionId: "s1", sql: "SELECT 1" });
+    store.claimNext("plugin-a", LEASE, "A");
+    expect(store.listInflight("plugin-a", "A")).toHaveLength(1);
+    expect(store.listInflight("plugin-a", "B")).toEqual([]);
+  });
+
+  it("omits an executing proposal (it is not re-adopted)", () => {
+    const { store } = makeStore();
+    store.submit({ sessionId: "s1", sql: "SELECT 1" });
+    const claimed = store.claimNext("plugin-a", LEASE)!;
+    store.markExecuting(claimed.id, claimed.leaseId!);
+    expect(store.listInflight("plugin-a", null)).toEqual([]);
+  });
+});
+
+describe("session-wide result polling", () => {
+  it("lists open and recently-decided requests as states, dropping stale ones", () => {
+    const { store, clock } = makeStore({ resultTtlMs: 1_000 });
+    store.submit({ sessionId: "s1", sql: "SELECT 1", intent: "one" });
+    store.submit({ sessionId: "s1", sql: "SELECT 2", intent: "two" });
+    const claimed = store.claimNext("p", LEASE)!;
+    store.resolve(claimed.id, claimed.leaseId!, { status: "rejected", reason: "no" });
+    // the decided one (rejected) plus the still-pending one, states only, never rows
+    const list = store.listSessionRequests("s1");
+    expect(list.map((r) => r.state).sort()).toEqual(["pending", "rejected"]);
+    expect(JSON.stringify(list)).not.toContain("rows");
+    expect(store.listSessionRequests("other")).toEqual([]);
+    // once the decided one ages past resultTtl, it drops off; the pending stays
+    clock.t += 1_001;
+    expect(store.listSessionRequests("s1").map((r) => r.state)).toEqual(["pending"]);
+  });
+
+  it("poll_results returns a snapshot with the pending count", async () => {
+    const { store } = makeStore();
+    store.submit({ sessionId: "s1", sql: "SELECT 1" });
+    store.submit({ sessionId: "s1", sql: "SELECT 2" });
+    const snap = await pollResults(store, "s1", 0);
+    expect(snap.pending).toBe(2);
+    expect(snap.results.every((r) => r.state === "pending")).toBe(true);
   });
 });
 
@@ -424,9 +494,11 @@ describe("presence", () => {
     const { store } = makeStore();
     setConn(store, "staging");
     store.upsertSession({ sessionId: "s1", harness: "claude-code" });
+    store.setSessionLabel("s1", "audit");
     store.submit({ sessionId: "s1", sql: "SELECT 1", intent: "check tables" });
     setConn(store, "other");
     store.upsertSession({ sessionId: "s2", harness: "codex" });
+    store.setSessionLabel("s2", "audit");
 
     const staging = store.listSessions("staging");
     expect(staging.map((s) => s.sessionId)).toEqual(["s1"]);
@@ -442,6 +514,7 @@ describe("presence", () => {
   it("scopes each session's pending count to the queried connection", () => {
     const { store } = makeStore();
     store.upsertSession({ sessionId: "s1" }); // unstamped: visible on every connection
+    store.setSessionLabel("s1", "audit");
     setConn(store, "A");
     store.submit({ sessionId: "s1", sql: "SELECT 1" }); // request stamped A
     expect(store.listSessions("A")[0].pendingCount).toBe(1);
@@ -457,14 +530,160 @@ describe("presence", () => {
     expect(store.getSession("s1")?.connection).toBe("A");
   });
 
-  it("stores an agent-set session intent surfaced in the roster", () => {
+  it("stores an agent-set session label surfaced in the roster", () => {
     const { store } = makeStore();
     setConn(store, "staging");
     store.upsertSession({ sessionId: "s1", harness: "claude-code" });
-    expect(store.listSessions("staging")[0].sessionIntent).toBeNull();
-    store.setSessionIntent("s1", "Support SUP-1042");
-    expect(store.listSessions("staging")[0].sessionIntent).toBe("Support SUP-1042");
-    // getSession carries the intent too, so /pending can surface it in detail.
-    expect(store.getSession("s1")?.sessionIntent).toBe("Support SUP-1042");
+    // No label yet: getSession has none and the roster hides the agent.
+    expect(store.getSession("s1")?.sessionLabel).toBeNull();
+    expect(store.listSessions("staging")).toHaveLength(0);
+    store.setSessionLabel("s1", "Support SUP-1042");
+    expect(store.listSessions("staging")[0].sessionLabel).toBe("Support SUP-1042");
+    // getSession carries the label too, so /pending can surface it in detail.
+    expect(store.getSession("s1")?.sessionLabel).toBe("Support SUP-1042");
+  });
+
+  it("hides a label-less session from the roster until it is labeled", () => {
+    const { store } = makeStore();
+    setConn(store, "staging");
+    store.upsertSession({ sessionId: "s1", harness: "claude-code" });
+    expect(store.listSessions("staging")).toHaveLength(0);
+    // A whitespace-only label does not count as a label.
+    store.setSessionLabel("s1", "   ");
+    expect(store.listSessions("staging")).toHaveLength(0);
+    store.setSessionLabel("s1", "audit");
+    expect(store.listSessions("staging").map((s) => s.sessionId)).toEqual(["s1"]);
+  });
+
+  it("drops a session idle past the roster TTL even while it heartbeats", () => {
+    const { store, clock } = makeStore({ rosterIdleTtlMs: 1_000 });
+    setConn(store, "staging");
+    store.upsertSession({ sessionId: "s1", harness: "claude-code" });
+    store.setSessionLabel("s1", "audit");
+    clock.t += 2_000;
+    store.heartbeatSession("s1");
+    expect(store.listSessions("staging")).toHaveLength(0);
+    // It returns on its next real action.
+    store.upsertSession({ sessionId: "s1", harness: "claude-code" });
+    expect(store.listSessions("staging")).toHaveLength(1);
+  });
+});
+
+describe("listActivity", () => {
+  function setConn(store: RequestStore, name: string): void {
+    store.setConnection({
+      connectionName: name,
+      databaseType: "postgresql",
+      databaseName: name,
+      readOnly: false,
+    });
+  }
+
+  it("returns terminal requests newest-first, connection-scoped, with no row data", () => {
+    const { store, clock } = makeStore();
+    setConn(store, "prod");
+    store.upsertSession({ sessionId: "s1", harness: "claude-code", project: "gatekeeper" });
+
+    // Approved: rows carry secrets that must never reach the activity feed.
+    const approved = store.submit({
+      sessionId: "s1",
+      sql: "SELECT email FROM users",
+      intent: "peek",
+    });
+    const ca = store.claimNext("p", LEASE, "prod")!;
+    store.resolve(ca.id, ca.leaseId!, {
+      status: "approved",
+      rows: [{ email: "alice@example.com" }, { email: "bob@example.com" }],
+      fields: [{ name: "email" }],
+    });
+
+    // Rejected with a human reason.
+    clock.t += 10;
+    const rejected = store.submit({ sessionId: "s1", sql: "DELETE FROM users", intent: "cleanup" });
+    const cr = store.claimNext("p", LEASE, "prod")!;
+    store.resolve(cr.id, cr.leaseId!, { status: "rejected", reason: "not read-only" });
+
+    // Failed with an engine error.
+    clock.t += 10;
+    const failed = store.submit({ sessionId: "s1", sql: "SELECT * FROM missing" });
+    const cf = store.claimNext("p", LEASE, "prod")!;
+    store.resolve(cf.id, cf.leaseId!, { status: "failed", error: "relation does not exist" });
+
+    // A still-pending request is not terminal and must not appear.
+    store.submit({ sessionId: "s1", sql: "SELECT 1" });
+
+    // A terminal request on another connection must not appear.
+    setConn(store, "other");
+    const elsewhere = store.submit({ sessionId: "s1", sql: "SELECT 9" });
+    const ce = store.claimNext("p", LEASE, "other")!;
+    store.resolve(ce.id, ce.leaseId!, { status: "rejected", reason: "no" });
+
+    const activity = store.listActivity("prod");
+    // Newest-first; the pending and the other-connection entries are excluded.
+    expect(activity.map((e) => e.id)).toEqual([failed.id, rejected.id, approved.id]);
+    expect(activity.map((e) => e.id)).not.toContain(elsewhere.id);
+
+    // No result-row content anywhere in the payload.
+    const serialized = JSON.stringify(activity);
+    expect(serialized).not.toContain("alice@example.com");
+    expect(serialized).not.toContain("bob@example.com");
+
+    const a = activity.find((e) => e.id === approved.id)!;
+    // The approved entry contributes only a scalar count and its metadata.
+    expect(a.state).toBe("approved");
+    expect(a.rowCount).toBe(2);
+    expect(a.reason).toBeNull();
+    expect(a).not.toHaveProperty("rows");
+    expect(a).not.toHaveProperty("result");
+    expect(a.sql).toBe("SELECT email FROM users");
+    expect(a.intent).toBe("peek");
+    // Session identity is joined from the sessions table.
+    expect(a.harness).toBe("claude-code");
+    expect(a.project).toBe("gatekeeper");
+
+    const r = activity.find((e) => e.id === rejected.id)!;
+    expect(r.reason).toBe("not read-only");
+    expect(r.rowCount).toBeNull();
+
+    const f = activity.find((e) => e.id === failed.id)!;
+    expect(f.error).toBe("relation does not exist");
+  });
+
+  it("carries no row content once an approved result is purged", () => {
+    const { store, clock } = makeStore({ resultTtlMs: 1_000 });
+    setConn(store, "prod");
+    store.submit({ sessionId: "s1", sql: "SELECT ssn FROM people" });
+    const c = store.claimNext("p", LEASE, "prod")!;
+    store.resolve(c.id, c.leaseId!, {
+      status: "approved",
+      rows: [{ ssn: "123-45-6789" }],
+      fields: [{ name: "ssn" }],
+    });
+    clock.t += 1_001;
+    store.sweep(); // strips the rows, leaving an approved-but-purged terminal
+    const entry = store.listActivity("prod")[0];
+    expect(entry.state).toBe("approved");
+    expect(entry.rowCount).toBeNull();
+    expect(JSON.stringify(entry)).not.toContain("123-45-6789");
+  });
+
+  it("honours the row limit", () => {
+    const { store, clock } = makeStore();
+    setConn(store, "prod");
+    for (let i = 0; i < 5; i++) {
+      clock.t += 1;
+      store.submit({ sessionId: "s1", sql: `SELECT ${i}` });
+      const c = store.claimNext("p", LEASE, "prod")!;
+      store.resolve(c.id, c.leaseId!, { status: "rejected", reason: "no" });
+    }
+    expect(store.listActivity("prod", 2)).toHaveLength(2);
+  });
+
+  it("still lists an unstamped terminal request on any connection", () => {
+    const { store } = makeStore();
+    const req = store.submit({ sessionId: "s1", sql: "SELECT 1" });
+    const c = store.claimNext("p", LEASE)!;
+    store.resolve(c.id, c.leaseId!, { status: "rejected", reason: "no" });
+    expect(store.listActivity("whatever").map((e) => e.id)).toEqual([req.id]);
   });
 });

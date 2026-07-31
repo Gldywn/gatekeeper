@@ -13,6 +13,7 @@ import {
   REBIND_JITTER_MS,
   RESULT_TTL_MS,
   RETENTION_MS,
+  ROSTER_IDLE_TTL_MS,
   SWEEP_INTERVAL_MS,
   tokenPath,
 } from "./config.js";
@@ -69,6 +70,7 @@ async function main(): Promise<void> {
     maxPendingPerSession: MAX_PENDING_PER_SESSION,
     resultTtlMs: RESULT_TTL_MS,
     retentionMs: RETENTION_MS,
+    rosterIdleTtlMs: ROSTER_IDLE_TTL_MS,
   });
   const pluginId = `plugin_${randomBytes(6).toString("hex")}`;
   const token = loadOrCreateToken();

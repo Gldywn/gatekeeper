@@ -57,6 +57,14 @@ async function handle(
     return;
   }
 
+  // Host-side audit feed: the plugin's iframe reads it under the same auth and
+  // connection scoping as /sessions. Never an MCP tool; the SQL it carries can
+  // hold PII literals, so no agent-facing surface exposes it.
+  if (req.method === "GET" && url.pathname === "/activity") {
+    send(res, 200, { activity: store.listActivity(resolveConnection(store, req)) });
+    return;
+  }
+
   if (req.method === "GET" && url.pathname === "/pending") {
     const proposal = store.claimNext(pluginId, LEASE_MS, resolveConnection(store, req));
     if (!proposal) {
@@ -75,6 +83,24 @@ async function handle(
       sessionId: proposal.sessionId,
       session: store.getSession(proposal.sessionId),
     });
+    return;
+  }
+
+  // Re-hydrate a reopened plugin: the proposals this pluginId already holds under
+  // a live lease, so a fresh tab shows them without waiting for the lease to lapse.
+  if (req.method === "GET" && url.pathname === "/inflight") {
+    const inflight = store.listInflight(pluginId, resolveConnection(store, req)).map((p) => ({
+      id: p.id,
+      sql: p.sql,
+      intent: p.intent,
+      createdAt: p.createdAt,
+      expiresAt: p.expiresAt,
+      leaseId: p.leaseId,
+      leaseExpiresAt: p.leaseExpiresAt,
+      sessionId: p.sessionId,
+      session: store.getSession(p.sessionId),
+    }));
+    send(res, 200, { inflight });
     return;
   }
 

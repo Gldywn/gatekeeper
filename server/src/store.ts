@@ -75,12 +75,29 @@ export interface SessionMeta {
   lastActive: number;
   connection: string | null;
   leftAt: number | null;
-  sessionIntent: string | null;
+  sessionLabel: string | null;
 }
 
 export interface SessionRoster extends SessionMeta {
   pendingCount: number;
   lastIntent: string | null;
+}
+
+export interface ActivityEntry {
+  id: string;
+  createdAt: number;
+  decidedAt: number | null;
+  sessionId: string;
+  harness: string | null;
+  project: string | null;
+  sessionLabel: string | null;
+  sql: string;
+  intent: string | null;
+  state: RequestState;
+  // Scalar outcome facts drawn from result_json only, never the result rows.
+  reason: string | null;
+  error: string | null;
+  rowCount: number | null;
 }
 
 export interface StoreOptions {
@@ -96,6 +113,8 @@ export interface StoreOptions {
   resultTtlMs?: number;
   /** How long terminal rows, old audit, and dead sessions are kept. */
   retentionMs?: number;
+  /** How long a session may be idle before the roster stops listing it. */
+  rosterIdleTtlMs?: number;
 }
 
 interface RawRow {
@@ -126,7 +145,7 @@ interface SessionRow {
   last_active: number | null;
   connection: string | null;
   left_at: number | null;
-  session_intent: string | null;
+  session_label: string | null;
 }
 
 const OPEN_STATES = "('pending','leased','executing')";
@@ -147,7 +166,7 @@ function toSessionMeta(row: SessionRow): SessionMeta {
     lastActive: row.last_active ?? row.last_seen,
     connection: row.connection,
     leftAt: row.left_at,
-    sessionIntent: row.session_intent,
+    sessionLabel: row.session_label,
   };
 }
 
@@ -192,6 +211,42 @@ function toAudit(raw: RawAudit): AuditEntry {
   };
 }
 
+// Pull ONLY scalar outcome facts from a stored result: the rejection reason, the
+// failure error, or an approved row *count*. It never returns row contents, so the
+// activity feed can explain an outcome without ever surfacing the data it read.
+function outcomeFacts(
+  state: RequestState,
+  resultJson: string | null,
+): { reason: string | null; error: string | null; rowCount: number | null } {
+  const facts: { reason: string | null; error: string | null; rowCount: number | null } = {
+    reason: null,
+    error: null,
+    rowCount: null,
+  };
+  if (resultJson === null) {
+    return facts;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(resultJson);
+  } catch {
+    return facts;
+  }
+  if (typeof parsed !== "object" || parsed === null) {
+    return facts;
+  }
+  const result = parsed as Record<string, unknown>;
+  if (state === "rejected") {
+    facts.reason = typeof result.reason === "string" ? result.reason : null;
+  } else if (state === "failed") {
+    facts.error = typeof result.error === "string" ? result.error : null;
+  } else if (state === "approved") {
+    // A scalar count only: the array length, never its elements.
+    facts.rowCount = Array.isArray(result.rows) ? result.rows.length : null;
+  }
+  return facts;
+}
+
 function toRequest(raw: RawRow): GatekeeperRequest {
   return {
     id: raw.id,
@@ -219,6 +274,7 @@ export class RequestStore {
   private readonly maxPending: number;
   private readonly resultTtl: number;
   private readonly retention: number;
+  private readonly rosterIdleTtl: number;
 
   constructor(options: StoreOptions = {}) {
     this.db = new Database(options.path ?? ":memory:");
@@ -235,6 +291,7 @@ export class RequestStore {
     this.maxPending = options.maxPendingPerSession ?? 32;
     this.resultTtl = options.resultTtlMs ?? 10 * 60_000;
     this.retention = options.retentionMs ?? 24 * 60 * 60_000;
+    this.rosterIdleTtl = options.rosterIdleTtlMs ?? 30 * 60_000;
     this.migrate();
   }
 
@@ -290,7 +347,7 @@ export class RequestStore {
         last_active INTEGER,
         connection TEXT,
         left_at INTEGER,
-        session_intent TEXT
+        session_label TEXT
       );
     `);
     // Add columns introduced after the first release to pre-existing databases.
@@ -299,7 +356,9 @@ export class RequestStore {
       "ALTER TABLE sessions ADD COLUMN last_active INTEGER",
       "ALTER TABLE sessions ADD COLUMN connection TEXT",
       "ALTER TABLE sessions ADD COLUMN left_at INTEGER",
-      "ALTER TABLE sessions ADD COLUMN session_intent TEXT",
+      // A fresh DB is already session_label, so this throws and is swallowed;
+      // an existing DB still on session_intent is renamed in place.
+      "ALTER TABLE sessions RENAME COLUMN session_intent TO session_label",
     ]) {
       try {
         this.db.exec(alter);
@@ -582,6 +641,22 @@ export class RequestStore {
     return row;
   }
 
+  // Lightweight status of the session's in-flight and recently-decided requests
+  // (states only), so an agent can poll all its proposals in one call.
+  listSessionRequests(
+    sessionId: string,
+  ): { id: string; intent: string | null; state: RequestState }[] {
+    const cutoff = this.now() - this.resultTtl;
+    return this.db
+      .prepare(
+        `SELECT id, intent, state FROM requests
+           WHERE session_id = @sessionId
+             AND (state IN ('pending', 'leased', 'executing') OR decided_at >= @cutoff)
+           ORDER BY created_at ASC`,
+      )
+      .all({ sessionId, cutoff }) as { id: string; intent: string | null; state: RequestState }[];
+  }
+
   // Expired leases return to pending; a lease that expired mid-execution fails
   // as execution_unknown, because the query may already have run.
   sweep(): void {
@@ -754,15 +829,18 @@ export class RequestStore {
       .run(this.now(), sessionId);
   }
 
-  /** An agent-set, session-level scope shown in the roster (the task at hand). */
-  setSessionIntent(sessionId: string, intent: string): void {
+  /** An agent-set, session-level label shown in the roster (the task at hand). */
+  setSessionLabel(sessionId: string, label: string): void {
     this.db
-      .prepare("UPDATE sessions SET session_intent = ? WHERE session_id = ?")
-      .run(intent, sessionId);
+      .prepare("UPDATE sessions SET session_label = ? WHERE session_id = ?")
+      .run(label, sessionId);
   }
 
   /** Sessions for a connection, each with its count of still-open requests. */
   listSessions(connection: string | null): SessionRoster[] {
+    // Idle past the TTL (on last action, or last_seen if it never acted) drops
+    // from the roster; it returns on its next action.
+    const idleCutoff = this.now() - this.rosterIdleTtl;
     // Scope pending_count to the queried connection so it matches what claimNext
     // would actually offer there, not the session's total across connections.
     const rows = this.db
@@ -776,10 +854,12 @@ export class RequestStore {
                 AND (r2.connection IS NULL OR r2.connection = @connection)
               ORDER BY r2.created_at DESC LIMIT 1) AS last_intent
          FROM sessions s
-         WHERE s.connection IS NULL OR s.connection = @connection
+         WHERE (s.connection IS NULL OR s.connection = @connection)
+           AND COALESCE(s.last_active, s.last_seen) >= @idleCutoff
+           AND s.session_label IS NOT NULL AND trim(s.session_label) != ''
          ORDER BY s.created_at ASC`,
       )
-      .all({ connection }) as (SessionRow & {
+      .all({ connection, idleCutoff }) as (SessionRow & {
       pending_count: number;
       last_intent: string | null;
     })[];
@@ -788,6 +868,68 @@ export class RequestStore {
       pendingCount: row.pending_count,
       lastIntent: row.last_intent,
     }));
+  }
+
+  /** Terminal requests for a connection, newest first, for the host-side activity
+   *  view. Each entry carries the SQL and metadata plus scalar outcome facts
+   *  (reason / error / row count) from result_json, but never the result rows. */
+  listActivity(connection: string | null, limit = 200): ActivityEntry[] {
+    const rows = this.db
+      .prepare(
+        `SELECT r.id, r.created_at, r.decided_at, r.session_id, r.sql, r.intent, r.state, r.result_json,
+           s.harness, s.project, s.session_label
+         FROM requests r
+         LEFT JOIN sessions s ON s.session_id = r.session_id
+         WHERE r.decided_at IS NOT NULL
+           AND (r.connection IS NULL OR r.connection = @connection)
+         ORDER BY r.decided_at DESC, r.id DESC
+         LIMIT @limit`,
+      )
+      .all({ connection, limit }) as {
+      id: string;
+      created_at: number;
+      decided_at: number | null;
+      session_id: string;
+      sql: string;
+      intent: string | null;
+      state: RequestState;
+      result_json: string | null;
+      harness: string | null;
+      project: string | null;
+      session_label: string | null;
+    }[];
+    return rows.map((row) => {
+      const facts = outcomeFacts(row.state, row.result_json);
+      return {
+        id: row.id,
+        createdAt: row.created_at,
+        decidedAt: row.decided_at,
+        sessionId: row.session_id,
+        harness: row.harness,
+        project: row.project,
+        sessionLabel: row.session_label,
+        sql: row.sql,
+        intent: row.intent,
+        state: row.state,
+        reason: facts.reason,
+        error: facts.error,
+        rowCount: facts.rowCount,
+      };
+    });
+  }
+
+  // A reopened plugin re-adopts the proposals this pluginId still holds under a
+  // live lease, so the fresh tab shows them at once instead of waiting out the lease.
+  listInflight(pluginId: string, connection: string | null): GatekeeperRequest[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM requests
+           WHERE state = 'leased' AND plugin_id = @pluginId AND lease_expires_at > @now
+             AND (connection IS NULL OR connection = @connection)
+           ORDER BY created_at ASC`,
+      )
+      .all({ pluginId, connection, now: this.now() }) as RawRow[];
+    return rows.map(toRequest);
   }
 
   getSession(sessionId: string): SessionMeta | null {

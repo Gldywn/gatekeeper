@@ -2,8 +2,13 @@ import { describe, expect, it } from "vitest";
 import { cancelQuery, getQueryResult, submitQuery } from "./service.js";
 import { RequestStore } from "./store.js";
 
+// Every submit path is gated on a session label, so seed one for s1; tests that
+// need a label-less session make their own bare store.
 function fresh() {
-  return new RequestStore({ proposalTtlMs: 10_000 });
+  const store = new RequestStore({ proposalTtlMs: 10_000 });
+  store.upsertSession({ sessionId: "s1" });
+  store.setSessionLabel("s1", "audit");
+  return store;
 }
 
 describe("submitQuery", () => {
@@ -20,6 +25,16 @@ describe("submitQuery", () => {
     expect(() => submitQuery(store, { sessionId: "s1", sql: "DELETE FROM t" })).toThrowError(
       /INVALID_SQL_POLICY/,
     );
+  });
+
+  it("rejects a query when the session has no label, and succeeds once labeled", () => {
+    const store = new RequestStore({ proposalTtlMs: 10_000 });
+    expect(() => submitQuery(store, { sessionId: "s9", sql: "SELECT 1" })).toThrowError(
+      /NO_SESSION_LABEL/,
+    );
+    store.upsertSession({ sessionId: "s9" });
+    store.setSessionLabel("s9", "audit");
+    expect(submitQuery(store, { sessionId: "s9", sql: "SELECT 1" }).state).toBe("pending");
   });
 });
 
