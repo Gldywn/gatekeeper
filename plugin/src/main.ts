@@ -1,19 +1,40 @@
 import "./style.css";
-import type { ConnectionInfo, RunQueryResult } from "@beekeeperstudio/plugin";
+import type { Column, ConnectionInfo, RunQueryResult } from "@beekeeperstudio/plugin";
 import {
   addNotificationListener,
   appStorage,
   clipboard,
   getAppInfo,
+  getColumns,
   getConnectionInfo,
   log,
+  requestFileSave,
   runQuery,
   setTabTitle,
 } from "@beekeeperstudio/plugin";
 import { enter, type Loop, pulse, reveal } from "./anim";
-import { checkIcon, chevronDown, copyIcon, harnessIcon } from "./icons";
+import { formatSql } from "./format";
+import {
+  buildingIcon,
+  checkIcon,
+  chevronDown,
+  copyIcon,
+  downloadIcon,
+  harnessIcon,
+  historyIcon,
+  pencilIcon,
+  sendIcon,
+  warnIcon,
+} from "./icons";
 import { isReadOnlyQuery, mapDialect } from "./readonly";
 import { capResult, cell, type Field, type HistResult } from "./result";
+import {
+  analyzeSql,
+  clientColumns,
+  piiColumns,
+  type SchemaContext,
+  sensitiveLiterals,
+} from "./schema";
 
 const BROKER_URL = "http://localhost:9999";
 const POLL_MS = 1000;
@@ -47,7 +68,7 @@ interface SessionMeta {
   harness: string | null;
   harnessVersion: string | null;
   project: string | null;
-  sessionIntent: string | null;
+  sessionLabel: string | null;
 }
 
 interface SessionRoster {
@@ -62,7 +83,7 @@ interface SessionRoster {
   leftAt: number | null;
   pendingCount: number;
   lastIntent: string | null;
-  sessionIntent: string | null;
+  sessionLabel: string | null;
 }
 
 type Presence = "active" | "idle" | "gone";
@@ -90,6 +111,9 @@ interface Proposal {
 
 interface Card extends Proposal {
   state: CardState;
+  // Host-side only: which tables/PII the query touches, for the human's eyes.
+  // Never posted to the broker, so the agent never learns the schema.
+  schema?: SchemaContext | null;
 }
 
 interface HistItem {
@@ -104,15 +128,49 @@ interface HistItem {
   result?: HistResult;
 }
 
+// The durable, PII-safe audit record served by GET /activity. It never carries
+// result rows: an approved query contributes a scalar rowCount only.
+interface ActivityEntry {
+  id: string;
+  createdAt: number;
+  decidedAt: number | null;
+  sessionId: string;
+  harness: string | null;
+  project: string | null;
+  sessionLabel: string | null;
+  sql: string;
+  intent: string | null;
+  state: string;
+  reason: string | null;
+  error: string | null;
+  rowCount: number | null;
+}
+
 async function runApprovedQuery(
   sql: string,
 ): Promise<{ rows: Record<string, unknown>[]; fields: Field[] }> {
   const result: RunQueryResult = await runQuery(sql);
+  // runQuery resolves (never throws) with an `error` field when the engine
+  // rejects the query or the connection is down; surface it as a failure so the
+  // agent gets "failed + reason", not a silent empty result.
+  if (result.error) {
+    throw new Error(runErrorText(result.error));
+  }
   const first = result.results[0];
   return {
     rows: first?.rows ?? [],
     fields: (first?.fields ?? []).map((f) => ({ name: f.name })),
   };
+}
+
+function runErrorText(error: unknown): string {
+  if (typeof error === "string") {
+    return error;
+  }
+  if (error && typeof error === "object" && "message" in error) {
+    return String((error as { message: unknown }).message);
+  }
+  return "Query execution failed";
 }
 
 // The broker token is a capability secret, so it lives in Beekeeper's encrypted
@@ -149,14 +207,49 @@ function escapeHtml(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
-function highlight(sql: string): string {
-  return escapeHtml(sql)
+// Display polish for an agent-written intent: force the first character upper,
+// in case it arrived lowercase. A non-letter first char is left as-is.
+function capitalize(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Wrap the given column names where they appear in the highlighted SQL. The guards
+// keep a match from landing inside an existing highlight span, a string, or a longer
+// word, so passes for different classes compose without corrupting each other.
+function markColumns(html: string, columns: readonly string[] | undefined, cls: string): string {
+  if (!columns?.length) {
+    return html;
+  }
+  const flag = new RegExp(`(?<![\\w>"'])(${columns.map(escapeRegExp).join("|")})(?![\\w<])`, "gi");
+  return html.replace(flag, `<span class="${cls}">$1</span>`);
+}
+
+function highlight(
+  sql: string,
+  pii?: readonly string[],
+  client?: readonly string[],
+  literals?: readonly string[],
+): string {
+  const sensitive = new Set(literals ?? []);
+  let html = escapeHtml(sql)
     .replace(
       /\b(SELECT|FROM|WHERE|GROUP BY|ORDER BY|LIMIT|AS|AND|OR|JOIN|ON|INTERVAL|DELETE|UPDATE|INSERT|WITH)\b/g,
       '<span class="kw">$1</span>',
     )
     .replace(/\b(count|sum|now|avg|max|min)\b/g, '<span class="fn">$1</span>')
-    .replace(/('[^']*')/g, '<span class="st">$1</span>');
+    // A string literal exposing a sensitive value gets an extra class so the value,
+    // not just the column, stands out in the query text.
+    .replace(
+      /('[^']*')/g,
+      (m) => `<span class="st${sensitive.has(m.slice(1, -1)) ? " sensitive-val" : ""}">${m}</span>`,
+    );
+  html = markColumns(html, pii, "pii-col");
+  html = markColumns(html, client, "client-col");
+  return html;
 }
 
 function clock(ms: number): string {
@@ -182,13 +275,69 @@ function previewSql(sql: string): string {
     : flat;
 }
 
-function sessionLabel(session: SessionMeta | null, fallback: string): string {
+function sessionDisplayName(session: SessionMeta | null, fallback: string): string {
   const project = session?.project?.trim();
   if (project) {
     return project;
   }
   const harness = session?.harness?.trim();
   return harness || session?.sessionId || fallback;
+}
+
+// Local calendar-day key (YYYY-MM-DD) that groups the activity feed by day.
+function dayKey(ts: number): string {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, "0")}-${`${d.getDate()}`.padStart(2, "0")}`;
+}
+
+function dayLabel(ts: number): string {
+  const key = dayKey(ts);
+  const now = Date.now();
+  if (key === dayKey(now)) {
+    return "Today";
+  }
+  if (key === dayKey(now - 86_400_000)) {
+    return "Yesterday";
+  }
+  return new Date(ts).toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function clockTime(ts: number): string {
+  return new Date(ts).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+
+// Map a terminal state to the shared status tokens: green approved, red
+// rejected/failed, faint for the neutral terminals (expired/cancelled).
+function outcomeMeta(state: string): { cls: "ok" | "no" | "mut"; label: string } {
+  if (state === "approved") {
+    return { cls: "ok", label: "approved" };
+  }
+  if (state === "rejected") {
+    return { cls: "no", label: "rejected" };
+  }
+  if (state === "failed") {
+    return { cls: "no", label: "failed" };
+  }
+  return { cls: "mut", label: state };
+}
+
+// The short outcome note on a collapsed row: a scalar row count, the rejection
+// reason, or the failure error. Never any row content.
+function activityNote(e: ActivityEntry): string {
+  if (e.state === "approved") {
+    return e.rowCount != null ? `${e.rowCount} rows` : "";
+  }
+  if (e.state === "rejected") {
+    return e.reason ?? "";
+  }
+  if (e.state === "failed") {
+    return e.error ?? "";
+  }
+  return "";
 }
 
 const HEADER = `
@@ -211,7 +360,6 @@ const HEADER = `
 export class Gatekeeper {
   private token: string | null = null;
   private connectionName = "";
-  private readOnly = false;
   private dialect = "postgresql";
   private conn: {
     connectionName: string;
@@ -221,7 +369,17 @@ export class Gatekeeper {
     readOnly: boolean;
   } | null = null;
   private readonly cards: Card[] = [];
+  // Columns per "schema.table", populated on demand for the approval-card schema
+  // annotation; cleared on a tablesChanged notification and on connection switch.
+  private readonly schemaCache = new Map<string, Column[]>();
+  // Open deny forms and their in-progress reason text, keyed by card id, so a
+  // half-typed reason survives a queue rebuild from a concurrent proposal.
+  private readonly denyDrafts = new Map<string, string>();
   private readonly history: HistItem[] = [];
+  // The durable activity feed, fetched fresh each time the overlay opens; the set
+  // tracks which entries have their full SQL expanded in place.
+  private activity: ActivityEntry[] = [];
+  private readonly activityExpanded = new Set<string>();
   private roster: SessionRoster[] = [];
   private rosterSig = "";
   private rosterLoops: Loop[] = [];
@@ -234,18 +392,32 @@ export class Gatekeeper {
   private connGeneration = 0;
   private renewTimer?: number;
   private tickTimer?: number;
+  private pollTimer?: number;
   private pollFailures = 0;
   private pollGeneration = 0;
   private connectionState: ConnectionState = "connecting";
+  // The history item whose detail overlay is open, so a late schema fetch only paints
+  // a detail still on screen.
+  private detailItemId: string | null = null;
   private readonly root: HTMLElement;
 
   constructor(root: HTMLElement) {
     this.root = root;
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
+        this.closeActivity();
         this.closeDetail();
       }
     });
+    // Refresh the moment the tab is looked at again (reopened or refocused), so
+    // the queue is never stale while the human is watching it.
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        this.pokePoll();
+      }
+    });
+    window.addEventListener("focus", () => this.pokePoll());
+    window.addEventListener("pageshow", () => this.pokePoll());
   }
 
   async start(): Promise<void> {
@@ -262,19 +434,49 @@ export class Gatekeeper {
       return;
     }
     this.renderShell();
-    this.renderConnCard();
+    // The schema annotation caches columns per table; a DDL change invalidates it.
+    addNotificationListener("tablesChanged", () => this.schemaCache.clear());
     this.polling = true;
+    void this.loadInflight();
     void this.poll();
     void this.pollRoster(++this.pollGeneration);
     void this.reportConnection();
     this.startTimers();
   }
 
+  // Re-adopt the proposals still leased to this plugin so a reopened tab shows them
+  // at once; renew right away so a near-expiry lease does not lapse before the timer.
+  private async loadInflight(): Promise<void> {
+    try {
+      const gen = this.connGeneration;
+      const res = await this.broker("/inflight", {
+        headers: this.conn?.connectionName
+          ? { "X-Gatekeeper-Connection": this.conn.connectionName }
+          : {},
+      });
+      if (res.status !== 200) {
+        return;
+      }
+      const { inflight } = (await res.json()) as { inflight: Proposal[] };
+      // A connection switch mid-fetch means these belong to the old database.
+      if (gen !== this.connGeneration) {
+        return;
+      }
+      for (const proposal of inflight) {
+        this.claim(proposal);
+      }
+      if (inflight.length) {
+        void this.renew();
+      }
+    } catch (err) {
+      log.error(err instanceof Error ? err : String(err));
+    }
+  }
+
   // Derive our cached connection fields from a fresh snapshot. Shared by start()
   // and the connection-switch path so the two can never drift apart.
   private applyConnection(conn: ConnectionInfo): void {
     this.connectionName = conn.connectionName || conn.databaseName || "connection";
-    this.readOnly = conn.readOnlyMode;
     this.dialect = mapDialect(conn.databaseType);
     this.conn = {
       connectionName: conn.connectionName,
@@ -321,46 +523,46 @@ export class Gatekeeper {
     // the cards; the broker re-offers still-pending proposals.
     this.connGeneration++;
     this.cards.length = 0;
-    // History and roster are connection-scoped; reset so the old one cannot leak
-    // in. The roster re-fetches on its own timer.
+    this.denyDrafts.clear();
+    // The new database has a different schema; drop cached columns so the next
+    // card's annotation cannot describe the old connection.
+    this.schemaCache.clear();
+    // History, activity, and roster are connection-scoped; reset so the old one
+    // cannot leak in. The roster re-fetches on its own timer; the activity overlay
+    // is closed because it now shows a different connection's audit trail.
     this.history.length = 0;
+    this.activity = [];
+    this.activityExpanded.clear();
+    this.closeActivity();
     this.roster = [];
     this.rosterSig = "";
     this.renderConnLabel();
-    this.renderConnCard();
     void this.reportConnection();
     this.renderQueue();
     this.renderHistory();
     this.renderRoster();
   }
 
+  // The connection context lives once, in the header: what database the whole
+  // queue governs. Reads this.conn; falls back to the bare name pre-snapshot.
   private renderConnLabel(): void {
-    const conn = this.root.querySelector<HTMLSpanElement>("#conn");
-    if (conn) {
-      conn.innerHTML = `${escapeHtml(this.connectionName)}${this.readOnly ? ' <span class="ro">read-only</span>' : ""}`;
-    }
-  }
-
-  // The rail's stacked connection context: what database this queue governs.
-  // Reads this.conn only; renders nothing until a connection snapshot exists.
-  private renderConnCard(): void {
-    const el = this.root.querySelector<HTMLElement>("#connCard");
+    const el = this.root.querySelector<HTMLSpanElement>("#conn");
     if (!el) {
       return;
     }
-    const conn = this.conn;
-    if (!conn) {
-      el.innerHTML = "";
+    const c = this.conn;
+    if (!c) {
+      el.innerHTML = this.connectionName ? escapeHtml(this.connectionName) : "";
       return;
     }
-    const dialect = mapDialect(conn.databaseType);
-    const db = conn.databaseName?.trim();
-    const schema = conn.schema?.trim();
+    const dialect = mapDialect(c.databaseType);
+    const db = c.databaseName?.trim();
+    const schema = c.schema?.trim();
     el.innerHTML = `
-      <span class="cc-name">${escapeHtml(conn.connectionName || "connection")}</span>
+      <span class="cc-name">${escapeHtml(c.connectionName || this.connectionName)}</span>
       <span class="cc-dialect">${escapeHtml(dialect)}${db ? ` &middot; ${escapeHtml(db)}` : ""}</span>
       ${schema ? `<span class="cc-schema">schema ${escapeHtml(schema)}</span>` : ""}
-      ${conn.readOnly ? '<span class="cc-ro">read-only</span>' : ""}`;
+      ${c.readOnly ? '<span class="cc-ro">read-only</span>' : ""}`;
   }
 
   // Hand the agent non-sensitive context (dialect, database, schema, read-only)
@@ -422,6 +624,7 @@ export class Gatekeeper {
       this.token = value;
       this.polling = true;
       this.renderShell();
+      void this.loadInflight();
       void this.poll();
       void this.pollRoster(++this.pollGeneration);
       void this.reportConnection();
@@ -443,20 +646,22 @@ export class Gatekeeper {
         ${HEADER}
         <div class="rail" id="rail">
           <section class="roster" id="roster"></section>
-          <section class="conn-card" id="connCard"></section>
         </div>
         <div class="main" id="main">
           <p class="label">Pending approval</p>
           <div class="queue" id="queue"></div>
           <section class="history">
-            <button class="disclosure" id="htoggle" aria-expanded="true"><span class="chev">${chevronDown}</span>Recently resolved</button>
+            <div class="history-head">
+              <button class="disclosure" id="htoggle" aria-expanded="true"><span class="chev">${chevronDown}</span>Recently resolved</button>
+              <button class="activity-link" id="activityBtn" type="button">${historyIcon}Activity</button>
+            </div>
             <div class="hist" id="hist"></div>
           </section>
         </div>
         <div class="detail" id="detail" hidden></div>
+        <div class="detail activity-overlay" id="activity" hidden></div>
       </div>`;
     this.renderConnLabel();
-    this.renderConnCard();
     const toggle = this.root.querySelector<HTMLButtonElement>("#htoggle")!;
     const hist = this.root.querySelector<HTMLDivElement>("#hist")!;
     toggle.addEventListener("click", () => {
@@ -464,17 +669,39 @@ export class Gatekeeper {
       hist.style.display = open ? "none" : "";
       toggle.setAttribute("aria-expanded", String(!open));
     });
-    this.root.querySelector<HTMLDivElement>("#queue")!.addEventListener("click", (e) => {
+    const queue = this.root.querySelector<HTMLDivElement>("#queue")!;
+    queue.addEventListener("click", (e) => {
       const target = e.target as HTMLElement;
       const copy = target.closest<HTMLElement>("[data-copy-sql]");
       const a = target.closest<HTMLElement>("[data-approve]");
       const r = target.closest<HTMLElement>("[data-reject]");
+      const denyOpen = target.closest<HTMLElement>("[data-deny-open]");
+      const deny = target.closest<HTMLElement>("[data-deny]");
       if (copy) {
         this.copySql(copy);
       } else if (a) {
         void this.approve(a.getAttribute("data-approve")!);
       } else if (r) {
         void this.reject(r.getAttribute("data-reject")!);
+      } else if (denyOpen) {
+        this.openDeny(denyOpen.getAttribute("data-deny-open")!);
+      } else if (deny) {
+        this.confirmDeny(deny.getAttribute("data-deny")!);
+      }
+    });
+    queue.addEventListener("keydown", (e) => {
+      const input = (e.target as HTMLElement).closest<HTMLElement>("[data-deny-input]");
+      if (!input) {
+        return;
+      }
+      const id = input.getAttribute("data-deny-input")!;
+      if (e.key === "Enter") {
+        e.preventDefault();
+        this.confirmDeny(id);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        this.closeDeny(id);
       }
     });
     hist.addEventListener("click", (e) => {
@@ -498,6 +725,31 @@ export class Gatekeeper {
       // Close on the backdrop or the close button, not on the card itself.
       if (target === detail || target.closest("[data-close]")) {
         this.closeDetail();
+      }
+    });
+    this.root
+      .querySelector<HTMLButtonElement>("#activityBtn")!
+      .addEventListener("click", () => void this.openActivity());
+    const activity = this.root.querySelector<HTMLDivElement>("#activity")!;
+    activity.addEventListener("click", (e) => {
+      const target = e.target as HTMLElement;
+      const copy = target.closest<HTMLElement>("[data-copy-sql]");
+      if (copy) {
+        this.copySql(copy);
+        return;
+      }
+      const exp = target.closest<HTMLElement>("[data-export]");
+      if (exp) {
+        void this.exportSession(exp.getAttribute("data-export")!);
+        return;
+      }
+      const sql = target.closest<HTMLElement>("[data-act-sql]");
+      if (sql) {
+        this.toggleActivitySql(sql.getAttribute("data-act-sql")!);
+        return;
+      }
+      if (target === activity || target.closest("[data-close]")) {
+        this.closeActivity();
       }
     });
     this.renderQueue();
@@ -529,6 +781,7 @@ export class Gatekeeper {
     if (!this.polling) {
       return;
     }
+    let claimed = false;
     try {
       const res = await this.broker("/pending", {
         headers: this.conn?.connectionName
@@ -543,6 +796,7 @@ export class Gatekeeper {
         return;
       }
       if (res.status === 200) {
+        claimed = true;
         this.claim((await res.json()) as Proposal);
       }
       this.pollFailures = 0;
@@ -558,7 +812,24 @@ export class Gatekeeper {
       }
       log.error(err instanceof Error ? err : String(err));
     }
-    window.setTimeout(() => void this.poll(), POLL_MS);
+    // Drain the queue back-to-back: /pending offers one proposal at a time, so a
+    // claim likely means more are waiting; only idle at POLL_MS once it is empty.
+    this.pollTimer = window.setTimeout(() => void this.poll(), claimed ? 0 : POLL_MS);
+  }
+
+  // Re-poll (and refresh the roster) right now instead of waiting out the
+  // interval, so pending proposals appear the instant the tab regains focus or
+  // is reopened, without spawning a second poll loop.
+  private pokePoll(): void {
+    if (!this.polling) {
+      return;
+    }
+    if (this.pollTimer !== undefined) {
+      window.clearTimeout(this.pollTimer);
+      this.pollTimer = undefined;
+    }
+    void this.poll();
+    void this.pollRoster(++this.pollGeneration);
   }
 
   private async pollRoster(generation: number): Promise<void> {
@@ -599,7 +870,7 @@ export class Gatekeeper {
     // Skip the rebuild (and the pulse restart) when only the relative ages moved;
     // tick() keeps those fresh in place.
     const sig = JSON.stringify(
-      rows.map((r) => [r.s.sessionId, r.p, r.s.pendingCount, r.s.sessionIntent, r.s.lastIntent]),
+      rows.map((r) => [r.s.sessionId, r.p, r.s.pendingCount, r.s.sessionLabel, r.s.lastIntent]),
     );
     if (sig === this.rosterSig) {
       return;
@@ -621,10 +892,10 @@ export class Gatekeeper {
   private rosterRow(s: SessionRoster, p: Presence): string {
     const harness = s.harness?.trim() || null;
     const project = s.project?.trim();
-    const label = project
-      ? `${escapeHtml(project)}${harness ? ` <span class="group-harness">${escapeHtml(harness)}</span>` : ""}`
-      : escapeHtml(harness || s.sessionId);
-    const intent = s.sessionIntent?.trim() || s.lastIntent?.trim();
+    const who = project ? escapeHtml(project) : escapeHtml(harness || s.sessionId);
+    // Every listed session has a non-empty label (the roster query filters the
+    // rest out), so render it directly with no placeholder branch.
+    const scope = capitalize(s.sessionLabel?.trim() ?? "");
     const pending = s.pendingCount > 0 ? ` &middot; ${s.pendingCount} pending` : "";
     const meta =
       p === "active"
@@ -636,8 +907,8 @@ export class Gatekeeper {
       <div class="roster-row" data-presence="${p}">
         <span class="presence-dot"></span>
         <span class="harness-badge">${harnessIcon(harness)}</span>
-        <span class="roster-label">${label}</span>
-        <span class="roster-intent"${intent ? ` title="${escapeHtml(intent)}"` : ""}>${intent ? escapeHtml(intent) : ""}</span>
+        <span class="roster-label">${who}</span>
+        <span class="roster-intent" title="${escapeHtml(scope)}">${escapeHtml(scope)}</span>
         <span class="roster-meta">${meta}</span>
       </div>`;
   }
@@ -645,12 +916,74 @@ export class Gatekeeper {
   private claim(proposal: Proposal): void {
     const existing = this.cards.find((c) => c.id === proposal.id);
     if (existing) {
-      existing.leaseId = proposal.leaseId;
-      existing.leaseExpiresAt = proposal.leaseExpiresAt;
+      // Keep the fresher lease if /inflight and a re-offered /pending race on the
+      // same proposal, so a live lease is never overwritten by a stale one.
+      if (proposal.leaseExpiresAt >= existing.leaseExpiresAt) {
+        existing.leaseId = proposal.leaseId;
+        existing.leaseExpiresAt = proposal.leaseExpiresAt;
+      }
       return;
     }
-    this.cards.push({ ...proposal, state: "ready" });
+    const card: Card = { ...proposal, state: "ready" };
+    this.cards.push(card);
     this.renderQueue();
+    void this.analyzeSchema(card);
+  }
+
+  // Annotate the card with the tables and PII-suspect columns the query touches.
+  // Runs entirely host-side and stores the result on the card only; nothing here
+  // ever reaches the broker, so the agent gains no schema knowledge.
+  private async analyzeSchema(card: Card): Promise<void> {
+    const schema = await this.schemaFor(card.sql);
+    // A mid-fetch connection switch yields null; leave the prior annotation rather
+    // than blanking a card whose columns simply could not be resolved this time.
+    if (schema === undefined) {
+      return;
+    }
+    card.schema = schema;
+    this.renderCardSchema(card);
+  }
+
+  // The tables and sensitive columns a query touches. Returns null when the SQL will
+  // not parse, or undefined when a connection switch invalidated the column fetch
+  // mid-flight. Host-side only: nothing here ever reaches the broker.
+  private async schemaFor(sql: string): Promise<SchemaContext | null | undefined> {
+    const parsed = analyzeSql(sql, this.dialect);
+    if (!parsed) {
+      return null;
+    }
+    const gen = this.connGeneration;
+    const fallback = this.conn?.schema ?? undefined;
+    const perTable = await Promise.all(
+      parsed.tables.map((t) => this.columnsFor(t.name, t.schema ?? fallback)),
+    );
+    if (gen !== this.connGeneration) {
+      return undefined;
+    }
+    const allColumns = perTable.flat().map((c) => c.name);
+    return {
+      tables: parsed.tables.map((t) => (t.schema ? `${t.schema}.${t.name}` : t.name)),
+      pii: piiColumns(parsed, allColumns),
+      client: clientColumns(parsed, allColumns),
+      literals: sensitiveLiterals(sql, this.dialect),
+      star: parsed.star,
+    };
+  }
+
+  private async columnsFor(table: string, schema: string | undefined): Promise<Column[]> {
+    const key = `${schema ?? ""}.${table}`;
+    const cached = this.schemaCache.get(key);
+    if (cached) {
+      return cached;
+    }
+    try {
+      const columns = await getColumns(table, schema);
+      this.schemaCache.set(key, columns);
+      return columns;
+    } catch {
+      // Unknown table (e.g. a CTE name) or a transient host error: no annotation.
+      return [];
+    }
   }
 
   private async renew(): Promise<void> {
@@ -710,9 +1043,26 @@ export class Gatekeeper {
     }
     const queue = this.root.querySelector<HTMLDivElement>("#queue");
     if (queue) {
+      // A concurrent proposal rebuilds the whole queue; carry any open deny form's
+      // typed text and focus across the rebuild so a half-composed reason survives.
+      let focusedDeny: string | null = null;
+      for (const input of queue.querySelectorAll<HTMLInputElement>(".deny-reason")) {
+        const id = input.getAttribute("data-deny-input");
+        if (id) {
+          this.denyDrafts.set(id, input.value);
+          if (input === document.activeElement) {
+            focusedDeny = id;
+          }
+        }
+      }
       this.breatheLoop?.stop();
       this.breatheLoop = undefined;
       queue.innerHTML = this.queueHtml();
+      if (focusedDeny) {
+        const input = queue.querySelector<HTMLInputElement>(`[data-deny-input="${focusedDeny}"]`);
+        input?.focus();
+        input?.setSelectionRange(input.value.length, input.value.length);
+      }
       const waitingMark = queue.querySelector(".waiting-mark");
       if (waitingMark) {
         this.breatheLoop = pulse(waitingMark);
@@ -755,15 +1105,17 @@ export class Gatekeeper {
     const project = session?.project?.trim();
     const harness = session?.harness?.trim() || null;
     const label = project
-      ? `${escapeHtml(project)}${harness ? ` <span class="group-harness">${escapeHtml(harness)}</span>` : ""}`
+      ? escapeHtml(project)
       : harness
         ? escapeHtml(harness)
         : escapeHtml(cards[0].sessionId ?? "session");
+    const intent = session?.sessionLabel?.trim();
     return `
       <section class="group">
         <div class="group-head">
           <span class="harness-badge">${harnessIcon(harness)}</span>
           <span class="group-label">${label}</span>
+          ${intent ? `<span class="group-intent" title="${escapeHtml(capitalize(intent))}">${escapeHtml(capitalize(intent))}</span>` : ""}
           <span class="group-count">${cards.length}</span>
         </div>
         ${cards.map((c) => this.cardHtml(c)).join("")}
@@ -785,26 +1137,83 @@ export class Gatekeeper {
   private cardHtml(card: Card): string {
     const readOnly = isReadOnlyQuery(card.sql, this.dialect);
     const remaining = card.expiresAt - Date.now();
-    const actions =
-      card.state === "ready"
-        ? `<div class="actions">
-             <button class="btn approve" type="button" data-approve="${card.id}" ${readOnly ? "" : "disabled"}>Approve</button>
-             <button class="btn reject" type="button" data-reject="${card.id}">Reject</button>
-           </div>`
-        : `<div class="actions"><span class="busy"><span class="spin"></span>${this.busyLabel(card.state)}...</span></div>`;
+    let actions: string;
+    if (card.state !== "ready") {
+      actions = `<div class="actions"><span class="busy"><span class="spin"></span>${this.busyLabel(card.state)}...</span></div>`;
+    } else {
+      actions = this.readyActions(card.id, readOnly);
+    }
     const blockedNote = readOnly
       ? ""
       : '<p class="blocked-note"><svg viewBox="0 0 16 16" fill="none"><path d="M8 1.7 1 14h14L8 1.7Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 6.3v3.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.7" r=".8" fill="currentColor"/></svg>Read-only only. This query can be rejected.</p>';
     return `
       <div class="card ${readOnly ? "" : "blocked"}" data-card="${card.id}">
         <div class="top">
-          ${card.intent ? `<span class="intent">${escapeHtml(card.intent)}</span>` : `<span class="intent">${escapeHtml(card.id)}</span>`}
+          ${card.intent ? `<span class="intent">${escapeHtml(capitalize(card.intent))}</span>` : `<span class="intent">${escapeHtml(card.id)}</span>`}
           <span class="${remaining <= 45_000 ? "lease low" : "lease"}">${clock(remaining)}</span>
         </div>
         <div class="meta">${escapeHtml(card.id)} &middot; ${relAge(card.createdAt)}</div>
-        <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(card.sql)}" aria-label="Copy SQL">${copyIcon}</button>${highlight(card.sql)}</pre>
+        <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(card.sql)}" aria-label="Copy SQL">${copyIcon}</button><code class="sql-body" id="sqlbody-${card.id}">${highlight(formatSql(card.sql), card.schema?.pii, card.schema?.client, card.schema?.literals)}</code></pre>
+        <div class="card-schema" id="cs-${card.id}">${this.schemaInner(card.schema)}</div>
         ${blockedNote}${actions}
       </div>`;
+  }
+
+  private readyActions(id: string, readOnly: boolean): string {
+    const revise = this.denyDrafts.has(id)
+      ? this.denyField(id, this.denyDrafts.get(id) ?? "")
+      : `<button class="deny-open" type="button" data-deny-open="${id}" aria-label="Reject and ask the agent to change something" title="Ask the agent to change something">${pencilIcon}</button>`;
+    return `<div class="actions">
+             <button class="btn approve" type="button" data-approve="${id}" ${readOnly ? "" : "disabled"}>Approve</button>
+             <button class="btn reject" type="button" data-reject="${id}">Reject</button>
+             ${revise}
+           </div>`;
+  }
+
+  // Reject-with-a-revision: an inline field, right of Reject, whose note is the
+  // change the human wants; sent to the agent on Enter or the send affordance.
+  private denyField(id: string, value = ""): string {
+    return `<div class="deny-field">
+             <input class="deny-reason" type="text" maxlength="140" data-deny-input="${id}" aria-label="What should the agent change?" placeholder="What should the agent change?" autocomplete="off" spellcheck="false" value="${escapeHtml(value)}" />
+             <button class="deny-send" type="button" data-deny="${id}" aria-label="Send to the agent">${sendIcon}</button>
+           </div>`;
+  }
+
+  // Compact under-SQL annotation: the tables read and a possible-PII flag. Empty
+  // (collapsed by CSS) until the async analysis lands or when nothing is known.
+  private schemaInner(schema: SchemaContext | null | undefined): string {
+    if (!schema?.tables.length) {
+      return "";
+    }
+    const tables = `<div class="cs-line"><span class="cs-k">reads</span><span class="cs-list">${schema.tables.map(escapeHtml).join(" &middot; ")}</span></div>`;
+    const pii = schema.pii.length
+      ? `<div class="cs-line cs-pii"><span class="cs-warn">${warnIcon}possible PII</span><span class="cs-list">${schema.pii.map(escapeHtml).join(" &middot; ")}</span></div>`
+      : "";
+    const client = schema.client.length
+      ? `<div class="cs-line cs-client"><span class="cs-warn">${buildingIcon}client data</span><span class="cs-list">${schema.client.map(escapeHtml).join(" &middot; ")}</span></div>`
+      : "";
+    const literal = schema.literals.length
+      ? `<div class="cs-line cs-literal"><span class="cs-warn">${warnIcon}sensitive value</span><span class="cs-list">${schema.literals.map((v) => escapeHtml(`'${v}'`)).join(" &middot; ")}</span></div>`
+      : "";
+    return tables + pii + client + literal;
+  }
+
+  private renderCardSchema(card: Card): void {
+    const el = this.root.querySelector<HTMLElement>(`#cs-${CSS.escape(card.id)}`);
+    if (el) {
+      el.innerHTML = this.schemaInner(card.schema);
+    }
+    // Re-highlight the SQL now that the sensitive columns are known, so they light
+    // up in the query text too, not only in the flags below.
+    const body = this.root.querySelector<HTMLElement>(`#sqlbody-${CSS.escape(card.id)}`);
+    if (body) {
+      body.innerHTML = highlight(
+        formatSql(card.sql),
+        card.schema?.pii,
+        card.schema?.client,
+        card.schema?.literals,
+      );
+    }
   }
 
   private busyLabel(state: CardState): string {
@@ -862,7 +1271,7 @@ export class Gatekeeper {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       await this.postResult(card, { status: "approved", error: message });
-      this.finish(id, "no", "query failed");
+      this.finish(id, "no", "query failed", undefined, message);
     }
   }
 
@@ -871,12 +1280,49 @@ export class Gatekeeper {
     if (card?.state !== "ready") {
       return;
     }
-    // A future deny-with-reason UI passes a human note here; it goes to the agent
+    // The deny-with-reason form passes the human note here; it goes to the agent
     // and is reflected back into the history row. Empty falls back to the defaults.
     const custom = reason?.trim();
     this.setCardState(id, "rejecting");
     await this.postResult(card, { status: "rejected", reason: custom || "Rejected by user." });
     this.finish(id, "no", "declined", undefined, custom || undefined);
+  }
+
+  // Swap only this card's action row in place (no renderQueue) so the lease
+  // countdown, copy button, and schema annotation survive the reveal.
+  private openDeny(id: string): void {
+    const card = this.cards.find((c) => c.id === id);
+    // Guard the draft too: a form already open must not re-open into a nested one.
+    if (card?.state !== "ready" || this.denyDrafts.has(id)) {
+      return;
+    }
+    this.denyDrafts.set(id, "");
+    const actions = this.root.querySelector<HTMLElement>(`[data-card="${id}"] .actions`);
+    if (!actions) {
+      return;
+    }
+    actions.outerHTML = this.readyActions(id, isReadOnlyQuery(card.sql, this.dialect));
+    this.root.querySelector<HTMLInputElement>(`[data-card="${id}"] .deny-reason`)?.focus();
+  }
+
+  private confirmDeny(id: string): void {
+    const reason = this.root
+      .querySelector<HTMLInputElement>(`[data-card="${id}"] .deny-reason`)
+      ?.value.trim();
+    this.denyDrafts.delete(id);
+    // Empty note keeps reject()'s "Rejected by user." fallback; never send "".
+    void this.reject(id, reason || undefined);
+  }
+
+  private closeDeny(id: string): void {
+    const card = this.cards.find((c) => c.id === id);
+    const actions = this.root.querySelector<HTMLElement>(`[data-card="${id}"] .actions`);
+    this.denyDrafts.delete(id);
+    if (!card || !actions) {
+      return;
+    }
+    actions.outerHTML = this.readyActions(id, isReadOnlyQuery(card.sql, this.dialect));
+    this.root.querySelector<HTMLButtonElement>(`[data-card="${id}"] .deny-open`)?.focus();
   }
 
   private async postExecuting(card: Card): Promise<boolean> {
@@ -906,6 +1352,7 @@ export class Gatekeeper {
   }
 
   private drop(id: string): void {
+    this.denyDrafts.delete(id);
     const index = this.cards.findIndex((c) => c.id === id);
     if (index !== -1) {
       this.cards.splice(index, 1);
@@ -984,13 +1431,13 @@ export class Gatekeeper {
       .filter((h) => h.connection === current)
       .map((h) => {
         const harness = h.session?.harness?.trim() || null;
-        const who = sessionLabel(h.session, h.id);
+        const who = sessionDisplayName(h.session, h.id);
         return `
         <button class="hrow" type="button" data-hist="${escapeHtml(h.id)}"${h.intent ? "" : " data-no-intent"} title="${escapeHtml(h.id)}">
           <span class="harness-badge">${harnessIcon(harness)}</span>
           <span class="hwho" title="${escapeHtml(who)}">${escapeHtml(who)}</span>
           <span class="hstatus ${h.status}">${h.status === "ok" ? "approved" : "rejected"}</span>
-          <span class="hintent">${escapeHtml(h.intent || previewSql(h.sql))}</span>
+          <span class="hintent">${escapeHtml(h.intent ? capitalize(h.intent) : previewSql(h.sql))}</span>
           <span class="hsql">${highlight(previewSql(h.sql))}</span>
           <span class="htime">
             <span class="hnote">${escapeHtml(h.note)}</span>
@@ -1007,16 +1454,285 @@ export class Gatekeeper {
     if (!panel) {
       return;
     }
+    this.detailItemId = item.id;
     panel.innerHTML = this.detailHtml(item);
     panel.hidden = false;
+    void this.annotateDetail(item);
+  }
+
+  // Match the pending card: once the schema resolves, show the same reads/PII/client
+  // annotation under the detail SQL and light the sensitive columns in the query text.
+  private async annotateDetail(item: HistItem): Promise<void> {
+    const schema = (await this.schemaFor(item.sql)) ?? null;
+    if (this.detailItemId !== item.id) {
+      return;
+    }
+    const cs = this.root.querySelector<HTMLElement>("#detail-cs");
+    if (cs) {
+      cs.innerHTML = this.schemaInner(schema);
+    }
+    const body = this.root.querySelector<HTMLElement>("#detail-sqlbody");
+    if (body) {
+      body.innerHTML = highlight(
+        formatSql(item.sql),
+        schema?.pii,
+        schema?.client,
+        schema?.literals,
+      );
+    }
   }
 
   private closeDetail(): void {
+    this.detailItemId = null;
     const panel = this.root.querySelector<HTMLDivElement>("#detail");
     if (panel) {
       panel.hidden = true;
       panel.innerHTML = "";
     }
+  }
+
+  // The connection-scoped activity view: a durable, PII-safe audit of what ran on
+  // this connection. It reuses the .detail overlay and is refreshed on every open.
+  private async openActivity(): Promise<void> {
+    const panel = this.root.querySelector<HTMLDivElement>("#activity");
+    if (!panel) {
+      return;
+    }
+    // A fresh open forgets which rows were expanded last time.
+    this.activityExpanded.clear();
+    panel.innerHTML = this.activityShell('<p class="act-status">Loading activity...</p>');
+    panel.hidden = false;
+    await this.loadActivity();
+  }
+
+  private closeActivity(): void {
+    const panel = this.root.querySelector<HTMLDivElement>("#activity");
+    if (panel && !panel.hidden) {
+      panel.hidden = true;
+      panel.innerHTML = "";
+    }
+  }
+
+  private async loadActivity(): Promise<void> {
+    const panel = this.root.querySelector<HTMLDivElement>("#activity");
+    if (!panel || panel.hidden) {
+      return;
+    }
+    try {
+      const res = await this.broker("/activity", {
+        headers: this.conn?.connectionName
+          ? { "X-Gatekeeper-Connection": this.conn.connectionName }
+          : {},
+      });
+      if (res.status !== 200) {
+        this.setActivityBody('<p class="act-status">Could not load activity.</p>');
+        return;
+      }
+      this.activity = ((await res.json()) as { activity: ActivityEntry[] }).activity;
+      this.renderActivity();
+    } catch (err) {
+      log.error(err instanceof Error ? err : String(err));
+      this.setActivityBody('<p class="act-status">Broker unreachable.</p>');
+    }
+  }
+
+  private activityShell(body: string): string {
+    const conn = this.connectionName ? escapeHtml(this.connectionName) : "";
+    return `
+      <div class="detail-card activity-card">
+        <div class="detail-head">
+          <span class="detail-who">Activity</span>
+          ${conn ? `<span class="act-conn">${conn}</span>` : ""}
+          <button class="detail-close" type="button" data-close aria-label="Close activity">&times;</button>
+        </div>
+        <div class="act-body">${body}</div>
+      </div>`;
+  }
+
+  private setActivityBody(html: string): void {
+    const body = this.root.querySelector<HTMLElement>("#activity .act-body");
+    if (body) {
+      body.innerHTML = html;
+    }
+  }
+
+  private renderActivity(): void {
+    this.setActivityBody(
+      this.activity.length
+        ? this.activityDaysHtml()
+        : '<p class="act-status">No activity on this connection yet.</p>',
+    );
+  }
+
+  // Group the feed by day, then by session within each day, preserving the
+  // server's newest-first order for both the groups and the entries inside them.
+  private activityDaysHtml(): string {
+    const days: { key: string; label: string; sessions: Map<string, ActivityEntry[]> }[] = [];
+    for (const e of this.activity) {
+      const ts = e.decidedAt ?? e.createdAt;
+      const key = dayKey(ts);
+      let day = days.find((d) => d.key === key);
+      if (!day) {
+        day = { key, label: dayLabel(ts), sessions: new Map() };
+        days.push(day);
+      }
+      const arr = day.sessions.get(e.sessionId);
+      if (arr) {
+        arr.push(e);
+      } else {
+        day.sessions.set(e.sessionId, [e]);
+      }
+    }
+    return days
+      .map(
+        (d) => `
+        <section class="act-day">
+          <div class="act-day-head">${escapeHtml(d.label)}</div>
+          ${[...d.sessions.entries()].map(([sid, entries]) => this.activityGroupHtml(d.key, sid, entries)).join("")}
+        </section>`,
+      )
+      .join("");
+  }
+
+  private activityGroupHtml(day: string, sessionId: string, entries: ActivityEntry[]): string {
+    const first = entries[0];
+    const harness = first.harness?.trim() || null;
+    const project = first.project?.trim();
+    const label = project ? escapeHtml(project) : escapeHtml(harness || sessionId);
+    const intent = first.sessionLabel?.trim();
+    return `
+        <section class="act-group">
+          <div class="act-group-head">
+            <span class="harness-badge">${harnessIcon(harness)}</span>
+            <span class="act-group-label">${label}</span>
+            ${intent ? `<span class="act-group-intent" title="${escapeHtml(capitalize(intent))}">${escapeHtml(capitalize(intent))}</span>` : ""}
+            <span class="act-group-sess">${escapeHtml(sessionId)}</span>
+            <button class="act-export" type="button" data-export="${escapeHtml(`${day}|${sessionId}`)}">${downloadIcon}Export</button>
+          </div>
+          <div class="act-entries">${entries.map((e) => this.activityEntryHtml(e)).join("")}</div>
+        </section>`;
+  }
+
+  private activityEntryHtml(e: ActivityEntry): string {
+    const ts = e.decidedAt ?? e.createdAt;
+    const { cls, label } = outcomeMeta(e.state);
+    const note = activityNote(e);
+    const intent = e.intent?.trim();
+    const headline = intent ? capitalize(intent) : previewSql(e.sql);
+    const expanded = this.activityExpanded.has(e.id);
+    // The row note truncates; the full reason/error rides the expanded panel.
+    const detailNote =
+      e.state === "rejected" && e.reason
+        ? e.reason
+        : e.state === "failed" && e.error
+          ? e.error
+          : "";
+    return `
+          <div class="act-entry${expanded ? " open" : ""}" data-act="${escapeHtml(e.id)}">
+            <button class="act-row" type="button" data-act-sql="${escapeHtml(e.id)}" aria-expanded="${expanded}">
+              <span class="chev">${chevronDown}</span>
+              <span class="act-time">${escapeHtml(clockTime(ts))}</span>
+              <span class="hstatus ${cls}">${escapeHtml(label)}</span>
+              <span class="act-intent">${escapeHtml(headline)}</span>
+              ${note ? `<span class="act-note">${escapeHtml(note)}</span>` : ""}
+            </button>
+            <div class="act-detail"${expanded ? "" : " hidden"}>
+              <div class="act-meta">${escapeHtml(e.id)} &middot; ${escapeHtml(new Date(ts).toLocaleString())}</div>
+              ${detailNote ? `<div class="detail-outcome">${escapeHtml(detailNote)}</div>` : ""}
+              <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(e.sql)}" aria-label="Copy SQL">${copyIcon}</button><code>${highlight(formatSql(e.sql))}</code></pre>
+            </div>
+          </div>`;
+  }
+
+  // Toggle a single entry's full SQL in place so expanding one row never rebuilds
+  // the list or loses the scroll position.
+  private toggleActivitySql(id: string): void {
+    const open = this.activityExpanded.has(id);
+    if (open) {
+      this.activityExpanded.delete(id);
+    } else {
+      this.activityExpanded.add(id);
+    }
+    const entry = this.root.querySelector<HTMLElement>(`#activity [data-act="${CSS.escape(id)}"]`);
+    if (!entry) {
+      return;
+    }
+    entry.classList.toggle("open", !open);
+    const detail = entry.querySelector<HTMLElement>(".act-detail");
+    if (detail) {
+      detail.hidden = open;
+    }
+    entry
+      .querySelector<HTMLElement>("[data-act-sql]")
+      ?.setAttribute("aria-expanded", String(!open));
+  }
+
+  // Deliberate human export: write one session-day's timeline as markdown via the
+  // host's save dialog. The SQL is host-side only and no result rows are included;
+  // an approved query contributes just its scalar row count.
+  private async exportSession(key: string): Promise<void> {
+    const sep = key.indexOf("|");
+    if (sep === -1) {
+      return;
+    }
+    const day = key.slice(0, sep);
+    const sessionId = key.slice(sep + 1);
+    const entries = this.activity.filter(
+      (e) => e.sessionId === sessionId && dayKey(e.decidedAt ?? e.createdAt) === day,
+    );
+    if (!entries.length) {
+      return;
+    }
+    const first = entries[0];
+    const who = (first.project?.trim() || first.harness?.trim() || sessionId).toLowerCase();
+    const slug = who.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "session";
+    try {
+      await requestFileSave({
+        data: this.activityMarkdown(day, sessionId, entries),
+        fileName: `gatekeeper-activity-${day}-${slug}.md`,
+        encoding: "utf8",
+        filters: [{ name: "Markdown", extensions: ["md"] }],
+      });
+    } catch (err) {
+      log.error(err instanceof Error ? err : String(err));
+    }
+  }
+
+  private activityMarkdown(day: string, sessionId: string, entries: ActivityEntry[]): string {
+    const first = entries[0];
+    const label = first.project?.trim() || first.harness?.trim() || sessionId;
+    const lines: string[] = ["# Gatekeeper activity", ""];
+    if (this.connectionName) {
+      lines.push(`- Connection: ${this.connectionName}`);
+    }
+    lines.push(`- Day: ${day}`, `- Session: ${label} (${sessionId})`);
+    if (first.harness?.trim()) {
+      lines.push(`- Harness: ${first.harness.trim()}`);
+    }
+    if (first.sessionLabel?.trim()) {
+      lines.push(`- Task: ${first.sessionLabel.trim()}`);
+    }
+    lines.push("");
+    // Oldest-first reads as a timeline.
+    for (const e of [...entries].reverse()) {
+      const ts = e.decidedAt ?? e.createdAt;
+      lines.push(`## ${new Date(ts).toLocaleTimeString()} · ${outcomeMeta(e.state).label}`);
+      if (e.intent?.trim()) {
+        lines.push(`- Intent: ${e.intent.trim()}`);
+      }
+      lines.push(`- Request: ${e.id}`);
+      if (e.state === "approved" && e.rowCount != null) {
+        lines.push(`- Rows: ${e.rowCount}`);
+      }
+      if (e.reason?.trim()) {
+        lines.push(`- Reason: ${e.reason.trim()}`);
+      }
+      if (e.error?.trim()) {
+        lines.push(`- Error: ${e.error.trim()}`);
+      }
+      lines.push("", "```sql", e.sql.trim(), "```", "");
+    }
+    return lines.join("\n");
   }
 
   private copySql(el: HTMLElement): void {
@@ -1036,7 +1752,7 @@ export class Gatekeeper {
   private detailHtml(item: HistItem): string {
     const grid = item.result ? this.gridHtml(item.result) : "";
     const harness = item.session?.harness?.trim() || null;
-    const who = sessionLabel(item.session, item.id);
+    const who = sessionDisplayName(item.session, item.id);
     const audit = [
       item.connection ? `on ${escapeHtml(item.connection)}` : "",
       harness ? escapeHtml(harness) : "",
@@ -1050,13 +1766,14 @@ export class Gatekeeper {
           <span class="harness-badge">${harnessIcon(harness)}</span>
           <span class="detail-who">${escapeHtml(who)}</span>
           <span class="hstatus ${item.status}">${item.status === "ok" ? "approved" : "rejected"}</span>
-          <span class="detail-note">${escapeHtml(item.note)}</span>
+          ${item.session?.sessionLabel ? `<span class="detail-scope" title="${escapeHtml(capitalize(item.session.sessionLabel))}">${escapeHtml(capitalize(item.session.sessionLabel))}</span>` : ""}
           <button class="detail-close" type="button" data-close aria-label="Close detail">&times;</button>
         </div>
-        ${item.session?.sessionIntent ? `<p class="detail-scope" title="${escapeHtml(item.session.sessionIntent)}">${escapeHtml(item.session.sessionIntent)}</p>` : ""}
-        ${item.intent ? `<p class="detail-intent">${escapeHtml(item.intent)}</p>` : ""}
         <div class="detail-meta">${audit.join(" &middot; ")}</div>
-        <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(item.sql)}" aria-label="Copy SQL">${copyIcon}</button>${highlight(item.sql)}</pre>
+        ${item.intent ? `<p class="detail-intent">${escapeHtml(capitalize(item.intent))}</p>` : ""}
+        <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(item.sql)}" aria-label="Copy SQL">${copyIcon}</button><code class="sql-body" id="detail-sqlbody">${highlight(formatSql(item.sql))}</code></pre>
+        <div class="card-schema" id="detail-cs"></div>
+        ${item.note ? `<div class="detail-outcome">${escapeHtml(item.note)}</div>` : ""}
         ${grid}
       </div>`;
   }

@@ -14,6 +14,8 @@
   --ok: var(--brand-success, oklch(75% 0.13 155));
   --danger: var(--brand-danger, oklch(68% 0.16 25));
   --exec: oklch(74% 0.1 235);
+  /* Client-confidentiality accent: a violet distinct from the red PII danger. */
+  --client: oklch(70% 0.15 300);
 
   --s1: 4px;
   --s2: 8px;
@@ -60,20 +62,22 @@ body {
     "header"
     "rail"
     "main";
+  row-gap: var(--s4);
 }
 
-/* The rail (roster + connection card) and the queue/history main column each
-   own a container context so their tiers react to their real width, not the
-   viewport. The shell switch stays a viewport media query on purpose: giving
-   .gk a container-type would apply layout containment and trap the fixed
-   .detail overlay it wraps, and an element cannot query its own container. */
+/* .main is the only container context (gk-main); .gk gets none so the fixed
+   .detail overlay it wraps is not trapped by layout containment. */
 .rail {
   grid-area: rail;
-  container-type: inline-size;
-  container-name: gk-roster;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--s3);
+  gap: var(--s2);
+  padding: var(--s3) var(--s4);
+  border: 1px solid var(--edge);
+  border-radius: var(--r);
+  background: var(--surface);
+  box-shadow: inset 0 1px 0 var(--hi);
 }
 .main {
   grid-area: main;
@@ -81,18 +85,10 @@ body {
   container-type: inline-size;
   container-name: gk-main;
 }
-@media (min-width: 56.25rem) {
-  .gk {
-    grid-template-columns: minmax(13.75rem, 16.25rem) 1fr;
-    grid-template-areas:
-      "header header"
-      "rail main";
-    column-gap: var(--s4);
-  }
-}
 
 .bar {
   grid-area: header;
+  min-width: 0;
   position: relative;
   display: flex;
   align-items: baseline;
@@ -125,20 +121,11 @@ body {
   font-size: 15px;
 }
 .conn {
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--muted);
   display: inline-flex;
   align-items: baseline;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 4px 8px;
   min-width: 0;
-  white-space: nowrap;
-}
-.conn .ro {
-  color: var(--ok);
-  font-family: var(--font-ui);
-  font-size: 11px;
-  flex: none;
 }
 .count {
   align-self: center;
@@ -194,6 +181,7 @@ body {
 }
 .conn-status[data-state="connected"]::before {
   background: var(--ok);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--ok) 20%, transparent);
 }
 .conn-status[data-state="error"] {
   color: var(--danger);
@@ -318,6 +306,24 @@ body {
 .sql .st {
   color: var(--ok);
 }
+/* PII columns flagged in the query text itself: red and bold so they stand out
+   among the amber keywords. */
+.sql .pii-col {
+  color: var(--danger);
+  font-weight: 700;
+}
+/* Client-confidential columns: violet, kept visually apart from red PII. */
+.sql .client-col {
+  color: var(--client);
+  font-weight: 700;
+}
+/* A sensitive value hardcoded in the query: tint its background so the value itself,
+   not only the column, is impossible to miss. */
+.sql .sensitive-val {
+  background: color-mix(in oklch, var(--danger) 24%, transparent);
+  border-radius: 3px;
+  padding: 0 2px;
+}
 .copy-sql {
   position: absolute;
   top: 6px;
@@ -356,6 +362,123 @@ body {
   border-color: var(--danger);
 }
 
+/* Under-SQL schema annotation: the tables read, plus a possible-PII flag so the
+   human eyeballs the sensitive columns before approving. Host-side only. */
+.card-schema {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s2);
+  margin: 0 0 var(--s3);
+}
+.card-schema:empty {
+  display: none;
+}
+.cs-line {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  min-width: 0;
+  font-size: 11px;
+}
+.cs-k {
+  flex: none;
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.cs-list {
+  min-width: 0;
+  font-family: var(--font-mono);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+/* The PII flag is a heads-up, not a block: a quiet danger-tinted chip, not loose
+   red text. It hugs its content (max-width: 100%) and wraps if the list is long. */
+.cs-pii {
+  max-width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--danger) 11%, transparent);
+}
+.cs-pii .cs-warn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--danger);
+  font-weight: 620;
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.cs-pii .cs-warn svg {
+  width: 12px;
+  height: 12px;
+}
+.cs-pii .cs-list {
+  color: color-mix(in oklch, var(--danger) 78%, var(--text));
+}
+/* Client-confidentiality flag: same quiet-chip treatment as PII, its own line and
+   violet tint so the two axes never blur together. */
+.cs-client {
+  max-width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--client) 12%, transparent);
+}
+.cs-client .cs-warn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--client);
+  font-weight: 620;
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.cs-client .cs-warn svg {
+  width: 12px;
+  height: 12px;
+}
+.cs-client .cs-list {
+  color: color-mix(in oklch, var(--client) 78%, var(--text));
+}
+/* A value embedded in the query is more serious than a flagged column, so it reuses
+   the danger tint (like PII) on its own line. */
+.cs-literal {
+  max-width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--danger) 11%, transparent);
+}
+.cs-literal .cs-warn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--danger);
+  font-weight: 620;
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.cs-literal .cs-warn svg {
+  width: 12px;
+  height: 12px;
+}
+.cs-literal .cs-list {
+  color: color-mix(in oklch, var(--danger) 78%, var(--text));
+}
+
 .blocked-note {
   display: flex;
   gap: 7px;
@@ -392,6 +515,30 @@ body {
 .btn.approve:hover {
   filter: brightness(1.07);
 }
+/* Quiet opt-in next to Reject: opens the reason note without forcing a second
+   click for the common no-reason reject. */
+.deny-open {
+  display: inline-flex;
+  margin-left: calc(-1 * var(--s2));
+  padding: 5px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--faint);
+  cursor: pointer;
+  transition: color var(--dur) var(--ease);
+}
+.deny-open svg {
+  width: 15px;
+  height: 15px;
+}
+.deny-open:hover {
+  color: var(--muted);
+}
+.deny-open:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 1px;
+}
 .btn.reject {
   background: none;
   color: var(--muted);
@@ -400,6 +547,55 @@ body {
 }
 .btn.reject:hover {
   color: var(--text);
+}
+/* Reject-with-a-revision: an inline field to the right of Reject, reading like
+   the SQL block (sunken, tonal edge), with a send affordance embedded at its end. */
+.deny-field {
+  flex: 1 1 auto;
+  min-width: 8rem;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--sunken);
+  border: 1px solid var(--edge);
+  border-radius: 5px;
+}
+.deny-field:focus-within {
+  outline: 2px solid var(--amber);
+  outline-offset: 1px;
+}
+.deny-reason {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--text);
+  background: none;
+  border: none;
+  outline: none;
+  padding: 6px 4px 6px 10px;
+}
+.deny-reason::placeholder {
+  color: var(--faint);
+}
+.deny-send {
+  flex: none;
+  display: inline-flex;
+  margin-right: 4px;
+  padding: 4px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--faint);
+  cursor: pointer;
+  transition: color var(--dur) var(--ease);
+}
+.deny-send svg {
+  width: 15px;
+  height: 15px;
+}
+.deny-send:hover {
+  color: var(--amber);
 }
 .btn:disabled {
   opacity: 0.4;
@@ -497,12 +693,14 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.group-harness {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  font-weight: 400;
+.group-intent {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
   color: var(--faint);
-  margin-left: 6px;
 }
 .group-count {
   margin-left: auto;
@@ -514,13 +712,18 @@ body {
 }
 
 .roster {
-  margin-top: var(--s3);
+  margin: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
 }
 .roster-head {
   display: flex;
   align-items: baseline;
   gap: 6px;
-  margin: 0 0 var(--s2);
+  margin: 0;
+  flex: none;
 }
 .roster-head .label {
   margin: 0;
@@ -531,17 +734,20 @@ body {
   font-variant-numeric: tabular-nums;
   color: var(--faint);
 }
+/* One agent per full-width line so the session task has the most room; it still
+   ellipsises past the edge, with the full text on hover. */
 .roster-list {
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
 }
 .roster-row {
   display: flex;
   align-items: center;
   gap: var(--s2);
-  padding: 4px var(--s1);
-  border-radius: 4px;
+  min-width: 0;
+  padding: 2px 0;
 }
 .roster-row[data-presence="gone"] {
   opacity: 0.5;
@@ -558,17 +764,12 @@ body {
   box-shadow: 0 0 0 3px color-mix(in oklch, var(--ok) 20%, transparent);
 }
 .roster-label {
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 55%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  flex: none;
   font-size: 12px;
+  font-weight: 560;
   color: var(--text);
 }
 .roster-intent {
-  display: none;
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -577,15 +778,9 @@ body {
   color: var(--faint);
   font-size: 11px;
 }
-/* Hidden-compact in the ~220-260px rail; shown once the roster is stacked
-   full-width and has room for the task line. */
-@container gk-roster (min-width: 20rem) {
-  .roster-intent {
-    display: block;
-  }
-}
 .roster-meta {
   flex: none;
+  margin-left: auto;
   font-family: var(--font-mono);
   font-size: 10.5px;
   color: var(--faint);
@@ -593,47 +788,24 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Connection context for the queue: what database these approvals govern. */
-.conn-card {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: var(--s3);
-  border-radius: var(--r);
-  background: var(--surface);
-  border: 1px solid var(--edge);
-  box-shadow: inset 0 1px 0 var(--hi);
-}
-.conn-card:empty {
-  display: none;
-}
+/* Connection context, shown once in the header bar. */
 .cc-name {
   font-size: 12px;
   font-weight: 600;
   color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .cc-dialect {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .cc-schema {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--faint);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .cc-ro {
-  align-self: flex-start;
-  margin-top: 2px;
+  margin: 0;
   font-size: 11px;
   color: var(--ok);
 }
@@ -827,27 +999,36 @@ body {
   display: flex;
   align-items: baseline;
   gap: var(--s2);
-  margin-bottom: var(--s3);
+  margin-bottom: var(--s2);
 }
+/* The session task rides the head line next to the status; long ones ellipsise
+   with the full text on hover. */
 .detail-scope {
-  font-size: 11px;
-  color: var(--faint);
-  margin: 0 0 2px;
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 12px;
+  color: var(--text);
 }
 .detail-intent {
-  font-weight: 620;
-  font-size: 13.5px;
+  font-weight: 640;
+  font-size: 14px;
   color: var(--text);
-  margin: 0 0 var(--s3);
+  margin: 0 0 var(--s2);
   overflow-wrap: anywhere;
 }
-/* Cap the detail SQL line length inside the wider detail card; card-level .sql
-   keeps its full width. */
+/* SQL and result grid share the card's full width so they line up. */
 .detail-card .sql {
-  max-width: min(100%, 900px);
+  width: 100%;
+}
+/* The row count / outcome sits between the query and its results, where it reads. */
+.detail-outcome {
+  margin: 0 0 var(--s2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
 }
 .detail-id {
   font-family: var(--font-mono);
@@ -866,8 +1047,8 @@ body {
 }
 .detail-meta {
   font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--faint);
+  font-size: 11px;
+  color: var(--muted);
   margin: 0 0 var(--s3);
   max-width: 80ch;
   overflow-wrap: anywhere;
@@ -931,6 +1112,223 @@ body {
 }
 .grid tbody tr:hover {
   background: var(--hi);
+}
+
+/* ---- Activity (connection-scoped audit) ---- */
+/* The disclosure now shares its row with the quiet activity trigger, so it no
+   longer spans the full width. */
+.history-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+.history-head .disclosure {
+  width: auto;
+  flex: 0 1 auto;
+}
+.activity-link {
+  margin-left: auto;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  color: var(--faint);
+  padding: var(--s2) 0;
+  transition: color var(--dur) var(--ease);
+}
+.activity-link:hover {
+  color: var(--text);
+}
+.activity-link:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.activity-link svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* The overlay reuses the .detail backdrop; its card is a scrollable audit log. */
+.activity-card {
+  max-width: min(96vw, 1100px);
+}
+.act-conn {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--faint);
+}
+.act-status {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--faint);
+  margin: var(--s3) 0;
+}
+.act-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+.act-day {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+.act-day-head {
+  font-size: 12px;
+  font-weight: 620;
+  color: var(--text);
+  padding-bottom: var(--s1);
+  border-bottom: 1px solid var(--edge);
+}
+.act-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+}
+.act-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  padding: 0 var(--s1);
+}
+.act-group-label {
+  flex: none;
+  font-size: 12px;
+  font-weight: 560;
+  color: var(--text);
+}
+.act-group-intent {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--faint);
+}
+/* The cryptic session tag maps a group back to its agent, as on the queue head. */
+.act-group-sess {
+  margin-left: auto;
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--faint);
+}
+.act-export {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--faint);
+  padding: 2px 4px;
+  transition: color var(--dur) var(--ease);
+}
+.act-export:hover {
+  color: var(--text);
+}
+.act-export:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+.act-export svg {
+  width: 13px;
+  height: 13px;
+}
+.act-entries {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.act-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  width: 100%;
+  padding: 5px var(--s1);
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease);
+}
+.act-row:hover {
+  background: var(--surface);
+}
+.act-row:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: -1px;
+}
+.act-row .chev {
+  align-self: center;
+  display: inline-flex;
+  width: 12px;
+  height: 12px;
+  flex: none;
+  color: var(--faint);
+  transition: transform var(--dur) var(--ease);
+}
+.act-row .chev svg {
+  width: 100%;
+  height: 100%;
+}
+.act-row[aria-expanded="false"] .chev {
+  transform: rotate(-90deg);
+}
+.act-time {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+.act-row .hstatus {
+  flex: none;
+}
+.act-intent {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text);
+}
+.act-note {
+  margin-left: auto;
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--faint);
+  white-space: nowrap;
+}
+.act-detail {
+  padding: var(--s2) var(--s1) var(--s3) 26px;
+}
+.act-meta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--faint);
+  margin-bottom: var(--s2);
+}
+.hstatus.mut {
+  color: var(--faint);
 }
 
 /* ---- Pairing screen ---- */
