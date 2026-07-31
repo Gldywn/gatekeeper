@@ -34,6 +34,20 @@
   --dur-short: 220ms;
   --dur-long: 420ms;
   --r: 7px;
+
+  /* Quiet depth: one honest elevation step for surfaces, a deeper one for the
+     header/rail and for anything floating (popovers), plus a top-lit ground.
+     Additive only, nothing above is overwritten. */
+  --elev-1: 0 1px 1px oklch(0% 0 0 / 0.34), 0 4px 10px oklch(0% 0 0 / 0.2);
+  --elev-2: 0 2px 4px oklch(0% 0 0 / 0.42), 0 10px 26px oklch(0% 0 0 / 0.28);
+  /* The existing popover shadow, named so every popover references one value. */
+  --elev-pop: 0 12px 34px oklch(0% 0 0 / 0.5);
+  --edge-strong: color-mix(in oklch, var(--text) 13%, transparent);
+  --ground-lit: radial-gradient(135% 100% at 50% -8%, oklch(21% 0.008 250), var(--ground) 58%);
+  /* A hairline that fades at both ends, for section rhythm. */
+  --rule: linear-gradient(90deg, transparent, var(--edge) 12%, var(--edge) 88%, transparent);
+  --fs-eyebrow: 10px;
+  --track-eyebrow: 0.08em;
 }
 
 * {
@@ -45,7 +59,7 @@ body {
 }
 body {
   margin: 0;
-  background: var(--ground);
+  background: var(--ground-lit);
   color: var(--text);
   font-family: var(--font-ui);
   font-size: 13.5px;
@@ -78,7 +92,10 @@ body {
   border: 1px solid var(--edge);
   border-radius: var(--r);
   background: var(--surface);
-  box-shadow: inset 0 1px 0 var(--hi);
+  box-shadow:
+    inset 0 1px 0 var(--hi),
+    inset 0 -1px 0 oklch(0% 0 0 / 0.18),
+    var(--elev-2);
 }
 .main {
   grid-area: main;
@@ -98,7 +115,41 @@ body {
   border-radius: var(--r);
   background: var(--surface);
   border: 1px solid var(--edge);
-  box-shadow: inset 0 1px 0 var(--hi);
+  box-shadow:
+    inset 0 1px 0 var(--hi),
+    inset 0 -1px 0 oklch(0% 0 0 / 0.18),
+    var(--elev-2);
+}
+/* Second signature: a faint honeycomb cluster behind the header content. It rides
+   its OWN clipped layer (not the bar's overflow) so the settings and read-only
+   popovers, which intentionally overflow below the bar, are never clipped. The
+   content is lifted above it; the layer never intercepts pointer events. */
+.hive-wrap {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  border-radius: var(--r);
+  pointer-events: none;
+}
+.hive {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  width: 210px;
+  height: 150px;
+  transform: translateY(-50%);
+  color: var(--faint);
+  opacity: 0.11;
+  pointer-events: none;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 78%);
+  mask-image: linear-gradient(90deg, transparent, #000 78%);
+}
+.brand,
+.conn-chip,
+.bar-right {
+  position: relative;
+  z-index: 1;
 }
 .mark {
   width: 24px;
@@ -234,7 +285,7 @@ body {
   border: 1px solid var(--edge);
   border-radius: 9px;
   box-shadow:
-    0 12px 34px rgba(0, 0, 0, 0.5),
+    var(--elev-pop),
     inset 0 1px 0 var(--hi);
   opacity: 0;
   visibility: hidden;
@@ -487,7 +538,7 @@ body {
   border: 1px solid var(--edge);
   border-radius: 9px;
   box-shadow:
-    0 12px 34px rgba(0, 0, 0, 0.5),
+    var(--elev-pop),
     inset 0 1px 0 var(--hi);
 }
 .settings-pop[hidden] {
@@ -644,6 +695,28 @@ label.qs-row {
   color: var(--muted);
   margin: var(--s5) 0 var(--s3);
 }
+/* Eyebrow section labels: uppercase, tracked micro-labels with a hairline that
+   fades as it leaves the text. Scoped to the section headers only (Connected
+   agents via .roster-head, Pending approval as the direct .main child); the
+   Recently-resolved header gets the same treatment on its own .disclosure rule.
+   Never a bare .label, so no other text is uppercased. */
+.roster-head .label,
+.main > .label {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  font-size: var(--fs-eyebrow);
+  letter-spacing: var(--track-eyebrow);
+  color: var(--faint);
+  text-transform: uppercase;
+}
+.roster-head .label::after,
+.main > .label::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--edge), transparent);
+}
 
 .queue {
   display: flex;
@@ -654,8 +727,17 @@ label.qs-row {
   border-radius: var(--r);
   background: var(--surface);
   border: 1px solid var(--edge);
-  box-shadow: inset 0 1px 0 var(--hi);
+  box-shadow:
+    inset 0 1px 0 var(--hi),
+    var(--elev-1);
   padding: var(--s3);
+}
+/* Tactile hover: lift by tone and shadow only, never by movement. */
+.card:hover {
+  border-color: var(--edge-strong);
+  box-shadow:
+    inset 0 1px 0 var(--hi),
+    var(--elev-2);
 }
 @media (prefers-reduced-motion: no-preference) {
   .card {
@@ -711,6 +793,7 @@ label.qs-row {
   margin: 0 0 var(--s3);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  box-shadow: inset 0 1px 2px oklch(0% 0 0 / 0.28);
 }
 .sql::before,
 .sql::after {
@@ -1106,6 +1189,9 @@ label.qs-row {
   border: 1px solid color-mix(in oklch, var(--text) 7%, transparent);
   border-radius: 8px;
   background: color-mix(in oklch, var(--surface) 40%, transparent);
+  box-shadow:
+    inset 0 1px 0 var(--hi),
+    var(--elev-1);
 }
 .group-head {
   display: flex;
@@ -1186,7 +1272,7 @@ label.qs-row {
 }
 .roster-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 6px;
   margin: 0;
   flex: none;
@@ -1264,7 +1350,9 @@ label.qs-row {
   border: none;
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-eyebrow);
+  letter-spacing: var(--track-eyebrow);
+  text-transform: uppercase;
   color: var(--faint);
   padding: var(--s2) 0;
   display: flex;
