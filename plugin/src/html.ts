@@ -14,10 +14,6 @@ export function capitalize(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
-export function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 export function clock(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
   const m = Math.floor(s / 60);

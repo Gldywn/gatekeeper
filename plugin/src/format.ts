@@ -3,7 +3,7 @@
 // A canonical token check backstops that, falling back to the original on any drift.
 
 type TokType = "str" | "word" | "op" | "punct" | "comment" | "ws";
-interface Tok {
+export interface Tok {
   t: TokType;
   v: string;
 }
@@ -13,7 +13,7 @@ const MULTI_OPS = ["->>", ">=", "<=", "<>", "!=", "||", "::", "->"];
 
 const WORD = /[A-Za-z0-9_$.]/;
 
-function tokenize(sql: string): Tok[] {
+export function tokenize(sql: string): Tok[] {
   const toks: Tok[] = [];
   const n = sql.length;
   let i = 0;

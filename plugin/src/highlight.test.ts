@@ -64,4 +64,22 @@ describe("highlight (pinned output for the Phase 2 rewrite)", () => {
       '<span class="kw">SELECT</span> <span class="pii-col">email</span>, <span class="client-col">company_name</span> <span class="kw">FROM</span> users <span class="kw">WHERE</span> plan = <span class="st sensitive-val">\'enterprise\'</span>',
     );
   });
+
+  it("keeps a backtick-quoted pii identifier flagged (MySQL)", () => {
+    expect(highlight("SELECT `email` FROM users", ["email"])).toBe(
+      '<span class="kw">SELECT</span> `<span class="pii-col">email</span>` <span class="kw">FROM</span> users',
+    );
+  });
+
+  it("keeps a double-quoted client identifier flagged (ANSI/Postgres)", () => {
+    expect(highlight('SELECT "company_name" FROM accounts', undefined, ["company_name"])).toBe(
+      '<span class="kw">SELECT</span> &quot;<span class="client-col">company_name</span>&quot; <span class="kw">FROM</span> accounts',
+    );
+  });
+
+  it("leaves a quoted non-sensitive identifier untinted", () => {
+    expect(highlight('SELECT "status" FROM t', ["email"], ["company_name"])).toBe(
+      '<span class="kw">SELECT</span> &quot;status&quot; <span class="kw">FROM</span> t',
+    );
+  });
 });
