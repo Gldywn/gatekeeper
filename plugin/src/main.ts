@@ -12,25 +12,15 @@ import {
   setTabTitle,
 } from "@beekeeperstudio/plugin";
 import { enter, type Loop, pulse, reveal } from "./anim";
-import {
-  activityNote,
-  capitalize,
-  clock,
-  clockTime,
-  dayKey,
-  dayLabel,
-  escapeHtml,
-  outcomeMeta,
-  previewSql,
-  relAge,
-  sessionDisplayName,
-} from "./html";
-import { checkIcon, chevronDown, copyIcon, downloadIcon, harnessIcon, historyIcon } from "./icons";
+import { clock, dayKey, escapeHtml, relAge } from "./html";
+import { checkIcon, chevronDown, copyIcon, historyIcon } from "./icons";
 import { BrokerClient } from "./net/broker";
+import { activityDaysHtml, activityMarkdown, activityShell } from "./render/activity";
+import { detailHtml } from "./render/detail";
 import { historyRow } from "./render/history";
 import { queueHtml, readyActions, schemaInner } from "./render/queue";
 import { presence, rosterRow } from "./render/roster";
-import { capResult, cell, type Field, type HistResult } from "./result";
+import { capResult, type Field, type HistResult } from "./result";
 import { formatSql } from "./sql/format";
 import { highlight } from "./sql/highlight";
 import { isReadOnlyQuery, mapDialect } from "./sql/readonly";
@@ -1028,7 +1018,7 @@ export class Gatekeeper {
       return;
     }
     this.detailItemId = item.id;
-    panel.innerHTML = this.detailHtml(item);
+    panel.innerHTML = detailHtml(item);
     panel.hidden = false;
     void this.annotateDetail(item);
   }
@@ -1073,7 +1063,10 @@ export class Gatekeeper {
     }
     // A fresh open forgets which rows were expanded last time.
     this.activityExpanded.clear();
-    panel.innerHTML = this.activityShell('<p class="act-status">Loading activity...</p>');
+    panel.innerHTML = activityShell(
+      '<p class="act-status">Loading activity...</p>',
+      this.connectionName,
+    );
     panel.hidden = false;
     await this.loadActivity();
   }
@@ -1105,19 +1098,6 @@ export class Gatekeeper {
     }
   }
 
-  private activityShell(body: string): string {
-    const conn = this.connectionName ? escapeHtml(this.connectionName) : "";
-    return `
-      <div class="detail-card activity-card">
-        <div class="detail-head">
-          <span class="detail-who">Activity</span>
-          ${conn ? `<span class="act-conn">${conn}</span>` : ""}
-          <button class="detail-close" type="button" data-close aria-label="Close activity">&times;</button>
-        </div>
-        <div class="act-body">${body}</div>
-      </div>`;
-  }
-
   private setActivityBody(html: string): void {
     const body = this.root.querySelector<HTMLElement>("#activity .act-body");
     if (body) {
@@ -1128,89 +1108,9 @@ export class Gatekeeper {
   private renderActivity(): void {
     this.setActivityBody(
       this.activity.length
-        ? this.activityDaysHtml()
+        ? activityDaysHtml(this.activity, this.activityExpanded)
         : '<p class="act-status">No activity on this connection yet.</p>',
     );
-  }
-
-  // Group the feed by day, then by session within each day, preserving the
-  // server's newest-first order for both the groups and the entries inside them.
-  private activityDaysHtml(): string {
-    const days: { key: string; label: string; sessions: Map<string, ActivityEntry[]> }[] = [];
-    for (const e of this.activity) {
-      const ts = e.decidedAt ?? e.createdAt;
-      const key = dayKey(ts);
-      let day = days.find((d) => d.key === key);
-      if (!day) {
-        day = { key, label: dayLabel(ts), sessions: new Map() };
-        days.push(day);
-      }
-      const arr = day.sessions.get(e.sessionId);
-      if (arr) {
-        arr.push(e);
-      } else {
-        day.sessions.set(e.sessionId, [e]);
-      }
-    }
-    return days
-      .map(
-        (d) => `
-        <section class="act-day">
-          <div class="act-day-head">${escapeHtml(d.label)}</div>
-          ${[...d.sessions.entries()].map(([sid, entries]) => this.activityGroupHtml(d.key, sid, entries)).join("")}
-        </section>`,
-      )
-      .join("");
-  }
-
-  private activityGroupHtml(day: string, sessionId: string, entries: ActivityEntry[]): string {
-    const first = entries[0];
-    const harness = first.harness?.trim() || null;
-    const project = first.project?.trim();
-    const label = project ? escapeHtml(project) : escapeHtml(harness || sessionId);
-    const intent = first.sessionLabel?.trim();
-    return `
-        <section class="act-group">
-          <div class="act-group-head">
-            <span class="harness-badge">${harnessIcon(harness)}</span>
-            <span class="act-group-label">${label}</span>
-            ${intent ? `<span class="act-group-intent" title="${escapeHtml(capitalize(intent))}">${escapeHtml(capitalize(intent))}</span>` : ""}
-            <span class="act-group-sess">${escapeHtml(sessionId)}</span>
-            <button class="act-export" type="button" data-export="${escapeHtml(`${day}|${sessionId}`)}">${downloadIcon}Export</button>
-          </div>
-          <div class="act-entries">${entries.map((e) => this.activityEntryHtml(e)).join("")}</div>
-        </section>`;
-  }
-
-  private activityEntryHtml(e: ActivityEntry): string {
-    const ts = e.decidedAt ?? e.createdAt;
-    const { cls, label } = outcomeMeta(e.state);
-    const note = activityNote(e);
-    const intent = e.intent?.trim();
-    const headline = intent ? capitalize(intent) : previewSql(e.sql);
-    const expanded = this.activityExpanded.has(e.id);
-    // The row note truncates; the full reason/error rides the expanded panel.
-    const detailNote =
-      e.state === "rejected" && e.reason
-        ? e.reason
-        : e.state === "failed" && e.error
-          ? e.error
-          : "";
-    return `
-          <div class="act-entry${expanded ? " open" : ""}" data-act="${escapeHtml(e.id)}">
-            <button class="act-row" type="button" data-act-sql="${escapeHtml(e.id)}" aria-expanded="${expanded}">
-              <span class="chev">${chevronDown}</span>
-              <span class="act-time">${escapeHtml(clockTime(ts))}</span>
-              <span class="hstatus ${cls}">${escapeHtml(label)}</span>
-              <span class="act-intent">${escapeHtml(headline)}</span>
-              ${note ? `<span class="act-note">${escapeHtml(note)}</span>` : ""}
-            </button>
-            <div class="act-detail"${expanded ? "" : " hidden"}>
-              <div class="act-meta">${escapeHtml(e.id)} &middot; ${escapeHtml(new Date(ts).toLocaleString())}</div>
-              ${detailNote ? `<div class="detail-outcome">${escapeHtml(detailNote)}</div>` : ""}
-              <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(e.sql)}" aria-label="Copy SQL">${copyIcon}</button><code>${highlight(formatSql(e.sql))}</code></pre>
-            </div>
-          </div>`;
   }
 
   // Toggle a single entry's full SQL in place so expanding one row never rebuilds
@@ -1257,7 +1157,7 @@ export class Gatekeeper {
     const slug = who.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "session";
     try {
       await requestFileSave({
-        data: this.activityMarkdown(day, sessionId, entries),
+        data: activityMarkdown(day, sessionId, entries, this.connectionName),
         fileName: `gatekeeper-activity-${day}-${slug}.md`,
         encoding: "utf8",
         filters: [{ name: "Markdown", extensions: ["md"] }],
@@ -1265,43 +1165,6 @@ export class Gatekeeper {
     } catch (err) {
       log.error(err instanceof Error ? err : String(err));
     }
-  }
-
-  private activityMarkdown(day: string, sessionId: string, entries: ActivityEntry[]): string {
-    const first = entries[0];
-    const label = first.project?.trim() || first.harness?.trim() || sessionId;
-    const lines: string[] = ["# Gatekeeper activity", ""];
-    if (this.connectionName) {
-      lines.push(`- Connection: ${this.connectionName}`);
-    }
-    lines.push(`- Day: ${day}`, `- Session: ${label} (${sessionId})`);
-    if (first.harness?.trim()) {
-      lines.push(`- Harness: ${first.harness.trim()}`);
-    }
-    if (first.sessionLabel?.trim()) {
-      lines.push(`- Task: ${first.sessionLabel.trim()}`);
-    }
-    lines.push("");
-    // Oldest-first reads as a timeline.
-    for (const e of [...entries].reverse()) {
-      const ts = e.decidedAt ?? e.createdAt;
-      lines.push(`## ${new Date(ts).toLocaleTimeString()} · ${outcomeMeta(e.state).label}`);
-      if (e.intent?.trim()) {
-        lines.push(`- Intent: ${e.intent.trim()}`);
-      }
-      lines.push(`- Request: ${e.id}`);
-      if (e.state === "approved" && e.rowCount != null) {
-        lines.push(`- Rows: ${e.rowCount}`);
-      }
-      if (e.reason?.trim()) {
-        lines.push(`- Reason: ${e.reason.trim()}`);
-      }
-      if (e.error?.trim()) {
-        lines.push(`- Error: ${e.error.trim()}`);
-      }
-      lines.push("", "```sql", e.sql.trim(), "```", "");
-    }
-    return lines.join("\n");
   }
 
   private copySql(el: HTMLElement): void {
@@ -1316,55 +1179,6 @@ export class Gatekeeper {
       el.classList.remove("copied");
       el.innerHTML = copyIcon;
     }, 1200);
-  }
-
-  private detailHtml(item: HistItem): string {
-    const grid = item.result ? this.gridHtml(item.result) : "";
-    const harness = item.session?.harness?.trim() || null;
-    const who = sessionDisplayName(item.session, item.id);
-    const audit = [
-      item.connection ? `on ${escapeHtml(item.connection)}` : "",
-      harness ? escapeHtml(harness) : "",
-      item.session?.sessionId ? escapeHtml(item.session.sessionId) : "",
-      escapeHtml(item.id),
-      escapeHtml(new Date(item.resolvedAt).toLocaleString()),
-    ].filter(Boolean);
-    return `
-      <div class="detail-card">
-        <div class="detail-head">
-          <span class="harness-badge">${harnessIcon(harness)}</span>
-          <span class="detail-who">${escapeHtml(who)}</span>
-          <span class="hstatus ${item.status}">${item.status === "ok" ? "approved" : "rejected"}</span>
-          ${item.session?.sessionLabel ? `<span class="detail-scope" title="${escapeHtml(capitalize(item.session.sessionLabel))}">${escapeHtml(capitalize(item.session.sessionLabel))}</span>` : ""}
-          <button class="detail-close" type="button" data-close aria-label="Close detail">&times;</button>
-        </div>
-        <div class="detail-meta">${audit.join(" &middot; ")}</div>
-        ${item.intent ? `<p class="detail-intent">${escapeHtml(capitalize(item.intent))}</p>` : ""}
-        <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(item.sql)}" aria-label="Copy SQL">${copyIcon}</button><code class="sql-body" id="detail-sqlbody">${highlight(formatSql(item.sql))}</code></pre>
-        <div class="card-schema" id="detail-cs"></div>
-        ${item.note ? `<div class="detail-outcome">${escapeHtml(item.note)}</div>` : ""}
-        ${grid}
-      </div>`;
-  }
-
-  private gridHtml(result: HistResult): string {
-    if (result.rowCount === 0) {
-      return '<p class="detail-empty">No rows returned.</p>';
-    }
-    if (result.rows.length === 0) {
-      return `<p class="detail-empty">${result.rowCount} rows returned, no longer held in memory.</p>`;
-    }
-    const cols = result.fields.length
-      ? result.fields.map((f) => f.name)
-      : Object.keys(result.rows[0]);
-    const head = cols.map((c) => `<th>${escapeHtml(c)}</th>`).join("");
-    const body = result.rows
-      .map((row) => `<tr>${cols.map((c) => `<td>${escapeHtml(cell(row[c]))}</td>`).join("")}</tr>`)
-      .join("");
-    const note = result.truncated
-      ? `<p class="detail-note">Showing ${result.rows.length} of ${result.rowCount} rows.</p>`
-      : "";
-    return `<div class="grid-wrap"><table class="grid"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>${note}`;
   }
 }
 
