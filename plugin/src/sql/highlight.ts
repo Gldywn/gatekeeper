@@ -1,5 +1,5 @@
+import { escapeHtml } from "../html";
 import { type Tok, tokenize } from "./format";
-import { escapeHtml } from "./html";
 
 // Case-sensitive by design: the previous regex pass matched only the uppercase
 // spellings, so INTERVAL etc. read as keywords only when written that way.

@@ -13,8 +13,6 @@ import {
   setTabTitle,
 } from "@beekeeperstudio/plugin";
 import { enter, type Loop, pulse, reveal } from "./anim";
-import { formatSql } from "./format";
-import { highlight } from "./highlight";
 import {
   activityNote,
   capitalize,
@@ -40,15 +38,17 @@ import {
   sendIcon,
   warnIcon,
 } from "./icons";
-import { isReadOnlyQuery, mapDialect } from "./readonly";
 import { capResult, cell, type Field, type HistResult } from "./result";
+import { formatSql } from "./sql/format";
+import { highlight } from "./sql/highlight";
+import { isReadOnlyQuery, mapDialect } from "./sql/readonly";
 import {
   analyzeSql,
   clientColumns,
   piiColumns,
   type SchemaContext,
   sensitiveLiterals,
-} from "./schema";
+} from "./sql/schema";
 import type {
   ActivityEntry,
   Card,

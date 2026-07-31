@@ -1,5 +1,5 @@
 import type { HistResult } from "./result";
-import type { SchemaContext } from "./schema";
+import type { SchemaContext } from "./sql/schema";
 
 export type CardState = "ready" | "approving" | "executing" | "posting" | "rejecting";
 
