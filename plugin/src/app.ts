@@ -365,14 +365,14 @@ export class Gatekeeper {
       <span class="dsep"></span>${this.readOnlyBadge()}`;
   }
 
-  // The layered read-only indicator: Gatekeeper (always SELECT-only), the Beekeeper
-  // connection mode, and the probed endpoint. Green only when all three hold; any
-  // gap (a writer/unverified endpoint, or Beekeeper's mode off) tones it amber.
+  // Gatekeeper always enforces SELECT-only, so green means a layer below it also
+  // blocks writes; a read replica alone earns it since it rejects writes server-side
+  // whatever Beekeeper's toggle says. Amber means only Gatekeeper stands.
   private readOnlyBadge(): string {
     const beekeeperReadOnly = this.conn?.readOnly ?? false;
     const ro = this.endpointRO;
     const endpointReadOnly = ro !== null && (ro.replica || ro.sessionReadOnly);
-    const allReadOnly = beekeeperReadOnly && endpointReadOnly;
+    const beyondGatekeeper = beekeeperReadOnly || endpointReadOnly;
 
     const endpoint = this.endpointLayer();
     const rows =
@@ -384,14 +384,14 @@ export class Gatekeeper {
       ) +
       this.roRow("Endpoint", endpoint.label, endpoint.state);
 
-    // The label stays "read-only" (Gatekeeper does enforce it); only tone and the
-    // warn glyph carry the "not at every layer" signal.
-    const title = allReadOnly
-      ? "Read-only at every layer"
-      : "Not read-only at every layer, hover for details";
-    const flag = allReadOnly ? "" : `<span class="ro-flag">${warnIcon}</span>`;
+    // The label stays "read-only" (Gatekeeper does enforce it); tone and the warn
+    // glyph carry whether a layer below Gatekeeper also blocks writes.
+    const title = beyondGatekeeper
+      ? "Read-only below Gatekeeper too, hover for details"
+      : "Only Gatekeeper enforces read-only here, hover for details";
+    const flag = beyondGatekeeper ? "" : `<span class="ro-flag">${warnIcon}</span>`;
     return `<span class="ro-wrap" tabindex="0">
-      <span class="ro${allReadOnly ? "" : " warn"}" title="${title}">${lockIcon}read-only${flag}</span>
+      <span class="ro${beyondGatekeeper ? "" : " warn"}" title="${title}">${lockIcon}read-only${flag}</span>
       <span class="ro-pop" role="tooltip">
         <div class="ro-pop-head">Read-only layers</div>
         ${rows}
