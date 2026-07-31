@@ -55,32 +55,32 @@ Headings are always roman (no italic display).
 ## Responsive
 
 The shell is fluid, not a fixed 560px column: `.gk` caps at `min(94vw, 1180px)`
-and centres, with fluid `padding-inline`. Above `56.25rem` it becomes a two-zone
-layout, a fixed-width `rail` (roster + connection card) beside a fluid `main`
-(the pending queue and history), placed by grid areas. The two zones are a
-first-class decision: the rail is reference context, the queue is the work.
+and centres, with fluid `padding-inline`. It stacks in one column: the header
+(which carries the sole connection context: name, dialect, database, schema,
+read-only), then a full-width **band** (`.rail`, the connected-agents roster),
+then the queue and history. The band is reference context read at a glance; the
+queue owns the width, because the SQL blocks and result tables benefit from it.
 
-Breakpoints are **CSS container queries**, not viewport media, because a zone's
-width diverges from the viewport once the layout splits: at a 1200px viewport the
-rail is ~240px and `main` is ~900px, so each must react to its own width. Three
-named container contexts carry this:
+The roster is a grid of agent cells (`repeat(auto-fill, minmax(19rem, 1fr))`) so
+it flows into as many columns as fit and stays short. Each cell carries the
+presence dot, tool icon (the tool is never spelled out, the icon is enough),
+project, the active/idle meta, and the session task on its own wrapped line,
+never truncated. The cryptic `sess_…` tag lives only on the queue group header,
+where it maps a group of proposals back to its agent.
 
-- `gk-roster` on `.rail`: shows the per-agent task line only when the rail is
-  stacked full-width, hides it in the compact ~220-260px rail.
+Two named **container query** contexts remain, each reacting to its own width
+rather than the viewport:
+
 - `gk-main` on `.main`: the history row reveals the who / SQL columns as `main`
   widens (`23.75rem`, then `40rem`), each tier keeping its grid track count equal
   to its visible spans.
 - `gk-detail` on `.detail-card`: cell caps scale with the card width (`cqi`).
 
-The one exception is the shell split itself, which is a viewport media query
-(`@media (min-width: 56.25rem)`) rather than a shell container: giving `.gk` a
-`container-type` would apply layout containment and trap the fixed `.detail`
-overlay it wraps, and an element cannot query its own container. The shell width
-tracks the viewport at `94vw`, so the viewport query is the right owner there.
-
-A `@supports not (container-type: inline-size)` block mirrors the `gk-main`
-breakpoints as viewport media queries for browsers without container-query
-support (Beekeeper's Chromium has it since 105).
+`.gk` itself gets no `container-type` on purpose: that would apply layout
+containment and trap the fixed `.detail` overlay it wraps. A `@supports not
+(container-type: inline-size)` block mirrors the `gk-main` breakpoints as viewport
+media queries for browsers without container-query support (Beekeeper's Chromium
+has it since 105).
 
 ## Motion
 

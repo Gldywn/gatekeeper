@@ -71,20 +71,44 @@ SQL text.
 ## MCP tools
 
 - `submit_query({ sql, intent?, idempotency_key? })` -> ticket. Enqueues a read-only
-  proposal and returns immediately with `request_id` and `state`.
+  proposal and returns immediately with `request_id` and `state`. Requires a session
+  label first (see `set_session_label`), otherwise it is rejected.
 - `get_query_result({ request_id, wait_ms? })` -> ticket. Reads a proposal, optionally
   waiting (bounded) for a terminal state: `approved`, `rejected`, `failed`, `expired`,
   `cancelled`.
+- `poll_results({ wait_ms? })` -> `{ results, pending }`. The state of every query the
+  session proposed recently, in one call, optionally waiting (bounded) until any pending
+  one resolves. States only; fetch a resolved one's rows with `get_query_result`.
 - `cancel_query({ request_id })` -> ticket. Withdraws a pending or leased proposal.
 - `run_query({ sql, intent? })` -> ticket. Convenience wrapper that submits and waits
   for the terminal result. It serializes one query at a time; prefer
   `submit_query` + `get_query_result` for concurrency.
+- `set_session_label({ label })` -> ok. Names the session with a short, human-readable
+  label shown in the plugin's connected-agents roster. Required before any query: the
+  server rejects `submit_query` until a session label is set.
 - `get_connection_info()` -> snapshot. Non-sensitive context about the connected
   database (dialect, database, schema, read-only, captured-at). Never includes host,
   user, or credentials; informational only.
 
 A ticket is `{ requestId, state, createdAt, expiresAt, terminal? }`, where `terminal`
 carries the `rows` and `fields` of an approved query.
+
+## Agent skill
+
+A companion skill teaches any agent to drive these tools well: name the session up
+front, propose read-only PII-free SQL, work in parallel while a human approves, and
+collect results as they land instead of blocking or ending the turn early. It is a
+single model-agnostic `SKILL.md` under [`skills/gatekeeper/`](skills/gatekeeper/SKILL.md),
+distributed through the [skills.sh](https://skills.sh) CLI so it installs across Claude
+Code, Codex, Cursor, and the rest:
+
+```bash
+npx skills add Gldywn/gatekeeper
+```
+
+The CLI is interactive: it asks which agents to install for and whether to install
+globally. Editing the skill: change `skills/gatekeeper/SKILL.md`, commit, and re-sync
+with `npx skills update`.
 
 ## Security
 
