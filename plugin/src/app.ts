@@ -20,6 +20,7 @@ import {
   gearIcon,
   historyIcon,
   lockIcon,
+  warnIcon,
 } from "./icons";
 import { BrokerClient } from "./net/broker";
 import { historyRow } from "./render/history";
@@ -29,6 +30,7 @@ import { capResult, type Field, type HistResult } from "./result";
 import { formatSql } from "./sql/format";
 import { highlight } from "./sql/highlight";
 import { isReadOnlyQuery, mapDialect } from "./sql/readonly";
+import { type EndpointReadOnly, probeReadOnly } from "./sql/readonly-probe";
 import type {
   Card,
   CardState,
@@ -158,6 +160,11 @@ export class Gatekeeper {
   private lastConnCheck = 0;
   private connCheckInFlight = false;
   private connGeneration = 0;
+  // Host-side endpoint read-only probe result, reset per connection. null once
+  // probed means "not verified" (non-Postgres or error); endpointProbed keeps the
+  // pending state distinct from a probe that ran and could not confirm.
+  private endpointRO: EndpointReadOnly | null = null;
+  private endpointProbed = false;
   private renewTimer?: number;
   private tickTimer?: number;
   private pollTimer?: number;
@@ -230,6 +237,7 @@ export class Gatekeeper {
     void this.poll();
     void this.pollRoster(++this.pollGeneration);
     void this.reportConnection();
+    void this.probeEndpoint();
     this.startTimers();
   }
 
@@ -318,8 +326,12 @@ export class Gatekeeper {
     this.activityView.reset();
     this.roster = [];
     this.rosterSig = "";
+    // The endpoint belongs to the old database; re-probe the new one from scratch.
+    this.endpointRO = null;
+    this.endpointProbed = false;
     this.renderConnLabel();
     void this.reportConnection();
+    void this.probeEndpoint();
     this.renderQueue();
     this.renderHistory();
     this.renderRoster();
@@ -350,7 +362,62 @@ export class Gatekeeper {
       <span class="chip-name">${escapeHtml(name)}</span>
       <span class="badge">${escapeHtml(dialect)}</span>
       ${path ? `<span class="chip-path">${path}</span>` : ""}
-      <span class="dsep"></span><span class="ro" title="Gatekeeper only executes read-only SELECT queries, whatever the connection's own mode">${lockIcon}read-only</span>`;
+      <span class="dsep"></span>${this.readOnlyBadge()}`;
+  }
+
+  // The layered read-only indicator: Gatekeeper (always SELECT-only), the Beekeeper
+  // connection mode, and the probed endpoint. Green only when all three hold; any
+  // gap (a writer/unverified endpoint, or Beekeeper's mode off) tones it amber.
+  private readOnlyBadge(): string {
+    const beekeeperReadOnly = this.conn?.readOnly ?? false;
+    const ro = this.endpointRO;
+    const endpointReadOnly = ro !== null && (ro.replica || ro.sessionReadOnly);
+    const allReadOnly = beekeeperReadOnly && endpointReadOnly;
+
+    const endpoint = this.endpointLayer();
+    const rows =
+      this.roRow("Gatekeeper", "SELECT only", "ok") +
+      this.roRow(
+        "Beekeeper connection",
+        beekeeperReadOnly ? "on" : "off",
+        beekeeperReadOnly ? "ok" : "mut",
+      ) +
+      this.roRow("Endpoint", endpoint.label, endpoint.state);
+
+    // The label stays "read-only" (Gatekeeper does enforce it); only tone and the
+    // warn glyph carry the "not at every layer" signal.
+    const title = allReadOnly
+      ? "Read-only at every layer"
+      : "Not read-only at every layer, hover for details";
+    const flag = allReadOnly ? "" : `<span class="ro-flag">${warnIcon}</span>`;
+    return `<span class="ro-wrap" tabindex="0">
+      <span class="ro${allReadOnly ? "" : " warn"}" title="${title}">${lockIcon}read-only${flag}</span>
+      <span class="ro-pop" role="tooltip">
+        <div class="ro-pop-head">Read-only layers</div>
+        ${rows}
+      </span>
+    </span>`;
+  }
+
+  // "not verified" covers both pending and a probe that ran but could not confirm
+  // (non-Postgres or error); a read replica or a read-only session is confirmed ok.
+  private endpointLayer(): { label: string; state: "ok" | "warn" | "mut" } {
+    const ro = this.endpointRO;
+    if (!this.endpointProbed || ro === null) {
+      return { label: "not verified", state: "mut" };
+    }
+    if (ro.replica) {
+      return { label: "read replica", state: "ok" };
+    }
+    if (ro.sessionReadOnly) {
+      return { label: "session read-only", state: "ok" };
+    }
+    return { label: "writable", state: "warn" };
+  }
+
+  private roRow(name: string, label: string, state: "ok" | "warn" | "mut"): string {
+    const glyph = state === "ok" ? checkIcon : state === "warn" ? warnIcon : "";
+    return `<div class="ro-row"><span class="ro-name">${name}</span><span class="ro-state ${state}">${glyph}${escapeHtml(label)}</span></div>`;
   }
 
   // Hand the agent non-sensitive context (dialect, database, schema, read-only)
@@ -364,6 +431,23 @@ export class Gatekeeper {
     } catch (err) {
       log.error(err instanceof Error ? err : String(err));
     }
+  }
+
+  // connGeneration-guarded like the annotator: a switch mid-probe discards the
+  // result. Runs via runQuery directly (host-side, not the approval gate) and is
+  // stored on the class only, never posted to the broker.
+  private async probeEndpoint(): Promise<void> {
+    if (!this.conn) {
+      return;
+    }
+    const gen = this.connGeneration;
+    const result = await probeReadOnly(this.dialect, runQuery);
+    if (gen !== this.connGeneration) {
+      return;
+    }
+    this.endpointRO = result;
+    this.endpointProbed = true;
+    this.renderConnLabel();
   }
 
   // Recreated on every (re-)pair; clear the old handles so re-pairing does not
@@ -405,6 +489,7 @@ export class Gatekeeper {
       void this.poll();
       void this.pollRoster(++this.pollGeneration);
       void this.reportConnection();
+      void this.probeEndpoint();
       this.startTimers();
     };
     this.root

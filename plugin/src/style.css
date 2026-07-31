@@ -181,6 +181,114 @@ body {
   width: 12px;
   height: 12px;
 }
+/* Not read-only at every layer: the lock stays (Gatekeeper still enforces
+   SELECT-only) but the tone shifts to amber with an appended warn glyph. */
+.ro.warn {
+  color: var(--amber);
+}
+.ro-flag {
+  display: inline-flex;
+  align-items: center;
+}
+.ro-flag svg {
+  width: 11px;
+  height: 11px;
+}
+/* Wraps the badge so the detail popover can anchor to it and reveal on hover/focus
+   with no JS toggle. */
+.ro-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.ro-wrap:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+/* Read-only detail popover: same shell as .settings-pop, anchored left of the
+   badge so it grows toward the header centre and never past the panel's right. */
+.ro-pop {
+  position: absolute;
+  top: calc(100% + 9px);
+  left: 0;
+  z-index: 6;
+  width: 232px;
+  max-width: min(232px, 78vw);
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--edge);
+  border-radius: 9px;
+  box-shadow:
+    0 12px 34px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 var(--hi);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity var(--dur) var(--ease),
+    visibility var(--dur) var(--ease);
+}
+.ro-wrap:hover .ro-pop,
+.ro-wrap:focus-within .ro-pop {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+.ro-pop::before {
+  content: "";
+  position: absolute;
+  top: -5px;
+  left: 12px;
+  width: 9px;
+  height: 9px;
+  background: var(--surface);
+  border-left: 1px solid var(--edge);
+  border-top: 1px solid var(--edge);
+  transform: rotate(45deg);
+}
+.ro-pop-head {
+  margin-bottom: 4px;
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--faint);
+}
+.ro-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 5px 0;
+}
+.ro-name {
+  font-size: 12px;
+  color: var(--text);
+}
+/* Per-layer verdict: ok green (confirmed read-only), warn amber (writer), mut
+   faint (neutral / not verified). */
+.ro-state {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.ro-state svg {
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
+.ro-state.ok {
+  color: var(--ok);
+}
+.ro-state.warn {
+  color: var(--amber);
+}
+.ro-state.mut {
+  color: var(--faint);
+}
 /* Hairline divider: between chip segments and inside the right cluster. */
 .dsep {
   width: 1px;
