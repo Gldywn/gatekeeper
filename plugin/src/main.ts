@@ -27,7 +27,9 @@ import {
 } from "./html";
 import { checkIcon, chevronDown, copyIcon, downloadIcon, harnessIcon, historyIcon } from "./icons";
 import { BrokerClient } from "./net/broker";
+import { historyRow } from "./render/history";
 import { queueHtml, readyActions, schemaInner } from "./render/queue";
+import { presence, rosterRow } from "./render/roster";
 import { capResult, cell, type Field, type HistResult } from "./result";
 import { formatSql } from "./sql/format";
 import { highlight } from "./sql/highlight";
@@ -61,10 +63,6 @@ const HIST_MAX = 20;
 // across all items here (the per-item caps live in ./result).
 const HIST_MAX_TOTAL_BYTES = 2 * 1024 * 1024;
 const ROSTER_POLL_MS = 2000;
-// Mirror the server's SESSION_HEARTBEAT_MS margin: active if it acted recently,
-// gone once its presence ping has been silent well past one heartbeat.
-const SESSION_ACTIVE_MS = 30_000;
-const SESSION_GONE_MS = 45_000;
 
 const CONNECTION_LABEL: Record<ConnectionState, string> = {
   connecting: "connecting...",
@@ -74,13 +72,6 @@ const CONNECTION_LABEL: Record<ConnectionState, string> = {
 };
 
 const PRESENCE_ORDER: Record<Presence, number> = { active: 0, idle: 1, gone: 2 };
-
-function presence(s: SessionRoster, now: number): Presence {
-  if (s.leftAt !== null || now - s.lastSeen > SESSION_GONE_MS) {
-    return "gone";
-  }
-  return now - s.lastActive <= SESSION_ACTIVE_MS ? "active" : "idle";
-}
 
 async function runApprovedQuery(
   sql: string,
@@ -624,7 +615,7 @@ export class Gatekeeper {
     this.rosterSig = sig;
     const live = rows.filter((r) => r.p !== "gone").length;
     const list = rows.length
-      ? rows.map(({ s, p }) => this.rosterRow(s, p)).join("")
+      ? rows.map(({ s, p }) => rosterRow(s, p)).join("")
       : '<div class="empty">No agents connected.</div>';
     el.innerHTML = `<div class="roster-head"><span class="label">Connected agents</span><span class="roster-count">${live}</span></div><div class="roster-list">${list}</div>`;
     for (const loop of this.rosterLoops) {
@@ -633,30 +624,6 @@ export class Gatekeeper {
     this.rosterLoops = [
       ...el.querySelectorAll('.roster-row[data-presence="active"] .presence-dot'),
     ].map((dot) => pulse(dot));
-  }
-
-  private rosterRow(s: SessionRoster, p: Presence): string {
-    const harness = s.harness?.trim() || null;
-    const project = s.project?.trim();
-    const who = project ? escapeHtml(project) : escapeHtml(harness || s.sessionId);
-    // Every listed session has a non-empty label (the roster query filters the
-    // rest out), so render it directly with no placeholder branch.
-    const scope = capitalize(s.sessionLabel?.trim() ?? "");
-    const pending = s.pendingCount > 0 ? ` &middot; ${s.pendingCount} pending` : "";
-    const meta =
-      p === "active"
-        ? `active${pending}`
-        : p === "idle"
-          ? `idle <span class="rage" data-age="${s.lastActive}">${relAge(s.lastActive)}</span>${pending}`
-          : `left <span class="rage" data-age="${s.leftAt ?? s.lastSeen}">${relAge(s.leftAt ?? s.lastSeen)}</span>`;
-    return `
-      <div class="roster-row" data-presence="${p}">
-        <span class="presence-dot"></span>
-        <span class="harness-badge">${harnessIcon(harness)}</span>
-        <span class="roster-label">${who}</span>
-        <span class="roster-intent" title="${escapeHtml(scope)}">${escapeHtml(scope)}</span>
-        <span class="roster-meta">${meta}</span>
-      </div>`;
   }
 
   private claim(proposal: Proposal): void {
@@ -1051,23 +1018,7 @@ export class Gatekeeper {
     const current = this.connectionName || null;
     hist.innerHTML = this.history
       .filter((h) => h.connection === current)
-      .map((h) => {
-        const harness = h.session?.harness?.trim() || null;
-        const who = sessionDisplayName(h.session, h.id);
-        return `
-        <button class="hrow" type="button" data-hist="${escapeHtml(h.id)}"${h.intent ? "" : " data-no-intent"} title="${escapeHtml(h.id)}">
-          <span class="harness-badge">${harnessIcon(harness)}</span>
-          <span class="hwho" title="${escapeHtml(who)}">${escapeHtml(who)}</span>
-          <span class="hstatus ${h.status}">${h.status === "ok" ? "approved" : "rejected"}</span>
-          <span class="hintent">${escapeHtml(h.intent ? capitalize(h.intent) : previewSql(h.sql))}</span>
-          <span class="hsql">${highlight(previewSql(h.sql))}</span>
-          <span class="htime">
-            <span class="hnote">${escapeHtml(h.note)}</span>
-            <span aria-hidden="true">&middot;</span>
-            <span class="hage" data-age="${h.resolvedAt}">${relAge(h.resolvedAt)}</span>
-          </span>
-        </button>`;
-      })
+      .map((h) => historyRow(h))
       .join("");
   }
 
