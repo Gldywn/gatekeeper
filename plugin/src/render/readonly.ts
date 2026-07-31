@@ -40,7 +40,7 @@ export function readOnlyView(
     gatekeeper: { label: "read-only", state: "ok" },
     beekeeper: beekeeperReadOnly
       ? { label: "read-only", state: "ok" }
-      : { label: "off", state: "mut" },
+      : { label: "writable", state: "warn" },
     endpoint: endpointLayer,
   };
 }

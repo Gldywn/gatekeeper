@@ -7,7 +7,7 @@ describe("render/readonly", () => {
     const v = readOnlyView(false, { replica: false, sessionReadOnly: false }, true);
     expect(v.chip).toEqual({ kind: "warn", label: "writable", lock: false });
     expect(v.gatekeeper).toEqual({ label: "read-only", state: "ok" });
-    expect(v.beekeeper).toEqual({ label: "off", state: "mut" });
+    expect(v.beekeeper).toEqual({ label: "writable", state: "warn" });
     expect(v.endpoint).toEqual({ label: "writable", state: "warn" });
   });
 

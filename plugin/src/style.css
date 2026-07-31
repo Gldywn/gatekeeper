@@ -193,6 +193,21 @@ body {
 .ro.mut {
   color: var(--faint);
 }
+/* Disclosure caret: hints the badge expands into the layer breakdown, and flips up
+   while it is open. */
+.ro-caret {
+  display: inline-flex;
+  color: var(--faint);
+  transition: transform var(--dur) var(--ease);
+}
+.ro-caret svg {
+  width: 11px;
+  height: 11px;
+}
+.ro-wrap:hover .ro-caret,
+.ro-wrap:focus-within .ro-caret {
+  transform: rotate(180deg);
+}
 /* Wraps the badge so the detail popover can anchor to it and reveal on hover/focus
    with no JS toggle. */
 .ro-wrap {
@@ -246,6 +261,16 @@ body {
   border-top: 1px solid var(--edge);
   transform: rotate(45deg);
 }
+/* Invisible bridge over the badge-to-popover gap so the cursor can travel down onto
+   the popover without :hover dropping and closing it mid-move. */
+.ro-pop::after {
+  content: "";
+  position: absolute;
+  top: -9px;
+  left: 0;
+  right: 0;
+  height: 9px;
+}
 .ro-pop-head {
   margin-bottom: 4px;
   font-size: 9.5px;
@@ -253,10 +278,13 @@ body {
   letter-spacing: 0.07em;
   color: var(--faint);
 }
+/* Fixed name column so every "?" lands in the same vertical line whatever the layer
+   name's width, then the state chip pinned to the right. */
 .ro-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 4.5rem 14px 1fr;
   align-items: center;
-  gap: var(--s2);
+  column-gap: var(--s2);
   padding: 5px 0;
 }
 .ro-name {
@@ -326,7 +354,7 @@ body {
 /* Per-layer verdict: ok green (confirmed read-only), warn amber (writer), mut
    faint (neutral / not verified). */
 .ro-state {
-  margin-left: auto;
+  justify-self: end;
   display: inline-flex;
   align-items: center;
   gap: 5px;

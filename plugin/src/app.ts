@@ -19,7 +19,7 @@ import {
   externalLinkIcon,
   gearIcon,
   historyIcon,
-  lockIcon,
+  shieldCheckIcon,
   warnIcon,
 } from "./icons";
 import { BrokerClient } from "./net/broker";
@@ -105,6 +105,10 @@ function runErrorText(error: unknown): string {
 // A quick-menu switch row: the setting name and its live, persisted toggle.
 function quickSwitch(setting: string, label: string, checked: boolean): string {
   return `<label class="qs-row switch-row"><span class="qs-name">${label}</span>${switchInput(setting, label, checked)}</label>`;
+}
+
+function layerGlyph(state: LayerState): string {
+  return state === "ok" ? shieldCheckIcon : state === "warn" ? warnIcon : "";
 }
 
 export class Gatekeeper {
@@ -379,16 +383,16 @@ export class Gatekeeper {
       this.roRow("Beekeeper", HELP_BEEKEEPER, view.beekeeper.label, view.beekeeper.state) +
       this.roRow("Endpoint", HELP_ENDPOINT, view.endpoint.label, view.endpoint.state);
 
-    const { kind, label, lock } = view.chip;
+    const { kind, label } = view.chip;
     const title =
       kind === "ok"
         ? "Read-only below Gatekeeper too, hover for details"
         : kind === "warn"
           ? "Only Gatekeeper enforces read-only here, hover for details"
           : "Endpoint not verified, hover for details";
-    const glyph = lock ? lockIcon : kind === "warn" ? warnIcon : "";
+    // The chevron signals the badge expands into the layer breakdown on hover/focus.
     return `<span class="ro-wrap" tabindex="0">
-      <span class="ro ${kind}" title="${title}">${glyph}${label}</span>
+      <span class="ro ${kind}" title="${title}">${layerGlyph(kind)}${label}<span class="ro-caret" aria-hidden="true">${chevronDown}</span></span>
       <span class="ro-pop" role="tooltip">
         <div class="ro-pop-head">Read-only layers</div>
         ${rows}
@@ -399,7 +403,7 @@ export class Gatekeeper {
   // A layer row: name, a "?" help affordance revealing the explanation on hover and
   // keyboard focus (with an aria-label for screen readers), then the state chip.
   private roRow(name: string, help: string, label: string, state: LayerState): string {
-    return `<div class="ro-row"><span class="ro-name">${name}</span><span class="ro-help" tabindex="0" role="button" aria-label="${escapeHtml(help)}">?<span class="ro-tip" role="tooltip">${escapeHtml(help)}</span></span><span class="ro-state ${state}">${label}</span></div>`;
+    return `<div class="ro-row"><span class="ro-name">${name}</span><span class="ro-help" tabindex="0" role="button" aria-label="${escapeHtml(help)}">?<span class="ro-tip" role="tooltip">${escapeHtml(help)}</span></span><span class="ro-state ${state}">${layerGlyph(state)}${label}</span></div>`;
   }
 
   // Hand the agent non-sensitive context (dialect, database, schema, read-only)
