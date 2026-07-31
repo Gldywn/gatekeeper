@@ -14,6 +14,20 @@ import {
 } from "@beekeeperstudio/plugin";
 import { enter, type Loop, pulse, reveal } from "./anim";
 import { formatSql } from "./format";
+import { highlight } from "./highlight";
+import {
+  activityNote,
+  capitalize,
+  clock,
+  clockTime,
+  dayKey,
+  dayLabel,
+  escapeHtml,
+  outcomeMeta,
+  previewSql,
+  relAge,
+  sessionDisplayName,
+} from "./html";
 import {
   buildingIcon,
   checkIcon,
@@ -35,6 +49,17 @@ import {
   type SchemaContext,
   sensitiveLiterals,
 } from "./schema";
+import type {
+  ActivityEntry,
+  Card,
+  CardState,
+  ConnectionState,
+  HistItem,
+  Presence,
+  Proposal,
+  SessionMeta,
+  SessionRoster,
+} from "./types";
 
 const BROKER_URL = "http://localhost:9999";
 const POLL_MS = 1000;
@@ -52,41 +77,12 @@ const ROSTER_POLL_MS = 2000;
 const SESSION_ACTIVE_MS = 30_000;
 const SESSION_GONE_MS = 45_000;
 
-type CardState = "ready" | "approving" | "executing" | "posting" | "rejecting";
-
-type ConnectionState = "connecting" | "reconnecting" | "connected" | "error";
-
 const CONNECTION_LABEL: Record<ConnectionState, string> = {
   connecting: "connecting...",
   reconnecting: "reconnecting...",
   connected: "connected",
   error: "unreachable",
 };
-
-interface SessionMeta {
-  sessionId: string;
-  harness: string | null;
-  harnessVersion: string | null;
-  project: string | null;
-  sessionLabel: string | null;
-}
-
-interface SessionRoster {
-  sessionId: string;
-  harness: string | null;
-  harnessVersion: string | null;
-  project: string | null;
-  createdAt: number;
-  lastSeen: number;
-  lastActive: number;
-  connection: string | null;
-  leftAt: number | null;
-  pendingCount: number;
-  lastIntent: string | null;
-  sessionLabel: string | null;
-}
-
-type Presence = "active" | "idle" | "gone";
 
 const PRESENCE_ORDER: Record<Presence, number> = { active: 0, idle: 1, gone: 2 };
 
@@ -95,55 +91,6 @@ function presence(s: SessionRoster, now: number): Presence {
     return "gone";
   }
   return now - s.lastActive <= SESSION_ACTIVE_MS ? "active" : "idle";
-}
-
-interface Proposal {
-  id: string;
-  sql: string;
-  intent?: string;
-  createdAt: number;
-  expiresAt: number;
-  leaseId: string;
-  leaseExpiresAt: number;
-  sessionId: string;
-  session: SessionMeta | null;
-}
-
-interface Card extends Proposal {
-  state: CardState;
-  // Host-side only: which tables/PII the query touches, for the human's eyes.
-  // Never posted to the broker, so the agent never learns the schema.
-  schema?: SchemaContext | null;
-}
-
-interface HistItem {
-  id: string;
-  status: "ok" | "no";
-  note: string;
-  sql: string;
-  resolvedAt: number;
-  connection: string | null;
-  session: SessionMeta | null;
-  intent?: string;
-  result?: HistResult;
-}
-
-// The durable, PII-safe audit record served by GET /activity. It never carries
-// result rows: an approved query contributes a scalar rowCount only.
-interface ActivityEntry {
-  id: string;
-  createdAt: number;
-  decidedAt: number | null;
-  sessionId: string;
-  harness: string | null;
-  project: string | null;
-  sessionLabel: string | null;
-  sql: string;
-  intent: string | null;
-  state: string;
-  reason: string | null;
-  error: string | null;
-  rowCount: number | null;
 }
 
 async function runApprovedQuery(
@@ -197,147 +144,6 @@ async function storeToken(value: string): Promise<void> {
 async function clearToken(): Promise<void> {
   await appStorage.setItem(TOKEN_KEY, "", { encrypted: true });
   await appStorage.setItem(TOKEN_KEY, "");
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-// Display polish for an agent-written intent: force the first character upper,
-// in case it arrived lowercase. A non-letter first char is left as-is.
-function capitalize(value: string): string {
-  return value.charAt(0).toUpperCase() + value.slice(1);
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-// Wrap the given column names where they appear in the highlighted SQL. The guards
-// keep a match from landing inside an existing highlight span, a string, or a longer
-// word, so passes for different classes compose without corrupting each other.
-function markColumns(html: string, columns: readonly string[] | undefined, cls: string): string {
-  if (!columns?.length) {
-    return html;
-  }
-  const flag = new RegExp(`(?<![\\w>"'])(${columns.map(escapeRegExp).join("|")})(?![\\w<])`, "gi");
-  return html.replace(flag, `<span class="${cls}">$1</span>`);
-}
-
-function highlight(
-  sql: string,
-  pii?: readonly string[],
-  client?: readonly string[],
-  literals?: readonly string[],
-): string {
-  const sensitive = new Set(literals ?? []);
-  let html = escapeHtml(sql)
-    .replace(
-      /\b(SELECT|FROM|WHERE|GROUP BY|ORDER BY|LIMIT|AS|AND|OR|JOIN|ON|INTERVAL|DELETE|UPDATE|INSERT|WITH)\b/g,
-      '<span class="kw">$1</span>',
-    )
-    .replace(/\b(count|sum|now|avg|max|min)\b/g, '<span class="fn">$1</span>')
-    // A string literal exposing a sensitive value gets an extra class so the value,
-    // not just the column, stands out in the query text.
-    .replace(
-      /('[^']*')/g,
-      (m) => `<span class="st${sensitive.has(m.slice(1, -1)) ? " sensitive-val" : ""}">${m}</span>`,
-    );
-  html = markColumns(html, pii, "pii-col");
-  html = markColumns(html, client, "client-col");
-  return html;
-}
-
-function clock(ms: number): string {
-  const s = Math.max(0, Math.round(ms / 1000));
-  const m = Math.floor(s / 60);
-  const r = s % 60;
-  return `${m}:${r < 10 ? "0" : ""}${r}`;
-}
-
-function relAge(createdAt: number): string {
-  const s = Math.max(0, Math.round((Date.now() - createdAt) / 1000));
-  return s < 60 ? `${s}s ago` : `${Math.floor(s / 60)}m ago`;
-}
-
-const HIST_SQL_PREVIEW_CHARS = 140;
-
-// Truncate the raw SQL before highlight()/escapeHtml() run, so highlight() only
-// ever wraps complete substrings; slicing already-highlighted HTML could cut a tag.
-function previewSql(sql: string): string {
-  const flat = sql.replace(/\s+/g, " ").trim();
-  return flat.length > HIST_SQL_PREVIEW_CHARS
-    ? `${flat.slice(0, HIST_SQL_PREVIEW_CHARS)}...`
-    : flat;
-}
-
-function sessionDisplayName(session: SessionMeta | null, fallback: string): string {
-  const project = session?.project?.trim();
-  if (project) {
-    return project;
-  }
-  const harness = session?.harness?.trim();
-  return harness || session?.sessionId || fallback;
-}
-
-// Local calendar-day key (YYYY-MM-DD) that groups the activity feed by day.
-function dayKey(ts: number): string {
-  const d = new Date(ts);
-  return `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, "0")}-${`${d.getDate()}`.padStart(2, "0")}`;
-}
-
-function dayLabel(ts: number): string {
-  const key = dayKey(ts);
-  const now = Date.now();
-  if (key === dayKey(now)) {
-    return "Today";
-  }
-  if (key === dayKey(now - 86_400_000)) {
-    return "Yesterday";
-  }
-  return new Date(ts).toLocaleDateString(undefined, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  });
-}
-
-function clockTime(ts: number): string {
-  return new Date(ts).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
-}
-
-// Map a terminal state to the shared status tokens: green approved, red
-// rejected/failed, faint for the neutral terminals (expired/cancelled).
-function outcomeMeta(state: string): { cls: "ok" | "no" | "mut"; label: string } {
-  if (state === "approved") {
-    return { cls: "ok", label: "approved" };
-  }
-  if (state === "rejected") {
-    return { cls: "no", label: "rejected" };
-  }
-  if (state === "failed") {
-    return { cls: "no", label: "failed" };
-  }
-  return { cls: "mut", label: state };
-}
-
-// The short outcome note on a collapsed row: a scalar row count, the rejection
-// reason, or the failure error. Never any row content.
-function activityNote(e: ActivityEntry): string {
-  if (e.state === "approved") {
-    return e.rowCount != null ? `${e.rowCount} rows` : "";
-  }
-  if (e.state === "rejected") {
-    return e.reason ?? "";
-  }
-  if (e.state === "failed") {
-    return e.error ?? "";
-  }
-  return "";
 }
 
 const HEADER = `
