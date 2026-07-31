@@ -167,32 +167,31 @@ body {
   background: color-mix(in oklch, var(--amber) 14%, transparent);
   white-space: nowrap;
 }
-/* Read-only guarantee, shown in the chip and echoed in the popover. */
+/* Binary read-only badge, shown in the chip and echoed in the popover. Its tone is
+   set by an explicit state class: ok green (read-only), warn amber (writable), mut
+   faint (unverified). */
 .ro {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   flex: none;
   font-size: 11px;
-  color: var(--ok);
+  color: var(--faint);
   white-space: nowrap;
 }
+.ro svg,
 .ro .ico {
   width: 12px;
   height: 12px;
 }
-/* Not read-only at every layer: the lock stays (Gatekeeper still enforces
-   SELECT-only) but the tone shifts to amber with an appended warn glyph. */
+.ro.ok {
+  color: var(--ok);
+}
 .ro.warn {
   color: var(--amber);
 }
-.ro-flag {
-  display: inline-flex;
-  align-items: center;
-}
-.ro-flag svg {
-  width: 11px;
-  height: 11px;
+.ro.mut {
+  color: var(--faint);
 }
 /* Wraps the badge so the detail popover can anchor to it and reveal on hover/focus
    with no JS toggle. */
@@ -263,6 +262,66 @@ body {
 .ro-name {
   font-size: 12px;
   color: var(--text);
+}
+/* Per-layer "?" help: a small circle that reveals its explanation on hover and
+   keyboard focus. Its aria-label carries the same sentence for screen readers. */
+.ro-help {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border-radius: 50%;
+  border: 1px solid var(--edge);
+  color: var(--faint);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+  user-select: none;
+}
+.ro-help:hover,
+.ro-help:focus-visible {
+  color: var(--text);
+  border-color: var(--faint);
+  outline: none;
+}
+/* Opens to the LEFT of the "?" (toward the header interior) so it never pushes past
+   the popover's right edge; body overflow-x: clip guarantees no horizontal scroll. */
+.ro-tip {
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 8px);
+  transform: translateY(-50%);
+  z-index: 7;
+  width: max-content;
+  max-width: 210px;
+  padding: 7px 9px;
+  background: var(--surface);
+  border: 1px solid var(--edge);
+  border-radius: 7px;
+  box-shadow:
+    0 10px 28px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 var(--hi);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: normal;
+  text-align: left;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity var(--dur) var(--ease),
+    visibility var(--dur) var(--ease);
+}
+.ro-help:hover .ro-tip,
+.ro-help:focus .ro-tip,
+.ro-help:focus-visible .ro-tip {
+  opacity: 1;
+  visibility: visible;
 }
 /* Per-layer verdict: ok green (confirmed read-only), warn amber (writer), mut
    faint (neutral / not verified). */
@@ -431,42 +490,96 @@ body {
   gap: var(--s2);
   padding: 5px 0;
 }
+label.qs-row {
+  cursor: pointer;
+}
 .qs-name {
   font-size: 12px;
   color: var(--text);
 }
-.qs-val {
-  margin-left: auto;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--muted);
+/* The locked read-only access control sits above the switches, set apart by a rule
+   so it reads as the single mode selector, not one of the toggles below it. */
+.qs-access {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 3px 0 9px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--edge);
 }
-.qs-lock {
+.qs-access-name {
+  font-size: 12px;
+  font-weight: 560;
+  color: var(--text);
+}
+.qs-access-ctl {
   margin-left: auto;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  font-size: 10px;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  color: var(--ok);
+  gap: 6px;
 }
-.qs-lock .ico {
-  width: 11px;
-  height: 11px;
+.qs-switches {
+  display: flex;
+  flex-direction: column;
 }
-/* Enabled-safeguard state as a calm pill, not a toggle: these are enforced and
-   not configurable yet, so nothing here should read as switchable. */
-.qs-state {
-  margin-left: auto;
-  padding: 1px 7px;
+/* A real checkbox restyled as a track+knob: ON slides the knob and tints the track
+   green (--ok). Shared by the quick menu and the settings overlay. */
+.switch {
+  appearance: none;
+  -webkit-appearance: none;
+  margin: 0;
+  position: relative;
+  flex: none;
+  width: 34px;
+  height: 18px;
   border-radius: 999px;
-  background: color-mix(in oklch, var(--ok) 12%, transparent);
+  background: var(--sunken);
+  border: 1px solid var(--edge);
+  cursor: pointer;
+  transition:
+    background var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
+}
+.switch::before {
+  content: "";
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--faint);
+  transition:
+    transform var(--dur) var(--ease),
+    background var(--dur) var(--ease);
+}
+.switch:checked {
+  background: color-mix(in oklch, var(--ok) 55%, transparent);
+  border-color: color-mix(in oklch, var(--ok) 45%, transparent);
+}
+.switch:checked::before {
+  transform: translateX(16px);
+  background: var(--ok);
+}
+.switch:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+/* Locked on: dimmed and non-interactive so it clearly cannot be flipped. */
+.switch.locked {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+.switch-lock {
+  display: inline-flex;
   color: var(--ok);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
+}
+.switch-lock .ico {
+  width: 12px;
+  height: 12px;
+}
+.switch-row .switch {
+  margin-left: auto;
 }
 .pop-foot {
   margin-top: 7px;
@@ -1677,6 +1790,105 @@ body {
 }
 .hstatus.mut {
   color: var(--faint);
+}
+
+/* ---- Settings overlay ---- */
+.settings-card {
+  max-width: min(96vw, 720px);
+}
+.set-back {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 6px;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: color var(--dur) var(--ease);
+}
+.set-back:hover {
+  color: var(--text);
+}
+.set-back:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 1px;
+}
+.set-back svg {
+  width: 14px;
+  height: 14px;
+}
+.settings-card .detail-who {
+  margin-left: var(--s2);
+}
+/* Scope (connection · dialect) pinned to the right, just before the close control. */
+.settings-card .act-conn {
+  margin-left: auto;
+}
+.set-group {
+  display: flex;
+  flex-direction: column;
+  margin-top: var(--s4);
+}
+.set-group-head {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--faint);
+  padding-bottom: var(--s2);
+  margin-bottom: var(--s1);
+  border-bottom: 1px solid var(--edge);
+}
+.set-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s4);
+  padding: var(--s3) 0;
+}
+.set-row + .set-row {
+  border-top: 1px solid var(--hi);
+}
+.set-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.set-name {
+  font-size: 13px;
+  font-weight: 560;
+  color: var(--text);
+}
+.set-desc {
+  font-size: 11.5px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.set-control {
+  margin-left: auto;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.set-select {
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+  background: var(--sunken);
+  border: 1px solid var(--edge);
+  border-radius: 5px;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+.set-select:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 1px;
 }
 
 /* ---- Pairing screen ---- */

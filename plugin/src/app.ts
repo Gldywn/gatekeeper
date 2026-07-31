@@ -23,10 +23,13 @@ import {
   warnIcon,
 } from "./icons";
 import { BrokerClient } from "./net/broker";
+import { lockedReadOnlySwitch, switchInput } from "./render/controls";
 import { historyRow } from "./render/history";
 import { queueHtml, readyActions, schemaInner } from "./render/queue";
+import { type LayerState, readOnlyView } from "./render/readonly";
 import { presence, rosterRow } from "./render/roster";
 import { capResult, type Field, type HistResult } from "./result";
+import { filterSchema, type Settings, SettingsStore } from "./settings";
 import { formatSql } from "./sql/format";
 import { highlight } from "./sql/highlight";
 import { isReadOnlyQuery, mapDialect } from "./sql/readonly";
@@ -42,6 +45,7 @@ import type {
 } from "./types";
 import { ActivityView } from "./views/activity";
 import { DetailView } from "./views/detail";
+import { SettingsView } from "./views/settings";
 
 const BROKER_URL = "http://localhost:9999";
 const POLL_MS = 1000;
@@ -49,11 +53,18 @@ const RENEW_MS = 15_000;
 const TICK_MS = 1000;
 const CONN_CHECK_MS = 5000;
 const TOKEN_KEY = "gatekeeper.token";
-const HIST_MAX = 20;
 // Results are held in the iframe only to power the detail view; bound the total
 // across all items here (the per-item caps live in ./result).
 const HIST_MAX_TOTAL_BYTES = 2 * 1024 * 1024;
 const ROSTER_POLL_MS = 2000;
+
+// The read-only layer help sentences, revealed by each row's "?" affordance.
+const HELP_GATEKEEPER =
+  "Gatekeeper only ever runs read-only SELECT queries. It never sends a write to the database, whatever the connection would allow.";
+const HELP_BEEKEEPER =
+  "Beekeeper's own connection read-only mode. When on, Beekeeper blocks any write on this connection by itself.";
+const HELP_ENDPOINT =
+  "The database endpoint this connection actually reaches. A read replica (such as an Aurora reader) rejects writes at the server, even if the credentials could write.";
 
 const CONNECTION_LABEL: Record<ConnectionState, string> = {
   connecting: "connecting...",
@@ -91,40 +102,10 @@ function runErrorText(error: unknown): string {
   return "Query execution failed";
 }
 
-const HEADER = `
-  <header class="bar">
-    <span class="brand">
-      <svg class="mark" viewBox="0 0 24 26" fill="none" aria-hidden="true">
-        <polygon points="12,1.4 22,7 22,19 12,24.6 2,19 2,7" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-        <polygon points="12,7.4 16.8,10.2 16.8,15.8 12,18.6 7.2,15.8 7.2,10.2" fill="currentColor" fill-opacity="0.92"/>
-      </svg>
-      <span class="wordmark">Gatekeeper</span>
-    </span>
-    <span class="conn-chip" id="conn"></span>
-    <span class="bar-right">
-      <span class="conn-status" id="connStatus" aria-live="polite"></span>
-      <span class="dsep"></span>
-      <span class="gear-wrap">
-        <button class="gear" id="settingsGear" type="button" aria-label="Settings" aria-haspopup="true" aria-expanded="false">${gearIcon}</button>
-        <div class="settings-pop" id="settingsPop" role="menu" aria-label="Safeguards" hidden>
-          <div class="pop-head">Safeguards</div>
-          <div class="qs-row">
-            <span class="qs-name">Read-only</span>
-            <span class="qs-lock">${lockIcon}enforced</span>
-          </div>
-          <div class="qs-row"><span class="qs-name">PII flagging</span><span class="qs-state">on</span></div>
-          <div class="qs-row"><span class="qs-name">Client-data flagging</span><span class="qs-state">on</span></div>
-          <div class="qs-row"><span class="qs-name">Schema annotation</span><span class="qs-state">on</span></div>
-          <div class="qs-row"><span class="qs-name">Sensitive-value detection</span><span class="qs-state">on</span></div>
-          <div class="qs-row"><span class="qs-name">Request expiry</span><span class="qs-val">15 min</span></div>
-          <div class="qs-row"><span class="qs-name">Activity audit</span><span class="qs-state">on</span></div>
-          <div class="pop-foot">
-            <button class="pop-full" id="settingsAll" type="button" title="Full settings — coming soon">All settings ${externalLinkIcon}</button>
-          </div>
-        </div>
-      </span>
-    </span>
-  </header>`;
+// A quick-menu switch row: the setting name and its live, persisted toggle.
+function quickSwitch(setting: string, label: string, checked: boolean): string {
+  return `<label class="qs-row switch-row"><span class="qs-name">${label}</span>${switchInput(setting, label, checked)}</label>`;
+}
 
 export class Gatekeeper {
   private token: string | null = null;
@@ -173,22 +154,35 @@ export class Gatekeeper {
   private connectionState: ConnectionState = "connecting";
   private readonly root: HTMLElement;
   private readonly broker = new BrokerClient({ baseUrl: BROKER_URL, tokenKey: TOKEN_KEY });
+  private readonly settingsStore = new SettingsStore();
   private readonly detailView: DetailView;
   private readonly activityView: ActivityView;
+  private readonly settingsView: SettingsView;
 
   constructor(root: HTMLElement) {
     this.root = root;
-    this.detailView = new DetailView({ root, annotator: this.annotator });
+    this.detailView = new DetailView({
+      root,
+      annotator: this.annotator,
+      settings: () => this.settingsStore.get(),
+    });
     this.activityView = new ActivityView({
       root,
       broker: this.broker,
       connectionName: () => this.connectionName,
       scope: () => this.conn?.connectionName,
     });
+    this.settingsView = new SettingsView({
+      root,
+      settings: () => this.settingsStore.get(),
+      connectionName: () => this.connectionName,
+      dialect: () => this.dialect,
+    });
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
         this.activityView.close();
         this.detailView.close();
+        this.settingsView.close();
         this.setSettingsOpen(false);
       }
     });
@@ -229,6 +223,7 @@ export class Gatekeeper {
       this.renderPairing();
       return;
     }
+    await this.settingsStore.load(this.connectionName);
     this.renderShell();
     // The schema annotation caches columns per table; a DDL change invalidates it.
     addNotificationListener("tablesChanged", () => this.annotator.clearCache());
@@ -329,12 +324,21 @@ export class Gatekeeper {
     // The endpoint belongs to the old database; re-probe the new one from scratch.
     this.endpointRO = null;
     this.endpointProbed = false;
+    // Settings are per connection; the overlay now shows a different scope, so close
+    // it and reload (which re-syncs the quick-menu switches and the activity trigger).
+    this.settingsView.close();
     this.renderConnLabel();
     void this.reportConnection();
     void this.probeEndpoint();
+    void this.reloadSettings();
     this.renderQueue();
     this.renderHistory();
     this.renderRoster();
+  }
+
+  private async reloadSettings(): Promise<void> {
+    await this.settingsStore.load(this.connectionName);
+    this.onSettingsChanged();
   }
 
   // The connection context lives once, in the header: what database the whole
@@ -365,33 +369,26 @@ export class Gatekeeper {
       <span class="dsep"></span>${this.readOnlyBadge()}`;
   }
 
-  // Gatekeeper always enforces SELECT-only, so green means a layer below it also
-  // blocks writes; a read replica alone earns it since it rejects writes server-side
-  // whatever Beekeeper's toggle says. Amber means only Gatekeeper stands.
+  // A binary badge over one harmonized vocabulary: green lock read-only when a layer
+  // below Gatekeeper also blocks writes, amber writable when the probe confirmed a
+  // writer, muted unverified otherwise. The probe result never leaves the host.
   private readOnlyBadge(): string {
-    const beekeeperReadOnly = this.conn?.readOnly ?? false;
-    const ro = this.endpointRO;
-    const endpointReadOnly = ro !== null && (ro.replica || ro.sessionReadOnly);
-    const beyondGatekeeper = beekeeperReadOnly || endpointReadOnly;
-
-    const endpoint = this.endpointLayer();
+    const view = readOnlyView(this.conn?.readOnly ?? false, this.endpointRO, this.endpointProbed);
     const rows =
-      this.roRow("Gatekeeper", "SELECT only", "ok") +
-      this.roRow(
-        "Beekeeper connection",
-        beekeeperReadOnly ? "on" : "off",
-        beekeeperReadOnly ? "ok" : "mut",
-      ) +
-      this.roRow("Endpoint", endpoint.label, endpoint.state);
+      this.roRow("Gatekeeper", HELP_GATEKEEPER, view.gatekeeper.label, view.gatekeeper.state) +
+      this.roRow("Beekeeper", HELP_BEEKEEPER, view.beekeeper.label, view.beekeeper.state) +
+      this.roRow("Endpoint", HELP_ENDPOINT, view.endpoint.label, view.endpoint.state);
 
-    // The label stays "read-only" (Gatekeeper does enforce it); tone and the warn
-    // glyph carry whether a layer below Gatekeeper also blocks writes.
-    const title = beyondGatekeeper
-      ? "Read-only below Gatekeeper too, hover for details"
-      : "Only Gatekeeper enforces read-only here, hover for details";
-    const flag = beyondGatekeeper ? "" : `<span class="ro-flag">${warnIcon}</span>`;
+    const { kind, label, lock } = view.chip;
+    const title =
+      kind === "ok"
+        ? "Read-only below Gatekeeper too, hover for details"
+        : kind === "warn"
+          ? "Only Gatekeeper enforces read-only here, hover for details"
+          : "Endpoint not verified, hover for details";
+    const glyph = lock ? lockIcon : kind === "warn" ? warnIcon : "";
     return `<span class="ro-wrap" tabindex="0">
-      <span class="ro${beyondGatekeeper ? "" : " warn"}" title="${title}">${lockIcon}read-only${flag}</span>
+      <span class="ro ${kind}" title="${title}">${glyph}${label}</span>
       <span class="ro-pop" role="tooltip">
         <div class="ro-pop-head">Read-only layers</div>
         ${rows}
@@ -399,25 +396,10 @@ export class Gatekeeper {
     </span>`;
   }
 
-  // "not verified" covers both pending and a probe that ran but could not confirm
-  // (non-Postgres or error); a read replica or a read-only session is confirmed ok.
-  private endpointLayer(): { label: string; state: "ok" | "warn" | "mut" } {
-    const ro = this.endpointRO;
-    if (!this.endpointProbed || ro === null) {
-      return { label: "not verified", state: "mut" };
-    }
-    if (ro.replica) {
-      return { label: "read replica", state: "ok" };
-    }
-    if (ro.sessionReadOnly) {
-      return { label: "session read-only", state: "ok" };
-    }
-    return { label: "writable", state: "warn" };
-  }
-
-  private roRow(name: string, label: string, state: "ok" | "warn" | "mut"): string {
-    const glyph = state === "ok" ? checkIcon : state === "warn" ? warnIcon : "";
-    return `<div class="ro-row"><span class="ro-name">${name}</span><span class="ro-state ${state}">${glyph}${escapeHtml(label)}</span></div>`;
+  // A layer row: name, a "?" help affordance revealing the explanation on hover and
+  // keyboard focus (with an aria-label for screen readers), then the state chip.
+  private roRow(name: string, help: string, label: string, state: LayerState): string {
+    return `<div class="ro-row"><span class="ro-name">${name}</span><span class="ro-help" tabindex="0" role="button" aria-label="${escapeHtml(help)}">?<span class="ro-tip" role="tooltip">${escapeHtml(help)}</span></span><span class="ro-state ${state}">${label}</span></div>`;
   }
 
   // Hand the agent non-sensitive context (dialect, database, schema, read-only)
@@ -484,6 +466,7 @@ export class Gatekeeper {
       await this.broker.setToken(value);
       this.token = value;
       this.polling = true;
+      await this.settingsStore.load(this.connectionName);
       this.renderShell();
       void this.loadInflight();
       void this.poll();
@@ -502,10 +485,50 @@ export class Gatekeeper {
     });
   }
 
+  // The header quick menu ("Guards") reflects the live per-connection settings, so it
+  // is built here rather than as a static const.
+  private headerHtml(): string {
+    const s = this.settingsStore.get();
+    return `
+  <header class="bar">
+    <span class="brand">
+      <svg class="mark" viewBox="0 0 24 26" fill="none" aria-hidden="true">
+        <polygon points="12,1.4 22,7 22,19 12,24.6 2,19 2,7" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+        <polygon points="12,7.4 16.8,10.2 16.8,15.8 12,18.6 7.2,15.8 7.2,10.2" fill="currentColor" fill-opacity="0.92"/>
+      </svg>
+      <span class="wordmark">Gatekeeper</span>
+    </span>
+    <span class="conn-chip" id="conn"></span>
+    <span class="bar-right">
+      <span class="conn-status" id="connStatus" aria-live="polite"></span>
+      <span class="dsep"></span>
+      <span class="gear-wrap">
+        <button class="gear" id="settingsGear" type="button" aria-label="Settings" aria-haspopup="true" aria-expanded="false">${gearIcon}</button>
+        <div class="settings-pop" id="settingsPop" role="menu" aria-label="Guards" hidden>
+          <div class="pop-head">Guards</div>
+          <div class="qs-access">
+            <span class="qs-access-name">Read-only mode</span>
+            <span class="qs-access-ctl">${lockedReadOnlySwitch()}</span>
+          </div>
+          <div class="qs-switches">
+            ${quickSwitch("piiFlagging", "PII flagging", s.piiFlagging)}
+            ${quickSwitch("clientFlagging", "Client-data flagging", s.clientFlagging)}
+            ${quickSwitch("schemaAnnotation", "Schema annotation", s.schemaAnnotation)}
+            ${quickSwitch("sensitiveValues", "Sensitive-value detection", s.sensitiveValues)}
+          </div>
+          <div class="pop-foot">
+            <button class="pop-full" id="settingsAll" type="button">Open all settings ${externalLinkIcon}</button>
+          </div>
+        </div>
+      </span>
+    </span>
+  </header>`;
+  }
+
   private renderShell(): void {
     this.root.innerHTML = `
       <div class="gk">
-        ${HEADER}
+        ${this.headerHtml()}
         <div class="rail" id="rail">
           <section class="roster" id="roster"></section>
         </div>
@@ -522,6 +545,7 @@ export class Gatekeeper {
         </div>
         <div class="detail" id="detail" hidden></div>
         <div class="detail activity-overlay" id="activity" hidden></div>
+        <div class="detail settings-overlay" id="settings" hidden></div>
       </div>`;
     this.renderConnLabel();
     const toggle = this.root.querySelector<HTMLButtonElement>("#htoggle")!;
@@ -600,7 +624,30 @@ export class Gatekeeper {
       this.setSettingsOpen(pop.hidden);
     });
     this.root.querySelector<HTMLButtonElement>("#settingsAll")!.addEventListener("click", () => {
-      // The full settings page is on hold; keep this a harmless no-op until it ships.
+      this.setSettingsOpen(false);
+      this.settingsView.open();
+    });
+    // The quick-menu switches are real inputs; persist on toggle and re-sync surfaces.
+    this.root.querySelector<HTMLElement>("#settingsPop")!.addEventListener("change", (e) => {
+      const input = (e.target as HTMLElement).closest<HTMLInputElement>("input[data-setting]");
+      if (input) {
+        void this.updateSetting(input.dataset.setting!, input.checked);
+      }
+    });
+    const settings = this.root.querySelector<HTMLDivElement>("#settings")!;
+    settings.addEventListener("click", (e) => {
+      const target = e.target as HTMLElement;
+      if (target === settings || target.closest("[data-close]")) {
+        this.settingsView.close();
+      }
+    });
+    settings.addEventListener("change", (e) => {
+      const el = (e.target as HTMLElement).closest<HTMLElement>("[data-setting]");
+      if (el instanceof HTMLSelectElement) {
+        void this.updateSetting(el.dataset.setting!, Number(el.value));
+      } else if (el instanceof HTMLInputElement) {
+        void this.updateSetting(el.dataset.setting!, el.checked);
+      }
     });
     const activity = this.root.querySelector<HTMLDivElement>("#activity")!;
     activity.addEventListener("click", (e) => {
@@ -627,6 +674,7 @@ export class Gatekeeper {
     this.renderQueue();
     this.renderHistory();
     this.renderRoster();
+    this.applyActivityLogVisibility();
     // Rebuilt DOM has a blank pill; force it back to the initial state (the
     // guard in setConnectionState would otherwise skip writing the new node).
     this.setConnectionState("connecting", "", true);
@@ -660,6 +708,55 @@ export class Gatekeeper {
     pop.hidden = !open;
     gear.setAttribute("aria-expanded", String(open));
     gear.classList.toggle("open", open);
+  }
+
+  private async updateSetting(key: string, value: boolean | number): Promise<void> {
+    await this.settingsStore.set({ [key]: value });
+    this.onSettingsChanged();
+  }
+
+  // A setting changed (from either surface): re-sync both control surfaces, re-apply
+  // the activity-log visibility and history cap, and re-annotate the pending cards so
+  // a dropped detection axis stops flagging at once.
+  private onSettingsChanged(): void {
+    this.syncSettingControls();
+    this.applyActivityLogVisibility();
+    this.trimHistory();
+    this.renderHistory();
+    for (const card of [...this.cards]) {
+      void this.analyzeSchema(card);
+    }
+  }
+
+  // Mirror the live settings into every rendered control (quick menu and overlay)
+  // by property, not a rebuild, so the input the human just touched keeps its focus.
+  private syncSettingControls(): void {
+    const s = this.settingsStore.get();
+    for (const el of this.root.querySelectorAll<HTMLElement>("[data-setting]")) {
+      const key = el.dataset.setting as keyof Settings;
+      const value = s[key];
+      if (el instanceof HTMLInputElement && el.type === "checkbox") {
+        el.checked = Boolean(value);
+      } else if (el instanceof HTMLSelectElement) {
+        el.value = String(value);
+      }
+    }
+  }
+
+  // "Activity log" off only hides the trigger; the server still records every request.
+  private applyActivityLogVisibility(): void {
+    const btn = this.root.querySelector<HTMLButtonElement>("#activityBtn");
+    if (btn) {
+      btn.hidden = !this.settingsStore.get().activityLog;
+    }
+  }
+
+  private trimHistory(): void {
+    const cap = this.settingsStore.get().recentlyResolved;
+    if (this.history.length > cap) {
+      this.history.length = cap;
+    }
+    this.enforceHistoryBudget();
   }
 
   private async poll(): Promise<void> {
@@ -787,13 +884,20 @@ export class Gatekeeper {
   // Runs entirely host-side and stores the result on the card only; nothing here
   // ever reaches the broker, so the agent gains no schema knowledge.
   private async analyzeSchema(card: Card): Promise<void> {
+    const settings = this.settingsStore.get();
+    // schemaAnnotation off skips the fetch entirely; re-enabling re-runs this.
+    if (!settings.schemaAnnotation) {
+      card.schema = null;
+      this.renderCardSchema(card);
+      return;
+    }
     const schema = await this.annotator.schemaFor(card.sql);
-    // A mid-fetch connection switch yields null; leave the prior annotation rather
-    // than blanking a card whose columns simply could not be resolved this time.
+    // A mid-fetch connection switch yields undefined; leave the prior annotation
+    // rather than blanking a card whose columns simply could not be resolved.
     if (schema === undefined) {
       return;
     }
-    card.schema = schema;
+    card.schema = filterSchema(schema, settings);
     this.renderCardSchema(card);
   }
 
@@ -1074,7 +1178,7 @@ export class Gatekeeper {
         intent: card.intent,
         result,
       });
-      if (this.history.length > HIST_MAX) {
+      if (this.history.length > this.settingsStore.get().recentlyResolved) {
         this.history.pop();
       }
       this.enforceHistoryBudget();

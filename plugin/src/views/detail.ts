@@ -1,6 +1,7 @@
 import type { SchemaAnnotator } from "../annotate";
 import { detailHtml } from "../render/detail";
 import { schemaInner } from "../render/queue";
+import { filterSchema, type Settings } from "../settings";
 import { formatSql } from "../sql/format";
 import { highlight } from "../sql/highlight";
 import type { HistItem } from "../types";
@@ -8,6 +9,7 @@ import type { HistItem } from "../types";
 interface DetailViewDeps {
   root: HTMLElement;
   annotator: SchemaAnnotator;
+  settings: () => Settings;
 }
 
 // Owns the resolved-history detail overlay (#detail): its open item and DOM subtree.
@@ -19,10 +21,12 @@ export class DetailView {
   private detailItemId: string | null = null;
   private readonly root: HTMLElement;
   private readonly annotator: SchemaAnnotator;
+  private readonly settings: () => Settings;
 
   constructor(deps: DetailViewDeps) {
     this.root = deps.root;
     this.annotator = deps.annotator;
+    this.settings = deps.settings;
   }
 
   open(item: HistItem): void {
@@ -39,10 +43,12 @@ export class DetailView {
   // Match the pending card: once the schema resolves, show the same reads/PII/client
   // annotation under the detail SQL and light the sensitive columns in the query text.
   private async annotateDetail(item: HistItem): Promise<void> {
-    const schema = (await this.annotator.schemaFor(item.sql)) ?? null;
+    const settings = this.settings();
+    const raw = settings.schemaAnnotation ? await this.annotator.schemaFor(item.sql) : null;
     if (this.detailItemId !== item.id) {
       return;
     }
+    const schema = filterSchema(raw ?? null, settings);
     const cs = this.root.querySelector<HTMLElement>("#detail-cs");
     if (cs) {
       cs.innerHTML = schemaInner(schema);
