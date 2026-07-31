@@ -1,18 +1,19 @@
-/* Studied-DNA from beekeeperstudio.io: amber-on-dark, honeycomb-cell mark, amber corner-frame. */
+/* Gatekeeper owns its palette (pinned, no longer deferring to the host's --theme-*
+   vars) so this dark-committed UI reads the same on any Beekeeper theme. */
 :root {
-  --ground: var(--query-editor-bg, oklch(18.5% 0.006 250));
-  --surface: var(--theme-bg, oklch(22% 0.007 250));
+  --ground: oklch(18.5% 0.006 250);
+  --surface: oklch(22% 0.007 250);
   --sunken: oklch(14.5% 0.005 250);
-  --text: var(--text-dark, oklch(93% 0.006 250));
+  --text: oklch(93% 0.006 250);
   --muted: oklch(70% 0.009 250);
   --faint: oklch(53% 0.01 250);
   --edge: color-mix(in oklch, var(--text) 8%, transparent);
   --hi: color-mix(in oklch, var(--text) 6%, transparent);
 
-  --amber: var(--theme-primary, oklch(82% 0.145 88));
+  --amber: oklch(82% 0.145 88);
   --amber-ink: oklch(26% 0.05 88);
-  --ok: var(--brand-success, oklch(75% 0.13 155));
-  --danger: var(--brand-danger, oklch(68% 0.16 25));
+  --ok: oklch(75% 0.13 155);
+  --danger: oklch(68% 0.16 25);
   --exec: oklch(74% 0.1 235);
   /* Client-confidentiality accent: a violet distinct from the red PII danger. */
   --client: oklch(70% 0.15 300);
