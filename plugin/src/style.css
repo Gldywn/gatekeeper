@@ -331,9 +331,11 @@ body {
 }
 /* Fixed name column so every "?" lands in the same vertical line whatever the layer
    name's width, then the state chip pinned to the right. */
+/* "?" first in its own fixed column so all three align on one vertical, then a
+   fixed name column so the left-aligned state chips start at the same x too. */
 .ro-row {
   display: grid;
-  grid-template-columns: 4.5rem 14px 1fr;
+  grid-template-columns: 16px 4.75rem 1fr;
   align-items: center;
   column-gap: var(--s2);
   padding: 5px 0;
@@ -349,15 +351,16 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 14px;
-  height: 14px;
+  width: 15px;
+  height: 15px;
   flex: none;
   border-radius: 50%;
   border: 1px solid var(--edge);
   color: var(--faint);
-  font-size: 9px;
-  font-weight: 700;
-  line-height: 1;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 15px;
+  text-align: center;
   cursor: help;
   user-select: none;
 }
@@ -405,7 +408,7 @@ body {
 /* Per-layer verdict: ok green (confirmed read-only), warn amber (writer), mut
    faint (neutral / not verified). */
 .ro-state {
-  justify-self: end;
+  justify-self: start;
   display: inline-flex;
   align-items: center;
   gap: 5px;

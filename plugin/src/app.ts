@@ -403,7 +403,7 @@ export class Gatekeeper {
   // A layer row: name, a "?" help affordance revealing the explanation on hover and
   // keyboard focus (with an aria-label for screen readers), then the state chip.
   private roRow(name: string, help: string, label: string, state: LayerState): string {
-    return `<div class="ro-row"><span class="ro-name">${name}</span><span class="ro-help" tabindex="0" role="button" aria-label="${escapeHtml(help)}">?<span class="ro-tip" role="tooltip">${escapeHtml(help)}</span></span><span class="ro-state ${state}">${layerGlyph(state)}${label}</span></div>`;
+    return `<div class="ro-row"><span class="ro-help" tabindex="0" role="button" aria-label="${escapeHtml(help)}">?<span class="ro-tip" role="tooltip">${escapeHtml(help)}</span></span><span class="ro-name">${name}</span><span class="ro-state ${state}">${layerGlyph(state)}${label}</span></div>`;
   }
 
   // Hand the agent non-sensitive context (dialect, database, schema, read-only)
