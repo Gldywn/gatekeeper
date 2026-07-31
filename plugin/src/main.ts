@@ -1,5 +1,5 @@
 import "./style.css";
-import type { Column, ConnectionInfo, RunQueryResult } from "@beekeeperstudio/plugin";
+import type { ConnectionInfo, RunQueryResult } from "@beekeeperstudio/plugin";
 import {
   addNotificationListener,
   clipboard,
@@ -12,6 +12,7 @@ import {
   setTabTitle,
 } from "@beekeeperstudio/plugin";
 import { enter, type Loop, pulse, reveal } from "./anim";
+import { SchemaAnnotator } from "./annotate";
 import { clock, dayKey, escapeHtml, relAge } from "./html";
 import { checkIcon, chevronDown, copyIcon, historyIcon } from "./icons";
 import { BrokerClient } from "./net/broker";
@@ -24,13 +25,6 @@ import { capResult, type Field, type HistResult } from "./result";
 import { formatSql } from "./sql/format";
 import { highlight } from "./sql/highlight";
 import { isReadOnlyQuery, mapDialect } from "./sql/readonly";
-import {
-  analyzeSql,
-  clientColumns,
-  piiColumns,
-  type SchemaContext,
-  sensitiveLiterals,
-} from "./sql/schema";
 import type {
   ActivityEntry,
   Card,
@@ -119,9 +113,14 @@ export class Gatekeeper {
     readOnly: boolean;
   } | null = null;
   private readonly cards: Card[] = [];
-  // Columns per "schema.table", populated on demand for the approval-card schema
-  // annotation; cleared on a tablesChanged notification and on connection switch.
-  private readonly schemaCache = new Map<string, Column[]>();
+  // Host-side schema annotation for the approval cards; owns its own column cache
+  // and reads connGeneration through a getter so a mid-fetch switch invalidates it.
+  private readonly annotator = new SchemaAnnotator({
+    getColumns,
+    dialect: () => this.dialect,
+    defaultSchema: () => this.conn?.schema ?? undefined,
+    generation: () => this.connGeneration,
+  });
   // Open deny forms and their in-progress reason text, keyed by card id, so a
   // half-typed reason survives a queue rebuild from a concurrent proposal.
   private readonly denyDrafts = new Map<string, string>();
@@ -186,7 +185,7 @@ export class Gatekeeper {
     }
     this.renderShell();
     // The schema annotation caches columns per table; a DDL change invalidates it.
-    addNotificationListener("tablesChanged", () => this.schemaCache.clear());
+    addNotificationListener("tablesChanged", () => this.annotator.clearCache());
     this.polling = true;
     void this.loadInflight();
     void this.poll();
@@ -272,7 +271,7 @@ export class Gatekeeper {
     this.denyDrafts.clear();
     // The new database has a different schema; drop cached columns so the next
     // card's annotation cannot describe the old connection.
-    this.schemaCache.clear();
+    this.annotator.clearCache();
     // History, activity, and roster are connection-scoped; reset so the old one
     // cannot leak in. The roster re-fetches on its own timer; the activity overlay
     // is closed because it now shows a different connection's audit trail.
@@ -637,7 +636,7 @@ export class Gatekeeper {
   // Runs entirely host-side and stores the result on the card only; nothing here
   // ever reaches the broker, so the agent gains no schema knowledge.
   private async analyzeSchema(card: Card): Promise<void> {
-    const schema = await this.schemaFor(card.sql);
+    const schema = await this.annotator.schemaFor(card.sql);
     // A mid-fetch connection switch yields null; leave the prior annotation rather
     // than blanking a card whose columns simply could not be resolved this time.
     if (schema === undefined) {
@@ -645,48 +644,6 @@ export class Gatekeeper {
     }
     card.schema = schema;
     this.renderCardSchema(card);
-  }
-
-  // The tables and sensitive columns a query touches. Returns null when the SQL will
-  // not parse, or undefined when a connection switch invalidated the column fetch
-  // mid-flight. Host-side only: nothing here ever reaches the broker.
-  private async schemaFor(sql: string): Promise<SchemaContext | null | undefined> {
-    const parsed = analyzeSql(sql, this.dialect);
-    if (!parsed) {
-      return null;
-    }
-    const gen = this.connGeneration;
-    const fallback = this.conn?.schema ?? undefined;
-    const perTable = await Promise.all(
-      parsed.tables.map((t) => this.columnsFor(t.name, t.schema ?? fallback)),
-    );
-    if (gen !== this.connGeneration) {
-      return undefined;
-    }
-    const allColumns = perTable.flat().map((c) => c.name);
-    return {
-      tables: parsed.tables.map((t) => (t.schema ? `${t.schema}.${t.name}` : t.name)),
-      pii: piiColumns(parsed, allColumns),
-      client: clientColumns(parsed, allColumns),
-      literals: sensitiveLiterals(sql, this.dialect),
-      star: parsed.star,
-    };
-  }
-
-  private async columnsFor(table: string, schema: string | undefined): Promise<Column[]> {
-    const key = `${schema ?? ""}.${table}`;
-    const cached = this.schemaCache.get(key);
-    if (cached) {
-      return cached;
-    }
-    try {
-      const columns = await getColumns(table, schema);
-      this.schemaCache.set(key, columns);
-      return columns;
-    } catch {
-      // Unknown table (e.g. a CTE name) or a transient host error: no annotation.
-      return [];
-    }
   }
 
   private async renew(): Promise<void> {
@@ -1026,7 +983,7 @@ export class Gatekeeper {
   // Match the pending card: once the schema resolves, show the same reads/PII/client
   // annotation under the detail SQL and light the sensitive columns in the query text.
   private async annotateDetail(item: HistItem): Promise<void> {
-    const schema = (await this.schemaFor(item.sql)) ?? null;
+    const schema = (await this.annotator.schemaFor(item.sql)) ?? null;
     if (this.detailItemId !== item.id) {
       return;
     }
