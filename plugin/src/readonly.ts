@@ -1,23 +1,9 @@
-import { Parser } from "node-sql-parser";
+import { parser } from "./sql-parser";
 
-const parser = new Parser();
+export { mapDialect } from "./sql-parser";
+
 const FORBIDDEN =
   /"type"\s*:\s*"(delete|update|insert|replace|create|drop|alter|truncate|call|use|grant|revoke|set|lock)"/i;
-
-export function mapDialect(databaseType: string): string {
-  switch (databaseType) {
-    case "sqlserver":
-      return "transactsql";
-    case "mariadb":
-    case "mysql":
-    case "sqlite":
-    case "bigquery":
-    case "snowflake":
-      return databaseType;
-    default:
-      return "postgresql";
-  }
-}
 
 function conservativeReadOnly(sql: string): boolean {
   const stripped = sql

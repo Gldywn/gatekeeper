@@ -1,6 +1,4 @@
-import { Parser } from "node-sql-parser";
-
-const parser = new Parser();
+import { parser } from "./sql-parser";
 
 export interface SchemaContext {
   tables: string[];
