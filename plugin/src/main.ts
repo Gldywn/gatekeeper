@@ -25,19 +25,9 @@ import {
   relAge,
   sessionDisplayName,
 } from "./html";
-import {
-  buildingIcon,
-  checkIcon,
-  chevronDown,
-  copyIcon,
-  downloadIcon,
-  harnessIcon,
-  historyIcon,
-  pencilIcon,
-  sendIcon,
-  warnIcon,
-} from "./icons";
+import { checkIcon, chevronDown, copyIcon, downloadIcon, harnessIcon, historyIcon } from "./icons";
 import { BrokerClient } from "./net/broker";
+import { queueHtml, readyActions, schemaInner } from "./render/queue";
 import { capResult, cell, type Field, type HistResult } from "./result";
 import { formatSql } from "./sql/format";
 import { highlight } from "./sql/highlight";
@@ -57,7 +47,6 @@ import type {
   HistItem,
   Presence,
   Proposal,
-  SessionMeta,
   SessionRoster,
 } from "./types";
 
@@ -810,7 +799,7 @@ export class Gatekeeper {
       }
       this.breatheLoop?.stop();
       this.breatheLoop = undefined;
-      queue.innerHTML = this.queueHtml();
+      queue.innerHTML = queueHtml(this.cards, this.dialect, this.denyDrafts);
       if (focusedDeny) {
         const input = queue.querySelector<HTMLInputElement>(`[data-deny-input="${focusedDeny}"]`);
         input?.focus();
@@ -835,46 +824,6 @@ export class Gatekeeper {
     this.updateTabTitle();
   }
 
-  private queueHtml(): string {
-    if (!this.cards.length) {
-      return `<div class="waiting"><svg class="waiting-mark" viewBox="0 0 24 26" fill="none" aria-hidden="true"><polygon points="12,1.4 22,7 22,19 12,24.6 2,19 2,7" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><polygon points="12,7.4 16.8,10.2 16.8,15.8 12,18.6 7.2,15.8 7.2,10.2" fill="currentColor" fill-opacity="0.85"/></svg><span>Waiting for a query proposal...</span></div>`;
-    }
-    // Group by session, keeping the arrival order of both groups and cards.
-    // Always render the session header, even for a single session, so the human
-    // can see which agent is asking.
-    const groups: { session: SessionMeta | null; cards: Card[] }[] = [];
-    for (const card of this.cards) {
-      let group = groups.find((g) => g.cards[0]?.sessionId === card.sessionId);
-      if (!group) {
-        group = { session: card.session, cards: [] };
-        groups.push(group);
-      }
-      group.cards.push(card);
-    }
-    return groups.map((g) => this.groupHtml(g.session, g.cards)).join("");
-  }
-
-  private groupHtml(session: SessionMeta | null, cards: Card[]): string {
-    const project = session?.project?.trim();
-    const harness = session?.harness?.trim() || null;
-    const label = project
-      ? escapeHtml(project)
-      : harness
-        ? escapeHtml(harness)
-        : escapeHtml(cards[0].sessionId ?? "session");
-    const intent = session?.sessionLabel?.trim();
-    return `
-      <section class="group">
-        <div class="group-head">
-          <span class="harness-badge">${harnessIcon(harness)}</span>
-          <span class="group-label">${label}</span>
-          ${intent ? `<span class="group-intent" title="${escapeHtml(capitalize(intent))}">${escapeHtml(capitalize(intent))}</span>` : ""}
-          <span class="group-count">${cards.length}</span>
-        </div>
-        ${cards.map((c) => this.cardHtml(c)).join("")}
-      </section>`;
-  }
-
   // Surface the count of queries awaiting a decision in the Beekeeper tab so it
   // reads from the tab strip; only touch the host when the count changes.
   private updateTabTitle(): void {
@@ -887,74 +836,10 @@ export class Gatekeeper {
     void setTabTitle(title);
   }
 
-  private cardHtml(card: Card): string {
-    const readOnly = isReadOnlyQuery(card.sql, this.dialect);
-    const remaining = card.expiresAt - Date.now();
-    let actions: string;
-    if (card.state !== "ready") {
-      actions = `<div class="actions"><span class="busy"><span class="spin"></span>${this.busyLabel(card.state)}...</span></div>`;
-    } else {
-      actions = this.readyActions(card.id, readOnly);
-    }
-    const blockedNote = readOnly
-      ? ""
-      : '<p class="blocked-note"><svg viewBox="0 0 16 16" fill="none"><path d="M8 1.7 1 14h14L8 1.7Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 6.3v3.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.7" r=".8" fill="currentColor"/></svg>Read-only only. This query can be rejected.</p>';
-    return `
-      <div class="card ${readOnly ? "" : "blocked"}" data-card="${card.id}">
-        <div class="top">
-          ${card.intent ? `<span class="intent">${escapeHtml(capitalize(card.intent))}</span>` : `<span class="intent">${escapeHtml(card.id)}</span>`}
-          <span class="${remaining <= 45_000 ? "lease low" : "lease"}">${clock(remaining)}</span>
-        </div>
-        <div class="meta">${escapeHtml(card.id)} &middot; ${relAge(card.createdAt)}</div>
-        <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(card.sql)}" aria-label="Copy SQL">${copyIcon}</button><code class="sql-body" id="sqlbody-${card.id}">${highlight(formatSql(card.sql), card.schema?.pii, card.schema?.client, card.schema?.literals)}</code></pre>
-        <div class="card-schema" id="cs-${card.id}">${this.schemaInner(card.schema)}</div>
-        ${blockedNote}${actions}
-      </div>`;
-  }
-
-  private readyActions(id: string, readOnly: boolean): string {
-    const revise = this.denyDrafts.has(id)
-      ? this.denyField(id, this.denyDrafts.get(id) ?? "")
-      : `<button class="deny-open" type="button" data-deny-open="${id}" aria-label="Reject and ask the agent to change something" title="Ask the agent to change something">${pencilIcon}</button>`;
-    return `<div class="actions">
-             <button class="btn approve" type="button" data-approve="${id}" ${readOnly ? "" : "disabled"}>Approve</button>
-             <button class="btn reject" type="button" data-reject="${id}">Reject</button>
-             ${revise}
-           </div>`;
-  }
-
-  // Reject-with-a-revision: an inline field, right of Reject, whose note is the
-  // change the human wants; sent to the agent on Enter or the send affordance.
-  private denyField(id: string, value = ""): string {
-    return `<div class="deny-field">
-             <input class="deny-reason" type="text" maxlength="140" data-deny-input="${id}" aria-label="What should the agent change?" placeholder="What should the agent change?" autocomplete="off" spellcheck="false" value="${escapeHtml(value)}" />
-             <button class="deny-send" type="button" data-deny="${id}" aria-label="Send to the agent">${sendIcon}</button>
-           </div>`;
-  }
-
-  // Compact under-SQL annotation: the tables read and a possible-PII flag. Empty
-  // (collapsed by CSS) until the async analysis lands or when nothing is known.
-  private schemaInner(schema: SchemaContext | null | undefined): string {
-    if (!schema?.tables.length) {
-      return "";
-    }
-    const tables = `<div class="cs-line"><span class="cs-k">reads</span><span class="cs-list">${schema.tables.map(escapeHtml).join(" &middot; ")}</span></div>`;
-    const pii = schema.pii.length
-      ? `<div class="cs-line cs-pii"><span class="cs-warn">${warnIcon}possible PII</span><span class="cs-list">${schema.pii.map(escapeHtml).join(" &middot; ")}</span></div>`
-      : "";
-    const client = schema.client.length
-      ? `<div class="cs-line cs-client"><span class="cs-warn">${buildingIcon}client data</span><span class="cs-list">${schema.client.map(escapeHtml).join(" &middot; ")}</span></div>`
-      : "";
-    const literal = schema.literals.length
-      ? `<div class="cs-line cs-literal"><span class="cs-warn">${warnIcon}sensitive value</span><span class="cs-list">${schema.literals.map((v) => escapeHtml(`'${v}'`)).join(" &middot; ")}</span></div>`
-      : "";
-    return tables + pii + client + literal;
-  }
-
   private renderCardSchema(card: Card): void {
     const el = this.root.querySelector<HTMLElement>(`#cs-${CSS.escape(card.id)}`);
     if (el) {
-      el.innerHTML = this.schemaInner(card.schema);
+      el.innerHTML = schemaInner(card.schema);
     }
     // Re-highlight the SQL now that the sensitive columns are known, so they light
     // up in the query text too, not only in the flags below.
@@ -967,13 +852,6 @@ export class Gatekeeper {
         card.schema?.literals,
       );
     }
-  }
-
-  private busyLabel(state: CardState): string {
-    if (state === "approving") return "approving";
-    if (state === "executing") return "running on connection";
-    if (state === "posting") return "returning rows";
-    return "rejecting";
   }
 
   private setCardState(id: string, state: CardState): void {
@@ -1054,7 +932,7 @@ export class Gatekeeper {
     if (!actions) {
       return;
     }
-    actions.outerHTML = this.readyActions(id, isReadOnlyQuery(card.sql, this.dialect));
+    actions.outerHTML = readyActions(id, isReadOnlyQuery(card.sql, this.dialect), this.denyDrafts);
     this.root.querySelector<HTMLInputElement>(`[data-card="${id}"] .deny-reason`)?.focus();
   }
 
@@ -1074,7 +952,7 @@ export class Gatekeeper {
     if (!card || !actions) {
       return;
     }
-    actions.outerHTML = this.readyActions(id, isReadOnlyQuery(card.sql, this.dialect));
+    actions.outerHTML = readyActions(id, isReadOnlyQuery(card.sql, this.dialect), this.denyDrafts);
     this.root.querySelector<HTMLButtonElement>(`[data-card="${id}"] .deny-open`)?.focus();
   }
 
@@ -1213,7 +1091,7 @@ export class Gatekeeper {
     }
     const cs = this.root.querySelector<HTMLElement>("#detail-cs");
     if (cs) {
-      cs.innerHTML = this.schemaInner(schema);
+      cs.innerHTML = schemaInner(schema);
     }
     const body = this.root.querySelector<HTMLElement>("#detail-sqlbody");
     if (body) {
