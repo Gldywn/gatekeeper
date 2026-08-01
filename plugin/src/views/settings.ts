@@ -1,5 +1,6 @@
 import { escapeHtml } from "../html";
-import { lockedReadOnlySwitch, switchInput } from "../render/controls";
+import { gearIcon } from "../icons";
+import { modeDropdown, switchInput } from "../render/controls";
 import { RECENTLY_RESOLVED_OPTIONS, type Settings } from "../settings";
 
 interface SettingsViewDeps {
@@ -71,18 +72,19 @@ export class SettingsView {
     const s = this.settings();
     return `
       <div class="detail-card settings-card">
-        <div class="detail-head">
-          <span class="detail-who">Settings</span>
+        <div class="panel-head">
+          <span class="panel-head-ico">${gearIcon}</span>
+          <span class="panel-title">Settings</span>
           <button class="detail-close" type="button" data-close aria-label="Close settings">&times;</button>
         </div>
         <section class="set-group">
           ${groupHead("Access", "What Gatekeeper lets the agent do on this connection.")}
-          <div class="set-row set-locked">
+          <div class="set-row">
             <div class="set-text">
-              <span class="set-name">Read-only mode</span>
-              <span class="set-desc">Gatekeeper only ever executes SELECT. Core guarantee; armed write access is planned.</span>
+              <span class="set-name">Execution mode</span>
+              <span class="set-desc">Which statements Gatekeeper will run once you approve.</span>
             </div>
-            <span class="set-control">${lockedReadOnlySwitch()}</span>
+            <span class="set-control">${modeDropdown()}</span>
           </div>
         </section>
         <section class="set-group">

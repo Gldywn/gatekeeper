@@ -23,7 +23,7 @@ import {
   warnIcon,
 } from "./icons";
 import { BrokerClient } from "./net/broker";
-import { lockedReadOnlySwitch, switchInput } from "./render/controls";
+import { modeDropdown, switchInput } from "./render/controls";
 import { historyRow } from "./render/history";
 import { queueHtml, readyActions, schemaInner } from "./render/queue";
 import { type LayerState, readOnlyView } from "./render/readonly";
@@ -182,6 +182,11 @@ export class Gatekeeper {
     });
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
+        // An open mode menu swallows the first Escape so it dismisses without also
+        // tearing down the overlay or popover it sits inside.
+        if (this.closeModeMenus()) {
+          return;
+        }
         this.activityView.close();
         this.detailView.close();
         this.settingsView.close();
@@ -200,6 +205,21 @@ export class Gatekeeper {
         return;
       }
       this.setSettingsOpen(false);
+    });
+    // The styled mode dropdowns (settings overlay and quick popover) open/close like
+    // the gear popover: the trigger toggles, a click outside dismisses. Options are
+    // inert (read-only is enforced regardless), so a click inside the menu is a no-op.
+    document.addEventListener("click", (e) => {
+      const target = e.target as HTMLElement;
+      const trigger = target.closest<HTMLElement>("[data-mode-trigger]");
+      if (trigger) {
+        this.toggleModeMenu(trigger);
+        return;
+      }
+      if (target.closest("[data-mode-menu]")) {
+        return;
+      }
+      this.closeModeMenus();
     });
     // Refresh the moment the tab is looked at again (reopened or refocused), so
     // the queue is never stale while the human is watching it.
@@ -520,14 +540,15 @@ export class Gatekeeper {
         <button class="gear" id="settingsGear" type="button" aria-label="Settings" aria-haspopup="true" aria-expanded="false">${gearIcon}</button>
         <div class="settings-pop" id="settingsPop" role="menu" aria-label="Guards" hidden>
           <div class="pop-head">Guards</div>
-          <div class="qs-access">
-            <span class="qs-access-name">Read-only mode</span>
-            <span class="qs-access-ctl">${lockedReadOnlySwitch()}</span>
+          <div class="pop-group">
+            <div class="pop-eyebrow">Access</div>
+            <div class="qs-row"><span class="qs-name">Mode</span><span class="qs-ctl">${modeDropdown(true)}</span></div>
           </div>
-          <div class="qs-switches">
+          <div class="pop-group">
+            <div class="pop-eyebrow">Detection</div>
+            ${quickSwitch("schemaAnnotation", "Schema annotation", s.schemaAnnotation)}
             ${quickSwitch("piiFlagging", "PII flagging", s.piiFlagging)}
             ${quickSwitch("clientFlagging", "Client-data flagging", s.clientFlagging)}
-            ${quickSwitch("schemaAnnotation", "Schema annotation", s.schemaAnnotation)}
             ${quickSwitch("sensitiveValues", "Sensitive-value detection", s.sensitiveValues)}
           </div>
           <div class="pop-foot">
@@ -722,6 +743,38 @@ export class Gatekeeper {
     pop.hidden = !open;
     gear.setAttribute("aria-expanded", String(open));
     gear.classList.toggle("open", open);
+    if (!open) {
+      this.closeModeMenus();
+    }
+  }
+
+  // Show one mode menu at a time, closing any other first.
+  private toggleModeMenu(trigger: HTMLElement): void {
+    const menu = trigger.parentElement?.querySelector<HTMLElement>("[data-mode-menu]");
+    if (!menu) {
+      return;
+    }
+    const open = menu.hidden;
+    this.closeModeMenus();
+    if (open) {
+      menu.hidden = false;
+      trigger.setAttribute("aria-expanded", "true");
+    }
+  }
+
+  // Close every open mode menu; returns whether one was actually open.
+  private closeModeMenus(): boolean {
+    let closed = false;
+    for (const menu of this.root.querySelectorAll<HTMLElement>("[data-mode-menu]")) {
+      if (!menu.hidden) {
+        menu.hidden = true;
+        closed = true;
+      }
+    }
+    for (const trigger of this.root.querySelectorAll<HTMLElement>("[data-mode-trigger]")) {
+      trigger.setAttribute("aria-expanded", "false");
+    }
+    return closed;
   }
 
   private async updateSetting(key: string, value: boolean | number): Promise<void> {

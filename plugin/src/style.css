@@ -535,7 +535,7 @@ body {
   top: calc(100% + 9px);
   right: 0;
   z-index: 6;
-  width: 262px;
+  width: 288px;
   padding: 11px 13px 10px;
   background: var(--surface);
   border: 1px solid var(--edge);
@@ -579,30 +579,23 @@ label.qs-row {
   font-size: 12px;
   color: var(--text);
 }
-/* The locked read-only access control sits above the switches, set apart by a rule
-   so it reads as the single mode selector, not one of the toggles below it. */
-.qs-access {
+/* The quick menu mirrors the settings page taxonomy: eyebrow groups (Access, then
+   Detection) reusing the page's eyebrow so the two surfaces read as one system. */
+.pop-group {
   display: flex;
-  align-items: center;
-  gap: var(--s2);
-  padding: 3px 0 9px;
+  flex-direction: column;
+  padding: 8px 0 9px;
+}
+.pop-group + .pop-group {
+  border-top: 1px solid var(--hi);
+}
+.pop-eyebrow {
   margin-bottom: 6px;
-  border-bottom: 1px solid var(--edge);
 }
-.qs-access-name {
-  font-size: 12px;
-  font-weight: 560;
-  color: var(--text);
-}
-.qs-access-ctl {
+.qs-ctl {
   margin-left: auto;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-}
-.qs-switches {
-  display: flex;
-  flex-direction: column;
 }
 /* A real checkbox restyled as a track+knob: ON slides the knob and tints the track
    green (--ok). Shared by the quick menu and the settings overlay. */
@@ -647,19 +640,6 @@ label.qs-row {
   outline: 2px solid var(--amber);
   outline-offset: 2px;
 }
-/* Locked on: dimmed and non-interactive so it clearly cannot be flipped. */
-.switch.locked {
-  cursor: not-allowed;
-  opacity: 0.7;
-}
-.switch-lock {
-  display: inline-flex;
-  color: var(--ok);
-}
-.switch-lock .ico {
-  width: 12px;
-  height: 12px;
-}
 .switch-row .switch {
   margin-left: auto;
 }
@@ -690,6 +670,115 @@ label.qs-row {
 .pop-full svg {
   width: 14px;
   height: 14px;
+}
+
+/* ---- Styled mode dropdown (display-only; read-only is enforced regardless) ----
+   A risk dot escalates green -> amber -> red as the mode would widen; only read-only
+   is live today, so the other two options are dimmed and inert. */
+.mode-dd {
+  position: relative;
+  display: inline-flex;
+}
+.risk-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+.risk-dot.ro {
+  background: var(--ok);
+}
+.risk-dot.rw {
+  background: var(--amber);
+}
+.risk-dot.full {
+  background: var(--danger);
+}
+.dd-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  min-width: 156px;
+  padding: 7px 10px;
+  border: 1px solid var(--edge);
+  border-radius: 7px;
+  background: var(--sunken);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: border-color var(--dur) var(--ease);
+}
+.dd-trigger.compact {
+  min-width: 132px;
+  padding: 5px 9px;
+}
+.dd-trigger:hover {
+  border-color: var(--edge-strong);
+}
+.dd-trigger:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 1px;
+}
+.dd-trigger .t-name {
+  font-weight: 560;
+}
+.dd-trigger .chev {
+  margin-left: auto;
+  display: inline-flex;
+  color: var(--faint);
+}
+.dd-trigger .chev svg {
+  width: 13px;
+  height: 13px;
+}
+.dd-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 7;
+  min-width: 260px;
+  padding: 5px;
+  background: var(--surface);
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+  box-shadow: var(--elev-pop);
+}
+.dd-menu[hidden] {
+  display: none;
+}
+.dd-opt {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 11px;
+  border-radius: 7px;
+}
+.dd-opt.sel {
+  background: color-mix(in oklch, var(--ok) 11%, transparent);
+}
+.dd-opt.off {
+  opacity: 0.5;
+}
+.dd-opt .o-name {
+  font-size: 13px;
+  font-weight: 560;
+  color: var(--text);
+}
+.dd-opt .o-allow {
+  margin-top: 1px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+.dd-check {
+  display: inline-flex;
+  color: var(--ok);
+}
+.dd-check svg {
+  width: 15px;
+  height: 15px;
 }
 
 .label {
@@ -1560,6 +1649,34 @@ label.qs-row {
   container-type: inline-size;
   container-name: gk-detail;
 }
+/* Seated title bar for the settings and activity overlays: a neutral window chrome
+   (leading icon, title, close pinned right) breaking out of the card padding so it
+   sits flush at the top. The detail overlay keeps its own tinted head below. */
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin: calc(-1 * var(--s3)) calc(-1 * var(--s3)) var(--s3);
+  padding: var(--s3);
+  background: color-mix(in oklch, var(--sunken) 45%, transparent);
+  border-bottom: 1px solid var(--edge);
+  border-radius: var(--r) var(--r) 0 0;
+}
+.panel-head-ico {
+  display: inline-flex;
+  flex: none;
+  color: var(--faint);
+}
+.panel-head-ico svg {
+  width: 16px;
+  height: 16px;
+}
+.panel-title {
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
 .detail-head {
   display: flex;
   align-items: baseline;
@@ -1620,9 +1737,12 @@ label.qs-row {
   color: var(--muted);
   margin: 0;
 }
+/* The detail's project/who reads as the window title, harmonized with the seated
+   bars (.panel-title); the rest of the detail head is unchanged. */
 .detail-who {
-  font-size: 12px;
-  font-weight: 560;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
   color: var(--text);
 }
 .detail-meta {
@@ -1636,19 +1756,26 @@ label.qs-row {
 .grid-wrap + .detail-note {
   margin-top: var(--s2);
 }
+/* A ~24px rounded hover target with a ~15px glyph, harmonized across all three
+   overlay heads (settings, activity, detail). */
 .detail-close {
   align-self: center;
   margin-left: auto;
-  padding: 0 var(--s1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   background: none;
   color: var(--muted);
-  font-size: 18px;
+  font-size: 15px;
   line-height: 1;
   cursor: pointer;
 }
 .detail-close:hover {
+  background: var(--hi);
   color: var(--text);
 }
 .detail-close:focus-visible {
@@ -1928,7 +2055,9 @@ label.qs-row {
 .set-group-head {
   margin-bottom: var(--s3);
 }
-.set-group-name {
+/* Shared with the quick popover's group eyebrow so the page and popover match. */
+.set-group-name,
+.pop-eyebrow {
   display: block;
   font-size: 9.5px;
   text-transform: uppercase;

@@ -8,7 +8,7 @@ import {
   outcomeMeta,
   previewSql,
 } from "../html";
-import { chevronDown, copyIcon, downloadIcon, harnessIcon } from "../icons";
+import { chevronDown, copyIcon, downloadIcon, harnessIcon, historyIcon } from "../icons";
 import { formatSql } from "../sql/format";
 import { highlight } from "../sql/highlight";
 import type { ActivityEntry } from "../types";
@@ -17,8 +17,9 @@ export function activityShell(body: string, connectionName: string): string {
   const conn = connectionName ? escapeHtml(connectionName) : "";
   return `
       <div class="detail-card activity-card">
-        <div class="detail-head">
-          <span class="detail-who">Activity</span>
+        <div class="panel-head">
+          <span class="panel-head-ico">${historyIcon}</span>
+          <span class="panel-title">Activity</span>
           ${conn ? `<span class="act-conn">${conn}</span>` : ""}
           <button class="detail-close" type="button" data-close aria-label="Close activity">&times;</button>
         </div>
