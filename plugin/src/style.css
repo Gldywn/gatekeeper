@@ -2050,10 +2050,9 @@ label.qs-row {
 .set-group:first-of-type {
   margin-top: var(--s3);
 }
-/* Group header: an eyebrow name plus a one-line purpose, so each bucket reads on its
-   own and new setting groups have an obvious home. */
+/* Group header: a compact eyebrow that labels each bucket. */
 .set-group-head {
-  margin-bottom: var(--s3);
+  margin-bottom: var(--s2);
 }
 /* Shared with the quick popover's group eyebrow so the page and popover match. */
 .set-group-name,
@@ -2064,12 +2063,6 @@ label.qs-row {
   letter-spacing: 0.07em;
   font-weight: 600;
   color: var(--faint);
-}
-.set-group-desc {
-  display: block;
-  margin-top: 3px;
-  font-size: 11.5px;
-  color: var(--muted);
 }
 .set-row {
   display: flex;
@@ -2090,6 +2083,37 @@ label.qs-row {
   font-size: 13px;
   font-weight: 560;
   color: var(--text);
+}
+/* The name and its inline detection example share one line. */
+.set-name-line {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  flex-wrap: wrap;
+}
+/* A sample of what a detection surfaces, in that detection's own on-card accent. */
+.set-ex {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.set-ex.reads {
+  color: var(--muted);
+  background: color-mix(in oklch, var(--text) 7%, transparent);
+}
+.set-ex.pii {
+  color: var(--danger);
+  background: color-mix(in oklch, var(--danger) 13%, transparent);
+}
+.set-ex.client {
+  color: var(--client);
+  background: color-mix(in oklch, var(--client) 13%, transparent);
+}
+.set-ex.lit {
+  color: var(--amber);
+  background: color-mix(in oklch, var(--amber) 13%, transparent);
 }
 .set-desc {
   font-size: 11.5px;

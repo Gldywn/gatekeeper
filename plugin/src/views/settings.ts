@@ -12,6 +12,9 @@ interface ToggleSpec {
   key: keyof Settings;
   name: string;
   desc: string;
+  // A tiny sample rendered in the detection's own on-card style, so its effect reads
+  // at a glance next to the name.
+  example?: { text: string; cls: string };
 }
 
 // Ordered so schema annotation, the base that resolves the columns the flags read,
@@ -21,21 +24,25 @@ const DETECTION_TOGGLES: ToggleSpec[] = [
     key: "schemaAnnotation",
     name: "Schema annotation",
     desc: "Resolve and show the tables and columns a query reads (host-side).",
+    example: { text: "reads users", cls: "reads" },
   },
   {
     key: "piiFlagging",
     name: "PII flagging",
     desc: "Highlight person-data columns and values on the approval card.",
+    example: { text: "email", cls: "pii" },
   },
   {
     key: "clientFlagging",
     name: "Client-data flagging",
     desc: "Highlight company and commercial columns and values, with a separate accent.",
+    example: { text: "company", cls: "client" },
   },
   {
     key: "sensitiveValues",
     name: "Sensitive-value detection",
     desc: "Flag a sensitive literal used in a WHERE filter, not just projected columns.",
+    example: { text: "'a@b.co'", cls: "lit" },
   },
 ];
 
@@ -78,7 +85,7 @@ export class SettingsView {
           <button class="detail-close" type="button" data-close aria-label="Close settings">&times;</button>
         </div>
         <section class="set-group">
-          ${groupHead("Access", "What Gatekeeper lets the agent do on this connection.")}
+          ${groupHead("Access")}
           <div class="set-row">
             <div class="set-text">
               <span class="set-name">Execution mode</span>
@@ -88,11 +95,11 @@ export class SettingsView {
           </div>
         </section>
         <section class="set-group">
-          ${groupHead("Detection", "What Gatekeeper surfaces on each proposal so you can review it safely.")}
+          ${groupHead("Detection")}
           ${DETECTION_TOGGLES.map((t) => toggleRow(t, s)).join("")}
         </section>
         <section class="set-group">
-          ${groupHead("History", "What this panel keeps and shows.")}
+          ${groupHead("History")}
           <div class="set-row">
             <div class="set-text">
               <span class="set-name">Recently resolved</span>
@@ -100,24 +107,23 @@ export class SettingsView {
             </div>
             <span class="set-control">${selectHtml(s.recentlyResolved)}</span>
           </div>
-          ${toggleRow(
-            { key: "activityLog", name: "Activity log", desc: "Show the connection activity log." },
-            s,
-          )}
         </section>
       </div>`;
   }
 }
 
-function groupHead(name: string, desc: string): string {
-  return `<div class="set-group-head"><span class="set-group-name">${name}</span><span class="set-group-desc">${desc}</span></div>`;
+function groupHead(name: string): string {
+  return `<div class="set-group-head"><span class="set-group-name">${name}</span></div>`;
 }
 
 function toggleRow(t: ToggleSpec, s: Settings): string {
+  const example = t.example
+    ? `<span class="set-ex ${t.example.cls}">${escapeHtml(t.example.text)}</span>`
+    : "";
   return `
           <div class="set-row">
             <div class="set-text">
-              <span class="set-name">${escapeHtml(t.name)}</span>
+              <span class="set-name-line"><span class="set-name">${escapeHtml(t.name)}</span>${example}</span>
               <span class="set-desc">${escapeHtml(t.desc)}</span>
             </div>
             <span class="set-control">${switchInput(t.key, t.name, Boolean(s[t.key]))}</span>

@@ -538,8 +538,7 @@ export class Gatekeeper {
       <span class="dsep"></span>
       <span class="gear-wrap">
         <button class="gear" id="settingsGear" type="button" aria-label="Settings" aria-haspopup="true" aria-expanded="false">${gearIcon}</button>
-        <div class="settings-pop" id="settingsPop" role="menu" aria-label="Guards" hidden>
-          <div class="pop-head">Guards</div>
+        <div class="settings-pop" id="settingsPop" role="menu" aria-label="Settings" hidden>
           <div class="pop-group">
             <div class="pop-eyebrow">Access</div>
             <div class="qs-row"><span class="qs-name">Mode</span><span class="qs-ctl">${modeDropdown(true)}</span></div>
@@ -708,9 +707,7 @@ export class Gatekeeper {
     });
     this.renderQueue();
     this.renderHistory();
-    this.renderRoster();
-    this.applyActivityLogVisibility();
-    // Rebuilt DOM has a blank pill; force it back to the initial state (the
+    this.renderRoster(); // Rebuilt DOM has a blank pill; force it back to the initial state (the
     // guard in setConnectionState would otherwise skip writing the new node).
     this.setConnectionState("connecting", "", true);
     const gk = this.root.querySelector(".gk");
@@ -787,7 +784,6 @@ export class Gatekeeper {
   // a dropped detection axis stops flagging at once.
   private onSettingsChanged(): void {
     this.syncSettingControls();
-    this.applyActivityLogVisibility();
     this.trimHistory();
     this.renderHistory();
     for (const card of [...this.cards]) {
@@ -807,14 +803,6 @@ export class Gatekeeper {
       } else if (el instanceof HTMLSelectElement) {
         el.value = String(value);
       }
-    }
-  }
-
-  // "Activity log" off only hides the trigger; the server still records every request.
-  private applyActivityLogVisibility(): void {
-    const btn = this.root.querySelector<HTMLButtonElement>("#activityBtn");
-    if (btn) {
-      btn.hidden = !this.settingsStore.get().activityLog;
     }
   }
 

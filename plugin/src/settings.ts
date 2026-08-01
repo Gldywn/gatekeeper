@@ -8,7 +8,6 @@ export interface Settings {
   clientFlagging: boolean;
   schemaAnnotation: boolean;
   sensitiveValues: boolean;
-  activityLog: boolean;
   recentlyResolved: number;
 }
 
@@ -21,7 +20,6 @@ export function defaultSettings(): Settings {
     clientFlagging: true,
     schemaAnnotation: true,
     sensitiveValues: true,
-    activityLog: true,
     recentlyResolved: RECENTLY_RESOLVED_DEFAULT,
   };
 }
@@ -40,7 +38,6 @@ export function normalizeSettings(raw: unknown): Settings {
     clientFlagging: asBool(r.clientFlagging, true),
     schemaAnnotation: asBool(r.schemaAnnotation, true),
     sensitiveValues: asBool(r.sensitiveValues, true),
-    activityLog: asBool(r.activityLog, true),
     recentlyResolved: (RECENTLY_RESOLVED_OPTIONS as readonly number[]).includes(resolved)
       ? resolved
       : RECENTLY_RESOLVED_DEFAULT,
