@@ -713,10 +713,8 @@ label.qs-row {
   color: var(--faint);
   text-transform: uppercase;
 }
-/* Pending-approval carries its rule on the label (its count sits inside the label);
-   the roster count is a sibling, so the rule rides the head, after the count. */
-.main > .label::after,
-.roster-head::after {
+/* Pending-approval carries its rule on the label, after its inline count badge. */
+.main > .label::after {
   content: "";
   flex: 1;
   height: 1px;
