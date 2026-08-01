@@ -1,6 +1,6 @@
 # Gatekeeper local test databases. Dev only, synthetic data, never a real target.
-# Host ports are deliberately non-default (55432, 33306) so this never collides with
-# a real local Postgres/MySQL. Add an engine by dropping a service here plus a
+# Host ports are deliberately unusual (54329, 33069) so this never collides with a
+# real local Postgres/MySQL. Add an engine by dropping a service here plus a
 # <engine>/ directory of init SQL mounted at /docker-entrypoint-initdb.d.
 name: gatekeeper-test
 
@@ -12,7 +12,7 @@ services:
       POSTGRES_USER: gatekeeper_test
       POSTGRES_PASSWORD: gatekeeper_test
     ports:
-      - "55432:5432"
+      - "54329:5432"
     volumes:
       - ./postgres:/docker-entrypoint-initdb.d:ro
       - pg_data:/var/lib/postgresql/data
@@ -24,14 +24,13 @@ services:
 
   mysql:
     image: mysql:8
-    command: --default-authentication-plugin=mysql_native_password
     environment:
       MYSQL_DATABASE: gatekeeper_test
       MYSQL_USER: gatekeeper_test
       MYSQL_PASSWORD: gatekeeper_test
       MYSQL_ROOT_PASSWORD: gatekeeper_test_root
     ports:
-      - "33306:3306"
+      - "33069:3306"
     volumes:
       - ./mysql:/docker-entrypoint-initdb.d:ro
       - mysql_data:/var/lib/mysql
