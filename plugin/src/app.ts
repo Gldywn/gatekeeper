@@ -179,8 +179,6 @@ export class Gatekeeper {
     this.settingsView = new SettingsView({
       root,
       settings: () => this.settingsStore.get(),
-      connectionName: () => this.connectionName,
-      dialect: () => this.dialect,
     });
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {

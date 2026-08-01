@@ -69,9 +69,6 @@ export const gearIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentCol
 // External-link glyph: the popover footer's hook to the full-settings overlay.
 export const externalLinkIcon = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3h4v4"/><path d="M13 3l-6 6"/><path d="M11 9v3.5H3.5V4.5H7"/></svg>`;
 
-// Lucide "arrow-left" (lucide.dev, ISC License), the settings overlay's Back control.
-export const arrowLeftIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>`;
-
 // The read-only guarantee: a padlock shown in the connection chip and the
 // locked read-only mode control. Sized by its parent (.ro / .switch-lock).
 export const lockIcon = `<svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="3.2" y="7" width="9.6" height="6.5" rx="1.4"/><path d="M5.2 7V4.9a2.8 2.8 0 0 1 5.6 0V7"/></svg>`;
