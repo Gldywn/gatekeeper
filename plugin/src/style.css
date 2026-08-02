@@ -1679,21 +1679,16 @@ label.qs-row {
 }
 /* The detail head is the same seated title bar as settings and activity, only its
    background is the outcome tint (below) instead of the neutral seated fill. */
+/* Text baseline-aligned so who, label, and status sit on one line; the amber agent
+   icon and the close ride align-self: center. Status stays right after the label. */
 .detail-head {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: var(--s2);
   margin: calc(-1 * var(--s3)) calc(-1 * var(--s3)) var(--s3);
   padding: var(--s3);
   border-bottom: 1px solid var(--edge);
   border-radius: var(--r) var(--r) 0 0;
-}
-/* Agent icon goes faint like the other heads' leading icons; the status pins right. */
-.detail-head .harness-badge {
-  color: var(--faint);
-}
-.detail-head .hstatus {
-  margin-left: auto;
 }
 /* Same outcome tint as the resolved rows, so the title bar signals the result. */
 .detail-head.approved {
