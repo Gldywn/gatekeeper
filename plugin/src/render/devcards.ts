@@ -106,5 +106,9 @@ export function devPanelHtml(): string {
           <span class="dp-sep" aria-hidden="true"></span>
           ${chips}
         </div>
+        <div class="dp-spike">
+          <span class="dp-spike-label">Native grid spike</span>
+          <button class="dp-chip" type="button" data-dev-native>Try native panel</button>
+        </div>
       </div>`;
 }

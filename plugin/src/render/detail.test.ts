@@ -52,7 +52,7 @@ describe("render/detail", () => {
     );
     // The outcome lives in the tinted recessed well: header (icon + word + meta), grid.
     expect(html).toContain(
-      '<div class="detail-well approved"><div class="detail-oc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span class="detail-oc-title">Approved</span><span class="detail-oc-meta">2 rows</span></div><div class="detail-oc-body" id="detail-grid"><div class="grid-wrap">',
+      '<div class="detail-rail approved"><div class="detail-oc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span class="detail-oc-title">Approved</span><span class="detail-oc-meta">2 rows</span></div><div class="detail-oc-body" id="detail-grid"><div class="grid-wrap">',
     );
   });
 
@@ -90,7 +90,7 @@ describe("render/detail", () => {
       note: "0 rows",
       result: { fields: [], rows: [], rowCount: 0, truncated: false },
     });
-    expect(html).toContain('<div class="detail-well approved">');
+    expect(html).toContain('<div class="detail-rail approved">');
     expect(html).toContain('<span class="detail-oc-meta">0 rows</span>');
     expect(html).toContain(
       '<div class="detail-oc-body"><div class="detail-oc-msg">The query ran and returned no rows.</div></div>',
@@ -116,7 +116,7 @@ describe("render/detail", () => {
       note: 'relation "customer" does not exist',
       result: undefined,
     });
-    expect(html).toContain('<div class="detail-well failed">');
+    expect(html).toContain('<div class="detail-rail failed">');
     expect(html).toContain('<span class="detail-oc-title">Failed</span>');
     expect(html).toContain('<span class="detail-oc-meta">at execution</span>');
     expect(html).toContain(
@@ -131,7 +131,7 @@ describe("render/detail", () => {
       note: "Please scope this to a single company.",
       result: undefined,
     });
-    expect(rejected).toContain('<div class="detail-well rejected">');
+    expect(rejected).toContain('<div class="detail-rail rejected">');
     expect(rejected).toContain('<span class="detail-oc-title">Changes requested</span>');
     expect(rejected).toContain(
       '<div class="detail-oc-note">Please scope this to a single company.</div>',
@@ -149,7 +149,7 @@ describe("render/detail", () => {
       note: "expired",
       result: undefined,
     });
-    expect(html).toContain('<div class="detail-well expired">');
+    expect(html).toContain('<div class="detail-rail expired">');
     expect(html).toContain('<span class="detail-oc-title">Expired</span>');
     expect(html).toContain(
       '<div class="detail-oc-msg">The proposal timed out before a decision. Nothing ran against the database.</div>',

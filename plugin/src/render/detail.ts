@@ -42,10 +42,10 @@ export function detailHtml(item: HistItem): string {
       </div>`;
 }
 
-// The recessed well: everything about the outcome sits in one sunken tray, tinted by
-// status, keyed off item.status so each terminal state reads at a glance.
+// The outcome carries the status colour on a left rail (the title bar stays neutral),
+// keyed off item.status so each terminal state reads at a glance.
 function outcomeHtml(item: HistItem): string {
-  return `<div class="detail-well ${item.status}">${outcomeInner(item)}</div>`;
+  return `<div class="detail-rail ${item.status}">${outcomeInner(item)}</div>`;
 }
 
 function outcomeInner(item: HistItem): string {
