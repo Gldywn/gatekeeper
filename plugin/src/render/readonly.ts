@@ -10,20 +10,20 @@ export interface ReadOnlyView {
 }
 
 // One read-only layer protects the whole connection; only every layer writable is
-// writable, anything left (no barrier, something unverified) is unknown. gatekeeperReadOnly
-// is true until the mode becomes switchable, so today the badge is always read-only.
+// writable, anything left (no barrier, something we could not read) is not available.
+// gatekeeperReadOnly is true until the mode becomes switchable, so today it is read-only.
 export function readOnlyView(
   gatekeeperReadOnly: boolean,
   beekeeperReadOnly: boolean,
   endpoint: EndpointReadOnly | null,
   endpointProbed: boolean,
 ): ReadOnlyView {
-  type Verdict = "ro" | "rw" | "unknown";
+  type Verdict = "ro" | "rw" | "na";
   const gk: Verdict = gatekeeperReadOnly ? "ro" : "rw";
   const bk: Verdict = beekeeperReadOnly ? "ro" : "rw";
   const ep: Verdict =
     !endpointProbed || endpoint === null
-      ? "unknown"
+      ? "na"
       : endpoint.replica || endpoint.sessionReadOnly
         ? "ro"
         : "rw";
@@ -34,21 +34,18 @@ export function readOnlyView(
     : layers.every((l) => l === "rw")
       ? "warn"
       : "mut";
-  const label = kind === "ok" ? "read-only" : kind === "warn" ? "writable" : "unknown";
 
-  const endpointRow: { label: string; state: LayerState } =
-    !endpointProbed || endpoint === null
-      ? { label: "not verified", state: "mut" }
-      : endpoint.replica
-        ? { label: "read replica", state: "ok" }
-        : endpoint.sessionReadOnly
-          ? { label: "session read-only", state: "ok" }
-          : { label: "writable", state: "warn" };
+  const word = (v: Verdict): { label: string; state: LayerState } =>
+    v === "ro"
+      ? { label: "read-only", state: "ok" }
+      : v === "rw"
+        ? { label: "writable", state: "warn" }
+        : { label: "not available", state: "mut" };
 
   return {
-    chip: { kind, label },
-    gatekeeper: { label: "read-only", state: "ok" },
-    beekeeper: beekeeperReadOnly ? { label: "on", state: "ok" } : { label: "off", state: "mut" },
-    endpoint: endpointRow,
+    chip: { kind, label: word(kind === "ok" ? "ro" : kind === "warn" ? "rw" : "na").label },
+    gatekeeper: word(gk),
+    beekeeper: word(bk),
+    endpoint: word(ep),
   };
 }

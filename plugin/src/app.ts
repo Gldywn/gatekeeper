@@ -412,7 +412,7 @@ export class Gatekeeper {
         ? "Read-only: a layer blocks writes, hover for details"
         : kind === "warn"
           ? "Writable: every layer would accept a write, hover for details"
-          : "Unknown: no layer is confirmed read-only, hover for details";
+          : "Read-only status not available, hover for details";
     // The chevron signals the badge expands into the layer breakdown on hover/focus.
     return `<span class="ro-wrap" tabindex="0">
       <span class="ro ${kind}" title="${title}">${layerGlyph(kind)}${label}<span class="ro-caret" aria-hidden="true">${chevronDown}</span></span>
