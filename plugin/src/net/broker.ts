@@ -137,6 +137,8 @@ export class BrokerClient {
   }
 
   private connHeader(connectionName?: string): Record<string, string> {
-    return connectionName ? { "X-Gatekeeper-Connection": connectionName } : {};
+    // Percent-encode: the scope key holds a control-char separator (and names can hold
+    // anything), and a raw control or non-ASCII byte in a header value is rejected by Node.
+    return connectionName ? { "X-Gatekeeper-Connection": encodeURIComponent(connectionName) } : {};
   }
 }

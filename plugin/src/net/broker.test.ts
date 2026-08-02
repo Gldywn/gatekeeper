@@ -107,12 +107,12 @@ describe("endpoint requests", () => {
     });
   });
 
-  it("carries the composite scope key verbatim in the connection header", async () => {
+  it("percent-encodes the composite scope key in the connection header", async () => {
     const c = client();
     await c.setToken("secret");
     fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => ({ inflight: [] }) });
-    // Two same-named connections on different engines derive different keys; the
-    // broker must send whichever it is given unchanged, so the server scopes right.
+    // The key holds a control-char separator; Node rejects a raw control char in a header
+    // value, so the plugin percent-encodes it and the server decodes it back.
     const scope = connectionScopeKey({
       connectionName: "gatekeeper_test",
       databaseType: "mysql",
@@ -120,7 +120,11 @@ describe("endpoint requests", () => {
     });
     await c.inflight(scope);
     expect(fetchMock).toHaveBeenCalledWith(`${URL}/inflight`, {
-      headers: { "X-Gatekeeper-Connection": scope, Authorization: "Bearer secret" },
+      headers: {
+        "X-Gatekeeper-Connection": encodeURIComponent(scope),
+        Authorization: "Bearer secret",
+      },
     });
+    expect(decodeURIComponent(encodeURIComponent(scope))).toBe(scope);
   });
 });

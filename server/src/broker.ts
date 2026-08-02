@@ -148,7 +148,11 @@ async function handle(
 function resolveConnection(store: RequestStore, req: IncomingMessage): string | null {
   const header = req.headers["x-gatekeeper-connection"];
   if (typeof header === "string" && header) {
-    return header;
+    try {
+      return decodeURIComponent(header);
+    } catch {
+      return header;
+    }
   }
   const conn = store.getConnection();
   return conn ? connectionScopeKey(conn) : null;

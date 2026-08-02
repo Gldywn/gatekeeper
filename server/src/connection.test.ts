@@ -37,13 +37,17 @@ describe("connectionScopeKey", () => {
     expect(pg).not.toBe(otherDb);
   });
 
-  it("is header-safe: no code unit exceeds a byte", () => {
+  it("percent-encodes to a header-safe value that round-trips", () => {
     const key = connectionScopeKey({
       connectionName: "prod",
       databaseType: "postgresql",
       databaseName: "app",
     });
-    expect([...key].every((ch) => ch.charCodeAt(0) <= 0xff)).toBe(true);
+    const header = encodeURIComponent(key);
+    // The separator is a control char that Node rejects raw in a header; encoded, every
+    // character is printable ASCII, and it decodes back to the exact key.
+    expect([...header].every((c) => c.charCodeAt(0) >= 0x20)).toBe(true);
+    expect(decodeURIComponent(header)).toBe(key);
   });
 });
 

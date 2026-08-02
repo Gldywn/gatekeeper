@@ -32,15 +32,18 @@ describe("connectionScopeKey", () => {
     expect(pg).not.toBe(otherDb);
   });
 
-  it("uses the header-safe unit separator the server also uses", () => {
-    // U+001F is a valid header byte (≤ 0xFF), so the plugin key and the server
-    // stamp for the same connection compare equal on the wire.
-    expect(SCOPE_SEP).toBe("\u001f");
+  it("percent-encodes to a header-safe value that round-trips", () => {
+    // The separator is U+001F, a control char; the header must percent-encode the key to
+    // printable ASCII and decode it back unchanged (Node rejects a raw control char).
+    expect(SCOPE_SEP).toHaveLength(1);
+    expect(SCOPE_SEP.charCodeAt(0)).toBe(0x1f);
     const key = connectionScopeKey({
       connectionName: "prod",
       databaseType: "postgresql",
       databaseName: "app",
     });
-    expect([...key].every((ch) => ch.charCodeAt(0) <= 0xff)).toBe(true);
+    const header = encodeURIComponent(key);
+    expect([...header].every((c) => c.charCodeAt(0) >= 0x20)).toBe(true);
+    expect(decodeURIComponent(header)).toBe(key);
   });
 });
