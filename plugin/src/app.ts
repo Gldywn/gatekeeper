@@ -687,6 +687,11 @@ export class Gatekeeper {
         this.copySql(copy);
         return;
       }
+      const pager = target.closest<HTMLElement>("[data-page]");
+      if (pager) {
+        this.detailView.page(pager.getAttribute("data-page") === "next" ? 1 : -1);
+        return;
+      }
       // Close on the backdrop or the close button, not on the card itself.
       if (target === detail || target.closest("[data-close]")) {
         this.detailView.close();

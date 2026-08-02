@@ -2,6 +2,7 @@ import { capitalize, clock, escapeHtml, relAge } from "../html";
 import {
   buildingIcon,
   copyIcon,
+  dbReadsIcon,
   flaskIcon,
   harnessIcon,
   messageIcon,
@@ -120,7 +121,7 @@ export function schemaInner(schema: SchemaContext | null | undefined): string {
   // The "reads" line needs a resolved table; the flags stand on their own, so a
   // table-less query (a synthetic dev card, or a CTE-only read) still surfaces them.
   const tables = schema.tables.length
-    ? `<div class="cs-line"><span class="cs-k">reads</span><span class="cs-list">${schema.tables.map(escapeHtml).join(" &middot; ")}</span></div>`
+    ? `<div class="cs-reads"><span class="cs-reads-k">${dbReadsIcon}Reads</span>${schema.tables.map((t) => `<span class="tbl-chip">${escapeHtml(t)}</span>`).join("")}</div>`
     : "";
   const pii = schema.pii.length
     ? `<div class="cs-line cs-pii"><span class="cs-warn">${warnIcon}possible PII</span><span class="cs-list">${schema.pii.map(escapeHtml).join(" &middot; ")}</span></div>`

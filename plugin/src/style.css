@@ -1089,6 +1089,37 @@ label.qs-row {
 .cs-literal .cs-list {
   color: color-mix(in oklch, var(--danger) 78%, var(--text));
 }
+/* The "reads" line as labeled chips: a cylinder-led label then one bordered mono
+   chip per table, shared by the pending card and the resolved detail. */
+.cs-reads {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.cs-reads-k {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.cs-reads-k svg {
+  width: 14px;
+  height: 14px;
+  color: var(--faint);
+}
+.tbl-chip {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text);
+  background: color-mix(in oklch, var(--text) 6%, transparent);
+  border: 1px solid var(--edge);
+  border-radius: 5px;
+  padding: 3px 9px;
+}
 
 .blocked-note {
   display: flex;
@@ -1725,7 +1756,94 @@ label.qs-row {
 .detail-card .sql {
   width: 100%;
 }
-/* The row count / outcome sits between the query and its results, where it reads. */
+/* The recessed well: the outcome steps down into a sunken tray that breaks out to
+   the card edges, a soft inset top shadow stepping it down with no line. Its tint is
+   the outcome color, kept faint so it does not fight the stronger tinted head above. */
+.detail-well {
+  margin: var(--s3) calc(-1 * var(--s3)) calc(-1 * var(--s3));
+  padding: var(--s3);
+  background: var(--sunken);
+  border-radius: 0 0 var(--r) var(--r);
+  box-shadow: inset 0 9px 14px -11px oklch(0% 0 0 / 0.6);
+}
+.detail-well.approved {
+  background: color-mix(in oklch, var(--ok) 6%, var(--sunken));
+}
+.detail-well.rejected {
+  background: color-mix(in oklch, var(--amber) 6%, var(--sunken));
+}
+.detail-well.failed {
+  background: color-mix(in oklch, var(--danger) 7%, var(--sunken));
+}
+.detail-well.expired {
+  background: color-mix(in oklch, var(--faint) 7%, var(--sunken));
+}
+/* Outcome header: a status icon + the status word, with a right-aligned mono meta. */
+.detail-oc {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.detail-oc svg {
+  width: 17px;
+  height: 17px;
+  flex: none;
+}
+.detail-oc-title {
+  font-size: 13.5px;
+  font-weight: 620;
+}
+.detail-oc-meta {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+.detail-well.approved .detail-oc-title,
+.detail-well.approved .detail-oc svg {
+  color: var(--ok);
+}
+.detail-well.rejected .detail-oc-title,
+.detail-well.rejected .detail-oc svg {
+  color: var(--amber);
+}
+.detail-well.failed .detail-oc-title,
+.detail-well.failed .detail-oc svg {
+  color: var(--danger);
+}
+.detail-well.expired .detail-oc-title,
+.detail-well.expired .detail-oc svg {
+  color: var(--muted);
+}
+.detail-oc-body {
+  margin-top: var(--s3);
+}
+.detail-oc-msg {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+/* Failed error / rejected note: a wrapped mono block, tinted toward the outcome. */
+.detail-oc-note {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  background: color-mix(in oklch, var(--text) 4%, transparent);
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.detail-well.failed .detail-oc-note {
+  color: color-mix(in oklch, var(--danger) 78%, var(--text));
+}
+.detail-well.rejected .detail-oc-note {
+  color: color-mix(in oklch, var(--amber) 82%, var(--text));
+}
+/* The row count / outcome for the activity overlay's inline note (its detail reuses
+   this class). The resolved-history detail now carries its own well above. */
 .detail-outcome {
   margin: 0 0 var(--s2);
   font-family: var(--font-mono);
@@ -1736,11 +1854,6 @@ label.qs-row {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--faint);
-}
-.detail-note {
-  font-size: 11px;
-  color: var(--muted);
-  margin: 0;
 }
 /* The detail's project/who reads as the window title, harmonized with the seated
    bars (.panel-title); the rest of the detail head is unchanged. */
@@ -1757,9 +1870,6 @@ label.qs-row {
   margin: 0 0 var(--s3);
   max-width: 80ch;
   overflow-wrap: anywhere;
-}
-.grid-wrap + .detail-note {
-  margin-top: var(--s2);
 }
 /* A ~24px rounded hover target with a ~15px glyph, harmonized across all three
    overlay heads (settings, activity, detail). */
@@ -1787,15 +1897,13 @@ label.qs-row {
   outline: 2px solid var(--amber);
   outline-offset: 1px;
 }
-.detail-empty {
-  color: var(--muted);
-  font-size: 12px;
-  margin: 0;
-}
+/* A scroll container bounded in height so the held rows never push the outcome
+   footer off-screen; the header row stays pinned as it scrolls. */
 .grid-wrap {
-  overflow-x: auto;
+  overflow: auto;
+  max-height: 300px;
   border: 1px solid var(--edge);
-  border-radius: 4px;
+  border-radius: 6px;
 }
 .grid {
   width: 100%;
@@ -1805,25 +1913,107 @@ label.qs-row {
 }
 .grid th,
 .grid td {
-  padding: 5px var(--s2);
+  padding: 6px var(--s3);
   text-align: left;
   vertical-align: top;
   overflow-wrap: anywhere;
   max-width: clamp(16ch, 20cqi, 40ch);
-  border-bottom: 1px solid var(--edge);
+  white-space: nowrap;
+  border-bottom: 1px solid var(--hi);
 }
 .grid th {
   position: sticky;
   top: 0;
+  z-index: 1;
   background: var(--sunken);
-  color: var(--amber);
-  font-weight: 560;
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--edge);
 }
 .grid td {
   color: var(--text);
+  font-variant-numeric: tabular-nums;
 }
-.grid tbody tr:hover {
+/* PII/client columns carry the same accents as the schema flags, so a sensitive
+   column reads at a glance in the result too. */
+.grid th.pii,
+.grid td.pii {
+  color: color-mix(in oklch, var(--danger) 78%, var(--text));
+}
+.grid th.client,
+.grid td.client {
+  color: color-mix(in oklch, var(--client) 78%, var(--text));
+}
+.grid tbody tr:nth-child(even) td {
+  background: color-mix(in oklch, var(--text) 2.5%, transparent);
+}
+.grid tbody tr:hover td {
   background: var(--hi);
+}
+/* The result footer: the true total, the shown slice, the held cap, and a pager
+   over the held rows (in memory, never a re-query). */
+.grid-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  flex-wrap: wrap;
+  padding: 9px 2px 0;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.grid-foot .rc b {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.cap-tag {
+  font-size: 10px;
+  color: var(--amber);
+  border: 1px solid color-mix(in oklch, var(--amber) 30%, transparent);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+.pager {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+}
+.pager-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--edge);
+  border-radius: 5px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.pager-btn svg {
+  width: 13px;
+  height: 13px;
+}
+.pager-btn:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--edge-strong);
+}
+.pager-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.pager-btn:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 1px;
+}
+.pager .pg {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  padding: 0 6px;
+  color: var(--faint);
 }
 
 /* ---- Activity (connection-scoped audit) ---- */
