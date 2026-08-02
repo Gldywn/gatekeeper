@@ -2237,6 +2237,7 @@ label.qs-row {
 /* The stroke flask, sized per context; unlike .harness-badge it is not fill-forced. */
 .dev-flask {
   display: inline-flex;
+  align-self: center;
   flex: none;
   color: var(--exec);
 }

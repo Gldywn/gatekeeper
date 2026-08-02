@@ -33,10 +33,30 @@ async function probePostgres(run: RunQuery): Promise<EndpointReadOnly | null> {
   };
 }
 
-// Keyed by dialect so MySQL etc. can be added later; an absent dialect resolves to
-// null ("not verified"), never "writable".
+// A read replica or an explicitly read-only MySQL server sets read_only/super_read_only;
+// there is no per-session read-only probe, so both fold onto the replica flag.
+async function probeMysql(run: RunQuery): Promise<EndpointReadOnly | null> {
+  const result = await run(
+    "SELECT @@global.read_only AS read_only, @@global.super_read_only AS super_read_only",
+  );
+  if (result.error) {
+    return null;
+  }
+  const row = result.results[0]?.rows[0];
+  if (!row) {
+    return null;
+  }
+  return {
+    replica: asBool(row.read_only) || asBool(row.super_read_only),
+    sessionReadOnly: false,
+  };
+}
+
+// Keyed by dialect; an absent dialect resolves to null ("unknown"), never "writable".
 const PROBES: Record<string, (run: RunQuery) => Promise<EndpointReadOnly | null>> = {
   postgresql: probePostgres,
+  mysql: probeMysql,
+  mariadb: probeMysql,
 };
 
 // Host-side (not the approval gate); null means "not verified", the safe default

@@ -100,7 +100,6 @@ export function devPanelHtml(): string {
         <div class="dp-head">
           <span class="dev-flask">${flaskIcon}</span>
           <span class="dp-title">Developer &middot; synthetic proposals</span>
-          <span class="dp-note">neutral read-only only</span>
         </div>
         <div class="dp-actions">
           <button class="dp-primary" type="button" data-dev-bundle>Send a bundle</button>

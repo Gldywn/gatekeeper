@@ -12,10 +12,10 @@ describe("render/readonly", () => {
     expect(v.endpoint).toEqual({ label: "writable", state: "warn" });
   });
 
-  it("labels an unprobed endpoint not available, and stays read-only overall", () => {
+  it("labels an unprobed endpoint unknown, and stays read-only overall", () => {
     const v = readOnlyView(true, false, null, false);
     expect(v.chip).toEqual({ kind: "ok", label: "read-only" });
-    expect(v.endpoint).toEqual({ label: "not available", state: "mut" });
+    expect(v.endpoint).toEqual({ label: "unknown", state: "mut" });
   });
 
   it("reads a replica or a read-only session as read-only", () => {
@@ -46,9 +46,9 @@ describe("render/readonly", () => {
     expect(v.chip).toEqual({ kind: "warn", label: "writable" });
   });
 
-  it("is not available when nothing is confirmed read-only and a layer could not be read", () => {
+  it("is unknown when nothing is confirmed read-only and a layer could not be read", () => {
     const v = readOnlyView(false, false, null, false);
-    expect(v.chip).toEqual({ kind: "mut", label: "not available" });
+    expect(v.chip).toEqual({ kind: "mut", label: "unknown" });
   });
 
   it("one read-only layer protects the whole, even with Gatekeeper in write mode", () => {

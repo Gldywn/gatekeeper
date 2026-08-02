@@ -20,6 +20,7 @@ import {
   gearIcon,
   historyIcon,
   shieldCheckIcon,
+  shieldQuestionIcon,
   warnIcon,
 } from "./icons";
 import { BrokerClient } from "./net/broker";
@@ -116,7 +117,7 @@ function quickSwitch(setting: string, label: string, checked: boolean): string {
 }
 
 function layerGlyph(state: LayerState): string {
-  return state === "ok" ? shieldCheckIcon : state === "warn" ? warnIcon : "";
+  return state === "ok" ? shieldCheckIcon : state === "warn" ? warnIcon : shieldQuestionIcon;
 }
 
 export class Gatekeeper {
@@ -437,7 +438,7 @@ export class Gatekeeper {
         ? "Read-only: a layer blocks writes, hover for details"
         : kind === "warn"
           ? "Writable: every layer would accept a write, hover for details"
-          : "Read-only status not available, hover for details";
+          : "Read-only status unknown, hover for details";
     // The chevron signals the badge expands into the layer breakdown on hover/focus.
     return `<span class="ro-wrap" tabindex="0">
       <span class="ro ${kind}" title="${title}">${layerGlyph(kind)}${label}<span class="ro-caret" aria-hidden="true">${chevronDown}</span></span>

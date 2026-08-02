@@ -1,5 +1,5 @@
 import { capitalize, escapeHtml, sessionDisplayName } from "../html";
-import { copyIcon, harnessIcon } from "../icons";
+import { agentBadge, copyIcon } from "../icons";
 import { cell, type HistResult } from "../result";
 import { formatSql } from "../sql/format";
 import { highlight } from "../sql/highlight";
@@ -19,7 +19,7 @@ export function detailHtml(item: HistItem): string {
   return `
       <div class="detail-card">
         <div class="detail-head ${item.status}">
-          <span class="harness-badge">${harnessIcon(harness)}</span>
+          ${agentBadge(harness)}
           <span class="detail-who">${escapeHtml(who)}</span>
           ${item.session?.sessionLabel ? `<span class="detail-scope" title="${escapeHtml(capitalize(item.session.sessionLabel))}">${escapeHtml(capitalize(item.session.sessionLabel))}</span>` : ""}
           <span class="hstatus ${item.status}">${item.status}</span>

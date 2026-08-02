@@ -40,7 +40,7 @@ export function readOnlyView(
       ? { label: "read-only", state: "ok" }
       : v === "rw"
         ? { label: "writable", state: "warn" }
-        : { label: "not available", state: "mut" };
+        : { label: "unknown", state: "mut" };
 
   return {
     chip: { kind, label: word(kind === "ok" ? "ro" : kind === "warn" ? "rw" : "na").label },

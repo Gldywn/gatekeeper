@@ -55,7 +55,20 @@ describe("probeReadOnly", () => {
 
   it("returns null for a dialect with no probe yet, without querying", async () => {
     const run = vi.fn(async () => ok({ replica: true, session_read_only: true }));
-    expect(await probeReadOnly("mysql", run)).toBeNull();
+    expect(await probeReadOnly("sqlite", run)).toBeNull();
     expect(run).not.toHaveBeenCalled();
+  });
+
+  it("reads the global read-only flags off the MySQL probe", async () => {
+    const run = vi.fn(async () => ok({ read_only: 1, super_read_only: 0 }));
+    expect(await probeReadOnly("mysql", run)).toEqual({ replica: true, sessionReadOnly: false });
+    expect(run).toHaveBeenCalledWith(
+      "SELECT @@global.read_only AS read_only, @@global.super_read_only AS super_read_only",
+    );
+  });
+
+  it("reports a writable MySQL primary as not read-only", async () => {
+    const run = vi.fn(async () => ok({ read_only: 0, super_read_only: 0 }));
+    expect(await probeReadOnly("mysql", run)).toEqual({ replica: false, sessionReadOnly: false });
   });
 });
