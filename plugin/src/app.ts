@@ -705,6 +705,12 @@ export class Gatekeeper {
         this.detailView.close();
       }
     });
+    detail.addEventListener("change", (e) => {
+      const sel = (e.target as HTMLElement).closest<HTMLSelectElement>("[data-page-size]");
+      if (sel) {
+        this.detailView.setPageSize(Number(sel.value));
+      }
+    });
     this.root
       .querySelector<HTMLButtonElement>("#activityBtn")!
       .addEventListener("click", () => void this.activityView.open());

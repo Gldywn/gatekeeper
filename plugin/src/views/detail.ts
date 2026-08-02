@@ -23,6 +23,8 @@ export class DetailView {
   // Which page of the held result rows the grid shows; reset whenever a new item
   // opens so a reopened row always starts at the first page.
   private pageIndex = 0;
+  // Rows shown per page; human-chosen via the grid footer, reset on each open.
+  private pageSize = HIST_PAGE_SIZE;
   private readonly root: HTMLElement;
   private readonly annotator: SchemaAnnotator;
   private readonly settings: () => Settings;
@@ -40,6 +42,7 @@ export class DetailView {
     }
     this.detailItem = item;
     this.pageIndex = 0;
+    this.pageSize = HIST_PAGE_SIZE;
     panel.innerHTML = detailHtml(item);
     panel.hidden = false;
     void this.annotateDetail(item);
@@ -53,7 +56,7 @@ export class DetailView {
     if (!result || result.rows.length === 0) {
       return;
     }
-    const pageCount = Math.max(1, Math.ceil(result.rows.length / HIST_PAGE_SIZE));
+    const pageCount = Math.max(1, Math.ceil(result.rows.length / this.pageSize));
     const next = Math.min(Math.max(0, this.pageIndex + delta), pageCount - 1);
     if (next === this.pageIndex) {
       return;
@@ -61,7 +64,22 @@ export class DetailView {
     this.pageIndex = next;
     const grid = this.root.querySelector<HTMLElement>("#detail-grid");
     if (grid) {
-      grid.innerHTML = gridHtml(result, this.pageIndex);
+      grid.innerHTML = gridHtml(result, this.pageIndex, this.pageSize);
+    }
+  }
+
+  // Change the rows-per-page and repaint from the first page; the held rows never
+  // re-query, they re-slice in memory.
+  setPageSize(size: number): void {
+    const result = this.detailItem?.result;
+    if (!result || result.rows.length === 0 || size === this.pageSize) {
+      return;
+    }
+    this.pageSize = size;
+    this.pageIndex = 0;
+    const grid = this.root.querySelector<HTMLElement>("#detail-grid");
+    if (grid) {
+      grid.innerHTML = gridHtml(result, 0, size);
     }
   }
 

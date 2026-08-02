@@ -62,7 +62,7 @@ describe("render/detail", () => {
     );
   });
 
-  it("pages the held rows in memory, stating the true total, the slice, and the cap", () => {
+  it("pages the held rows in memory, stating the true total, the page size, and the cap", () => {
     const big: HistResult = {
       fields: [{ name: "id" }, { name: "email" }],
       rows: Array.from({ length: 120 }, (_, i) => ({ id: i + 1, email: `u${i}@x.io` })),
@@ -71,17 +71,22 @@ describe("render/detail", () => {
     };
     const page0 = gridHtml(big, 0);
     expect(page0).toContain(
-      '<div class="grid-foot"><span class="rc"><b>1,240</b> rows &middot; showing <b>1&ndash;50</b> <span class="cap-tag">first 120 held</span></span><span class="pager"><button type="button" class="pager-btn" data-page="prev" aria-label="Previous page" disabled>',
+      '<span class="rc"><b>1,240</b> rows <span class="cap-tag">first 120 held</span></span>',
     );
+    expect(page0).toContain('<option value="50" selected>50</option>');
     expect(page0).toContain('<span class="pg">1 / 3</span>');
     // Page 0 holds a full 50-row slice; the last page holds the remaining 20.
     expect((page0.match(/<tr><td/g) ?? []).length).toBe(50);
     const last = gridHtml(big, 2);
     expect(last).toContain('<span class="pg">3 / 3</span>');
-    expect(last).toContain("showing <b>101&ndash;120</b>");
     expect((last.match(/<tr><td/g) ?? []).length).toBe(20);
     // Out-of-range pages clamp to the last valid one rather than rendering empty.
     expect(gridHtml(big, 9)).toContain('<span class="pg">3 / 3</span>');
+    // A larger page size re-slices in place: 100 rows per page gives 2 pages.
+    const big100 = gridHtml(big, 0, 100);
+    expect(big100).toContain('<option value="100" selected>100</option>');
+    expect(big100).toContain('<span class="pg">1 / 2</span>');
+    expect((big100.match(/<tr><td/g) ?? []).length).toBe(100);
   });
 
   it("shows the empty-result message for an approved query with zero rows", () => {

@@ -104,13 +104,13 @@ function ocNote(text: string): string {
 // The held rows are already capped (capResult, at decision time); page over them in
 // place, never a re-query. Returns the table plus a footer that states the true
 // total, the shown slice, the cap, and the pager over the held rows only.
-export function gridHtml(result: HistResult, page = 0): string {
+export function gridHtml(result: HistResult, page = 0, pageSize = HIST_PAGE_SIZE): string {
   const cols = result.fields.length
     ? result.fields.map((f) => f.name)
     : Object.keys(result.rows[0] ?? {});
   const colCls = cols.map((c) => classifyColumn(c));
   const head = cols.map((c, i) => `<th${colAttr(colCls[i])}>${escapeHtml(c)}</th>`).join("");
-  const { rows, page: cur, pageCount } = pageSlice(result.rows, page);
+  const { rows, page: cur, pageCount } = pageSlice(result.rows, page, pageSize);
   const body = rows
     .map(
       (row) =>
@@ -118,27 +118,36 @@ export function gridHtml(result: HistResult, page = 0): string {
     )
     .join("");
   const table = `<div class="grid-wrap"><table class="grid"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
-  return table + gridFoot(result, cur, pageCount, rows.length);
+  return table + gridFoot(result, cur, pageCount, pageSize);
 }
 
 function colAttr(cls: "pii" | "client" | null): string {
   return cls ? ` class="${cls}"` : "";
 }
 
-function gridFoot(result: HistResult, page: number, pageCount: number, sliceLen: number): string {
+const PAGE_SIZES = [10, 25, 50, 100];
+
+function gridFoot(result: HistResult, page: number, pageCount: number, pageSize: number): string {
   const noun = result.rowCount === 1 ? "row" : "rows";
-  const multi = pageCount > 1;
-  const start = page * HIST_PAGE_SIZE + 1;
-  const end = page * HIST_PAGE_SIZE + sliceLen;
-  const showing = multi
-    ? ` &middot; showing <b>${formatCount(start)}&ndash;${formatCount(end)}</b>`
-    : "";
   const capTag = result.truncated
     ? ` <span class="cap-tag">first ${formatCount(result.rows.length)} held</span>`
     : "";
-  const rc = `<span class="rc"><b>${formatCount(result.rowCount)}</b> ${noun}${showing}${capTag}</span>`;
-  const pager = multi ? gridPager(page, pageCount) : "";
-  return `<div class="grid-foot">${rc}${pager}</div>`;
+  const rc = `<span class="rc"><b>${formatCount(result.rowCount)}</b> ${noun}${capTag}</span>`;
+  const size = pageSizeSelect(pageSize, result.rows.length);
+  const pager = pageCount > 1 ? gridPager(page, pageCount) : "";
+  const right = size || pager ? `<span class="grid-foot-r">${size}${pager}</span>` : "";
+  return `<div class="grid-foot">${rc}${right}</div>`;
+}
+
+// Rows-per-page chooser, shown only once the held rows exceed the smallest option.
+function pageSizeSelect(current: number, held: number): string {
+  if (held <= PAGE_SIZES[0]) {
+    return "";
+  }
+  const opts = PAGE_SIZES.map(
+    (n) => `<option value="${n}"${n === current ? " selected" : ""}>${n}</option>`,
+  ).join("");
+  return `<label class="page-size">Rows <select data-page-size>${opts}</select></label>`;
 }
 
 function gridPager(page: number, pageCount: number): string {
