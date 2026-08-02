@@ -391,11 +391,16 @@ export class Gatekeeper {
       <span class="dsep"></span>${this.readOnlyBadge()}`;
   }
 
-  // A binary badge over one harmonized vocabulary: green lock read-only when a layer
-  // below Gatekeeper also blocks writes, amber writable when the probe confirmed a
-  // writer, muted unverified otherwise. The probe result never leaves the host.
+  // Aggregate over the three layers (Gatekeeper mode, Beekeeper mode, endpoint): green
+  // when any blocks writes, amber when all would accept one, muted when it cannot be told.
   private readOnlyBadge(): string {
-    const view = readOnlyView(this.conn?.readOnly ?? false, this.endpointRO, this.endpointProbed);
+    // Gatekeeper mode is locked read-only for now (the mode dropdown is display-only).
+    const view = readOnlyView(
+      true,
+      this.conn?.readOnly ?? false,
+      this.endpointRO,
+      this.endpointProbed,
+    );
     const rows =
       this.roRow("Gatekeeper", HELP_GATEKEEPER, view.gatekeeper.label, view.gatekeeper.state) +
       this.roRow("Beekeeper", HELP_BEEKEEPER, view.beekeeper.label, view.beekeeper.state) +
@@ -404,10 +409,10 @@ export class Gatekeeper {
     const { kind, label } = view.chip;
     const title =
       kind === "ok"
-        ? "Read-only below Gatekeeper too, hover for details"
+        ? "Read-only: a layer blocks writes, hover for details"
         : kind === "warn"
-          ? "Only Gatekeeper enforces read-only here, hover for details"
-          : "Endpoint not verified, hover for details";
+          ? "Writable: every layer would accept a write, hover for details"
+          : "Unknown: no layer is confirmed read-only, hover for details";
     // The chevron signals the badge expands into the layer breakdown on hover/focus.
     return `<span class="ro-wrap" tabindex="0">
       <span class="ro ${kind}" title="${title}">${layerGlyph(kind)}${label}<span class="ro-caret" aria-hidden="true">${chevronDown}</span></span>
