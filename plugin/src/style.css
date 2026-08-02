@@ -1677,13 +1677,23 @@ label.qs-row {
   letter-spacing: -0.01em;
   color: var(--text);
 }
+/* The detail head is the same seated title bar as settings and activity, only its
+   background is the outcome tint (below) instead of the neutral seated fill. */
 .detail-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--s2);
-  margin-bottom: var(--s2);
-  padding: var(--s2);
-  border-radius: 6px;
+  margin: calc(-1 * var(--s3)) calc(-1 * var(--s3)) var(--s3);
+  padding: var(--s3);
+  border-bottom: 1px solid var(--edge);
+  border-radius: var(--r) var(--r) 0 0;
+}
+/* Agent icon goes faint like the other heads' leading icons; the status pins right. */
+.detail-head .harness-badge {
+  color: var(--faint);
+}
+.detail-head .hstatus {
+  margin-left: auto;
 }
 /* Same outcome tint as the resolved rows, so the title bar signals the result. */
 .detail-head.approved {
