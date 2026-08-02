@@ -1052,6 +1052,11 @@ export class Gatekeeper {
       }
       return;
     }
+    // Skip a proposal already past its TTL (re-adopted from /inflight right after a
+    // reload, before the broker swept it) so it never flashes at 0:00 then vanishes.
+    if (proposal.expiresAt - Date.now() <= 0) {
+      return;
+    }
     const card: Card = { ...proposal, state: "ready" };
     this.cards.push(card);
     this.renderQueue();
