@@ -107,7 +107,8 @@ export function devPanelHtml(): string {
           ${chips}
         </div>
         <div class="dp-spike">
-          <span class="dp-spike-label">Native grid spike</span>
+          <span class="dp-spike-label">Dev tools</span>
+          <button class="dp-chip" type="button" data-dev-reload>Reload view</button>
           <button class="dp-chip" type="button" data-dev-native>Try native panel</button>
         </div>
       </div>`;

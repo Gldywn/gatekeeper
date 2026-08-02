@@ -665,6 +665,14 @@ export class Gatekeeper {
         this.injectDevBundle();
         return;
       }
+      if (target.closest("[data-dev-reload]")) {
+        // Re-fetches the iframe's plugin:// URL from disk so a rebuild shows without a
+        // tab close/reopen; resets state like a reopen, the host bridge is stateless.
+        if (this.settingsStore.get().developerMode) {
+          window.location.reload();
+        }
+        return;
+      }
       const native = target.closest<HTMLElement>("[data-dev-native]");
       if (native) {
         void this.tryNativePanel(native);
