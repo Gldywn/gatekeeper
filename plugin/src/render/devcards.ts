@@ -99,17 +99,21 @@ export function devPanelHtml(): string {
   return `<div class="dev-panel">
         <div class="dp-head">
           <span class="dev-flask">${flaskIcon}</span>
-          <span class="dp-title">Developer &middot; synthetic proposals</span>
+          <span class="dp-title">Developer panel</span>
         </div>
-        <div class="dp-actions">
-          <button class="dp-primary" type="button" data-dev-bundle>Send a bundle</button>
-          <span class="dp-sep" aria-hidden="true"></span>
-          ${chips}
+        <div class="dp-group">
+          <span class="dp-group-label">Synthetic proposals</span>
+          <div class="dp-actions">
+            <button class="dp-primary" type="button" data-dev-bundle>Send a bundle</button>
+            <span class="dp-sep" aria-hidden="true"></span>
+            ${chips}
+          </div>
         </div>
-        <div class="dp-spike">
-          <span class="dp-spike-label">Dev tools</span>
-          <button class="dp-chip" type="button" data-dev-reload>Reload view</button>
-          <button class="dp-chip" type="button" data-dev-native>Try native panel</button>
+        <div class="dp-group">
+          <span class="dp-group-label">Quick tools</span>
+          <div class="dp-actions">
+            <button class="dp-chip" type="button" data-dev-reload>Reload view</button>
+          </div>
         </div>
       </div>`;
 }

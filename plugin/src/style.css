@@ -2556,16 +2556,20 @@ label.qs-row {
   outline: 2px solid var(--exec);
   outline-offset: 2px;
 }
-.dp-spike {
-  display: flex;
-  align-items: center;
-  gap: var(--s2);
-  margin-top: 10px;
-  padding-top: 10px;
+/* Each dev section (synthetic proposals, quick tools, …) is an eyebrow-labelled group;
+   a dashed divider only between groups keeps future tools clean to slot in. */
+.dp-group + .dp-group {
+  margin-top: 12px;
+  padding-top: 12px;
   border-top: 1px dashed color-mix(in oklch, var(--exec) 22%, var(--edge));
 }
-.dp-spike-label {
-  font-size: 11px;
+.dp-group-label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: var(--fs-eyebrow);
+  letter-spacing: var(--track-eyebrow);
+  text-transform: uppercase;
+  font-weight: 600;
   color: var(--faint);
 }
 

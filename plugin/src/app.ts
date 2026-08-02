@@ -2,7 +2,6 @@ import type { ConnectionInfo, RunQueryResult } from "@beekeeperstudio/plugin";
 import {
   addNotificationListener,
   clipboard,
-  expandTableResult,
   getColumns,
   getConnectionInfo,
   log,
@@ -673,11 +672,6 @@ export class Gatekeeper {
         }
         return;
       }
-      const native = target.closest<HTMLElement>("[data-dev-native]");
-      if (native) {
-        void this.tryNativePanel(native);
-        return;
-      }
       const chip = target.closest<HTMLElement>("[data-dev-chip]");
       if (chip) {
         this.injectDevCard(chip.getAttribute("data-dev-chip") as DevCardType);
@@ -899,28 +893,6 @@ export class Gatekeeper {
       return;
     }
     this.addDevCard(buildDevCard(devCardSpec(type), this.nextDevId(), Date.now()));
-  }
-
-  // Dev-only spike (idea #10): does expandTableResult populate Beekeeper's native grid
-  // from our base-tab? Feedback lands in the button; the log pane is easy to miss.
-  private async tryNativePanel(btn: HTMLElement): Promise<void> {
-    if (!this.settingsStore.get().developerMode) {
-      return;
-    }
-    btn.textContent = "running…";
-    try {
-      const result = await runQuery("SELECT 1 AS demo, 'gatekeeper' AS source");
-      if (result.error) {
-        btn.textContent = "query error";
-        return;
-      }
-      await expandTableResult(result.results);
-      // Resolves silently on a base-tab: no native grid exists to fill (idea #10).
-      btn.textContent = "resolved · no native grid here";
-    } catch (err) {
-      log.error(err instanceof Error ? err : String(err));
-      btn.textContent = "not supported here";
-    }
   }
 
   // A synthetic card joins the same queue and schema annotation as a real one, so it
