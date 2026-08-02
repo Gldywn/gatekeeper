@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BrokerClient } from "./broker";
+import { connectionScopeKey } from "./scope";
 
 // The encrypted store and the plaintext store the mocked appStorage keeps apart,
 // so the legacy-migration path can be exercised without the real host bridge.
@@ -103,6 +104,23 @@ describe("endpoint requests", () => {
     expect(await c.sessions()).toBeNull();
     expect(fetchMock).toHaveBeenCalledWith(`${URL}/sessions`, {
       headers: { Authorization: "Bearer null" },
+    });
+  });
+
+  it("carries the composite scope key verbatim in the connection header", async () => {
+    const c = client();
+    await c.setToken("secret");
+    fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => ({ inflight: [] }) });
+    // Two same-named connections on different engines derive different keys; the
+    // broker must send whichever it is given unchanged, so the server scopes right.
+    const scope = connectionScopeKey({
+      connectionName: "gatekeeper_test",
+      databaseType: "mysql",
+      databaseName: "gatekeeper_test",
+    });
+    await c.inflight(scope);
+    expect(fetchMock).toHaveBeenCalledWith(`${URL}/inflight`, {
+      headers: { "X-Gatekeeper-Connection": scope, Authorization: "Bearer secret" },
     });
   });
 });

@@ -23,6 +23,7 @@ import {
   warnIcon,
 } from "./icons";
 import { BrokerClient } from "./net/broker";
+import { connectionScopeKey } from "./net/scope";
 import { modeDropdown, switchInput } from "./render/controls";
 import { historyRow } from "./render/history";
 import { queueHtml, readyActions, schemaInner } from "./render/queue";
@@ -174,7 +175,7 @@ export class Gatekeeper {
       root,
       broker: this.broker,
       connectionName: () => this.connectionName,
-      scope: () => this.conn?.connectionName,
+      scope: () => this.connScopeKey(),
     });
     this.settingsView = new SettingsView({
       root,
@@ -263,7 +264,7 @@ export class Gatekeeper {
   private async loadInflight(): Promise<void> {
     try {
       const gen = this.connGeneration;
-      const inflight = await this.broker.inflight(this.conn?.connectionName);
+      const inflight = await this.broker.inflight(this.connScopeKey());
       if (inflight === null) {
         return;
       }
@@ -296,6 +297,13 @@ export class Gatekeeper {
     };
   }
 
+  // The scoping identity sent to the broker: composite so a same-named connection
+  // on a different engine/database never claims this one's queries, roster, or
+  // activity. undefined pre-snapshot, so the header is omitted until we know it.
+  private connScopeKey(): string | undefined {
+    return this.conn ? connectionScopeKey(this.conn) : undefined;
+  }
+
   // No connectionChanged notification exists, so a switch is caught by re-reading
   // getConnectionInfo(): a postMessage round-trip, throttled to ~5s on the tick
   // (a switch is rare) rather than paid every second.
@@ -318,8 +326,15 @@ export class Gatekeeper {
     } catch {
       return; // Keep the last known connection; retry on the next throttle window.
     }
-    const name = conn.connectionName || conn.databaseName || "connection";
-    if (name === this.connectionName) {
+    // Detect a switch by the composite identity, not the display name alone: two
+    // connections can share a name yet point at different engines/databases, and
+    // those must not silently keep the prior scope, cards, or history.
+    const nextKey = connectionScopeKey({
+      connectionName: conn.connectionName,
+      databaseType: conn.databaseType,
+      databaseName: conn.databaseName,
+    });
+    if (this.connScopeKey() === nextKey) {
       return;
     }
     this.applyConnection(conn);
@@ -825,7 +840,7 @@ export class Gatekeeper {
     }
     let claimed = false;
     try {
-      const res = await this.broker.pending(this.conn?.connectionName);
+      const res = await this.broker.pending(this.connScopeKey());
       if (res.status === 401) {
         this.polling = false;
         this.token = null;
@@ -877,7 +892,7 @@ export class Gatekeeper {
       return;
     }
     try {
-      const sessions = await this.broker.sessions(this.conn?.connectionName);
+      const sessions = await this.broker.sessions(this.connScopeKey());
       if (sessions !== null) {
         this.roster = sessions;
         this.renderRoster();

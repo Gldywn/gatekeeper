@@ -2,7 +2,50 @@ import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { connectionScopeKey, SCOPE_SEP } from "./connection.js";
 import { RequestStore } from "./store.js";
+
+describe("connectionScopeKey", () => {
+  it("joins name, engine, and database into one debuggable, non-hashed key", () => {
+    const key = connectionScopeKey({
+      connectionName: "gatekeeper_test",
+      databaseType: "postgresql",
+      databaseName: "app",
+    });
+    // Plain and readable: every part survives, joined by the unit separator.
+    expect(key).toBe(`gatekeeper_test${SCOPE_SEP}postgresql${SCOPE_SEP}app`);
+    expect(key.split(SCOPE_SEP)).toEqual(["gatekeeper_test", "postgresql", "app"]);
+  });
+
+  it("distinguishes a shared display name across engines or databases", () => {
+    const pg = connectionScopeKey({
+      connectionName: "gatekeeper_test",
+      databaseType: "postgresql",
+      databaseName: "gatekeeper_test",
+    });
+    const my = connectionScopeKey({
+      connectionName: "gatekeeper_test",
+      databaseType: "mysql",
+      databaseName: "gatekeeper_test",
+    });
+    const otherDb = connectionScopeKey({
+      connectionName: "gatekeeper_test",
+      databaseType: "postgresql",
+      databaseName: "analytics",
+    });
+    expect(pg).not.toBe(my);
+    expect(pg).not.toBe(otherDb);
+  });
+
+  it("is header-safe: no code unit exceeds a byte", () => {
+    const key = connectionScopeKey({
+      connectionName: "prod",
+      databaseType: "postgresql",
+      databaseName: "app",
+    });
+    expect([...key].every((ch) => ch.charCodeAt(0) <= 0xff)).toBe(true);
+  });
+});
 
 describe("connection snapshot", () => {
   it("is null until the plugin reports", () => {

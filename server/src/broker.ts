@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { BROKER_HOST, brokerPort, LEASE_MS } from "./config.js";
+import { connectionScopeKey } from "./connection.js";
 import { type Outcome, type RequestStore, StoreError } from "./store.js";
 
 const CORS: Record<string, string> = {
@@ -141,11 +142,16 @@ async function handle(
   send(res, 404, { error: "not found" });
 }
 
+// The plugin's header carries the composite scope key for the tab making the
+// request; only when it is absent do we fall back to the last-posted snapshot
+// (shared, so it can lag behind a multi-tab caller's real connection).
 function resolveConnection(store: RequestStore, req: IncomingMessage): string | null {
   const header = req.headers["x-gatekeeper-connection"];
-  return typeof header === "string" && header
-    ? header
-    : store.getConnection()?.connectionName || null;
+  if (typeof header === "string" && header) {
+    return header;
+  }
+  const conn = store.getConnection();
+  return conn ? connectionScopeKey(conn) : null;
 }
 
 function guarded(res: ServerResponse, fn: () => void): void {

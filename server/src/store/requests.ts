@@ -1,3 +1,4 @@
+import { connectionScopeKey } from "../connection.js";
 import { logAudit } from "./audit.js";
 import { getConnection } from "./connection.js";
 import { digest, isUniqueViolation, OPEN_STATES, type StoreContext, token } from "./db.js";
@@ -43,6 +44,7 @@ export function submit(
     }
 
     const now = ctx.now();
+    const conn = getConnection(ctx);
     const row: RawRow = {
       id: token("req"),
       created_at: now,
@@ -58,7 +60,7 @@ export function submit(
       result_json: null,
       policy_json: input.policy === undefined ? null : JSON.stringify(input.policy),
       expires_at: now + ctx.ttl,
-      connection: getConnection(ctx)?.connectionName || null,
+      connection: conn ? connectionScopeKey(conn) : null,
     };
     try {
       ctx.db

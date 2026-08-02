@@ -1,3 +1,4 @@
+import { connectionScopeKey } from "../connection.js";
 import { getConnection } from "./connection.js";
 import { OPEN_STATES, type StoreContext } from "./db.js";
 import { type SessionRow, toSessionMeta } from "./rows.js";
@@ -14,7 +15,8 @@ export function upsertSession(
   },
 ): void {
   const now = ctx.now();
-  const connection = getConnection(ctx)?.connectionName ?? null;
+  const conn = getConnection(ctx);
+  const connection = conn ? connectionScopeKey(conn) : null;
   ctx.db
     .prepare(
       `INSERT INTO sessions (session_id, harness, harness_version, project, created_at, last_seen, last_active, connection, left_at)
