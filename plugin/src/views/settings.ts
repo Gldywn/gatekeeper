@@ -1,5 +1,5 @@
 import { escapeHtml } from "../html";
-import { gearIcon } from "../icons";
+import { flaskIcon, gearIcon } from "../icons";
 import { modeDropdown, switchInput } from "../render/controls";
 import { RECENTLY_RESOLVED_OPTIONS, type Settings } from "../settings";
 
@@ -108,8 +108,25 @@ export class SettingsView {
             <span class="set-control">${selectHtml(s.recentlyResolved)}</span>
           </div>
         </section>
+        ${devZone(s)}
       </div>`;
   }
+}
+
+// A recessed, dashed, dimmer block set apart from the real settings: one blue
+// toggle for the whole developer suite. Blue (never amber/green/red) so it reads
+// as technical, not a warning.
+function devZone(s: Settings): string {
+  return `
+        <div class="dev-zone">
+          <div class="dev-row">
+            <div class="dev-main">
+              <span class="dev-name"><span class="dev-flask">${flaskIcon}</span>Developer mode <span class="dev-tag">dev</span></span>
+              <span class="dev-desc">Turn on developer mode and its utilities. Only ever runs neutral read-only queries, never touches your data.</span>
+            </div>
+            <span class="set-control">${switchInput("developerMode", "Developer mode", s.developerMode)}</span>
+          </div>
+        </div>`;
 }
 
 function groupHead(name: string): string {

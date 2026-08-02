@@ -1,5 +1,13 @@
 import { capitalize, clock, escapeHtml, relAge } from "../html";
-import { buildingIcon, copyIcon, harnessIcon, messageIcon, sendIcon, warnIcon } from "../icons";
+import {
+  buildingIcon,
+  copyIcon,
+  flaskIcon,
+  harnessIcon,
+  messageIcon,
+  sendIcon,
+  warnIcon,
+} from "../icons";
 import { formatSql } from "../sql/format";
 import { highlight } from "../sql/highlight";
 import { isReadOnlyQuery } from "../sql/readonly";
@@ -39,11 +47,14 @@ export function groupHtml(
       ? escapeHtml(harness)
       : escapeHtml(cards[0].sessionId ?? "session");
   const intent = session?.sessionLabel?.trim();
+  // A synthetic session: swap the fill-forced harness badge for the stroke flask
+  // and tag the group so it reads as dev, matching the blue cards inside it.
+  const dev = cards.some((c) => c.dev);
   return `
-      <section class="group">
+      <section class="group${dev ? " dev" : ""}">
         <div class="group-head">
-          <span class="harness-badge">${harnessIcon(harness)}</span>
-          <span class="group-label">${label}</span>
+          <span class="${dev ? "dev-flask" : "harness-badge"}">${dev ? flaskIcon : harnessIcon(harness)}</span>
+          <span class="group-label">${label}</span>${dev ? `<span class="dev-tag">dev</span>` : ""}
           ${intent ? `<span class="group-intent" title="${escapeHtml(capitalize(intent))}">${escapeHtml(capitalize(intent))}</span>` : ""}
           <span class="group-count count-badge">${cards.length}</span>
         </div>
@@ -64,9 +75,9 @@ export function cardHtml(card: Card, dialect: string, denyDrafts: Map<string, st
     ? ""
     : '<p class="blocked-note"><svg viewBox="0 0 16 16" fill="none"><path d="M8 1.7 1 14h14L8 1.7Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 6.3v3.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.7" r=".8" fill="currentColor"/></svg>Read-only only. This query can be rejected.</p>';
   return `
-      <div class="card ${readOnly ? "" : "blocked"}" data-card="${card.id}">
+      <div class="card ${card.dev ? "dev" : readOnly ? "" : "blocked"}" data-card="${card.id}">
         <div class="top">
-          ${card.intent ? `<span class="intent">${escapeHtml(capitalize(card.intent))}</span>` : `<span class="intent">${escapeHtml(card.id)}</span>`}
+          ${card.dev ? `<span class="dev-flask">${flaskIcon}</span>` : ""}${card.intent ? `<span class="intent">${escapeHtml(capitalize(card.intent))}</span>` : `<span class="intent">${escapeHtml(card.id)}</span>`}${card.dev ? `<span class="dev-tag">dev</span>` : ""}
           <span class="${remaining <= 45_000 ? "lease low" : "lease"}">${clock(remaining)}</span>
         </div>
         <div class="meta">${escapeHtml(card.id)} &middot; ${relAge(card.createdAt)}</div>
@@ -103,10 +114,14 @@ export function denyField(id: string, value = ""): string {
 // Compact under-SQL annotation: the tables read and a possible-PII flag. Empty
 // (collapsed by CSS) until the async analysis lands or when nothing is known.
 export function schemaInner(schema: SchemaContext | null | undefined): string {
-  if (!schema?.tables.length) {
+  if (!schema) {
     return "";
   }
-  const tables = `<div class="cs-line"><span class="cs-k">reads</span><span class="cs-list">${schema.tables.map(escapeHtml).join(" &middot; ")}</span></div>`;
+  // The "reads" line needs a resolved table; the flags stand on their own, so a
+  // table-less query (a synthetic dev card, or a CTE-only read) still surfaces them.
+  const tables = schema.tables.length
+    ? `<div class="cs-line"><span class="cs-k">reads</span><span class="cs-list">${schema.tables.map(escapeHtml).join(" &middot; ")}</span></div>`
+    : "";
   const pii = schema.pii.length
     ? `<div class="cs-line cs-pii"><span class="cs-warn">${warnIcon}possible PII</span><span class="cs-list">${schema.pii.map(escapeHtml).join(" &middot; ")}</span></div>`
     : "";

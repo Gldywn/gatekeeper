@@ -69,5 +69,9 @@ export const gearIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentCol
 // External-link glyph: the popover footer's hook to the full-settings overlay.
 export const externalLinkIcon = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3h4v4"/><path d="M13 3l-6 6"/><path d="M11 9v3.5H3.5V4.5H7"/></svg>`;
 
+// Lucide "flask-conical" (lucide.dev, ISC License), the developer-mode mark. A
+// stroke icon (not filled), so it renders outside the fill-forcing .harness-badge.
+export const flaskIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2"/><path d="M6.453 15h11.094"/><path d="M8.5 2h7"/></svg>`;
+
 // The connection target: a database cylinder leading the header chip.
 export const dbCylinderIcon = `<svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><ellipse cx="8" cy="4" rx="5" ry="2"/><path d="M3 4v8c0 1.1 2.24 2 5 2s5-.9 5-2V4"/><path d="M3 8c0 1.1 2.24 2 5 2s5-.9 5-2"/></svg>`;

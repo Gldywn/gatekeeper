@@ -25,10 +25,17 @@ import {
 import { BrokerClient } from "./net/broker";
 import { connectionScopeKey } from "./net/scope";
 import { modeDropdown, switchInput } from "./render/controls";
+import {
+  buildDevCard,
+  type DevCardType,
+  devBundle,
+  devCardSpec,
+  devPanelHtml,
+} from "./render/devcards";
 import { historyRow } from "./render/history";
 import { queueHtml, readyActions, schemaInner } from "./render/queue";
 import { type LayerState, readOnlyView } from "./render/readonly";
-import { presence, rosterRow } from "./render/roster";
+import { devRosterRow, presence, rosterRow } from "./render/roster";
 import { capResult, type Field, type HistResult } from "./result";
 import { filterSchema, type Settings, SettingsStore } from "./settings";
 import { formatSql } from "./sql/format";
@@ -135,6 +142,9 @@ export class Gatekeeper {
   // Open deny forms and their in-progress reason text, keyed by card id, so a
   // half-typed reason survives a queue rebuild from a concurrent proposal.
   private readonly denyDrafts = new Map<string, string>();
+  // Monotonic counter for synthetic dev-card ids, so a bundle injected in one tick
+  // never collides on id.
+  private devSeq = 0;
   private readonly history: HistItem[] = [];
   private roster: SessionRoster[] = [];
   private rosterSig = "";
@@ -587,6 +597,7 @@ export class Gatekeeper {
           <section class="roster" id="roster"></section>
         </div>
         <div class="main" id="main">
+          <div id="devPanel"></div>
           <p class="label">Pending approval <span class="count-badge" id="pendingCount" aria-live="polite"></span></p>
           <div class="queue" id="queue"></div>
           <section class="history">
@@ -642,6 +653,19 @@ export class Gatekeeper {
         e.preventDefault();
         e.stopPropagation();
         this.closeDeny(id);
+      }
+    });
+    // Developer-only generator panel; the whole subtree is empty (and inert) unless
+    // dev mode is on, so this handler never fires for a real user.
+    this.root.querySelector<HTMLElement>("#devPanel")!.addEventListener("click", (e) => {
+      const target = e.target as HTMLElement;
+      if (target.closest("[data-dev-bundle]")) {
+        this.injectDevBundle();
+        return;
+      }
+      const chip = target.closest<HTMLElement>("[data-dev-chip]");
+      if (chip) {
+        this.injectDevCard(chip.getAttribute("data-dev-chip") as DevCardType);
       }
     });
     hist.addEventListener("click", (e) => {
@@ -725,6 +749,7 @@ export class Gatekeeper {
         this.activityView.close();
       }
     });
+    this.renderDevPanel();
     this.renderQueue();
     this.renderHistory();
     this.renderRoster(); // Rebuilt DOM has a blank pill; force it back to the initial state (the
@@ -809,6 +834,59 @@ export class Gatekeeper {
     for (const card of [...this.cards]) {
       void this.analyzeSchema(card);
     }
+    this.syncDevMode();
+  }
+
+  // Dev mode gates every dev surface; when it goes off, drop any synthetic cards so
+  // nothing dev survives the toggle, then re-render the panel, queue, and roster so
+  // the panel and fake agent appear or disappear together.
+  private syncDevMode(): void {
+    if (!this.settingsStore.get().developerMode) {
+      for (let i = this.cards.length - 1; i >= 0; i--) {
+        if (this.cards[i].dev) {
+          this.denyDrafts.delete(this.cards[i].id);
+          this.cards.splice(i, 1);
+        }
+      }
+    }
+    this.renderDevPanel();
+    this.renderQueue();
+    this.renderRoster();
+  }
+
+  private renderDevPanel(): void {
+    const el = this.root.querySelector<HTMLElement>("#devPanel");
+    if (el) {
+      el.innerHTML = this.settingsStore.get().developerMode ? devPanelHtml() : "";
+    }
+  }
+
+  private nextDevId(): string {
+    return `dev_${(this.devSeq++).toString(36).padStart(4, "0")}`;
+  }
+
+  private injectDevBundle(): void {
+    if (!this.settingsStore.get().developerMode) {
+      return;
+    }
+    for (const spec of devBundle()) {
+      this.addDevCard(buildDevCard(spec, this.nextDevId(), Date.now()));
+    }
+  }
+
+  private injectDevCard(type: DevCardType): void {
+    if (!this.settingsStore.get().developerMode) {
+      return;
+    }
+    this.addDevCard(buildDevCard(devCardSpec(type), this.nextDevId(), Date.now()));
+  }
+
+  // A synthetic card joins the same queue and schema annotation as a real one, so it
+  // renders identically; only its resolve path (approve/reject) diverges, staying local.
+  private addDevCard(card: Card): void {
+    this.cards.push(card);
+    this.renderQueue();
+    void this.analyzeSchema(card);
   }
 
   // Mirror the live settings into every rendered control (quick menu and overlay)
@@ -916,19 +994,24 @@ export class Gatekeeper {
       // human might act on; otherwise drop it so the roster stays current.
       .filter((r) => r.p !== "gone" || r.s.pendingCount > 0)
       .sort((a, b) => PRESENCE_ORDER[a.p] - PRESENCE_ORDER[b.p] || b.s.lastActive - a.s.lastActive);
+    // The fake agent is pinned first and counted; fold dev mode into the signature
+    // so toggling it forces a rebuild.
+    const dev = this.settingsStore.get().developerMode;
     // Skip the rebuild (and the pulse restart) when only the relative ages moved;
     // tick() keeps those fresh in place.
-    const sig = JSON.stringify(
+    const sig = JSON.stringify([
+      dev,
       rows.map((r) => [r.s.sessionId, r.p, r.s.pendingCount, r.s.sessionLabel, r.s.lastIntent]),
-    );
+    ]);
     if (sig === this.rosterSig) {
       return;
     }
     this.rosterSig = sig;
-    const live = rows.filter((r) => r.p !== "gone").length;
-    const list = rows.length
-      ? rows.map(({ s, p }) => rosterRow(s, p)).join("")
-      : '<div class="empty">No agents connected.</div>';
+    const live = rows.filter((r) => r.p !== "gone").length + (dev ? 1 : 0);
+    const realList = rows.map(({ s, p }) => rosterRow(s, p)).join("");
+    const list = dev
+      ? devRosterRow() + realList
+      : realList || '<div class="empty">No agents connected.</div>';
     el.innerHTML = `<div class="roster-head"><span class="label">Connected agents</span><span class="roster-count count-badge">${live}</span></div><div class="roster-list">${list}</div>`;
     for (const loop of this.rosterLoops) {
       loop.stop();
@@ -978,6 +1061,10 @@ export class Gatekeeper {
 
   private async renew(): Promise<void> {
     for (const card of [...this.cards]) {
+      // Dev cards hold no broker lease; their countdown is purely local.
+      if (card.dev) {
+        continue;
+      }
       // Renew while a human deliberates (ready) and while the approved query
       // runs (executing). An unrenewed executing card would expire mid-query
       // and be failed as execution_unknown even though it actually succeeded.
@@ -1106,6 +1193,13 @@ export class Gatekeeper {
   }
 
   private async approve(id: string): Promise<void> {
+    // Developer-mode cards resolve locally and never reach the broker safety core;
+    // branch before any connection/lease work so the two paths cannot entangle.
+    const devCard = this.cards.find((c) => c.id === id && c.dev);
+    if (devCard) {
+      await this.approveDev(devCard);
+      return;
+    }
     // Catch a switch since the last throttled poll before touching the database.
     await this.checkConnection();
     const card = this.cards.find((c) => c.id === id);
@@ -1150,6 +1244,12 @@ export class Gatekeeper {
   }
 
   private async reject(id: string, reason?: string): Promise<void> {
+    // Dev cards (plain reject or request-changes) resolve locally, no broker.
+    const devCard = this.cards.find((c) => c.id === id && c.dev);
+    if (devCard) {
+      this.rejectDev(devCard, reason);
+      return;
+    }
     const card = this.cards.find((c) => c.id === id);
     if (card?.state !== "ready") {
       return;
@@ -1160,6 +1260,36 @@ export class Gatekeeper {
     this.setCardState(id, "rejecting");
     await this.postResult(card, { status: "rejected", reason: custom || "Rejected by user." });
     this.finish(id, "rejected", "declined", undefined, custom || undefined);
+  }
+
+  // Local dev resolve: run the neutral SELECT once through the host runQuery, then
+  // commit to history via finish() (broker-free). No executing/result/renew ever
+  // fires, so a dev card leaves no trace on the server, roster, or audit trail.
+  private async approveDev(card: Card): Promise<void> {
+    if (card.state !== "ready") {
+      return;
+    }
+    // The read-only guarantee holds even for synthetic cards: never run a non-SELECT.
+    if (!isReadOnlyQuery(card.sql, this.dialect)) {
+      this.finish(card.id, "failed", "blocked");
+      return;
+    }
+    this.setCardState(card.id, "executing");
+    try {
+      const { rows, fields } = await runApprovedQuery(card.sql);
+      this.finish(card.id, "approved", `${rows.length} rows`, capResult(rows, fields));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.finish(card.id, "failed", "query failed", undefined, message);
+    }
+  }
+
+  private rejectDev(card: Card, reason?: string): void {
+    if (card.state !== "ready") {
+      return;
+    }
+    const custom = reason?.trim();
+    this.finish(card.id, "rejected", "declined", undefined, custom || undefined);
   }
 
   // Swap only this card's action row in place (no renderQueue) so the lease

@@ -1,5 +1,5 @@
 import { capitalize, escapeHtml, relAge } from "../html";
-import { harnessIcon } from "../icons";
+import { flaskIcon, harnessIcon } from "../icons";
 import type { Presence, SessionRoster } from "../types";
 
 // Mirror the server's SESSION_HEARTBEAT_MS margin: active if it acted recently,
@@ -35,5 +35,18 @@ export function rosterRow(s: SessionRoster, p: Presence): string {
         <span class="roster-label">${who}</span>
         <span class="roster-intent" title="${escapeHtml(scope)}">${escapeHtml(scope)}</span>
         <span class="roster-meta">${meta}</span>
+      </div>`;
+}
+
+// The synthetic dev-mode agent, pinned first when developer mode is on. Injected
+// at render time; never from /sessions, never leased, never posted anywhere.
+export function devRosterRow(): string {
+  return `
+      <div class="roster-row dev" data-presence="active">
+        <span class="presence-dot"></span>
+        <span class="dev-flask">${flaskIcon}</span>
+        <span class="roster-label">dev-mode</span>
+        <span class="roster-intent" title="Synthetic session for UI testing">Synthetic session for UI testing</span>
+        <span class="dev-tag">dev</span>
       </div>`;
 }

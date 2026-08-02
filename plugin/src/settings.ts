@@ -9,6 +9,9 @@ export interface Settings {
   schemaAnnotation: boolean;
   sensitiveValues: boolean;
   recentlyResolved: number;
+  // Client-side developer utilities (synthetic proposals, a fake agent). Off by
+  // default; every dev surface is invisible and inert until this is on.
+  developerMode: boolean;
 }
 
 export const RECENTLY_RESOLVED_OPTIONS = [10, 20, 50] as const;
@@ -21,6 +24,7 @@ export function defaultSettings(): Settings {
     schemaAnnotation: true,
     sensitiveValues: true,
     recentlyResolved: RECENTLY_RESOLVED_DEFAULT,
+    developerMode: false,
   };
 }
 
@@ -41,6 +45,7 @@ export function normalizeSettings(raw: unknown): Settings {
     recentlyResolved: (RECENTLY_RESOLVED_OPTIONS as readonly number[]).includes(resolved)
       ? resolved
       : RECENTLY_RESOLVED_DEFAULT,
+    developerMode: asBool(r.developerMode, false),
   };
 }
 

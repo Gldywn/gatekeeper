@@ -2228,3 +2228,184 @@ label.qs-row {
     max-width: 24ch;
   }
 }
+
+/* ---- Developer mode (backlog idea #11) ----
+   Every dev surface is blue (--exec, never amber/green/red which already carry
+   meaning), recessed, and dashed so it reads as a separate technical area. All of
+   it is gated behind the developerMode toggle and absent from the DOM when off. */
+
+/* The stroke flask, sized per context; unlike .harness-badge it is not fill-forced. */
+.dev-flask {
+  display: inline-flex;
+  flex: none;
+  color: var(--exec);
+}
+.dev-flask svg {
+  width: 14px;
+  height: 14px;
+}
+/* One blue tag shared by every dev surface. Perfectly centered so the mono label
+   never drifts off the baseline of the pill. */
+.dev-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--exec);
+  border: 1px solid color-mix(in oklch, var(--exec) 40%, transparent);
+  border-radius: 4px;
+  padding: 3px 5px;
+}
+
+/* Recessed block at the bottom of Settings, dimmer than the real rows. */
+.dev-zone {
+  margin-top: var(--s5);
+  padding: 13px 14px;
+  border: 1px dashed var(--edge-strong);
+  border-radius: 9px;
+  background: color-mix(in oklch, var(--sunken) 40%, transparent);
+}
+.dev-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.dev-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.dev-name {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: 13px;
+  font-weight: 560;
+  color: var(--muted);
+}
+.dev-desc {
+  font-size: 11.5px;
+  color: var(--faint);
+  overflow-wrap: anywhere;
+}
+/* The developer toggle is blue when on, not the settings green. */
+.dev-zone .switch:checked {
+  background: color-mix(in oklch, var(--exec) 55%, transparent);
+  border-color: color-mix(in oklch, var(--exec) 45%, transparent);
+}
+.dev-zone .switch:checked::before {
+  background: var(--exec);
+}
+
+/* The generator panel above the pending queue. */
+.dev-panel {
+  border: 1px dashed color-mix(in oklch, var(--exec) 34%, var(--edge));
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--exec) 6%, transparent);
+  padding: 11px 13px;
+  margin-bottom: var(--s4);
+}
+.dp-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 10px;
+}
+.dp-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  color: var(--exec);
+}
+.dp-note {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--faint);
+}
+.dp-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  align-items: center;
+}
+.dp-primary {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 570;
+  cursor: pointer;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 13px;
+  color: oklch(18% 0.03 235);
+  background: var(--exec);
+}
+.dp-primary:focus-visible {
+  outline: 2px solid var(--exec);
+  outline-offset: 2px;
+}
+.dp-sep {
+  width: 1px;
+  height: 18px;
+  background: color-mix(in oklch, var(--exec) 30%, transparent);
+}
+.dp-chip {
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  border: 1px solid color-mix(in oklch, var(--exec) 30%, transparent);
+  border-radius: 999px;
+  padding: 4px 11px;
+  color: var(--muted);
+  background: none;
+}
+.dp-chip:hover {
+  color: var(--text);
+  border-color: color-mix(in oklch, var(--exec) 55%, transparent);
+}
+.dp-chip:focus-visible {
+  outline: 2px solid var(--exec);
+  outline-offset: 2px;
+}
+
+/* The fake connected agent, pinned first in the roster. */
+.roster-row.dev .dev-flask svg {
+  width: 15px;
+  height: 15px;
+}
+.roster-row.dev .presence-dot {
+  background: var(--exec);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--exec) 20%, transparent);
+}
+.roster-row.dev .roster-label {
+  color: color-mix(in oklch, var(--text) 82%, var(--exec));
+}
+.roster-row.dev .dev-tag {
+  margin-left: auto;
+}
+
+/* A synthetic dev card and its queue group. */
+.group.dev .dev-flask,
+.group.dev .dev-tag {
+  align-self: center;
+}
+.group.dev .dev-flask svg {
+  width: 15px;
+  height: 15px;
+}
+.card.dev {
+  border-color: color-mix(in oklch, var(--exec) 28%, var(--edge));
+}
+.card.dev .top {
+  align-items: center;
+}
+.card.dev .dev-flask svg {
+  width: 15px;
+  height: 15px;
+}

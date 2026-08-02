@@ -47,6 +47,9 @@ export interface Card extends Proposal {
   // Host-side only: which tables/PII the query touches, for the human's eyes.
   // Never posted to the broker, so the agent never learns the schema.
   schema?: SchemaContext | null;
+  // Developer-mode synthetic card: resolves down a fully local path that never
+  // calls the broker, lease, roster, or audit trail. Absent on real cards.
+  dev?: boolean;
 }
 
 export interface HistItem {
