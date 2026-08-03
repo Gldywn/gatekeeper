@@ -47,7 +47,12 @@ export function createMcpServer(store: RequestStore): { server: McpServer; sessi
           .describe(
             "The SQL to propose (a read, or a write for a human to approve under Write/Destructive mode).",
           ),
-        intent: z.string().optional().describe("A short, human-readable reason for the query."),
+        intent: z
+          .string()
+          .optional()
+          .describe(
+            "Plain-language reason a human reviewer can approve at a glance: the goal behind this query and why you're running it, with a ticket or incident id if there is one. Don't restate the SQL or use table/column jargon; keep raw PII, secrets, and record values out.",
+          ),
         idempotency_key: z
           .string()
           .optional()
@@ -156,7 +161,12 @@ export function createMcpServer(store: RequestStore): { server: McpServer; sessi
         "Convenience wrapper that submits a query and waits (bounded) for the terminal result. Reads are always allowed; a write/destructive statement runs only if a human has armed the matching mode (Write or Destructive), else it is rejected. It serializes one query at a time; prefer submit_query + get_query_result when you want concurrency.",
       inputSchema: {
         sql: z.string(),
-        intent: z.string().optional(),
+        intent: z
+          .string()
+          .optional()
+          .describe(
+            "Plain-language reason a human reviewer can approve at a glance: the goal behind this query and why you're running it, with a ticket or incident id if there is one. Don't restate the SQL or use table/column jargon; keep raw PII, secrets, and record values out.",
+          ),
       },
     },
     async ({ sql, intent }) => {
@@ -178,7 +188,9 @@ export function createMcpServer(store: RequestStore): { server: McpServer; sessi
       inputSchema: {
         label: z
           .string()
-          .describe("A short session scope, e.g. 'Support SUP-1042: identity check'."),
+          .describe(
+            "The whole session or task you're on (a ticket or incident id works well), not a single query, so the human can match this agent to your session. A few words, no PII, credentials, or connection details. E.g. 'Support SUP-1042: login/identity check'.",
+          ),
       },
     },
     async ({ label }) => {
