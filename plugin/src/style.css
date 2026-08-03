@@ -74,7 +74,7 @@ body::before {
   position: fixed;
   inset: 0;
   z-index: -1;
-  background: url("./assets/gatekeeper-bg.webp") center / cover no-repeat;
+  background: url("./assets/gatekeeper-bg.webp") center / 100% 100% no-repeat;
   opacity: 0.45;
   pointer-events: none;
 }
@@ -146,18 +146,18 @@ body::before {
 }
 .hive {
   position: absolute;
-  top: 50%;
+  top: 0;
   right: 0;
-  width: 280px;
-  height: 160px;
-  transform: translateY(-50%);
-  /* Screen blend drops the asset's near-black backdrop, leaving only its hexagons. */
-  background: url("./assets/gatekeeper-deco.svg") right center / cover no-repeat;
+  width: 320px;
+  height: 100%;
+  /* Anchored in the top-right corner; screen blend drops the asset's near-black
+     backdrop, and the diagonal mask fades it inward from the corner. */
+  background: url("./assets/gatekeeper-deco.svg") right top / cover no-repeat;
   mix-blend-mode: screen;
-  opacity: 0.5;
+  opacity: 0.6;
   pointer-events: none;
-  -webkit-mask-image: linear-gradient(90deg, transparent, #000 65%);
-  mask-image: linear-gradient(90deg, transparent, #000 65%);
+  -webkit-mask-image: linear-gradient(to bottom left, #000 15%, transparent 72%);
+  mask-image: linear-gradient(to bottom left, #000 15%, transparent 72%);
 }
 .brand,
 .conn-chip,
@@ -166,12 +166,13 @@ body::before {
   z-index: 1;
 }
 .mark {
-  width: 24px;
-  height: 24px;
+  width: 30px;
+  height: 30px;
   flex: none;
   align-self: center;
-  background: url("./assets/gatekeeper-logo.webp") center / contain no-repeat;
-  border-radius: 6px;
+  /* Zoom past the icon's white canvas margin and round it into a squircle. */
+  background: url("./assets/gatekeeper-logo.webp") center / 138% no-repeat;
+  border-radius: 8px;
 }
 .wordmark {
   font-weight: 660;
@@ -1479,10 +1480,27 @@ label.qs-row {
   font-size: 12px;
 }
 .waiting-mark {
-  width: 30px;
-  height: 32px;
-  color: var(--amber);
-  opacity: 0.7;
+  width: 56px;
+  height: 56px;
+  background: url("./assets/gatekeeper-logo.webp") center / 138% no-repeat;
+  border-radius: 13px;
+  opacity: 0.9;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .waiting-mark {
+    animation: gk-breathe 2.6s var(--ease-in-out) infinite;
+  }
+}
+@keyframes gk-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.82;
+  }
+  50% {
+    transform: scale(1.06);
+    opacity: 1;
+  }
 }
 
 /* A faint container so each agent's group (header + its cards) reads as one block,
