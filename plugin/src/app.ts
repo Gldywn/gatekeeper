@@ -903,9 +903,9 @@ export class Gatekeeper {
     if (key === "developerMode" && value === true) {
       this.confirmModal.open({
         tone: "exec",
-        heading: "Enable Developer MODE",
+        heading: "Enable Developer Mode",
         body: "Developer mode adds synthetic proposals and a fake agent for local testing. It only ever runs neutral read-only queries and never touches your data.",
-        confirmLabel: "Enable Developer MODE",
+        confirmLabel: "Enable Developer Mode",
         onConfirm: () => void this.updateSetting(key, true),
         onCancel: () => {
           if (inputEl) {
@@ -935,9 +935,9 @@ export class Gatekeeper {
     if (next === "write") {
       this.confirmModal.open({
         tone: "write",
-        heading: "Enable Write MODE",
+        heading: "Enable Write Mode",
         body: "Write mode lets you approve INSERT and UPDATE statements. Each still runs only on your one-click approval, one at a time.",
-        confirmLabel: "Enable Write MODE",
+        confirmLabel: "Enable Write Mode",
         onConfirm: () => this.applyMode("write"),
       });
       return;
@@ -946,9 +946,9 @@ export class Gatekeeper {
     // captured) can never match, so the confirm stays locked, fail-closed.
     this.confirmModal.open({
       tone: "destructive",
-      heading: "Enable Destructive MODE",
+      heading: "Enable Destructive Mode",
       body: "Destructive mode lets you approve DELETE, DROP, TRUNCATE and other data-changing statements. Type the database name to confirm.",
-      confirmLabel: "Enable Destructive MODE",
+      confirmLabel: "Enable Destructive Mode",
       challenge: {
         label: "Type the database name to confirm",
         expected: this.conn?.databaseName ?? "",
