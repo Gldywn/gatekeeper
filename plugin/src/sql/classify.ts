@@ -47,7 +47,8 @@ const MODIFY_NODE: Record<string, RiskClass> = {
   unlock: "destructive",
 };
 
-const LOCKING_READ = /\bfor\s+(update|share|no\s+key\s+update|key\s+share)\b/i;
+const LOCKING_READ =
+  /\bfor\s+(update|share|no\s+key\s+update|key\s+share)\b|\block\s+in\s+share\s+mode\b/i;
 const MODIFY_KEYWORDS =
   /\b(insert|update|delete|drop|truncate|alter|create|replace|merge|grant|revoke|call|vacuum|pragma|attach|copy|into|lock)\b/i;
 
@@ -122,6 +123,11 @@ function fallback(sql: string): RiskVerdict {
     return { class: "destructive", parseOk: false, blocked: true };
   }
   if (/^(select|with)\b/i.test(single) && !MODIFY_KEYWORDS.test(single)) {
+    // A locking read (FOR SHARE / FOR KEY SHARE fail to parse and land here) takes
+    // row locks, so it carries write intent even though it changes no data.
+    if (LOCKING_READ.test(single)) {
+      return { class: "write", parseOk: false, blocked: false };
+    }
     return { class: "read", parseOk: false, blocked: false };
   }
   return { class: "destructive", parseOk: false, blocked: true };

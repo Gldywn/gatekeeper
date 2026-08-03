@@ -137,6 +137,7 @@ export class Gatekeeper {
   // on load, on a connection switch, and on re-pair.
   private mode: RiskMode = "read";
   private conn: {
+    id: number;
     connectionName: string;
     databaseType: string;
     databaseName: string;
@@ -326,6 +327,7 @@ export class Gatekeeper {
     this.connectionName = conn.connectionName || conn.databaseName || "connection";
     this.dialect = mapDialect(conn.databaseType);
     this.conn = {
+      id: conn.id,
       connectionName: conn.connectionName,
       databaseType: conn.databaseType,
       databaseName: conn.databaseName,
@@ -371,7 +373,10 @@ export class Gatekeeper {
       databaseType: conn.databaseType,
       databaseName: conn.databaseName,
     });
-    if (this.connScopeKey() === nextKey) {
+    // SAFETY-CRITICAL: also key the switch on Beekeeper's stable connection id, so an
+    // armed mode never carries across two connections that share name+engine+database
+    // but point at different hosts (the scope key alone cannot tell them apart).
+    if (this.conn?.id === conn.id && this.connScopeKey() === nextKey) {
       return;
     }
     this.applyConnection(conn);

@@ -44,6 +44,17 @@ describe("classifyQuery", () => {
     ).toBeGreaterThanOrEqual(rank("write"));
   });
 
+  it("never reads a locking read (FOR SHARE / LOCK IN SHARE MODE)", () => {
+    for (const [sql, dialect] of [
+      ["SELECT * FROM t FOR SHARE", "postgresql"],
+      ["SELECT * FROM t FOR KEY SHARE", "postgresql"],
+      ["SELECT * FROM t LOCK IN SHARE MODE", "mysql"],
+    ] as const) {
+      const v = classifyQuery(sql, dialect);
+      expect(v.class === "read" && !v.blocked, sql).toBe(false);
+    }
+  });
+
   it("blocks multi-statement input", () => {
     for (const sql of ["SELECT 1; DROP TABLE users", "SELECT 1; SELECT 2"]) {
       expect(classifyQuery(sql, pg).blocked, sql).toBe(true);
