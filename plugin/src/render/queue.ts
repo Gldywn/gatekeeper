@@ -6,16 +6,85 @@ import {
   flaskIcon,
   harnessIcon,
   messageIcon,
+  pencilIcon,
   sendIcon,
   warnIcon,
 } from "../icons";
+import { classifyQuery, type RiskClass, rank } from "../sql/classify";
 import { formatSql } from "../sql/format";
 import { highlight } from "../sql/highlight";
-import { isReadOnlyQuery } from "../sql/readonly";
-import type { SchemaContext } from "../sql/schema";
+import { modeRank, type RiskMode } from "../sql/mode";
+import { analyzeTableOps, type SchemaContext } from "../sql/schema";
 import type { Card, CardState, SessionMeta } from "../types";
 
-export function queueHtml(cards: Card[], dialect: string, denyDrafts: Map<string, string>): string {
+const WRITE_MODE_NOTE = "Write mode required to approve this query.";
+const DESTRUCTIVE_MODE_NOTE = "Destructive mode required to approve this query.";
+const CONNECTION_NOTE = "Connection is read-only; this write cannot run.";
+const MULTI_STATEMENT_NOTE = "Only a single statement can be approved.";
+
+const ALERT_ICON =
+  '<svg viewBox="0 0 16 16" fill="none"><path d="M8 1.7 1 14h14L8 1.7Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 6.3v3.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.7" r=".8" fill="currentColor"/></svg>';
+
+// The armed-mode decision for one card: risk class, whether Approve is live, its
+// label, and (when not) the blocked-note text. Shared with the app's deny form.
+export interface CardGate {
+  cls: RiskClass;
+  approveEnabled: boolean;
+  approveLabel: string;
+  note: string;
+}
+
+function approveLabelFor(cls: RiskClass): string {
+  return cls === "destructive"
+    ? "Approve destructive"
+    : cls === "write"
+      ? "Approve write"
+      : "Approve";
+}
+
+export function cardGate(
+  sql: string,
+  dialect: string,
+  mode: RiskMode,
+  connReadOnly: boolean,
+): CardGate {
+  const v = classifyQuery(sql, dialect);
+  const cls = v.class;
+  const approvable = !v.blocked && rank(cls) <= modeRank(mode);
+  // A write/destructive the armed mode would allow, but the connection is definitely
+  // unwritable (a read-only Beekeeper connection or a replica endpoint).
+  const connBlocked = approvable && cls !== "read" && mode !== "read" && connReadOnly;
+  let note = "";
+  if (!approvable) {
+    note = v.blocked
+      ? MULTI_STATEMENT_NOTE
+      : cls === "destructive"
+        ? DESTRUCTIVE_MODE_NOTE
+        : WRITE_MODE_NOTE;
+  } else if (connBlocked) {
+    note = CONNECTION_NOTE;
+  }
+  return {
+    cls,
+    approveEnabled: approvable && !connBlocked,
+    approveLabel: approveLabelFor(cls),
+    note,
+  };
+}
+
+// Dev cards are synthetic read-only SELECTs resolved on a local path, so they never
+// pass the mode gate; give them the plain read verdict.
+function devGate(): CardGate {
+  return { cls: "read", approveEnabled: true, approveLabel: "Approve", note: "" };
+}
+
+export function queueHtml(
+  cards: Card[],
+  dialect: string,
+  denyDrafts: Map<string, string>,
+  mode: RiskMode = "read",
+  connReadOnly = false,
+): string {
   if (!cards.length) {
     return `<div class="waiting"><svg class="waiting-mark" viewBox="0 0 24 26" fill="none" aria-hidden="true"><polygon points="12,1.4 22,7 22,19 12,24.6 2,19 2,7" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><polygon points="12,7.4 16.8,10.2 16.8,15.8 12,18.6 7.2,15.8 7.2,10.2" fill="currentColor" fill-opacity="0.85"/></svg><span>Waiting for a query proposal...</span></div>`;
   }
@@ -31,7 +100,9 @@ export function queueHtml(cards: Card[], dialect: string, denyDrafts: Map<string
     }
     group.cards.push(card);
   }
-  return groups.map((g) => groupHtml(g.session, g.cards, dialect, denyDrafts)).join("");
+  return groups
+    .map((g) => groupHtml(g.session, g.cards, dialect, denyDrafts, mode, connReadOnly))
+    .join("");
 }
 
 export function groupHtml(
@@ -39,6 +110,8 @@ export function groupHtml(
   cards: Card[],
   dialect: string,
   denyDrafts: Map<string, string>,
+  mode: RiskMode = "read",
+  connReadOnly = false,
 ): string {
   const project = session?.project?.trim();
   const harness = session?.harness?.trim() || null;
@@ -59,45 +132,98 @@ export function groupHtml(
           ${intent ? `<span class="group-intent" title="${escapeHtml(capitalize(intent))}">${escapeHtml(capitalize(intent))}</span>` : ""}
           <span class="group-count count-badge">${cards.length}</span>
         </div>
-        ${cards.map((c) => cardHtml(c, dialect, denyDrafts)).join("")}
+        ${cards.map((c) => cardHtml(c, dialect, denyDrafts, mode, connReadOnly)).join("")}
       </section>`;
 }
 
-export function cardHtml(card: Card, dialect: string, denyDrafts: Map<string, string>): string {
-  const readOnly = isReadOnlyQuery(card.sql, dialect);
+export function cardHtml(
+  card: Card,
+  dialect: string,
+  denyDrafts: Map<string, string>,
+  mode: RiskMode = "read",
+  connReadOnly = false,
+): string {
+  const gate = card.dev ? devGate() : cardGate(card.sql, dialect, mode, connReadOnly);
   const remaining = card.expiresAt - Date.now();
   let actions: string;
   if (card.state !== "ready") {
     actions = `<div class="actions"><span class="busy"><span class="spin"></span>${busyLabel(card.state)}...</span></div>`;
   } else {
-    actions = readyActions(card.id, readOnly, denyDrafts);
+    actions = readyActions(card.id, gate, denyDrafts);
   }
-  const blockedNote = readOnly
-    ? ""
-    : '<p class="blocked-note"><svg viewBox="0 0 16 16" fill="none"><path d="M8 1.7 1 14h14L8 1.7Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 6.3v3.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.7" r=".8" fill="currentColor"/></svg>Read-only only. This query can be rejected.</p>';
+  const badge = card.dev ? "" : riskBadge(gate.cls);
+  const riskAnno = card.dev ? "" : riskAnnotation(card.sql, dialect, gate.cls);
+  const blockedNote = gate.note
+    ? `<p class="blocked-note">${ALERT_ICON}${escapeHtml(gate.note)}</p>`
+    : "";
+  const cardClass = card.dev ? "dev" : cardClassFor(gate);
   return `
-      <div class="card ${card.dev ? "dev" : readOnly ? "" : "blocked"}" data-card="${card.id}">
+      <div class="card ${cardClass}" data-card="${card.id}">
         <div class="top">
-          ${card.dev ? `<span class="dev-flask">${flaskIcon}</span>` : ""}${card.intent ? `<span class="intent">${escapeHtml(capitalize(card.intent))}</span>` : `<span class="intent">${escapeHtml(card.id)}</span>`}${card.dev ? `<span class="dev-tag">dev</span>` : ""}
+          ${badge}${card.dev ? `<span class="dev-flask">${flaskIcon}</span>` : ""}${card.intent ? `<span class="intent">${escapeHtml(capitalize(card.intent))}</span>` : `<span class="intent">${escapeHtml(card.id)}</span>`}${card.dev ? `<span class="dev-tag">dev</span>` : ""}
           <span class="${remaining <= 45_000 ? "lease low" : "lease"}">${clock(remaining)}</span>
         </div>
         <div class="meta">${escapeHtml(card.id)} &middot; ${relAge(card.createdAt)}</div>
         <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(card.sql)}" aria-label="Copy SQL">${copyIcon}</button><code class="sql-body" id="sqlbody-${card.id}">${highlight(formatSql(card.sql), card.schema?.pii, card.schema?.client, card.schema?.literals)}</code></pre>
-        <div class="card-schema" id="cs-${card.id}">${schemaInner(card.schema)}</div>
+        ${riskAnno}<div class="card-schema" id="cs-${card.id}">${schemaInner(card.schema, gate.cls !== "read")}</div>
         ${blockedNote}${actions}
       </div>`;
 }
 
-export function readyActions(
-  id: string,
-  readOnly: boolean,
-  denyDrafts: Map<string, string>,
-): string {
+// The card's risk tokens: a write/destructive class colour, plus .blocked when the
+// armed mode or the connection stops approval (reuses today's chrome).
+function cardClassFor(gate: CardGate): string {
+  const risk = gate.cls === "write" ? "write" : gate.cls === "destructive" ? "destructive" : "";
+  const blocked = gate.approveEnabled ? "" : "blocked";
+  return [risk, blocked].filter(Boolean).join(" ");
+}
+
+// The class chip in .top: none for a read, solid amber "Writes" or solid red "Destroys".
+function riskBadge(cls: RiskClass): string {
+  if (cls === "write") {
+    return `<span class="risk-badge write">Writes</span>`;
+  }
+  if (cls === "destructive") {
+    return `<span class="risk-badge destructive">Destroys</span>`;
+  }
+  return "";
+}
+
+// The tables written ("Writes"/"Deletes"), plus, for a mixed statement
+// (INSERT ... SELECT), the tables also read.
+function riskAnnotation(sql: string, dialect: string, cls: RiskClass): string {
+  if (cls === "read") {
+    return "";
+  }
+  const ops = analyzeTableOps(sql, dialect);
+  if (!ops) {
+    return "";
+  }
+  const label = cls === "destructive" ? "Deletes" : "Writes";
+  const tone = cls === "destructive" ? "destructive" : "write";
+  const writesLine = ops.writes.length
+    ? `<div class="cs-writes ${tone}"><span class="cs-writes-k">${pencilIcon}${label}</span>${tblChips(ops.writes)}</div>`
+    : "";
+  const readsLine = ops.reads.length
+    ? `<div class="cs-reads"><span class="cs-reads-k">${dbReadsIcon}Reads</span>${tblChips(ops.reads)}</div>`
+    : "";
+  if (!writesLine && !readsLine) {
+    return "";
+  }
+  return `<div class="card-risk">${writesLine}${readsLine}</div>`;
+}
+
+function tblChips(tables: string[]): string {
+  return tables.map((t) => `<span class="tbl-chip">${escapeHtml(t)}</span>`).join("");
+}
+
+export function readyActions(id: string, gate: CardGate, denyDrafts: Map<string, string>): string {
   const revise = denyDrafts.has(id)
     ? denyField(id, denyDrafts.get(id) ?? "")
     : `<button class="deny-open" type="button" data-deny-open="${id}" title="Reject and ask the agent to change something">${messageIcon}Request changes</button>`;
+  const tone = gate.cls === "destructive" ? " destructive" : "";
   return `<div class="actions">
-             <button class="btn approve" type="button" data-approve="${id}" ${readOnly ? "" : "disabled"}>Approve</button>
+             <button class="btn approve${tone}" type="button" data-approve="${id}" ${gate.approveEnabled ? "" : "disabled"}>${gate.approveLabel}</button>
              <button class="btn reject" type="button" data-reject="${id}">Reject</button>
              ${revise}
            </div>`;
@@ -112,17 +238,16 @@ export function denyField(id: string, value = ""): string {
            </div>`;
 }
 
-// Compact under-SQL annotation: the tables read and a possible-PII flag. Empty
-// (collapsed by CSS) until the async analysis lands or when nothing is known.
-export function schemaInner(schema: SchemaContext | null | undefined): string {
+// hideReads drops the "Reads" line on a write/destructive card, whose tables the risk
+// annotation already lists; the sensitive-column flags still stand on their own.
+export function schemaInner(schema: SchemaContext | null | undefined, hideReads = false): string {
   if (!schema) {
     return "";
   }
-  // The "reads" line needs a resolved table; the flags stand on their own, so a
-  // table-less query (a synthetic dev card, or a CTE-only read) still surfaces them.
-  const tables = schema.tables.length
-    ? `<div class="cs-reads"><span class="cs-reads-k">${dbReadsIcon}Reads</span>${schema.tables.map((t) => `<span class="tbl-chip">${escapeHtml(t)}</span>`).join("")}</div>`
-    : "";
+  const tables =
+    !hideReads && schema.tables.length
+      ? `<div class="cs-reads"><span class="cs-reads-k">${dbReadsIcon}Reads</span>${schema.tables.map((t) => `<span class="tbl-chip">${escapeHtml(t)}</span>`).join("")}</div>`
+      : "";
   const pii = schema.pii.length
     ? `<div class="cs-line cs-pii"><span class="cs-warn">${warnIcon}possible PII</span><span class="cs-list">${schema.pii.map(escapeHtml).join(" &middot; ")}</span></div>`
     : "";

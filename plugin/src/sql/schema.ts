@@ -186,6 +186,39 @@ export function analyzeSql(
   }
 }
 
+function formatRef(ref: TableRef): string {
+  return ref.schema ? `${ref.schema}.${ref.name}` : ref.name;
+}
+
+// The tables a modifying query writes to versus reads from, split by the parser's
+// per-entry operation prefix ("{op}::{schema}::{table}"): everything but a plain
+// select is a write/destructive target. Feeds the card's Writes/Deletes annotation.
+export function analyzeTableOps(
+  sql: string,
+  dialect: string,
+): { writes: string[]; reads: string[] } | null {
+  let tableList: string[];
+  try {
+    ({ tableList } = parser.parse(sql, { database: dialect }));
+  } catch {
+    return null;
+  }
+  const writes: TableRef[] = [];
+  const reads: TableRef[] = [];
+  for (const entry of tableList) {
+    const op = entry.split("::")[0]?.toLowerCase() ?? "";
+    const ref = parseTableRef(entry);
+    if (!ref) {
+      continue;
+    }
+    (op === "select" ? reads : writes).push(ref);
+  }
+  return {
+    writes: dedupeRefs(writes).map(formatRef),
+    reads: dedupeRefs(reads).map(formatRef),
+  };
+}
+
 // The distinct column names a query would expose: the ones it names, plus (for
 // SELECT *) the real columns of the tables it reads.
 function exposedColumns(

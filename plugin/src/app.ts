@@ -22,9 +22,11 @@ import {
   shieldCheckIcon,
   shieldQuestionIcon,
   warnIcon,
+  xIcon,
 } from "./icons";
 import { BrokerClient } from "./net/broker";
 import { connectionScopeKey } from "./net/scope";
+import { ConfirmModal } from "./render/confirm";
 import { modeDropdown, switchInput } from "./render/controls";
 import {
   buildDevCard,
@@ -34,13 +36,15 @@ import {
   devPanelHtml,
 } from "./render/devcards";
 import { historyRow } from "./render/history";
-import { queueHtml, readyActions, schemaInner } from "./render/queue";
+import { type CardGate, cardGate, queueHtml, readyActions, schemaInner } from "./render/queue";
 import { type LayerState, readOnlyView } from "./render/readonly";
 import { devRosterRow, presence, rosterRow } from "./render/roster";
 import { capResult, type Field, type HistResult } from "./result";
 import { filterSchema, resultBudgetBytes, type Settings, SettingsStore } from "./settings";
+import { classifyQuery, type RiskClass, rank } from "./sql/classify";
 import { formatSql } from "./sql/format";
 import { highlight } from "./sql/highlight";
+import { modeRank, type RiskMode } from "./sql/mode";
 import { isReadOnlyQuery, mapDialect } from "./sql/readonly";
 import { type EndpointReadOnly, probeReadOnly } from "./sql/readonly-probe";
 import type {
@@ -64,9 +68,17 @@ const CONN_CHECK_MS = 5000;
 const TOKEN_KEY = "gatekeeper.token";
 const ROSTER_POLL_MS = 2000;
 
-// The read-only layer help sentences, revealed by each row's "?" affordance.
-const HELP_GATEKEEPER =
-  "Gatekeeper only ever runs read-only SELECT queries. It never sends a write to the database, whatever the connection would allow.";
+// The read-only layer help sentences, revealed by each row's "?" affordance. The
+// Gatekeeper one tracks the armed mode: read-only by default, wider once armed.
+function helpGatekeeper(mode: RiskMode): string {
+  if (mode === "write") {
+    return "Write mode is armed: Gatekeeper may run an approved INSERT or UPDATE, still one human approval at a time.";
+  }
+  if (mode === "destructive") {
+    return "Destructive mode is armed: Gatekeeper may run an approved write, up to DELETE, DROP, or TRUNCATE, still one human approval at a time.";
+  }
+  return "Gatekeeper only ever runs read-only SELECT queries. It never sends a write to the database, whatever the connection would allow.";
+}
 const HELP_BEEKEEPER =
   "Beekeeper's own connection read-only mode. When on, Beekeeper blocks any write on this connection by itself.";
 const HELP_ENDPOINT =
@@ -121,6 +133,9 @@ export class Gatekeeper {
   private token: string | null = null;
   private connectionName = "";
   private dialect = "postgresql";
+  // Ephemeral armed access mode: in-memory only, never persisted. Resets to "read"
+  // on load, on a connection switch, and on re-pair.
+  private mode: RiskMode = "read";
   private conn: {
     connectionName: string;
     databaseType: string;
@@ -171,9 +186,11 @@ export class Gatekeeper {
   private readonly detailView: DetailView;
   private readonly activityView: ActivityView;
   private readonly settingsView: SettingsView;
+  private readonly confirmModal: ConfirmModal;
 
   constructor(root: HTMLElement) {
     this.root = root;
+    this.confirmModal = new ConfirmModal(root);
     this.detailView = new DetailView({
       root,
       annotator: this.annotator,
@@ -188,9 +205,15 @@ export class Gatekeeper {
     this.settingsView = new SettingsView({
       root,
       settings: () => this.settingsStore.get(),
+      mode: () => this.mode,
     });
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
+        // The arm/confirm modal sits on top of everything; it swallows the first
+        // Escape (cancelling) before any overlay beneath it can close.
+        if (this.confirmModal.cancel()) {
+          return;
+        }
         // An open mode menu swallows the first Escape so it dismisses without also
         // tearing down the overlay or popover it sits inside.
         if (this.closeModeMenus()) {
@@ -216,13 +239,19 @@ export class Gatekeeper {
       this.setSettingsOpen(false);
     });
     // The styled mode dropdowns (settings overlay and quick popover) open/close like
-    // the gear popover: the trigger toggles, a click outside dismisses. Options are
-    // inert (read-only is enforced regardless), so a click inside the menu is a no-op.
+    // the gear popover: the trigger toggles, a click outside dismisses. Selecting an
+    // option requests that mode (a raise confirms; a drop applies at once).
     document.addEventListener("click", (e) => {
       const target = e.target as HTMLElement;
       const trigger = target.closest<HTMLElement>("[data-mode-trigger]");
       if (trigger) {
         this.toggleModeMenu(trigger);
+        return;
+      }
+      const opt = target.closest<HTMLElement>("[data-mode-opt]");
+      if (opt) {
+        this.closeModeMenus();
+        this.requestMode(opt.getAttribute("data-mode-opt") as RiskMode);
         return;
       }
       if (target.closest("[data-mode-menu]")) {
@@ -356,6 +385,10 @@ export class Gatekeeper {
     this.connGeneration++;
     this.cards.length = 0;
     this.denyDrafts.clear();
+    // SAFETY-CRITICAL: the armed mode belongs to the old connection; a new database
+    // must never inherit write/destructive. Drop any half-open arm dialog too.
+    this.mode = "read";
+    this.confirmModal.cancel();
     // The new database has a different schema; drop cached columns so the next
     // card's annotation cannot describe the old connection.
     this.annotator.clearCache();
@@ -373,6 +406,7 @@ export class Gatekeeper {
     // it and reload (which re-syncs the quick-menu switches and the activity trigger).
     this.settingsView.close();
     this.renderConnLabel();
+    this.renderModeSurfaces();
     void this.reportConnection();
     void this.probeEndpoint();
     void this.reloadSettings();
@@ -417,15 +451,21 @@ export class Gatekeeper {
   // Aggregate over the three layers (Gatekeeper mode, Beekeeper mode, endpoint): green
   // when any blocks writes, amber when all would accept one, muted when it cannot be told.
   private readOnlyBadge(): string {
-    // Gatekeeper mode is locked read-only for now (the mode dropdown is display-only).
+    // The Gatekeeper layer is read-only only while the armed mode is "read"; a raised
+    // mode makes it a writer, so the aggregate rides the lower layers.
     const view = readOnlyView(
-      true,
+      this.mode === "read",
       this.conn?.readOnly ?? false,
       this.endpointRO,
       this.endpointProbed,
     );
     const rows =
-      this.roRow("Gatekeeper", HELP_GATEKEEPER, view.gatekeeper.label, view.gatekeeper.state) +
+      this.roRow(
+        "Gatekeeper",
+        helpGatekeeper(this.mode),
+        view.gatekeeper.label,
+        view.gatekeeper.state,
+      ) +
       this.roRow("Beekeeper", HELP_BEEKEEPER, view.beekeeper.label, view.beekeeper.state) +
       this.roRow("Endpoint", HELP_ENDPOINT, view.endpoint.label, view.endpoint.state);
 
@@ -459,7 +499,7 @@ export class Gatekeeper {
       return;
     }
     try {
-      await this.broker.postConnection(this.conn);
+      await this.broker.postConnection({ ...this.conn, mode: this.mode });
     } catch (err) {
       log.error(err instanceof Error ? err : String(err));
     }
@@ -513,6 +553,8 @@ export class Gatekeeper {
       if (!value) {
         return;
       }
+      // Re-pairing is a fresh session; the armed mode never survives it.
+      this.mode = "read";
       await this.broker.setToken(value);
       this.token = value;
       this.polling = true;
@@ -561,6 +603,7 @@ export class Gatekeeper {
       <span class="wordmark">Gatekeeper</span>
     </span>
     <span class="conn-chip" id="conn"></span>
+    <span class="armed" id="armed"></span>
     <span class="bar-right">
       <span class="conn-status" id="connStatus" aria-live="polite"></span>
       <span class="dsep"></span>
@@ -569,7 +612,7 @@ export class Gatekeeper {
         <div class="settings-pop" id="settingsPop" role="menu" aria-label="Settings" hidden>
           <div class="pop-group">
             <div class="pop-eyebrow">Access</div>
-            <div class="qs-row"><span class="qs-name">Mode</span><span class="qs-ctl">${modeDropdown(true)}</span></div>
+            <div class="qs-row"><span class="qs-name">Mode</span><span class="qs-ctl" id="modeCtlHeader">${modeDropdown(this.mode, true)}</span></div>
           </div>
           <div class="pop-group">
             <div class="pop-eyebrow">Detection</div>
@@ -609,8 +652,10 @@ export class Gatekeeper {
         <div class="detail" id="detail" hidden></div>
         <div class="detail activity-overlay" id="activity" hidden></div>
         <div class="detail settings-overlay" id="settings" hidden></div>
+        <div class="detail confirm-overlay" id="confirm" hidden></div>
       </div>`;
     this.renderConnLabel();
+    this.renderArmed();
     const toggle = this.root.querySelector<HTMLButtonElement>("#htoggle")!;
     const hist = this.root.querySelector<HTMLDivElement>("#hist")!;
     toggle.addEventListener("click", () => {
@@ -711,6 +756,12 @@ export class Gatekeeper {
     this.root
       .querySelector<HTMLButtonElement>("#activityBtn")!
       .addEventListener("click", () => void this.activityView.open());
+    // The armed banner's X drops straight back to read-only (no confirm on a drop).
+    this.root.querySelector<HTMLElement>("#armed")!.addEventListener("click", (e) => {
+      if ((e.target as HTMLElement).closest("[data-disarm]")) {
+        this.applyMode("read");
+      }
+    });
     this.root.querySelector<HTMLButtonElement>("#settingsGear")!.addEventListener("click", (e) => {
       // Stop the bubble so the document dismiss handler does not immediately
       // re-close the popover this same click just opened.
@@ -726,7 +777,7 @@ export class Gatekeeper {
     this.root.querySelector<HTMLElement>("#settingsPop")!.addEventListener("change", (e) => {
       const input = (e.target as HTMLElement).closest<HTMLInputElement>("input[data-setting]");
       if (input) {
-        void this.updateSetting(input.dataset.setting!, input.checked);
+        this.onSettingInput(input.dataset.setting!, input.checked, input);
       }
     });
     const settings = this.root.querySelector<HTMLDivElement>("#settings")!;
@@ -741,7 +792,7 @@ export class Gatekeeper {
       if (el instanceof HTMLSelectElement) {
         void this.updateSetting(el.dataset.setting!, Number(el.value));
       } else if (el instanceof HTMLInputElement) {
-        void this.updateSetting(el.dataset.setting!, el.checked);
+        this.onSettingInput(el.dataset.setting!, el.checked, el);
       }
     });
     const activity = this.root.querySelector<HTMLDivElement>("#activity")!;
@@ -839,6 +890,110 @@ export class Gatekeeper {
   private async updateSetting(key: string, value: boolean | number): Promise<void> {
     await this.settingsStore.set({ [key]: value });
     this.onSettingsChanged();
+  }
+
+  // A toggle from either settings surface. Enabling developer mode confirms through the
+  // shared modal (a raise); disabling, and every other toggle, applies immediately.
+  private onSettingInput(key: string, value: boolean, inputEl?: HTMLInputElement): void {
+    if (key === "developerMode" && value === true) {
+      this.confirmModal.open({
+        tone: "exec",
+        heading: "Enable Developer MODE",
+        body: "Developer mode adds synthetic proposals and a fake agent for local testing. It only ever runs neutral read-only queries and never touches your data.",
+        confirmLabel: "Enable Developer MODE",
+        onConfirm: () => void this.updateSetting(key, true),
+        onCancel: () => {
+          if (inputEl) {
+            inputEl.checked = false;
+          }
+        },
+      });
+      return;
+    }
+    void this.updateSetting(key, value);
+  }
+
+  // Selecting a mode: a drop (or read) applies at once; a raise opens the confirm modal,
+  // which applies it only once the human confirms (destructive also types the db name).
+  private requestMode(next: RiskMode): void {
+    if (next === this.mode) {
+      return;
+    }
+    if (modeRank(next) <= modeRank(this.mode)) {
+      this.applyMode(next);
+      return;
+    }
+    this.openModeArm(next);
+  }
+
+  private openModeArm(next: RiskMode): void {
+    if (next === "write") {
+      this.confirmModal.open({
+        tone: "write",
+        heading: "Enable Write MODE",
+        body: "Write mode lets you approve INSERT and UPDATE statements. Each still runs only on your one-click approval, one at a time.",
+        confirmLabel: "Enable Write MODE",
+        onConfirm: () => this.applyMode("write"),
+      });
+      return;
+    }
+    // Destructive types the database name to confirm; a blank target (no connection
+    // captured) can never match, so the confirm stays locked, fail-closed.
+    this.confirmModal.open({
+      tone: "destructive",
+      heading: "Enable Destructive MODE",
+      body: "Destructive mode lets you approve DELETE, DROP, TRUNCATE and other data-changing statements. Type the database name to confirm.",
+      confirmLabel: "Enable Destructive MODE",
+      challenge: {
+        label: "Type the database name to confirm",
+        expected: this.conn?.databaseName ?? "",
+        placeholder: this.conn?.databaseName || "database name",
+      },
+      onConfirm: () => this.applyMode("destructive"),
+    });
+  }
+
+  // Commit a mode change: re-render the badge, mode surfaces and armed banner, re-gate
+  // the queue, and re-post the snapshot so the agent sees the new mode.
+  private applyMode(next: RiskMode): void {
+    if (next === this.mode) {
+      return;
+    }
+    this.mode = next;
+    this.renderConnLabel();
+    this.renderModeSurfaces();
+    this.renderQueue();
+    void this.reportConnection();
+  }
+
+  // Re-render both mode dropdowns (header popover, settings overlay when open) and the
+  // armed banner in place, without a full shell rebuild.
+  private renderModeSurfaces(): void {
+    const header = this.root.querySelector<HTMLElement>("#modeCtlHeader");
+    if (header) {
+      header.innerHTML = modeDropdown(this.mode, true);
+    }
+    const overlay = this.root.querySelector<HTMLElement>("#modeCtlSettings");
+    if (overlay) {
+      overlay.innerHTML = modeDropdown(this.mode);
+    }
+    this.renderArmed();
+  }
+
+  // The header armed banner, present only when a mode is armed: a toned chip with an X
+  // that drops back to read-only.
+  private renderArmed(): void {
+    const el = this.root.querySelector<HTMLElement>("#armed");
+    if (!el) {
+      return;
+    }
+    if (this.mode === "read") {
+      el.innerHTML = "";
+      return;
+    }
+    const tone = this.mode === "destructive" ? "destructive" : "write";
+    const label = this.mode === "destructive" ? "DESTRUCTIVE MODE" : "WRITE MODE";
+    el.innerHTML = `<span class="armed-chip ${tone}"><span class="armed-dot"></span>${label}<button class="armed-off" type="button" data-disarm title="Disarm, back to read-only" aria-label="Disarm, back to read-only">${xIcon}</button></span>`;
   }
 
   // A setting changed (from either surface): re-sync both control surfaces, re-apply
@@ -1129,6 +1284,12 @@ export class Gatekeeper {
     });
   }
 
+  // Definitely-unwritable: a read-only Beekeeper connection or a replica endpoint. A
+  // write/destructive card is blocked-by-connection when a mode is armed but this holds.
+  private connectionReadOnly(): boolean {
+    return (this.conn?.readOnly ?? false) || this.endpointRO?.replica === true;
+  }
+
   private renderQueue(): void {
     const count = this.root.querySelector<HTMLSpanElement>("#pendingCount");
     if (count) {
@@ -1151,7 +1312,13 @@ export class Gatekeeper {
       }
       this.breatheLoop?.stop();
       this.breatheLoop = undefined;
-      queue.innerHTML = queueHtml(this.cards, this.dialect, this.denyDrafts);
+      queue.innerHTML = queueHtml(
+        this.cards,
+        this.dialect,
+        this.denyDrafts,
+        this.mode,
+        this.connectionReadOnly(),
+      );
       if (focusedDeny) {
         const input = queue.querySelector<HTMLInputElement>(`[data-deny-input="${focusedDeny}"]`);
         input?.focus();
@@ -1191,7 +1358,10 @@ export class Gatekeeper {
   private renderCardSchema(card: Card): void {
     const el = this.root.querySelector<HTMLElement>(`#cs-${CSS.escape(card.id)}`);
     if (el) {
-      el.innerHTML = schemaInner(card.schema);
+      // A write/destructive card lists its tables in the risk annotation, so drop the
+      // duplicate reads line here; the sensitive-column flags still render.
+      const cls = card.dev ? "read" : classifyQuery(card.sql, this.dialect).class;
+      el.innerHTML = schemaInner(card.schema, cls !== "read");
     }
     // Re-highlight the SQL now that the sensitive columns are known, so they light
     // up in the query text too, not only in the flags below.
@@ -1229,10 +1399,13 @@ export class Gatekeeper {
       return;
     }
     const gen = this.connGeneration;
-    if (!isReadOnlyQuery(card.sql, this.dialect)) {
+    // SAFETY-CRITICAL: the real gate. Never run a statement the armed mode cannot
+    // approve, nor a blocked (multi-statement, unparseable) one.
+    const verdict = classifyQuery(card.sql, this.dialect);
+    if (verdict.blocked || rank(verdict.class) > modeRank(this.mode)) {
       await this.postResult(card, {
         status: "rejected",
-        reason: "Blocked: not a read-only SELECT.",
+        reason: this.modeBlockReason(verdict.blocked, verdict.class),
       });
       this.finish(id, "failed", "blocked");
       return;
@@ -1337,7 +1510,7 @@ export class Gatekeeper {
     if (!actions) {
       return;
     }
-    actions.outerHTML = readyActions(id, isReadOnlyQuery(card.sql, this.dialect), this.denyDrafts);
+    actions.outerHTML = readyActions(id, this.gateFor(card), this.denyDrafts);
     this.root.querySelector<HTMLInputElement>(`[data-card="${id}"] .deny-reason`)?.focus();
   }
 
@@ -1357,8 +1530,25 @@ export class Gatekeeper {
     if (!card || !actions) {
       return;
     }
-    actions.outerHTML = readyActions(id, isReadOnlyQuery(card.sql, this.dialect), this.denyDrafts);
+    actions.outerHTML = readyActions(id, this.gateFor(card), this.denyDrafts);
     this.root.querySelector<HTMLButtonElement>(`[data-card="${id}"] .deny-open`)?.focus();
+  }
+
+  // The armed-mode verdict for one card, matching what the queue renders; dev cards
+  // stay on the plain read path.
+  private gateFor(card: Card): CardGate {
+    return card.dev
+      ? { cls: "read", approveEnabled: true, approveLabel: "Approve", note: "" }
+      : cardGate(card.sql, this.dialect, this.mode, this.connectionReadOnly());
+  }
+
+  private modeBlockReason(blocked: boolean, cls: RiskClass): string {
+    if (blocked) {
+      return "Blocked: only a single statement can be approved.";
+    }
+    return cls === "destructive"
+      ? "Blocked: destructive mode is not armed."
+      : "Blocked: write mode is not armed.";
   }
 
   private async postExecuting(card: Card): Promise<boolean> {

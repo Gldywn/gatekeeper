@@ -7,13 +7,14 @@ export interface BrokerConfig {
 }
 
 // The non-sensitive connection context handed to the agent via POST /connection:
-// dialect, database, schema, read-only, never host/user/credentials.
+// dialect, database, schema, read-only, the armed mode; never host/user/credentials.
 export interface ConnectionSnapshot {
   connectionName: string;
   databaseType: string;
   databaseName: string;
   schema: string | null;
   readOnly: boolean;
+  mode: "read" | "write" | "destructive";
 }
 
 // A refused renewal (cancelled or lost lease) tells the caller to drop the card.

@@ -14,6 +14,8 @@
   --amber-ink: oklch(26% 0.05 88);
   --ok: oklch(75% 0.13 155);
   --danger: oklch(68% 0.16 25);
+  /* Dark ink for text seated on a solid --danger fill (badges, the destructive button). */
+  --danger-ink: oklch(22% 0.05 25);
   --exec: oklch(74% 0.1 235);
   /* Client-confidentiality accent: a violet distinct from the red PII danger. */
   --client: oklch(70% 0.15 300);
@@ -436,6 +438,68 @@ body {
   height: 15px;
   background: var(--edge);
   flex: none;
+}
+
+/* Header armed banner: a toned chip present only while a mode is armed, with an X that
+   disarms. Amber for write, red for destructive; collapsed (empty) at read-only. */
+.armed {
+  display: inline-flex;
+  flex: none;
+}
+.armed:empty {
+  display: none;
+}
+.armed-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px 3px 9px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.armed-chip.write {
+  color: var(--amber-ink);
+  background: var(--amber);
+}
+.armed-chip.destructive {
+  color: var(--danger-ink);
+  background: var(--danger);
+}
+.armed-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.85;
+  flex: none;
+}
+.armed-off {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: color-mix(in oklch, oklch(0% 0 0) 16%, transparent);
+  color: currentColor;
+  cursor: pointer;
+}
+.armed-off:hover {
+  background: color-mix(in oklch, oklch(0% 0 0) 30%, transparent);
+}
+.armed-off:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 1px;
+}
+.armed-off svg {
+  width: 12px;
+  height: 12px;
 }
 
 /* Right cluster: live status, a divider, and the settings gear. */
@@ -968,8 +1032,10 @@ label.qs-row {
   width: 13px;
   height: 13px;
 }
-.card.blocked .sql::before,
-.card.blocked .sql::after {
+/* A destructive card's SQL brackets go red; write keeps the default amber, and the
+   .blocked chrome (mode/connection) never overrides the class colour. */
+.card.destructive .sql::before,
+.card.destructive .sql::after {
   border-color: var(--danger);
 }
 
@@ -1121,6 +1187,69 @@ label.qs-row {
   padding: 3px 9px;
 }
 
+/* ---- Risk classes: write (amber) and destructive (red) card treatments ---- */
+/* A faint red wash so a destructive card reads as dangerous at a glance. */
+.card.destructive {
+  background: color-mix(in oklch, var(--danger) 5%, var(--surface));
+}
+/* The class chip in .top: a solid fill with dark ink, centred against the baseline row. */
+.risk-badge {
+  align-self: center;
+  flex: none;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 5px;
+  line-height: 1.35;
+}
+.risk-badge.write {
+  background: var(--amber);
+  color: var(--amber-ink);
+}
+.risk-badge.destructive {
+  background: var(--danger);
+  color: var(--danger-ink);
+}
+/* The written-tables annotation ("Writes"/"Deletes"), mirroring .card-schema's stack;
+   the label carries the class tone, the chips reuse the neutral .tbl-chip. */
+.card-risk {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s2);
+  margin: 0 0 var(--s3);
+}
+.card-risk:empty {
+  display: none;
+}
+.cs-writes {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.cs-writes-k {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 560;
+}
+.cs-writes-k svg {
+  width: 13px;
+  height: 13px;
+}
+.cs-writes.write .cs-writes-k {
+  color: var(--amber);
+}
+.cs-writes.destructive .cs-writes-k {
+  color: var(--danger);
+}
+
 .blocked-note {
   display: flex;
   gap: 7px;
@@ -1156,6 +1285,11 @@ label.qs-row {
 }
 .btn.approve:hover {
   filter: brightness(1.07);
+}
+/* Destructive approve: the same solid button, red instead of amber. */
+.btn.approve.destructive {
+  background: var(--danger);
+  color: var(--danger-ink);
 }
 /* Quiet opt-in next to Reject: opens the reason note without forcing a second
    click for the common no-reason reject. */
@@ -2636,4 +2770,113 @@ label.qs-row {
 .card.dev .dev-flask svg {
   width: 15px;
   height: 15px;
+}
+
+/* ---- Shared confirm modal (arm write/destructive, enable developer mode) ----
+   Neutral border, no coloured top accent: the tone lives in the heading + button. */
+.confirm-card {
+  max-width: min(94vw, 440px);
+  margin-top: 12vh;
+}
+.confirm-title {
+  margin: 0 0 var(--s2);
+  font-size: 16px;
+  font-weight: 660;
+  letter-spacing: -0.01em;
+}
+.confirm-title.exec {
+  color: var(--exec);
+}
+.confirm-title.write {
+  color: var(--amber);
+}
+.confirm-title.destructive {
+  color: var(--danger);
+}
+.confirm-text {
+  margin: 0 0 var(--s4);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.confirm-challenge {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: var(--s4);
+}
+.confirm-challenge-label {
+  font-size: 11px;
+  color: var(--faint);
+}
+.confirm-input {
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text);
+  background: var(--sunken);
+  border: 1px solid var(--edge);
+  border-radius: 5px;
+  padding: 8px 10px;
+}
+.confirm-input:focus-visible {
+  outline: 2px solid var(--danger);
+  outline-offset: 1px;
+}
+.confirm-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--s3);
+}
+.confirm-cancel {
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 560;
+  cursor: pointer;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  color: var(--muted);
+  padding: 7px 12px;
+}
+.confirm-cancel:hover {
+  color: var(--text);
+}
+.confirm-cancel:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 1px;
+}
+.confirm-go {
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  border-radius: 5px;
+  padding: 7px 16px;
+  transition: filter var(--dur) var(--ease);
+}
+.confirm-go:hover:not(:disabled) {
+  filter: brightness(1.07);
+}
+.confirm-go:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.confirm-go:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+.confirm-go.exec {
+  background: var(--exec);
+  color: oklch(18% 0.03 235);
+}
+.confirm-go.write {
+  background: var(--amber);
+  color: var(--amber-ink);
+}
+.confirm-go.destructive {
+  background: var(--danger);
+  color: var(--danger-ink);
 }

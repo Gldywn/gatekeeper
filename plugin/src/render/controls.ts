@@ -1,5 +1,6 @@
 import { escapeHtml } from "../html";
 import { checkIcon, chevronDown } from "../icons";
+import type { RiskMode } from "../sql/mode";
 
 // A real, persisted toggle: an appearance:none checkbox styled as a track+knob. Its
 // data-setting maps it to a Settings key; the app's delegated change handler persists it.
@@ -8,28 +9,29 @@ export function switchInput(setting: string, ariaLabel: string, checked: boolean
 }
 
 interface ModeOption {
+  mode: RiskMode;
   risk: "ro" | "rw" | "full";
   name: string;
   allow: string;
-  current: boolean;
 }
 
-// Only read-only is available today; the others preview the planned escalation, dimmed
-// and unselectable, since read-only is enforced regardless (isReadOnlyQuery).
+// The risk dot escalates green -> amber -> red as the mode widens. Raising the mode
+// needs confirmation (the app wires it); dropping applies immediately.
 const MODE_OPTIONS: ModeOption[] = [
-  { risk: "ro", name: "Read-only", allow: "SELECT only", current: true },
-  { risk: "rw", name: "Write", allow: "adds INSERT, UPDATE", current: false },
-  { risk: "full", name: "Destructive", allow: "adds DELETE, DROP, TRUNCATE", current: false },
+  { mode: "read", risk: "ro", name: "Read-only", allow: "SELECT only" },
+  { mode: "write", risk: "rw", name: "Write", allow: "adds INSERT, UPDATE" },
+  { mode: "destructive", risk: "full", name: "Destructive", allow: "adds DELETE, DROP, TRUNCATE" },
 ];
 
-const CURRENT_MODE = MODE_OPTIONS.find((m) => m.current) ?? MODE_OPTIONS[0];
-
-// A styled (non-native) dropdown for the access mode; display-only, the app wires
-// open/close on [data-mode-trigger]/[data-mode-menu].
-export function modeDropdown(compact = false): string {
+// A styled (non-native) dropdown for the access mode, reflecting the live armed mode.
+// The app wires open/close on [data-mode-trigger]/[data-mode-menu] and selection on
+// [data-mode-opt].
+export function modeDropdown(mode: RiskMode, compact = false): string {
+  const current = MODE_OPTIONS.find((m) => m.mode === mode) ?? MODE_OPTIONS[0];
   const options = MODE_OPTIONS.map((m) => {
-    const check = m.current ? `<span class="dd-check">${checkIcon}</span>` : "";
-    return `<div class="dd-opt${m.current ? " sel" : " off"}" role="option" aria-selected="${m.current}"${m.current ? "" : ' aria-disabled="true"'}>
+    const sel = m.mode === mode;
+    const check = sel ? `<span class="dd-check">${checkIcon}</span>` : "";
+    return `<div class="dd-opt${sel ? " sel" : ""}" role="option" aria-selected="${sel}" data-mode-opt="${m.mode}">
               <span class="risk-dot ${m.risk}"></span>
               <div><div class="o-name">${m.name}</div><div class="o-allow">${m.allow}</div></div>
               ${check}
@@ -37,8 +39,8 @@ export function modeDropdown(compact = false): string {
   }).join("");
   return `<span class="mode-dd">
             <button class="dd-trigger${compact ? " compact" : ""}" type="button" data-mode-trigger aria-haspopup="listbox" aria-expanded="false">
-              <span class="risk-dot ${CURRENT_MODE.risk}"></span>
-              <span class="t-name">${CURRENT_MODE.name}</span>
+              <span class="risk-dot ${current.risk}"></span>
+              <span class="t-name">${current.name}</span>
               <span class="chev">${chevronDown}</span>
             </button>
             <div class="dd-menu" data-mode-menu role="listbox" hidden>${options}</div>

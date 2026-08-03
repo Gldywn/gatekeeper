@@ -2,10 +2,12 @@ import { escapeHtml } from "../html";
 import { flaskIcon, gearIcon } from "../icons";
 import { modeDropdown, switchInput } from "../render/controls";
 import { RECENTLY_RESOLVED_OPTIONS, RESULT_CACHE_OPTIONS, type Settings } from "../settings";
+import type { RiskMode } from "../sql/mode";
 
 interface SettingsViewDeps {
   root: HTMLElement;
   settings: () => Settings;
+  mode: () => RiskMode;
 }
 
 interface ToggleSpec {
@@ -52,10 +54,12 @@ const DETECTION_TOGGLES: ToggleSpec[] = [
 export class SettingsView {
   private readonly root: HTMLElement;
   private readonly settings: () => Settings;
+  private readonly mode: () => RiskMode;
 
   constructor(deps: SettingsViewDeps) {
     this.root = deps.root;
     this.settings = deps.settings;
+    this.mode = deps.mode;
   }
 
   open(): void {
@@ -89,9 +93,9 @@ export class SettingsView {
           <div class="set-row">
             <div class="set-text">
               <span class="set-name">Execution mode</span>
-              <span class="set-desc">Which statements Gatekeeper will run once you approve.</span>
+              <span class="set-desc">Which statements Gatekeeper will run once you approve. Resets to read-only on load or a connection switch.</span>
             </div>
-            <span class="set-control">${modeDropdown()}</span>
+            <span class="set-control" id="modeCtlSettings">${modeDropdown(this.mode())}</span>
           </div>
         </section>
         <section class="set-group">

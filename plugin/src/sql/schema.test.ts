@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   analyzeSql,
+  analyzeTableOps,
   classifyColumn,
   clientColumns,
   looksLikeClientData,
@@ -8,6 +9,39 @@ import {
   piiColumns,
   sensitiveLiterals,
 } from "./schema";
+
+describe("analyzeTableOps", () => {
+  const pg = "postgresql";
+
+  it("returns no write targets for a plain read", () => {
+    expect(analyzeTableOps("SELECT * FROM audit.users", pg)).toEqual({
+      writes: [],
+      reads: ["audit.users"],
+    });
+  });
+
+  it("splits an INSERT ... SELECT into its write target and read source", () => {
+    expect(analyzeTableOps("INSERT INTO audit SELECT * FROM users", pg)).toEqual({
+      writes: ["audit"],
+      reads: ["users"],
+    });
+  });
+
+  it("reports a delete/update target as a write, not a read", () => {
+    expect(analyzeTableOps("DELETE FROM users WHERE id = 1", pg)).toEqual({
+      writes: ["users"],
+      reads: [],
+    });
+    expect(analyzeTableOps("UPDATE users SET name = 'x' WHERE id = 1", pg)).toEqual({
+      writes: ["users"],
+      reads: [],
+    });
+  });
+
+  it("returns null when the statement will not parse", () => {
+    expect(analyzeTableOps("VACUUM", pg)).toBeNull();
+  });
+});
 
 describe("looksLikePii", () => {
   it("flags person, contact, and secret columns regardless of separators", () => {

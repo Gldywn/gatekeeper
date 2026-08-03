@@ -34,6 +34,8 @@ export interface Proposal {
   id: string;
   sql: string;
   intent?: string;
+  // The server's advisory risk class; the plugin recomputes authoritatively.
+  class?: "read" | "write" | "destructive" | null;
   createdAt: number;
   expiresAt: number;
   leaseId: string;
