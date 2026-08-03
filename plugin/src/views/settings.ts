@@ -1,7 +1,7 @@
 import { escapeHtml } from "../html";
 import { flaskIcon, gearIcon } from "../icons";
 import { modeDropdown, switchInput } from "../render/controls";
-import { RECENTLY_RESOLVED_OPTIONS, type Settings } from "../settings";
+import { RECENTLY_RESOLVED_OPTIONS, RESULT_CACHE_OPTIONS, type Settings } from "../settings";
 
 interface SettingsViewDeps {
   root: HTMLElement;
@@ -107,6 +107,13 @@ export class SettingsView {
             </div>
             <span class="set-control">${selectHtml(s.recentlyResolved)}</span>
           </div>
+          <div class="set-row">
+            <div class="set-text">
+              <span class="set-name">Result memory</span>
+              <span class="set-desc">How much approved-result data to keep in this tab for review. Larger results page fully up to this; beyond it the oldest rows are dropped.</span>
+            </div>
+            <span class="set-control">${cacheSelectHtml(s.resultCacheMb)}</span>
+          </div>
         </section>
         ${devZone(s)}
       </div>`;
@@ -152,4 +159,15 @@ function selectHtml(value: number): string {
     (n) => `<option value="${n}"${n === value ? " selected" : ""}>${n}</option>`,
   ).join("");
   return `<select class="set-select" data-setting="recentlyResolved" aria-label="Recently resolved count">${opts}</select>`;
+}
+
+function cacheLabel(mb: number): string {
+  return mb >= 1024 ? `${mb / 1024} GB` : `${mb} MB`;
+}
+
+function cacheSelectHtml(value: number): string {
+  const opts = RESULT_CACHE_OPTIONS.map(
+    (n) => `<option value="${n}"${n === value ? " selected" : ""}>${cacheLabel(n)}</option>`,
+  ).join("");
+  return `<select class="set-select" data-setting="resultCacheMb" aria-label="Result memory budget">${opts}</select>`;
 }

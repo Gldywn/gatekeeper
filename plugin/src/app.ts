@@ -38,7 +38,7 @@ import { queueHtml, readyActions, schemaInner } from "./render/queue";
 import { type LayerState, readOnlyView } from "./render/readonly";
 import { devRosterRow, presence, rosterRow } from "./render/roster";
 import { capResult, type Field, type HistResult } from "./result";
-import { filterSchema, type Settings, SettingsStore } from "./settings";
+import { filterSchema, resultBudgetBytes, type Settings, SettingsStore } from "./settings";
 import { formatSql } from "./sql/format";
 import { highlight } from "./sql/highlight";
 import { isReadOnlyQuery, mapDialect } from "./sql/readonly";
@@ -62,9 +62,6 @@ const RENEW_MS = 15_000;
 const TICK_MS = 1000;
 const CONN_CHECK_MS = 5000;
 const TOKEN_KEY = "gatekeeper.token";
-// Results are held in the iframe only to power the detail view; bound the total
-// across all items here (the per-item caps live in ./result).
-const HIST_MAX_TOTAL_BYTES = 2 * 1024 * 1024;
 const ROSTER_POLL_MS = 2000;
 
 // The read-only layer help sentences, revealed by each row's "?" affordance.
@@ -1260,7 +1257,12 @@ export class Gatekeeper {
       }
       this.setCardState(id, "posting");
       await this.postResult(card, { status: "approved", rows, fields });
-      this.finish(id, "approved", `${rows.length} rows`, capResult(rows, fields));
+      this.finish(
+        id,
+        "approved",
+        `${rows.length} rows`,
+        capResult(rows, fields, resultBudgetBytes(this.settingsStore.get())),
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       await this.postResult(card, { status: "approved", error: message });
@@ -1302,7 +1304,12 @@ export class Gatekeeper {
     this.setCardState(card.id, "executing");
     try {
       const { rows, fields } = await runApprovedQuery(card.sql);
-      this.finish(card.id, "approved", `${rows.length} rows`, capResult(rows, fields));
+      this.finish(
+        card.id,
+        "approved",
+        `${rows.length} rows`,
+        capResult(rows, fields, resultBudgetBytes(this.settingsStore.get())),
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.finish(card.id, "failed", "query failed", undefined, message);
@@ -1422,17 +1429,18 @@ export class Gatekeeper {
     }
   }
 
-  // Retain the newest results within the total byte budget; older items keep
+  // Retain the newest results within the configured byte budget; older items keep
   // their row and SQL but shed their rows so memory stays bounded.
   private enforceHistoryBudget(): void {
+    const budget = resultBudgetBytes(this.settingsStore.get());
     let total = 0;
     for (const item of this.history) {
       if (!item.result || item.result.rows.length === 0) {
         continue;
       }
-      const size = JSON.stringify(item.result.rows).length;
-      if (total + size > HIST_MAX_TOTAL_BYTES) {
-        item.result = { ...item.result, rows: [], truncated: true };
+      const size = item.result.bytes ?? JSON.stringify(item.result.rows).length;
+      if (total + size > budget) {
+        item.result = { ...item.result, rows: [], truncated: true, bytes: 0 };
       } else {
         total += size;
       }

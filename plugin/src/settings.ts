@@ -9,6 +9,9 @@ export interface Settings {
   schemaAnnotation: boolean;
   sensitiveValues: boolean;
   recentlyResolved: number;
+  // Approximate RAM ceiling (MB) for held result rows across history; a bigger value
+  // keeps more of a large result reviewable before the "held" cap kicks in.
+  resultCacheMb: number;
   // Client-side developer utilities (synthetic proposals, a fake agent). Off by
   // default; every dev surface is invisible and inert until this is on.
   developerMode: boolean;
@@ -17,6 +20,16 @@ export interface Settings {
 export const RECENTLY_RESOLVED_OPTIONS = [10, 20, 50] as const;
 const RECENTLY_RESOLVED_DEFAULT = 20;
 
+export const RESULT_CACHE_OPTIONS = [128, 512, 1024] as const;
+const RESULT_CACHE_DEFAULT = 512;
+// Held rows are measured as serialized JSON; the browser heap runs ~3x larger (UTF-16
+// strings + object overhead), so convert the RAM ceiling down to a byte budget.
+const RESULT_HEAP_FACTOR = 3;
+
+export function resultBudgetBytes(s: Settings): number {
+  return Math.floor((s.resultCacheMb * 1024 * 1024) / RESULT_HEAP_FACTOR);
+}
+
 export function defaultSettings(): Settings {
   return {
     piiFlagging: true,
@@ -24,6 +37,7 @@ export function defaultSettings(): Settings {
     schemaAnnotation: true,
     sensitiveValues: true,
     recentlyResolved: RECENTLY_RESOLVED_DEFAULT,
+    resultCacheMb: RESULT_CACHE_DEFAULT,
     developerMode: false,
   };
 }
@@ -37,6 +51,7 @@ function asBool(value: unknown, fallback: boolean): boolean {
 export function normalizeSettings(raw: unknown): Settings {
   const r = (raw ?? {}) as Partial<Record<keyof Settings, unknown>>;
   const resolved = Number(r.recentlyResolved);
+  const cacheMb = Number(r.resultCacheMb);
   return {
     piiFlagging: asBool(r.piiFlagging, true),
     clientFlagging: asBool(r.clientFlagging, true),
@@ -45,6 +60,9 @@ export function normalizeSettings(raw: unknown): Settings {
     recentlyResolved: (RECENTLY_RESOLVED_OPTIONS as readonly number[]).includes(resolved)
       ? resolved
       : RECENTLY_RESOLVED_DEFAULT,
+    resultCacheMb: (RESULT_CACHE_OPTIONS as readonly number[]).includes(cacheMb)
+      ? cacheMb
+      : RESULT_CACHE_DEFAULT,
     developerMode: asBool(r.developerMode, false),
   };
 }

@@ -9,7 +9,7 @@ vi.mock("@beekeeperstudio/plugin", () => ({
   },
 }));
 
-import { defaultSettings, filterSchema, normalizeSettings } from "./settings";
+import { defaultSettings, filterSchema, normalizeSettings, resultBudgetBytes } from "./settings";
 import type { SchemaContext } from "./sql/schema";
 
 const full: SchemaContext = {
@@ -35,6 +35,16 @@ describe("settings/normalizeSettings", () => {
   it("falls back to 20 for an out-of-range or non-numeric recentlyResolved", () => {
     expect(normalizeSettings({ recentlyResolved: 999 }).recentlyResolved).toBe(20);
     expect(normalizeSettings({ recentlyResolved: "nope" }).recentlyResolved).toBe(20);
+  });
+
+  it("keeps a valid resultCacheMb option and defaults an invalid one to 512", () => {
+    expect(normalizeSettings({ resultCacheMb: 1024 }).resultCacheMb).toBe(1024);
+    expect(normalizeSettings({ resultCacheMb: 300 }).resultCacheMb).toBe(512);
+    expect(normalizeSettings({ resultCacheMb: "nope" }).resultCacheMb).toBe(512);
+  });
+
+  it("derives the serialized byte budget from the RAM ceiling (heap factor 3)", () => {
+    expect(resultBudgetBytes(defaultSettings())).toBe(Math.floor((512 * 1024 * 1024) / 3));
   });
 });
 
