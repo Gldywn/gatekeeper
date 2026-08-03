@@ -47,6 +47,10 @@ declare module "tabulator-tables" {
     movableColumns?: boolean;
     renderVertical?: "virtual" | "basic";
     nestedFieldSeparator?: string | false;
+    pagination?: boolean;
+    paginationSize?: number;
+    paginationSizeSelector?: number[] | boolean;
+    paginationCounter?: string;
   }
 
   export class Tabulator {

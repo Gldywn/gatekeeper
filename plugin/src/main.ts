@@ -1,5 +1,6 @@
-// Tabulator's base stylesheet first, so our token overrides in style.css cascade last.
-import "tabulator-tables/dist/css/tabulator.min.css";
+// Tabulator's dark base theme first, so our token overrides in style.css cascade last.
+// The light default bled white through the rows; midnight starts dark, so we only re-tint.
+import "tabulator-tables/dist/css/tabulator_midnight.min.css";
 import "./style.css";
 import { addNotificationListener, getAppInfo, log } from "@beekeeperstudio/plugin";
 import { Gatekeeper } from "./app";

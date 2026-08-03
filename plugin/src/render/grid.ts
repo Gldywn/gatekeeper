@@ -19,19 +19,23 @@ export function mountResultGrid(host: HTMLElement, result: HistResult): Tabulato
   return new TabulatorFull(host, {
     data: result.rows,
     columns: names.map((name) => columnDef(name, result.rows)),
-    // fitDataStretch sizes each column to its content and stretches the last to fill;
-    // wide results scroll horizontally, capped by columnDefaults maxWidth.
-    layout: "fitDataStretch",
+    // fitColumns fills the overlay width so there's no dead gutter; many columns keep
+    // their minWidth and scroll horizontally rather than squashing unreadably.
+    layout: "fitColumns",
     maxHeight: GRID_MAX_HEIGHT,
     movableColumns: true,
     // Treat a column name literally; a dotted DB column must not be read as a nested path.
     nestedFieldSeparator: false,
+    // Client-side paging with the sizes the reviewer had before virtualization replaced it.
+    pagination: true,
+    paginationSize: 50,
+    paginationSizeSelector: [10, 25, 50, 100],
+    paginationCounter: "rows",
     columnDefaults: {
       formatter: (cell) => renderValue(cell.getValue()),
       tooltip: cellTooltip,
       resizable: true,
-      minWidth: 72,
-      maxWidth: 420,
+      minWidth: 80,
     },
   });
 }
@@ -116,5 +120,6 @@ function cellTooltip(_event: Event, cell: CellComponent): HTMLElement | string |
   if (typeof value === "string" && value.length > TOOLTIP_MIN_CHARS) {
     return value;
   }
-  return false;
+  // Empty string = no tooltip; returning the boolean false surfaced a stray "false".
+  return "";
 }
