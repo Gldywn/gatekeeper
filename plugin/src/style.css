@@ -61,22 +61,24 @@ body {
 }
 body {
   margin: 0;
-  background: var(--ground-lit);
+  min-height: 100vh;
+  /* One fixed, viewport-filling ground: the top-lit vignette plus a faint amber glow
+     off the top-left. Fixed + min-height so it never seams where the content ends. */
+  background:
+    /* A nod to the logo's glossy gold: a warm highlight up where the logo sits, melting
+       through amber into bronze, then into the dark ground. No shape, just the gradient. */
+    radial-gradient(120% 95% at 11% -10%,
+      color-mix(in oklch, oklch(90% 0.075 86) 17%, transparent) 0%,
+      color-mix(in oklch, oklch(80% 0.13 80) 12%, transparent) 26%,
+      color-mix(in oklch, oklch(55% 0.1 64) 9%, transparent) 52%,
+      transparent 72%),
+    var(--ground-lit);
+  background-attachment: fixed;
   color: var(--text);
   font-family: var(--font-ui);
   font-size: 13.5px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
-}
-/* A subtle generated texture behind everything; kept faint so cards stay readable. */
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  background: url("./assets/gatekeeper-bg.webp") center / 100% 100% no-repeat;
-  opacity: 0.45;
-  pointer-events: none;
 }
 .gk {
   max-width: min(94vw, 1180px);
@@ -170,7 +172,11 @@ body::before {
   height: 30px;
   flex: none;
   align-self: center;
-  background: url("./assets/gatekeeper-logo.webp") center / contain no-repeat;
+  /* Crop past the cutout's pale edge, re-round the corners, and lift it off the bar
+     with a soft shadow instead of a hard outline that never traced the squircle. */
+  background: url("./assets/gatekeeper-logo.webp") center / 150% no-repeat;
+  border-radius: 7px;
+  filter: drop-shadow(0 1px 1.5px oklch(0% 0 0 / 0.5));
 }
 .wordmark {
   font-weight: 660;
@@ -1480,8 +1486,9 @@ label.qs-row {
 .waiting-mark {
   width: 56px;
   height: 56px;
-  background: url("./assets/gatekeeper-logo.webp") center / contain no-repeat;
-  opacity: 0.9;
+  background: url("./assets/gatekeeper-logo.webp") center / 150% no-repeat;
+  border-radius: 13px;
+  filter: drop-shadow(0 2px 5px oklch(0% 0 0 / 0.4));
 }
 @media (prefers-reduced-motion: no-preference) {
   .waiting-mark {
