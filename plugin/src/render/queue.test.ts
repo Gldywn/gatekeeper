@@ -75,7 +75,7 @@ describe("render/queue", () => {
     expect(html).toContain('data-approve="q1" >Approve</button>');
   });
 
-  it("renders a write card in write mode: amber badge, Approve write, Writes annotation", () => {
+  it("renders a write card in write mode: amber badge, Approve write, Write annotation", () => {
     const html = cardHtml(
       ready("q2", "INSERT INTO logs (id) VALUES (1)"),
       "postgresql",
@@ -83,7 +83,7 @@ describe("render/queue", () => {
       "write",
     );
     expect(html).toContain('class="card write"');
-    expect(html).toContain('<span class="risk-badge write">Writes</span>');
+    expect(html).toContain('<span class="risk-badge write">Write</span>');
     expect(html).toContain('class="cs-writes write"');
     expect(html).toContain('data-approve="q2" >Approve write</button>');
     expect(html).not.toContain("blocked-note");
@@ -101,7 +101,7 @@ describe("render/queue", () => {
     expect(html).toContain('data-approve="q3" disabled>Approve write</button>');
   });
 
-  it("renders a destructive card in destructive mode: red badge, red Approve, Deletes annotation", () => {
+  it("renders a destructive card in destructive mode: red badge, red Approve, Delete annotation", () => {
     const html = cardHtml(
       ready("q4", "DELETE FROM users WHERE id = 1"),
       "postgresql",
@@ -109,11 +109,11 @@ describe("render/queue", () => {
       "destructive",
     );
     expect(html).toContain('class="card destructive"');
-    expect(html).toContain('<span class="risk-badge destructive">Destroys</span>');
+    expect(html).toContain('<span class="risk-badge destructive">Destructive</span>');
     expect(html).toContain('class="btn approve destructive"');
     expect(html).toContain(">Approve destructive</button>");
     expect(html).toContain('class="cs-writes destructive"');
-    expect(html).toContain("Deletes");
+    expect(html).toContain("Delete");
   });
 
   it("blocks a destructive card in write mode with the destructive-mode note", () => {

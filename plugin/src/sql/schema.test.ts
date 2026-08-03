@@ -17,6 +17,7 @@ describe("analyzeTableOps", () => {
     expect(analyzeTableOps("SELECT * FROM audit.users", pg)).toEqual({
       writes: [],
       reads: ["audit.users"],
+      writeOp: null,
     });
   });
 
@@ -24,17 +25,20 @@ describe("analyzeTableOps", () => {
     expect(analyzeTableOps("INSERT INTO audit SELECT * FROM users", pg)).toEqual({
       writes: ["audit"],
       reads: ["users"],
+      writeOp: "insert",
     });
   });
 
-  it("reports a delete/update target as a write, not a read", () => {
+  it("reports a delete/update target as a write, and names the operation", () => {
     expect(analyzeTableOps("DELETE FROM users WHERE id = 1", pg)).toEqual({
       writes: ["users"],
       reads: [],
+      writeOp: "delete",
     });
     expect(analyzeTableOps("UPDATE users SET name = 'x' WHERE id = 1", pg)).toEqual({
       writes: ["users"],
       reads: [],
+      writeOp: "update",
     });
   });
 

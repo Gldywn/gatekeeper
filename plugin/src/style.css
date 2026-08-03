@@ -911,7 +911,7 @@ label.qs-row {
 
 .top {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   gap: var(--s2);
 }
 .intent {
@@ -1195,24 +1195,31 @@ label.qs-row {
   background: color-mix(in oklch, var(--danger) 5%, var(--surface));
 }
 /* The class chip in .top: a solid fill with dark ink, centred against the baseline row. */
+/* A quiet tinted tag, top-aligned so it sits with the first line of a wrapping intent
+   instead of floating to the middle. */
 .risk-badge {
-  align-self: center;
+  align-self: flex-start;
+  margin-top: 2px;
   flex: none;
-  font-size: 9.5px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
-  padding: 2px 7px;
+  padding: 2px 8px;
   border-radius: 5px;
-  line-height: 1.35;
+  border: 1px solid transparent;
 }
 .risk-badge.write {
-  background: var(--amber);
-  color: var(--amber-ink);
+  color: var(--amber);
+  background: color-mix(in oklch, var(--amber) 15%, transparent);
+  border-color: color-mix(in oklch, var(--amber) 42%, transparent);
 }
 .risk-badge.destructive {
-  background: var(--danger);
-  color: var(--danger-ink);
+  color: var(--danger);
+  background: color-mix(in oklch, var(--danger) 15%, transparent);
+  border-color: color-mix(in oklch, var(--danger) 44%, transparent);
 }
 /* The written-tables annotation ("Writes"/"Deletes"), mirroring .card-schema's stack;
    the label carries the class tone, the chips reuse the neutral .tbl-chip. */
@@ -1252,17 +1259,44 @@ label.qs-row {
   color: var(--danger);
 }
 
-.blocked-note {
-  display: flex;
-  gap: 7px;
-  align-items: center;
-  font-size: 12px;
-  color: var(--danger);
-  margin: 0 0 var(--s3);
+/* The blocked reason rides in a hover popover above the disabled Approve button. */
+.approve-slot {
+  position: relative;
+  display: inline-flex;
 }
-.blocked-note svg {
-  width: 14px;
-  height: 14px;
+.approve-pop {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 8;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--danger);
+  background: var(--surface);
+  border: 1px solid color-mix(in oklch, var(--danger) 35%, var(--edge));
+  border-radius: 7px;
+  padding: 6px 10px;
+  box-shadow: var(--elev-2);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(3px);
+  transition:
+    opacity var(--dur) var(--ease),
+    transform var(--dur) var(--ease),
+    visibility var(--dur);
+}
+.approve-slot:hover .approve-pop,
+.approve-slot:focus-within .approve-pop {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+.approve-pop svg {
+  width: 13px;
+  height: 13px;
   flex: none;
 }
 

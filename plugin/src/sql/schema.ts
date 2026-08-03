@@ -196,7 +196,7 @@ function formatRef(ref: TableRef): string {
 export function analyzeTableOps(
   sql: string,
   dialect: string,
-): { writes: string[]; reads: string[] } | null {
+): { writes: string[]; reads: string[]; writeOp: string | null } | null {
   let tableList: string[];
   try {
     ({ tableList } = parser.parse(sql, { database: dialect }));
@@ -205,17 +205,24 @@ export function analyzeTableOps(
   }
   const writes: TableRef[] = [];
   const reads: TableRef[] = [];
+  let writeOp: string | null = null;
   for (const entry of tableList) {
     const op = entry.split("::")[0]?.toLowerCase() ?? "";
     const ref = parseTableRef(entry);
     if (!ref) {
       continue;
     }
-    (op === "select" ? reads : writes).push(ref);
+    if (op === "select") {
+      reads.push(ref);
+    } else {
+      writes.push(ref);
+      writeOp ??= op;
+    }
   }
   return {
     writes: dedupeRefs(writes).map(formatRef),
     reads: dedupeRefs(reads).map(formatRef),
+    writeOp,
   };
 }
 

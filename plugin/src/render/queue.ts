@@ -8,6 +8,7 @@ import {
   messageIcon,
   pencilIcon,
   sendIcon,
+  trashIcon,
   warnIcon,
 } from "../icons";
 import { classifyQuery, type RiskClass, rank } from "../sql/classify";
@@ -153,9 +154,6 @@ export function cardHtml(
   }
   const badge = card.dev ? "" : riskBadge(gate.cls);
   const riskAnno = card.dev ? "" : riskAnnotation(card.sql, dialect, gate.cls);
-  const blockedNote = gate.note
-    ? `<p class="blocked-note">${ALERT_ICON}${escapeHtml(gate.note)}</p>`
-    : "";
   const cardClass = card.dev ? "dev" : cardClassFor(gate);
   return `
       <div class="card ${cardClass}" data-card="${card.id}">
@@ -166,7 +164,7 @@ export function cardHtml(
         <div class="meta">${escapeHtml(card.id)} &middot; ${relAge(card.createdAt)}</div>
         <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(card.sql)}" aria-label="Copy SQL">${copyIcon}</button><code class="sql-body" id="sqlbody-${card.id}">${highlight(formatSql(card.sql), card.schema?.pii, card.schema?.client, card.schema?.literals)}</code></pre>
         ${riskAnno}<div class="card-schema" id="cs-${card.id}">${schemaInner(card.schema, gate.cls !== "read")}</div>
-        ${blockedNote}${actions}
+        ${actions}
       </div>`;
 }
 
@@ -178,19 +176,42 @@ function cardClassFor(gate: CardGate): string {
   return [risk, blocked].filter(Boolean).join(" ");
 }
 
-// The class chip in .top: none for a read, solid amber "Writes" or solid red "Destroys".
+// The class chip in .top: none for a read, "Write" (amber) or "Destructive" (red),
+// matching the mode names.
 function riskBadge(cls: RiskClass): string {
   if (cls === "write") {
-    return `<span class="risk-badge write">Writes</span>`;
+    return `<span class="risk-badge write">Write</span>`;
   }
   if (cls === "destructive") {
-    return `<span class="risk-badge destructive">Destroys</span>`;
+    return `<span class="risk-badge destructive">Destructive</span>`;
   }
   return "";
 }
 
-// The tables written ("Writes"/"Deletes"), plus, for a mixed statement
-// (INSERT ... SELECT), the tables also read.
+// The specific destructive verb from the parsed operation, so a DROP does not read
+// as "Delete"; falls back to a generic verb the rare time the op is unknown.
+function destructiveVerb(op: string | null): string {
+  switch (op) {
+    case "delete":
+      return "Delete";
+    case "drop":
+      return "Drop";
+    case "truncate":
+      return "Truncate";
+    case "alter":
+      return "Alter";
+    case "create":
+      return "Create";
+    case "rename":
+      return "Rename";
+    default:
+      return "Change";
+  }
+}
+
+// The tables written, named by the actual verb (Write / Delete / Drop / …) with a
+// pencil for a write and a trash for a destructive; plus the tables read on a mixed
+// statement (INSERT ... SELECT).
 function riskAnnotation(sql: string, dialect: string, cls: RiskClass): string {
   if (cls === "read") {
     return "";
@@ -199,10 +220,12 @@ function riskAnnotation(sql: string, dialect: string, cls: RiskClass): string {
   if (!ops) {
     return "";
   }
-  const label = cls === "destructive" ? "Deletes" : "Writes";
-  const tone = cls === "destructive" ? "destructive" : "write";
+  const destructive = cls === "destructive";
+  const label = destructive ? destructiveVerb(ops.writeOp) : "Write";
+  const icon = destructive ? trashIcon : pencilIcon;
+  const tone = destructive ? "destructive" : "write";
   const writesLine = ops.writes.length
-    ? `<div class="cs-writes ${tone}"><span class="cs-writes-k">${pencilIcon}${label}</span>${tblChips(ops.writes)}</div>`
+    ? `<div class="cs-writes ${tone}"><span class="cs-writes-k">${icon}${label}</span>${tblChips(ops.writes)}</div>`
     : "";
   const readsLine = ops.reads.length
     ? `<div class="cs-reads"><span class="cs-reads-k">${dbReadsIcon}Reads</span>${tblChips(ops.reads)}</div>`
@@ -222,8 +245,14 @@ export function readyActions(id: string, gate: CardGate, denyDrafts: Map<string,
     ? denyField(id, denyDrafts.get(id) ?? "")
     : `<button class="deny-open" type="button" data-deny-open="${id}" title="Reject and ask the agent to change something">${messageIcon}Request changes</button>`;
   const tone = gate.cls === "destructive" ? " destructive" : "";
+  const approveBtn = `<button class="btn approve${tone}" type="button" data-approve="${id}" ${gate.approveEnabled ? "" : "disabled"}>${gate.approveLabel}</button>`;
+  // When blocked, the reason rides in a hover popover above the disabled Approve,
+  // not as a loose line in the card body.
+  const approve = gate.note
+    ? `<span class="approve-slot">${approveBtn}<span class="approve-pop" role="tooltip">${ALERT_ICON}${escapeHtml(gate.note)}</span></span>`
+    : approveBtn;
   return `<div class="actions">
-             <button class="btn approve${tone}" type="button" data-approve="${id}" ${gate.approveEnabled ? "" : "disabled"}>${gate.approveLabel}</button>
+             ${approve}
              <button class="btn reject" type="button" data-reject="${id}">Reject</button>
              ${revise}
            </div>`;
