@@ -170,9 +170,7 @@ body::before {
   height: 30px;
   flex: none;
   align-self: center;
-  /* Zoom past the icon's white canvas margin and round it into a squircle. */
-  background: url("./assets/gatekeeper-logo.webp") center / 138% no-repeat;
-  border-radius: 8px;
+  background: url("./assets/gatekeeper-logo.webp") center / contain no-repeat;
 }
 .wordmark {
   font-weight: 660;
@@ -449,8 +447,8 @@ body::before {
 /* Hairline divider: between chip segments and inside the right cluster. */
 .dsep {
   width: 1px;
-  height: 15px;
-  background: var(--edge);
+  height: 18px;
+  background: color-mix(in oklch, var(--text) 24%, transparent);
   flex: none;
 }
 
@@ -531,7 +529,7 @@ body::before {
   align-items: center;
   gap: 6px;
   white-space: nowrap;
-  color: var(--muted);
+  color: color-mix(in oklch, var(--text) 84%, transparent);
   font-size: 11.5px;
   flex: none;
 }
@@ -587,7 +585,7 @@ body::before {
   border: none;
   border-radius: 6px;
   background: none;
-  color: var(--faint);
+  color: var(--muted);
   cursor: pointer;
   transition:
     color var(--dur) var(--ease),
@@ -1482,8 +1480,7 @@ label.qs-row {
 .waiting-mark {
   width: 56px;
   height: 56px;
-  background: url("./assets/gatekeeper-logo.webp") center / 138% no-repeat;
-  border-radius: 13px;
+  background: url("./assets/gatekeeper-logo.webp") center / contain no-repeat;
   opacity: 0.9;
 }
 @media (prefers-reduced-motion: no-preference) {
