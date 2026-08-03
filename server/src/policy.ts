@@ -27,6 +27,9 @@ const WRITE_LEAD = new Set(["insert", "update", "upsert"]);
 const EMBED_WRITE = /\b(insert\s+into|update\s+\w)/i;
 const EMBED_DESTRUCTIVE =
   /\b(delete\s+from|drop\s+\w|truncate\s+|alter\s+\w|grant\s+|revoke\s+|merge\s+into)/i;
+// A select carrying INTO creates a table or writes a file; over-classify it on the
+// advisory stamp (a string-literal "into" is harmless here, the plugin is precise).
+const EMBED_INTO = /\binto\b/i;
 
 // Advisory, regex-only risk classifier mirroring the plugin's classes. The plugin
 // (with a real parser) stays authoritative; this only stamps the audit and blocks the
@@ -52,7 +55,7 @@ function riskClass(single: string): RiskClass {
     return EMBED_DESTRUCTIVE.test(single) ? "destructive" : "write";
   }
   if (READ_LEAD.has(lead)) {
-    if (EMBED_DESTRUCTIVE.test(single)) {
+    if (EMBED_DESTRUCTIVE.test(single) || EMBED_INTO.test(single)) {
       return "destructive";
     }
     if (EMBED_WRITE.test(single)) {

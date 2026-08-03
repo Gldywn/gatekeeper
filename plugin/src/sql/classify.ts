@@ -27,6 +27,9 @@ const WRITE_STATEMENTS = new Set(["insert", "update"]);
 const MODIFY_NODE: Record<string, RiskClass> = {
   insert: "write",
   update: "write",
+  // SELECT ... INTO parses as a select carrying an `into` node; it creates a table
+  // (Postgres) or writes/exfiltrates a file (MySQL OUTFILE/DUMPFILE), never a read.
+  into: "destructive",
   delete: "destructive",
   drop: "destructive",
   truncate: "destructive",

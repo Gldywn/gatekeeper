@@ -50,6 +50,18 @@ describe("classifyQuery", () => {
     }
   });
 
+  it("never reads a SELECT ... INTO (table create / file write)", () => {
+    for (const [sql, dialect] of [
+      ["SELECT * INTO stolen FROM users", "postgresql"],
+      ["SELECT * FROM users INTO OUTFILE '/tmp/x.csv'", "mysql"],
+      ["SELECT * INTO DUMPFILE '/tmp/x' FROM users", "mysql"],
+    ] as const) {
+      const v = classifyQuery(sql, dialect);
+      // The security property: it must never be an approvable read.
+      expect(v.class === "read" && !v.blocked, sql).toBe(false);
+    }
+  });
+
   it("fails a data-modifying CTE closed, never read", () => {
     expect(classifyQuery("WITH x AS (DELETE FROM t RETURNING *) SELECT * FROM x", pg).class).toBe(
       "destructive",

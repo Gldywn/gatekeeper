@@ -23,6 +23,9 @@ const classCases: Array<[string, RiskClass]> = [
   ["EXPLAIN ANALYZE DELETE FROM users", "destructive"],
   // An unrecognised leading keyword fails safe.
   ["VACUUM", "destructive"],
+  // SELECT ... INTO creates a table or writes a file, never a plain read.
+  ["SELECT * INTO stolen FROM users", "destructive"],
+  ["SELECT * FROM users INTO OUTFILE '/tmp/x'", "destructive"],
 ];
 
 describe("classifyRisk", () => {

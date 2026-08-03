@@ -1418,6 +1418,9 @@ export class Gatekeeper {
       this.finish(id, "failed", "lease lost");
       return;
     }
+    // Final anti-race guard: the connection poll is throttled, so a switch during the
+    // postExecuting round-trip could go unseen; re-read live before touching the DB.
+    await this.checkConnection();
     if (gen !== this.connGeneration) {
       return;
     }
