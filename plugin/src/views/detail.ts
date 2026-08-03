@@ -1,7 +1,8 @@
+import type { TabulatorFull } from "tabulator-tables";
 import type { SchemaAnnotator } from "../annotate";
-import { detailHtml, gridHtml } from "../render/detail";
+import { detailHtml } from "../render/detail";
+import { mountResultGrid } from "../render/grid";
 import { schemaInner } from "../render/queue";
-import { HIST_PAGE_SIZE } from "../result";
 import { filterSchema, type Settings } from "../settings";
 import { formatSql } from "../sql/format";
 import { highlight } from "../sql/highlight";
@@ -18,13 +19,11 @@ interface DetailViewDeps {
 // annotation as the pending card did.
 export class DetailView {
   // The history item whose detail overlay is open, so a late schema fetch only paints
-  // a detail still on screen, and the pager can re-slice its held rows.
+  // a detail still on screen.
   private detailItem: HistItem | null = null;
-  // Which page of the held result rows the grid shows; reset whenever a new item
-  // opens so a reopened row always starts at the first page.
-  private pageIndex = 0;
-  // Rows shown per page; human-chosen via the grid footer, reset on each open.
-  private pageSize = HIST_PAGE_SIZE;
+  // The live Tabulator instance for the open item's result, destroyed on close/reopen so
+  // its virtual-DOM listeners and detached nodes never outlive the overlay.
+  private grid: TabulatorFull | null = null;
   private readonly root: HTMLElement;
   private readonly annotator: SchemaAnnotator;
   private readonly settings: () => Settings;
@@ -41,45 +40,27 @@ export class DetailView {
       return;
     }
     this.detailItem = item;
-    this.pageIndex = 0;
-    this.pageSize = HIST_PAGE_SIZE;
     panel.innerHTML = detailHtml(item);
     panel.hidden = false;
+    this.mountGrid(panel, item);
     void this.annotateDetail(item);
   }
 
-  // Step the held-rows pager and repaint only the table slice + footer, so the rest
-  // of the overlay (head, SQL, annotation) stays put. Pages in memory, never a
-  // re-query; clamped to the valid range.
-  page(delta: number): void {
-    const result = this.detailItem?.result;
-    if (!result || result.rows.length === 0) {
-      return;
-    }
-    const pageCount = Math.max(1, Math.ceil(result.rows.length / this.pageSize));
-    const next = Math.min(Math.max(0, this.pageIndex + delta), pageCount - 1);
-    if (next === this.pageIndex) {
-      return;
-    }
-    this.pageIndex = next;
-    const grid = this.root.querySelector<HTMLElement>("#detail-grid");
-    if (grid) {
-      grid.innerHTML = gridHtml(result, this.pageIndex, this.pageSize);
+  // Instantiate Tabulator over the held rows once the overlay markup is in the DOM and
+  // visible (the host must be laid out for the virtual renderer to size its viewport).
+  // Only the approved-with-rows outcome renders the .gk-grid host.
+  private mountGrid(panel: HTMLElement, item: HistItem): void {
+    this.destroyGrid();
+    const host = panel.querySelector<HTMLElement>(".gk-grid");
+    if (host && item.result && item.result.rows.length > 0) {
+      this.grid = mountResultGrid(host, item.result);
     }
   }
 
-  // Change the rows-per-page and repaint from the first page; the held rows never
-  // re-query, they re-slice in memory.
-  setPageSize(size: number): void {
-    const result = this.detailItem?.result;
-    if (!result || result.rows.length === 0 || size === this.pageSize) {
-      return;
-    }
-    this.pageSize = size;
-    this.pageIndex = 0;
-    const grid = this.root.querySelector<HTMLElement>("#detail-grid");
-    if (grid) {
-      grid.innerHTML = gridHtml(result, 0, size);
+  private destroyGrid(): void {
+    if (this.grid) {
+      this.grid.destroy();
+      this.grid = null;
     }
   }
 
@@ -109,7 +90,7 @@ export class DetailView {
 
   close(): void {
     this.detailItem = null;
-    this.pageIndex = 0;
+    this.destroyGrid();
     const panel = this.root.querySelector<HTMLDivElement>("#detail");
     if (panel) {
       panel.hidden = true;

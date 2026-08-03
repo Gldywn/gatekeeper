@@ -65,13 +65,15 @@ body {
   /* One fixed, viewport-filling ground: the top-lit vignette plus a faint amber glow
      off the top-left. Fixed + min-height so it never seams where the content ends. */
   background:
-    /* A nod to the logo's glossy gold: a warm highlight up where the logo sits, melting
+/* A nod to the logo's glossy gold: a warm highlight up where the logo sits, melting
        through amber into bronze, then into the dark ground. No shape, just the gradient. */
-    radial-gradient(120% 95% at 11% -10%,
+    radial-gradient(
+      120% 95% at 11% -10%,
       color-mix(in oklch, oklch(90% 0.075 86) 17%, transparent) 0%,
       color-mix(in oklch, oklch(80% 0.13 80) 12%, transparent) 26%,
       color-mix(in oklch, oklch(55% 0.1 64) 9%, transparent) 52%,
-      transparent 72%),
+      transparent 72%
+    ),
     var(--ground-lit);
   background-attachment: fixed;
   color: var(--text);
@@ -2105,69 +2107,15 @@ label.qs-row {
   outline: 2px solid var(--amber);
   outline-offset: 1px;
 }
-/* A scroll container bounded in height so the held rows never push the outcome
-   footer off-screen; the header row stays pinned as it scrolls. */
-.grid-wrap {
-  overflow: auto;
-  max-height: 300px;
-  /* Opaque neutral ground so the outcome's status tint never bleeds into the data. */
-  background: var(--sunken);
-  border: 1px solid var(--edge);
-  border-radius: 6px;
-}
-.grid {
-  width: 100%;
-  border-collapse: collapse;
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-}
-.grid th,
-.grid td {
-  padding: 6px var(--s3);
-  text-align: left;
-  vertical-align: top;
-  /* A wide value wraps within the capped column instead of overflowing and
-     overlapping the next cell (white-space: nowrap had no clip). */
-  white-space: normal;
-  overflow-wrap: anywhere;
-  max-width: clamp(16ch, 20cqi, 40ch);
-  min-width: 6ch;
-  border-bottom: 1px solid var(--hi);
-}
-.grid th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: var(--sunken);
-  color: var(--muted);
-  font-weight: 600;
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  border-bottom: 1px solid var(--edge);
-}
-.grid td {
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-/* PII/client columns carry the same accents as the schema flags, so a sensitive
-   column reads at a glance in the result too. */
-.grid th.pii,
-.grid td.pii {
-  color: color-mix(in oklch, var(--danger) 78%, var(--text));
-}
-.grid th.client,
-.grid td.client {
-  color: color-mix(in oklch, var(--client) 78%, var(--text));
-}
-.grid tbody tr:nth-child(even) td {
-  background: color-mix(in oklch, var(--text) 2.5%, transparent);
-}
-.grid tbody tr:hover td {
-  background: var(--hi);
-}
-/* The result footer: the true total, the shown slice, the held cap, and a pager
-   over the held rows (in memory, never a re-query). */
+/* ==== Result grid (Tabulator) ==============================================
+   Tabulator renders the approved result set (render/grid.ts): row virtualization,
+   click-to-sort, column resize + reorder, and type-aware cells. Its base stylesheet
+   is bundled first (main.ts); everything below re-skins it to our tokens. Scoped
+   under .gk-grid so nothing here leaks past the grid, and so these two-class
+   selectors outrank Tabulator's single-class defaults whatever the bundle order. */
+
+/* The footer states the true total and the held cap, both independent of the
+   virtual slice Tabulator has painted (in memory, never a re-query). */
 .grid-foot {
   display: flex;
   align-items: center;
@@ -2181,34 +2129,6 @@ label.qs-row {
   color: var(--text);
   font-variant-numeric: tabular-nums;
 }
-.grid-foot-r {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s3);
-}
-.page-size {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  color: var(--faint);
-}
-.page-size select {
-  font: inherit;
-  font-size: 11px;
-  font-family: var(--font-mono);
-  color: var(--text);
-  background: var(--sunken);
-  border: 1px solid var(--edge);
-  border-radius: 5px;
-  padding: 2px 6px;
-  cursor: pointer;
-}
-.page-size select:focus-visible {
-  outline: 2px solid var(--amber);
-  outline-offset: 1px;
-}
 .cap-tag {
   font-size: 10px;
   color: var(--amber);
@@ -2216,44 +2136,150 @@ label.qs-row {
   border-radius: 4px;
   padding: 1px 6px;
 }
-.pager {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s1);
-}
-.pager-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
+
+.gk-grid.tabulator {
+  background: var(--sunken);
   border: 1px solid var(--edge);
-  border-radius: 5px;
-  background: none;
-  color: var(--muted);
-  cursor: pointer;
-}
-.pager-btn svg {
-  width: 13px;
-  height: 13px;
-}
-.pager-btn:hover:not(:disabled) {
-  color: var(--text);
-  border-color: var(--edge-strong);
-}
-.pager-btn:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-.pager-btn:focus-visible {
-  outline: 2px solid var(--amber);
-  outline-offset: 1px;
-}
-.pager .pg {
+  border-radius: var(--r);
+  overflow: hidden;
   font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text);
+}
+.gk-grid .tabulator-tableholder {
+  background: var(--sunken);
+}
+.gk-grid .tabulator-tableholder:focus {
+  outline: none;
+}
+/* Header seated on --sunken: UI font, quiet uppercase labels, hairline underline. */
+.gk-grid .tabulator-header {
+  background: var(--sunken);
+  border-bottom: 1px solid var(--edge);
+  color: var(--muted);
+}
+.gk-grid .tabulator-col {
+  background: var(--sunken);
+  border-right: 1px solid var(--hi);
+}
+.gk-grid .tabulator-col .tabulator-col-content {
+  padding: 6px var(--s3);
+}
+.gk-grid .tabulator-col .tabulator-col-title {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+/* Sort arrow: faint at rest, amber (with a lit title) on the sorted column. */
+.gk-grid .tabulator-col .tabulator-col-sorter .tabulator-arrow {
+  border-top-color: var(--faint);
+  border-bottom-color: var(--faint);
+}
+.gk-grid .tabulator-col[aria-sort="ascending"] .tabulator-arrow,
+.gk-grid .tabulator-col[aria-sort="descending"] .tabulator-arrow {
+  border-top-color: var(--amber);
+  border-bottom-color: var(--amber);
+}
+.gk-grid .tabulator-col[aria-sort="ascending"] .tabulator-col-title,
+.gk-grid .tabulator-col[aria-sort="descending"] .tabulator-col-title {
+  color: var(--text);
+}
+.gk-grid .tabulator-col .tabulator-col-resize-handle:hover {
+  background: var(--edge-strong);
+}
+/* Rows: hairline separators, a whisper of zebra, hover on --hi. */
+.gk-grid .tabulator-row {
+  background: transparent;
+  border-bottom: 1px solid var(--hi);
+  min-height: 28px;
+}
+.gk-grid .tabulator-row.tabulator-row-even {
+  background: color-mix(in oklch, var(--text) 2.5%, transparent);
+}
+.gk-grid .tabulator-row:hover {
+  background: var(--hi);
+}
+.gk-grid .tabulator-cell {
+  padding: 6px var(--s3);
+  border-right: 1px solid transparent;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gk-grid .tabulator-cell.gk-col-num {
   font-variant-numeric: tabular-nums;
-  padding: 0 6px;
+}
+/* PII / client columns carry the same accents as the schema flags, on header + cells. */
+.gk-grid .tabulator-col.pii .tabulator-col-title,
+.gk-grid .tabulator-cell.pii {
+  color: color-mix(in oklch, var(--danger) 78%, var(--text));
+}
+.gk-grid .tabulator-col.client .tabulator-col-title,
+.gk-grid .tabulator-cell.client {
+  color: color-mix(in oklch, var(--client) 78%, var(--text));
+}
+/* A real SQL null: a muted chip, deliberately distinct from the plain string "NULL". */
+.gk-grid .gk-null {
+  font-style: italic;
   color: var(--faint);
+  background: color-mix(in oklch, var(--text) 6%, transparent);
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  padding: 0 5px;
+  font-size: 10px;
+  letter-spacing: 0.03em;
+}
+/* Boolean: a small colored dot (green when true) ahead of the literal. */
+.gk-grid .gk-bool::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  vertical-align: middle;
+  background: var(--faint);
+}
+.gk-grid .gk-bool.is-true::before {
+  background: var(--ok);
+}
+/* JSON / array: a muted one-line preview; the full pretty print expands in the tooltip. */
+.gk-grid .gk-json {
+  color: var(--muted);
+}
+/* Cell-range / row selection accents, should Tabulator ever surface them. */
+.gk-grid .tabulator-row.tabulator-selected {
+  background: color-mix(in oklch, var(--amber) 14%, transparent);
+}
+.gk-grid .tabulator-cell.tabulator-range-selected {
+  background: color-mix(in oklch, var(--amber) 16%, transparent);
+}
+/* Tabulator appends the tooltip to <body>, outside .gk-grid, so it is styled
+   unscoped: the full value / pretty-printed JSON on our floating surface. */
+.tabulator-tooltip {
+  max-width: 460px;
+  max-height: 320px;
+  overflow: auto;
+  padding: 8px 10px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--edge-strong);
+  border-radius: 6px;
+  box-shadow: var(--elev-pop);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.tabulator-tooltip .gk-json-pop {
+  margin: 0;
+  font: inherit;
+  white-space: pre;
 }
 
 /* ---- Activity (connection-scoped audit) ---- */
@@ -2651,11 +2677,6 @@ label.qs-row {
     .hrow[data-no-intent] {
       grid-template-columns: 15px 72px 72px 54px 1fr auto;
     }
-  }
-  /* 20cqi is meaningless without a container; restore the flat cell cap. */
-  .grid th,
-  .grid td {
-    max-width: 24ch;
   }
 }
 

@@ -13,7 +13,8 @@
     "@beekeeperstudio/plugin": "1.7.1",
     "@thesvg/icons": "3.2.8",
     "motion": "12.42.2",
-    "node-sql-parser": "5.4.0"
+    "node-sql-parser": "5.4.0",
+    "tabulator-tables": "6.5.2"
   },
   "devDependencies": {
     "@beekeeperstudio/vite-plugin": "1.1.0",

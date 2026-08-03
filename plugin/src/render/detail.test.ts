@@ -5,7 +5,7 @@ process.env.TZ = "UTC";
 import { describe, expect, it } from "vitest";
 import type { HistResult } from "../result";
 import type { HistItem } from "../types";
-import { detailHtml, gridHtml } from "./detail";
+import { detailHtml } from "./detail";
 
 const result: HistResult = {
   fields: [{ name: "email" }, { name: "company_name" }],
@@ -50,43 +50,26 @@ describe("render/detail", () => {
     expect(html).toContain(
       '<span class="kw">SELECT</span>\n  email,\n  company_name\n<span class="kw">FROM</span> audit.users',
     );
-    // The outcome lives in the tinted recessed well: header (icon + word + meta), grid.
+    // The outcome lives in the tinted recessed well: header (icon + word + meta), then the
+    // grid host Tabulator mounts into (render/grid.ts), and the plain row-count footer.
     expect(html).toContain(
-      '<div class="detail-rail approved"><div class="detail-oc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span class="detail-oc-title">Approved</span><span class="detail-oc-meta">2 rows</span></div><div class="detail-oc-body" id="detail-grid"><div class="grid-wrap">',
+      '<div class="detail-rail approved"><div class="detail-oc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span class="detail-oc-title">Approved</span><span class="detail-oc-meta">2 rows</span></div><div class="detail-oc-body" id="detail-grid"><div class="gk-grid" data-result-grid></div><div class="grid-foot"><span class="rc"><b>2</b> rows</span></div></div>',
     );
   });
 
-  it("renders a result grid with PII/client column tints and a plain footer", () => {
-    expect(gridHtml(result)).toBe(
-      '<div class="grid-wrap"><table class="grid"><thead><tr><th class="pii">email</th><th class="client">company_name</th></tr></thead><tbody><tr><td class="pii">jane@acme.io</td><td class="client">Acme</td></tr><tr><td class="pii">john@globex.io</td><td class="client">Globex</td></tr></tbody></table></div><div class="grid-foot"><span class="rc"><b>2</b> rows</span></div>',
-    );
-  });
-
-  it("pages the held rows in memory, stating the true total, the page size, and the cap", () => {
+  it("footer states the true total and the held cap when the result was truncated", () => {
     const big: HistResult = {
       fields: [{ name: "id" }, { name: "email" }],
       rows: Array.from({ length: 120 }, (_, i) => ({ id: i + 1, email: `u${i}@x.io` })),
       rowCount: 1240,
       truncated: true,
     };
-    const page0 = gridHtml(big, 0);
-    expect(page0).toContain(
+    const html = detailHtml({ ...item, note: "1,240 rows", result: big });
+    expect(html).toContain(
       '<span class="rc"><b>1,240</b> rows <span class="cap-tag">first 120 held</span></span>',
     );
-    expect(page0).toContain('<option value="50" selected>50</option>');
-    expect(page0).toContain('<span class="pg">1 / 3</span>');
-    // Page 0 holds a full 50-row slice; the last page holds the remaining 20.
-    expect((page0.match(/<tr><td/g) ?? []).length).toBe(50);
-    const last = gridHtml(big, 2);
-    expect(last).toContain('<span class="pg">3 / 3</span>');
-    expect((last.match(/<tr><td/g) ?? []).length).toBe(20);
-    // Out-of-range pages clamp to the last valid one rather than rendering empty.
-    expect(gridHtml(big, 9)).toContain('<span class="pg">3 / 3</span>');
-    // A larger page size re-slices in place: 100 rows per page gives 2 pages.
-    const big100 = gridHtml(big, 0, 100);
-    expect(big100).toContain('<option value="100" selected>100</option>');
-    expect(big100).toContain('<span class="pg">1 / 2</span>');
-    expect((big100.match(/<tr><td/g) ?? []).length).toBe(100);
+    // The grid host is present but empty; Tabulator fills it at mount time in the DOM.
+    expect(html).toContain('<div class="gk-grid" data-result-grid></div>');
   });
 
   it("shows the empty-result message for an approved query with zero rows", () => {

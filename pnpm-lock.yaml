@@ -32,6 +32,9 @@ importers:
       node-sql-parser:
         specifier: 5.4.0
         version: 5.4.0
+      tabulator-tables:
+        specifier: 6.5.2
+        version: 6.5.2
     devDependencies:
       '@beekeeperstudio/vite-plugin':
         specifier: 1.1.0
@@ -1065,6 +1068,9 @@ packages:
   strip-json-comments@2.0.1:
     resolution: {integrity: sha512-4gB8na07fecVVkOI6Rs4e7T6NOTki5EmL7TUduTs6bu3EdnSycntVJ4re8kgZA+wx9IueI2Y11bfbgwtzuE0KQ==}
     engines: {node: '>=0.10.0'}
+
+  tabulator-tables@6.5.2:
+    resolution: {integrity: sha512-cRL3xsaaf5RzND8KPbn4C9Ce5tzyiQUE01E/10zN50MjdRKl/Gl5nXkzLN6cvEyRfWHCPuqBF92y50CBw20WYA==}
 
   tar-fs@2.1.5:
     resolution: {integrity: sha512-OboTd8mmMhZDNPV+UjQcK9yKAatXu2aJ+r1w4im1Otd4M4fl2hwvdoXUxIYHFTHWK/3y3FarBP70v3vwmGlOxw==}
@@ -2107,6 +2113,8 @@ snapshots:
       safe-buffer: 5.2.1
 
   strip-json-comments@2.0.1: {}
+
+  tabulator-tables@6.5.2: {}
 
   tar-fs@2.1.5:
     dependencies:

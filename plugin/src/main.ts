@@ -1,3 +1,5 @@
+// Tabulator's base stylesheet first, so our token overrides in style.css cascade last.
+import "tabulator-tables/dist/css/tabulator.min.css";
 import "./style.css";
 import { addNotificationListener, getAppInfo, log } from "@beekeeperstudio/plugin";
 import { Gatekeeper } from "./app";
