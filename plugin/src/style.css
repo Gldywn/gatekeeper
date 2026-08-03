@@ -68,6 +68,16 @@ body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
+/* A subtle generated texture behind everything; kept faint so cards stay readable. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: url("./assets/gatekeeper-bg.webp") center / cover no-repeat;
+  opacity: 0.45;
+  pointer-events: none;
+}
 .gk {
   max-width: min(94vw, 1180px);
   margin-inline: auto;
@@ -137,15 +147,17 @@ body {
 .hive {
   position: absolute;
   top: 50%;
-  right: 8px;
-  width: 210px;
-  height: 150px;
+  right: 0;
+  width: 280px;
+  height: 160px;
   transform: translateY(-50%);
-  color: var(--faint);
-  opacity: 0.11;
+  /* Screen blend drops the asset's near-black backdrop, leaving only its hexagons. */
+  background: url("./assets/gatekeeper-deco.svg") right center / cover no-repeat;
+  mix-blend-mode: screen;
+  opacity: 0.5;
   pointer-events: none;
-  -webkit-mask-image: linear-gradient(90deg, transparent, #000 78%);
-  mask-image: linear-gradient(90deg, transparent, #000 78%);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 65%);
+  mask-image: linear-gradient(90deg, transparent, #000 65%);
 }
 .brand,
 .conn-chip,
@@ -155,10 +167,11 @@ body {
 }
 .mark {
   width: 24px;
-  height: 26px;
+  height: 24px;
   flex: none;
   align-self: center;
-  color: var(--amber);
+  background: url("./assets/gatekeeper-logo.webp") center / contain no-repeat;
+  border-radius: 6px;
 }
 .wordmark {
   font-weight: 660;

@@ -588,23 +588,9 @@ export class Gatekeeper {
     const s = this.settingsStore.get();
     return `
   <header class="bar">
-    <span class="hive-wrap" aria-hidden="true">
-      <svg class="hive" viewBox="-40 -40 80 80" fill="none" stroke="currentColor" stroke-width="0.8" aria-hidden="true">
-        <defs><polygon id="hx" points="0,-14 12.1,-7 12.1,7 0,14 -12.1,7 -12.1,-7"/></defs>
-        <use href="#hx" x="0" y="0"/>
-        <use href="#hx" x="24.2" y="0"/>
-        <use href="#hx" x="-24.2" y="0"/>
-        <use href="#hx" x="12.1" y="-21"/>
-        <use href="#hx" x="-12.1" y="-21"/>
-        <use href="#hx" x="12.1" y="21"/>
-        <use href="#hx" x="-12.1" y="21"/>
-      </svg>
-    </span>
+    <span class="hive-wrap" aria-hidden="true"><span class="hive"></span></span>
     <span class="brand">
-      <svg class="mark" viewBox="0 0 24 26" fill="none" aria-hidden="true">
-        <polygon points="12,1.4 22,7 22,19 12,24.6 2,19 2,7" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-        <polygon points="12,7.4 16.8,10.2 16.8,15.8 12,18.6 7.2,15.8 7.2,10.2" fill="currentColor" fill-opacity="0.92"/>
-      </svg>
+      <span class="mark" aria-hidden="true"></span>
       <span class="wordmark">Gatekeeper</span>
     </span>
     <span class="conn-chip" id="conn"></span>
