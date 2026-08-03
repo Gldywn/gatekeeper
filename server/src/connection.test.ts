@@ -73,8 +73,17 @@ describe("connection snapshot", () => {
       databaseName: "app",
       schema: "public",
       readOnly: true,
+      mode: "read",
       capturedAt: 1000,
     });
+  });
+
+  it("captures the armed access mode, defaulting to read", () => {
+    const store = new RequestStore({ now: () => 1000 });
+    store.setConnection({ databaseName: "app", mode: "destructive" });
+    expect(store.getConnection()?.mode).toBe("destructive");
+    store.setConnection({ databaseName: "app", mode: "bogus" });
+    expect(store.getConnection()?.mode).toBe("read");
   });
 
   it("coerces missing or wrong-typed fields safely", () => {
@@ -86,6 +95,7 @@ describe("connection snapshot", () => {
       databaseName: "",
       schema: null,
       readOnly: false,
+      mode: "read",
       capturedAt: 5,
     });
   });

@@ -20,11 +20,22 @@ describe("submitQuery", () => {
     expect(ticket.terminal).toBeUndefined();
   });
 
-  it("rejects a non-read-only query before it is enqueued", () => {
+  it("now forwards a write/destructive query (advisory), stamping its class for the audit", () => {
     const store = fresh();
-    expect(() => submitQuery(store, { sessionId: "s1", sql: "DELETE FROM t" })).toThrowError(
+    const ticket = submitQuery(store, { sessionId: "s1", sql: "DELETE FROM t" });
+    expect(ticket.state).toBe("pending");
+    const stored = store.get(ticket.requestId);
+    expect((stored?.policy as { class?: string })?.class).toBe("destructive");
+  });
+
+  it("still rejects an empty or multi-statement query before it is enqueued", () => {
+    const store = fresh();
+    expect(() => submitQuery(store, { sessionId: "s1", sql: "   " })).toThrowError(
       /INVALID_SQL_POLICY/,
     );
+    expect(() =>
+      submitQuery(store, { sessionId: "s1", sql: "SELECT 1; DROP TABLE t" }),
+    ).toThrowError(/INVALID_SQL_POLICY/);
   });
 
   it("rejects a query when the session has no label, and succeeds once labeled", () => {

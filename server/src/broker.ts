@@ -77,6 +77,7 @@ async function handle(
       id: proposal.id,
       sql: proposal.sql,
       intent: proposal.intent,
+      class: proposalClass(proposal.policy),
       createdAt: proposal.createdAt,
       expiresAt: proposal.expiresAt,
       leaseId: proposal.leaseId,
@@ -94,6 +95,7 @@ async function handle(
       id: p.id,
       sql: p.sql,
       intent: p.intent,
+      class: proposalClass(p.policy),
       createdAt: p.createdAt,
       expiresAt: p.expiresAt,
       leaseId: p.leaseId,
@@ -176,6 +178,16 @@ function guarded(res: ServerResponse, fn: () => void): void {
     }
     send(res, 500, { error: err instanceof Error ? err.message : String(err) });
   }
+}
+
+// The advisory risk class stamped at submit, surfaced on the proposal so the plugin
+// can show it while still recomputing authoritatively.
+function proposalClass(policy: unknown): string | null {
+  if (policy && typeof policy === "object" && "class" in policy) {
+    const c = (policy as { class: unknown }).class;
+    return typeof c === "string" ? c : null;
+  }
+  return null;
 }
 
 function toOutcome(body: Record<string, unknown>): Outcome {

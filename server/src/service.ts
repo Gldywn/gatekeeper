@@ -1,5 +1,5 @@
 import { MAX_WAIT_MS, POLL_MS } from "./config.js";
-import { assessReadOnly } from "./policy.js";
+import { classifyRisk } from "./policy.js";
 import type { GatekeeperRequest, RequestState, RequestStore } from "./store.js";
 
 const TERMINAL_STATES: ReadonlySet<RequestState> = new Set([
@@ -90,13 +90,15 @@ export interface SubmitInput {
   project?: string | null;
 }
 
-/** Preflight the policy and enqueue a read-only proposal, returning a ticket. */
+/** Preflight the advisory policy and enqueue a proposal, returning a ticket. */
 export function submitQuery(store: RequestStore, input: SubmitInput): Ticket {
-  const policy = assessReadOnly(input.sql);
-  if (!policy.readOnly) {
+  // Advisory now: only empty/multi-statement are refused here. A write/destructive is
+  // forwarded and shown to the human, who arms the matching mode and approves it.
+  const risk = classifyRisk(input.sql);
+  if (!risk.ok) {
     throw new ServiceError(
       "INVALID_SQL_POLICY",
-      policy.reason ?? "Only read-only SELECT queries are allowed",
+      risk.reason ?? "Only a single valid statement is allowed",
     );
   }
   // Gate every submission on a session label so a human can tell the agents apart
@@ -119,7 +121,8 @@ export function submitQuery(store: RequestStore, input: SubmitInput): Ticket {
     sql: input.sql,
     intent: input.intent,
     idempotencyKey: input.idempotencyKey,
-    policy,
+    // Stamp the risk class into the persisted policy for the audit trail.
+    policy: { class: risk.class, ok: risk.ok },
   });
   return toTicket(req);
 }

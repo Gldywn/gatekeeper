@@ -38,11 +38,15 @@ export function createMcpServer(store: RequestStore): { server: McpServer; sessi
   server.registerTool(
     "submit_query",
     {
-      title: "Propose a read-only SQL query for human approval",
+      title: "Propose a SQL query for human approval",
       description:
-        "Enqueue a read-only SQL SELECT for a human to approve in Beekeeper Studio. Returns immediately with a request_id; it does not run until a human approves it. Requires a session label: call set_session_label first, or this is rejected. Non-blocking: submit several, keep working (investigate, read, propose more) while they await approval, then use poll_results to see which resolved and get_query_result to read one. Do not end your turn with a query still pending; poll or wait for it first.",
+        "Enqueue a SQL statement for a human to approve in Beekeeper Studio. Reads (SELECT) are always allowed; an INSERT/UPDATE runs only if a human has armed Write mode, and DELETE/DROP/TRUNCATE only under Destructive mode. Those modes are ephemeral, off by default, and armed by the human in the plugin, not by you. The statement never runs until a human approves it, and is rejected if the mode it needs is not armed. Returns immediately with a request_id. Requires a session label: call set_session_label first, or this is rejected. Non-blocking: submit several, keep working (investigate, read, propose more) while they await approval, then use poll_results to see which resolved and get_query_result to read one. Do not end your turn with a query still pending; poll or wait for it first.",
       inputSchema: {
-        sql: z.string().describe("The read-only SQL SELECT to propose."),
+        sql: z
+          .string()
+          .describe(
+            "The SQL to propose (a read, or a write for a human to approve under Write/Destructive mode).",
+          ),
         intent: z.string().optional().describe("A short, human-readable reason for the query."),
         idempotency_key: z
           .string()
@@ -133,7 +137,7 @@ export function createMcpServer(store: RequestStore): { server: McpServer; sessi
     {
       title: "Get non-sensitive context about the connected database",
       description:
-        "Return informational context about the database the plugin is connected to: dialect, database name, default schema, read-only mode, and when it was captured. Never contains host, user, or credentials. Informational only; do not treat it as an authorization boundary.",
+        "Return informational context about the database the plugin is connected to: dialect, database name, default schema, read-only mode, the human's armed access mode (read/write/destructive), and when it was captured. Never contains host, user, or credentials. Informational only; do not treat it as an authorization boundary.",
       inputSchema: {},
     },
     async () => {
@@ -147,9 +151,9 @@ export function createMcpServer(store: RequestStore): { server: McpServer; sessi
   server.registerTool(
     "run_query",
     {
-      title: "Run a read-only query and wait for the human decision",
+      title: "Run a query and wait for the human decision",
       description:
-        "Convenience wrapper that submits a query and waits (bounded) for the terminal result. It serializes one query at a time; prefer submit_query + get_query_result when you want concurrency.",
+        "Convenience wrapper that submits a query and waits (bounded) for the terminal result. Reads are always allowed; a write/destructive statement runs only if a human has armed the matching mode (Write or Destructive), else it is rejected. It serializes one query at a time; prefer submit_query + get_query_result when you want concurrency.",
       inputSchema: {
         sql: z.string(),
         intent: z.string().optional(),

@@ -1,9 +1,14 @@
+export type ConnectionMode = "read" | "write" | "destructive";
+
 export interface ConnectionSnapshot {
   connectionName: string;
   databaseType: string;
   databaseName: string;
   schema: string | null;
   readOnly: boolean;
+  // The plugin's ephemeral armed access mode; defaults to read-only. Informational
+  // only (any token holder can post it), never an authorization boundary.
+  mode: ConnectionMode;
   capturedAt: number;
 }
 
@@ -26,6 +31,10 @@ function str(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
+function mode(value: unknown): ConnectionMode {
+  return value === "write" || value === "destructive" ? value : "read";
+}
+
 // The non-sensitive connection context the plugin shares with the agent. It
 // never carries host, user, or credentials, and is informational only: any
 // holder of the broker token can set it, so it must not drive authorization.
@@ -39,6 +48,7 @@ export function sanitizeConnection(
     databaseName: str(input.databaseName),
     schema: input.schema == null ? null : str(input.schema),
     readOnly: input.readOnly === true,
+    mode: mode(input.mode),
     capturedAt,
   };
 }
