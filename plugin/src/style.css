@@ -1890,25 +1890,36 @@ label.qs-row {
 }
 .detail-rail.approved {
   border-left-color: var(--ok);
-  background: color-mix(in oklch, var(--ok) 5%, transparent);
 }
 .detail-rail.rejected {
   border-left-color: var(--amber);
-  background: color-mix(in oklch, var(--amber) 5%, transparent);
 }
 .detail-rail.failed {
   border-left-color: var(--danger);
-  background: color-mix(in oklch, var(--danger) 6%, transparent);
 }
 .detail-rail.expired {
   border-left-color: var(--faint);
-  background: color-mix(in oklch, var(--faint) 6%, transparent);
 }
-/* Outcome header: a status icon + the status word, with a right-aligned mono meta. */
+/* Outcome header: a status-tinted band that bleeds to the rail edges and runs down to
+   the table top; the tint lives here (plus the left rail), not across the whole tray. */
 .detail-oc {
   display: flex;
   align-items: center;
   gap: 9px;
+  margin: calc(-1 * var(--s3)) calc(-1 * var(--s3)) 0 calc(-1 * var(--s3) - 3px);
+  padding: var(--s3) var(--s3) var(--s3) calc(var(--s3) + 3px);
+}
+.detail-rail.approved .detail-oc {
+  background: color-mix(in oklch, var(--ok) 11%, transparent);
+}
+.detail-rail.rejected .detail-oc {
+  background: color-mix(in oklch, var(--amber) 12%, transparent);
+}
+.detail-rail.failed .detail-oc {
+  background: color-mix(in oklch, var(--danger) 12%, transparent);
+}
+.detail-rail.expired .detail-oc {
+  background: color-mix(in oklch, var(--faint) 12%, transparent);
 }
 .detail-oc svg {
   width: 17px;
@@ -1943,7 +1954,7 @@ label.qs-row {
   color: var(--muted);
 }
 .detail-oc-body {
-  margin-top: var(--s3);
+  margin-top: 0;
 }
 .detail-oc-msg {
   font-size: 12.5px;
