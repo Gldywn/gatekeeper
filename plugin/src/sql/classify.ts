@@ -71,6 +71,8 @@ function walkTypes(node: unknown, visit: (type: string) => void): void {
   }
 }
 
+// Known limitation: a read-classified SELECT can still have side effects through
+// volatile or exec functions (nextval, dblink_exec); a static parse cannot see those.
 function topClass(top: string): RiskClass {
   if (READ_STATEMENTS.has(top)) {
     return "read";
