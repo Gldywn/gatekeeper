@@ -23,7 +23,7 @@
         "command": "open-gatekeeper",
         "name": "Gatekeeper",
         "view": "main",
-        "placement": "menubar.tools"
+        "placement": ["menubar.tools", "newTabDropdown"]
       }
     ]
   }
