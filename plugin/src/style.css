@@ -1990,7 +1990,7 @@ label.qs-row {
   color: var(--muted);
 }
 .detail-oc-body {
-  margin-top: 0;
+  margin-top: var(--s2);
 }
 .detail-oc-msg {
   font-size: 12.5px;
