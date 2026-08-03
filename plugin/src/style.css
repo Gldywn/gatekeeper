@@ -2091,9 +2091,12 @@ label.qs-row {
   padding: 6px var(--s3);
   text-align: left;
   vertical-align: top;
+  /* A wide value wraps within the capped column instead of overflowing and
+     overlapping the next cell (white-space: nowrap had no clip). */
+  white-space: normal;
   overflow-wrap: anywhere;
   max-width: clamp(16ch, 20cqi, 40ch);
-  white-space: nowrap;
+  min-width: 6ch;
   border-bottom: 1px solid var(--hi);
 }
 .grid th {
