@@ -2202,7 +2202,7 @@ label.qs-row {
 .gk-grid .tabulator-row:hover {
   background: color-mix(in oklch, var(--amber) 7%, transparent);
 }
-.gk-grid .tabulator-cell {
+.gk-grid.tabulator .tabulator-cell {
   padding: 7px var(--s3);
   border-right: 1px solid transparent;
   color: var(--text);
@@ -2289,6 +2289,26 @@ label.qs-row {
 }
 .gk-grid .tabulator-footer .tabulator-page:disabled {
   opacity: 0.4;
+}
+/* The vendor midnight theme paints rows/tables/cells via deep selectors (0,3,0+) that
+   out-rank the token rules above, which left the grid light ("blanc sur blanc"). Force
+   every surface dark; these touch only backgrounds, so the pii/client text accents stand. */
+.gk-grid.tabulator,
+.gk-grid.tabulator .tabulator-header,
+.gk-grid.tabulator .tabulator-col,
+.gk-grid.tabulator .tabulator-tableholder {
+  background: var(--sunken) !important;
+}
+.gk-grid.tabulator .tabulator-table,
+.gk-grid.tabulator .tabulator-row,
+.gk-grid.tabulator .tabulator-cell {
+  background: transparent !important;
+}
+.gk-grid.tabulator .tabulator-row.tabulator-row-even {
+  background: color-mix(in oklch, var(--text) 4%, transparent) !important;
+}
+.gk-grid.tabulator .tabulator-row:hover {
+  background: color-mix(in oklch, var(--amber) 7%, transparent) !important;
 }
 /* Tabulator appends the tooltip to <body>, outside .gk-grid, so it is styled
    unscoped: the full value / pretty-printed JSON on our floating surface. */
