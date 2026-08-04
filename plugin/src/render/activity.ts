@@ -153,10 +153,11 @@ function exportControl(day: string, sessionId: string): string {
             </span>`;
 }
 
+type RiskClass = ReturnType<typeof classifyQuery>["class"];
+
 // A pencil for a write, a trash for a destructive, nothing for a read (the norm), so the eye
 // lands on the entries that changed data. Reuses the pending cards' classifier for one truth.
-function riskIcon(sql: string, dialect: string): string {
-  const cls = classifyQuery(sql, dialect).class;
+function riskIcon(cls: RiskClass): string {
   if (cls === "write") {
     return `<span class="act-risk write" title="Write">${pencilIcon}</span>`;
   }
@@ -164,6 +165,16 @@ function riskIcon(sql: string, dialect: string): string {
     return `<span class="act-risk destructive" title="Destructive">${trashIcon}</span>`;
   }
   return "";
+}
+
+// The one right-side metric, and only when it means something: rows returned for an
+// approved read, rows changed for an approved write/destructive (its blast radius),
+// nothing otherwise. A blank beats a filler like a decision-time dressed up as latency.
+function activityMetric(e: ActivityEntry, cls: RiskClass): string {
+  if (e.state !== "approved" || e.rowCount == null) {
+    return "";
+  }
+  return cls === "read" ? `${e.rowCount} rows` : `${e.rowCount} affected`;
 }
 
 export function activityEntryHtml(e: ActivityEntry, expanded: Set<string>, dialect: string): string {
@@ -175,6 +186,7 @@ export function activityEntryHtml(e: ActivityEntry, expanded: Set<string>, diale
   const label = capitalize(outcomeMeta(state).label);
   // The full reason/error rides the expanded panel, tinted toward the outcome colour.
   const note = state === "rejected" ? e.reason?.trim() : state === "failed" ? e.error?.trim() : "";
+  const cls = classifyQuery(e.sql, dialect).class;
   const rows = state === "approved" && e.rowCount != null ? ` &middot; ${e.rowCount} rows` : "";
   return `
           <div class="act-entry${isExpanded ? " open" : ""}" data-act="${escapeHtml(e.id)}">
@@ -182,9 +194,9 @@ export function activityEntryHtml(e: ActivityEntry, expanded: Set<string>, diale
               <span class="chev">${chevronDown}</span>
               <span class="act-time">${escapeHtml(clockTime(ts))}</span>
               <span class="act-state ${escapeHtml(state)}">${escapeHtml(label)}</span>
-              ${riskIcon(e.sql, dialect)}<span class="act-intent">${escapeHtml(headline)}</span>
+              ${riskIcon(cls)}<span class="act-intent">${escapeHtml(headline)}</span>
               <span class="act-flags" data-act-flags="${escapeHtml(e.id)}"></span>
-              <span class="act-lat">${escapeHtml(activityLatency(e))}</span>
+              <span class="act-metric">${escapeHtml(activityMetric(e, cls))}</span>
             </button>
             <div class="act-detail"${isExpanded ? "" : " hidden"}>
               <div class="act-meta">${escapeHtml(e.id)} &middot; ${escapeHtml(new Date(ts).toLocaleString())}${rows}</div>

@@ -2824,10 +2824,11 @@ label.qs-row {
   color: var(--client);
   background: color-mix(in oklch, var(--client) 16%, transparent);
 }
-.act-lat {
+.act-metric {
   flex: none;
   min-width: 46px;
   text-align: right;
+  white-space: nowrap;
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--faint);

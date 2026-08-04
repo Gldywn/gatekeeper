@@ -88,9 +88,8 @@ export function outcomeMeta(state: string): { cls: "ok" | "no" | "mut"; label: s
   return { cls: "mut", label: state };
 }
 
-// Execution latency, shown only for outcomes that actually ran a query; a rejected
-// or expired proposal never reached the database, so it reads as a dash. Sub-500ms
-// stays in milliseconds, above that one decimal second reads more calmly.
+// Proposal-to-decision delay (decidedAt - createdAt), not the query's execution time,
+// which we never capture. Kept only as raw export data; the trail UI shows rows instead.
 export function activityLatency(e: ActivityEntry): string {
   if (e.state !== "approved" && e.state !== "failed") {
     return "—";
