@@ -151,13 +151,13 @@ body {
 .hive {
   position: absolute;
   top: 0;
-  right: 150px;
-  width: 460px;
+  right: 120px;
+  width: 400px;
   height: 100%;
   /* The honeycomb sits in the header's empty middle gap, not the corner; screen blend
      drops the asset's near-black backdrop, and a tilted mask dissolves it diagonally on
      both the left and the right so it never crowds the title or the connection status. */
-  background: url("./assets/gatekeeper-deco.svg") center / cover no-repeat;
+  background: url("./assets/gatekeeper-deco.svg") center 12% / cover no-repeat;
   mix-blend-mode: screen;
   opacity: 0.5;
   pointer-events: none;
