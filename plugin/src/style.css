@@ -483,20 +483,40 @@ body {
   white-space: nowrap;
 }
 .armed-chip.write {
+  --sc: var(--amber);
   color: var(--amber-ink);
   background: var(--amber);
 }
 .armed-chip.destructive {
+  --sc: var(--danger);
   color: var(--danger-ink);
   background: var(--danger);
 }
-.armed-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-  opacity: 0.85;
+.armed-ico {
+  display: inline-flex;
+  align-items: center;
   flex: none;
+}
+.armed-ico svg {
+  width: 13px;
+  height: 13px;
+}
+/* A pulsing ring so an armed write/destructive mode is unmissable and reads as "live". */
+@media (prefers-reduced-motion: no-preference) {
+  .armed-chip {
+    animation: armed-pulse 2s var(--ease-in-out) infinite;
+  }
+}
+@keyframes armed-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--sc) 55%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 6px color-mix(in oklch, var(--sc) 0%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--sc) 0%, transparent);
+  }
 }
 .armed-off {
   display: inline-flex;

@@ -12,12 +12,14 @@ import { enter, type Loop, pulse, reveal } from "./anim";
 import { SchemaAnnotator } from "./annotate";
 import { clock, escapeHtml, relAge } from "./html";
 import {
+  alertTriangleIcon,
   checkIcon,
   chevronDown,
   copyIcon,
   externalLinkIcon,
   gearIcon,
   historyIcon,
+  pencilIcon,
   shieldCheckIcon,
   shieldQuestionIcon,
   warnIcon,
@@ -1031,7 +1033,8 @@ export class Gatekeeper {
     }
     const tone = this.mode === "destructive" ? "destructive" : "write";
     const label = this.mode === "destructive" ? "DESTRUCTIVE MODE" : "WRITE MODE";
-    el.innerHTML = `<span class="armed-chip ${tone}"><span class="armed-dot"></span>${label}<button class="armed-off" type="button" data-disarm title="Disarm, back to read-only" aria-label="Disarm, back to read-only">${xIcon}</button></span>`;
+    const icon = this.mode === "destructive" ? alertTriangleIcon : pencilIcon;
+    el.innerHTML = `<span class="armed-chip ${tone}"><span class="armed-ico">${icon}</span>${label}<button class="armed-off" type="button" data-disarm title="Disarm, back to read-only" aria-label="Disarm, back to read-only">${xIcon}</button></span>`;
   }
 
   // A setting changed (from either surface): re-sync both control surfaces, re-apply
