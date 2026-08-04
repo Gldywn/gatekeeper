@@ -4,7 +4,7 @@ process.env.TZ = "UTC";
 
 import { describe, expect, it } from "vitest";
 import type { ActivityEntry } from "../types";
-import { activityEntryHtml, activityMarkdown } from "./activity";
+import { activityCsv, activityEntryHtml, activityGroupHtml, activityMarkdown } from "./activity";
 
 const T = new Date("2026-01-01T09:30:00Z").getTime();
 
@@ -53,9 +53,43 @@ describe("render/activity", () => {
     );
   });
 
-  it("renders a session-day markdown export", () => {
-    expect(activityMarkdown("2026-01-01", "s1", [approved, rejected], "prod-analytics")).toBe(
-      "# Gatekeeper activity\n\n- Connection: prod-analytics\n- Day: 2026-01-01\n- Session: gatekeeper (s1)\n- Harness: claude-code\n- Task: audit review\n\n## 9:29:30 AM · declined\n- Intent: remove a user\n- Request: q_cd34\n- Reason: read-only only\n\n```sql\nDELETE FROM audit.users WHERE id = 1\n```\n\n## 9:30:00 AM · approved\n- Intent: list account contacts\n- Request: q_ab12\n- Rows: 3\n\n```sql\nSELECT email FROM audit.users\n```\n",
+  it("renders the export trigger and its format menu", () => {
+    const html = activityGroupHtml("2026-01-01", "s1", [approved], new Set());
+    expect(html).toContain('data-export-trigger="2026-01-01|s1"');
+    expect(html).toContain("data-export-menu");
+    expect(html).toContain('data-export="2026-01-01|s1" data-export-fmt="md"');
+    expect(html).toContain('data-export="2026-01-01|s1" data-export-fmt="csv"');
+  });
+
+  it("renders a session-day markdown export with intent in the title, flags and latency", () => {
+    const flags = new Map([["q_ab12", ["PII", "sensitive value"]]]);
+    expect(
+      activityMarkdown("2026-01-01", "s1", [approved, rejected], "prod-analytics", flags),
+    ).toBe(
+      "# Gatekeeper audit trail\n\n- Connection: prod-analytics\n- Day: 2026-01-01\n- Session: gatekeeper (s1)\n- Harness: claude-code\n- Task: audit review\n- Queries: 2 (1 Approved · 1 Declined)\n\n## 9:29:30 AM · Declined · Remove a user\n- Request: q_cd34\n- Reason: read-only only\n\n```sql\nDELETE FROM audit.users WHERE id = 1\n```\n\n## 9:30:00 AM · Approved · List account contacts\n- Flags: PII, sensitive value\n- Latency: 5.0s\n- Request: q_ab12\n- Rows: 3\n\n```sql\nSELECT email FROM audit.users\n```\n",
     );
+  });
+
+  it("renders a session-day CSV export: BOM, session_id first, flattened SQL", () => {
+    const flags = new Map([["q_ab12", ["PII"]]]);
+    expect(activityCsv([approved, rejected], flags)).toBe(
+      "﻿session_id,timestamp,status,latency_ms,intent,flags,request_id,rows,reason,error,sql\r\n" +
+        "s1,2026-01-01T09:29:30.000Z,declined,,remove a user,,q_cd34,,read-only only,,DELETE FROM audit.users WHERE id = 1\r\n" +
+        "s1,2026-01-01T09:30:00.000Z,approved,5000,list account contacts,PII,q_ab12,3,,,SELECT email FROM audit.users\r\n",
+    );
+  });
+
+  it("quotes and neutralises CSV fields that could break a spreadsheet", () => {
+    const tricky: ActivityEntry = {
+      ...approved,
+      id: "q_ef56",
+      intent: "=SUM(A1:A2)",
+      sql: "SELECT a,\n  b FROM t WHERE c = 'x\"y'",
+      rowCount: 1,
+    };
+    const csv = activityCsv([tricky]);
+    // Formula-guarded intent, and the SQL flattened + RFC-4180 quoted (doubled quote).
+    expect(csv).toContain(",'=SUM(A1:A2),");
+    expect(csv).toContain('"SELECT a, b FROM t WHERE c = \'x""y\'"');
   });
 });

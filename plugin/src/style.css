@@ -2585,6 +2585,71 @@ label.qs-row {
   width: 13px;
   height: 13px;
 }
+.act-export-wrap {
+  position: relative;
+  flex: none;
+}
+.act-export-chev {
+  display: inline-flex;
+  color: var(--faint);
+}
+.act-export-chev svg {
+  width: 11px;
+  height: 11px;
+}
+.act-export[aria-expanded="true"] .act-export-chev {
+  transform: rotate(180deg);
+}
+/* Compact format menu: two icon rows, tighter than the mode dropdown. */
+.act-export-menu {
+  position: absolute;
+  top: calc(100% + 5px);
+  right: 0;
+  z-index: 7;
+  min-width: 150px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  box-shadow: var(--elev-pop);
+}
+.act-export-menu[hidden] {
+  display: none;
+}
+.act-export-opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+.act-export-opt:hover {
+  background: var(--hi);
+}
+.act-export-opt:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: -2px;
+}
+.act-export-opt svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  color: var(--muted);
+}
+.act-export-ext {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--faint);
+}
 
 /* Entry: chevron, time, status pill, intent, sensitivity flags, latency. */
 .act-entries {

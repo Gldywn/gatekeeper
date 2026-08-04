@@ -220,9 +220,9 @@ export class Gatekeeper {
         if (this.confirmModal.cancel()) {
           return;
         }
-        // An open mode menu swallows the first Escape so it dismisses without also
-        // tearing down the overlay or popover it sits inside.
-        if (this.closeModeMenus()) {
+        // An open mode or export menu swallows the first Escape so it dismisses without
+        // also tearing down the overlay or popover it sits inside.
+        if (this.closeModeMenus() || this.closeExportMenus()) {
           return;
         }
         this.activityView.close();
@@ -792,11 +792,22 @@ export class Gatekeeper {
         this.copySql(copy);
         return;
       }
-      const exp = target.closest<HTMLElement>("[data-export]");
-      if (exp) {
-        void this.activityView.exportSession(exp.getAttribute("data-export")!);
+      const fmt = target.closest<HTMLElement>("[data-export-fmt]");
+      if (fmt) {
+        this.closeExportMenus();
+        void this.activityView.exportSession(
+          fmt.getAttribute("data-export")!,
+          fmt.getAttribute("data-export-fmt") as "md" | "csv",
+        );
         return;
       }
+      const expTrigger = target.closest<HTMLElement>("[data-export-trigger]");
+      if (expTrigger) {
+        this.toggleExportMenu(expTrigger);
+        return;
+      }
+      // Any other click in the panel dismisses an open format menu.
+      this.closeExportMenus();
       const dayHead = target.closest<HTMLElement>("[data-day]");
       if (dayHead) {
         this.activityView.toggleDay(dayHead);
@@ -850,6 +861,35 @@ export class Gatekeeper {
     if (!open) {
       this.closeModeMenus();
     }
+  }
+
+  // The export format menu opens/closes like the mode menus: one at a time, trigger
+  // toggles, a click elsewhere dismisses.
+  private toggleExportMenu(trigger: HTMLElement): void {
+    const menu = trigger.parentElement?.querySelector<HTMLElement>("[data-export-menu]");
+    if (!menu) {
+      return;
+    }
+    const open = menu.hidden;
+    this.closeExportMenus();
+    if (open) {
+      menu.hidden = false;
+      trigger.setAttribute("aria-expanded", "true");
+    }
+  }
+
+  private closeExportMenus(): boolean {
+    let closed = false;
+    for (const menu of this.root.querySelectorAll<HTMLElement>("[data-export-menu]")) {
+      if (!menu.hidden) {
+        menu.hidden = true;
+        closed = true;
+      }
+    }
+    for (const trigger of this.root.querySelectorAll<HTMLElement>("[data-export-trigger]")) {
+      trigger.setAttribute("aria-expanded", "false");
+    }
+    return closed;
   }
 
   // Show one mode menu at a time, closing any other first.

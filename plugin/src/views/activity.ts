@@ -2,7 +2,9 @@ import { log, requestFileSave } from "@beekeeperstudio/plugin";
 import { dayKey } from "../html";
 import type { BrokerClient } from "../net/broker";
 import {
+  activityCsv,
   activityDaysHtml,
+  activityFlagLabels,
   activityFlagsHtml,
   activityMarkdown,
   activityShell,
@@ -182,10 +184,10 @@ export class ActivityView {
       ?.setAttribute("aria-expanded", String(!open));
   }
 
-  // Deliberate human export: write one session-day's timeline as markdown via the
-  // host's save dialog. The SQL is host-side only and no result rows are included;
-  // an approved query contributes just its scalar row count.
-  async exportSession(key: string): Promise<void> {
+  // Deliberate human export of one session-day's timeline via the host's save dialog,
+  // as markdown or CSV. The SQL is host-side only and no result rows are included; an
+  // approved query contributes just its scalar row count.
+  async exportSession(key: string, format: "md" | "csv"): Promise<void> {
     const sep = key.indexOf("|");
     if (sep === -1) {
       return;
@@ -198,15 +200,30 @@ export class ActivityView {
     if (!entries.length) {
       return;
     }
+    // Sensitivity flags are not stored on the entry: resolve them from the same cached
+    // schema the row chips use. A parse miss or a mid-flight switch just leaves it blank.
+    const flags = new Map<string, string[]>();
+    for (const e of entries) {
+      const schema = await this.schemaFor(e.sql);
+      const labels = schema ? activityFlagLabels(schema) : [];
+      if (labels.length) {
+        flags.set(e.id, labels);
+      }
+    }
     const first = entries[0];
     const who = (first.project?.trim() || first.harness?.trim() || sessionId).toLowerCase();
     const slug = who.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "session";
+    const csv = format === "csv";
     try {
       await requestFileSave({
-        data: activityMarkdown(day, sessionId, entries, this.connectionName()),
-        fileName: `gatekeeper-activity-${day}-${slug}.md`,
+        data: csv
+          ? activityCsv(entries, flags)
+          : activityMarkdown(day, sessionId, entries, this.connectionName(), flags),
+        fileName: `gatekeeper-activity-${day}-${slug}.${csv ? "csv" : "md"}`,
         encoding: "utf8",
-        filters: [{ name: "Markdown", extensions: ["md"] }],
+        filters: [
+          csv ? { name: "CSV", extensions: ["csv"] } : { name: "Markdown", extensions: ["md"] },
+        ],
       });
     } catch (err) {
       log.error(err instanceof Error ? err : String(err));
