@@ -1949,9 +1949,13 @@ label.qs-row {
   margin: 0 0 var(--s2);
   overflow-wrap: anywhere;
 }
-/* SQL and result grid share the card's full width so they line up. */
+/* SQL and result grid share the card's full width so they line up. The query text is
+   capped and scrolls on its own so a very long statement can't push the popup past the
+   viewport (the grid below sizes to whatever height is left). */
 .detail-card .sql {
   width: 100%;
+  max-height: 40vh;
+  overflow: auto;
 }
 /* The accent rail: the outcome breaks out to the card's bottom edges with a status-
    coloured left rail and a faint status wash, flat on the surface (no inset). All the

@@ -2,9 +2,6 @@ import { type CellComponent, type ColumnDefinition, TabulatorFull } from "tabula
 import type { HistResult } from "../result";
 import { classifyColumn } from "../sql/schema";
 
-// Let the grid fill most of the viewport height so a page uses the space it has (and the
-// page-size selector visibly changes the table height); rows past that virtualize + scroll.
-const GRID_MAX_HEIGHT = "max(280px, calc(100vh - 300px))";
 // Values are sampled, not fully scanned, to decide a column's alignment/sorter: enough
 // to classify without walking 100k held rows.
 const NUMERIC_SAMPLE = 40;
@@ -16,13 +13,20 @@ const TOOLTIP_MIN_CHARS = 40;
 // Display only: no editing, sorting/resize/reorder are read-only affordances.
 export function mountResultGrid(host: HTMLElement, result: HistResult): TabulatorFull {
   const names = columnNames(result);
+  // Size the grid to the space left below its host so the detail popup never overflows the
+  // viewport (only the tableholder scrolls); read from the host's live position, so a long
+  // or short query above it simply gives the grid less or more room.
+  const maxHeight = Math.max(
+    240,
+    Math.floor(window.innerHeight - host.getBoundingClientRect().top - 80),
+  );
   return new TabulatorFull(host, {
     data: result.rows,
     columns: names.map((name) => columnDef(name, result.rows)),
     // fitColumns fills the overlay width so there's no dead gutter; many columns keep
     // their minWidth and scroll horizontally rather than squashing unreadably.
     layout: "fitColumns",
-    maxHeight: GRID_MAX_HEIGHT,
+    maxHeight,
     movableColumns: true,
     // Treat a column name literally; a dotted DB column must not be read as a nested path.
     nestedFieldSeparator: false,
