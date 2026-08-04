@@ -954,7 +954,7 @@ label.qs-row {
   color: var(--amber);
 }
 .meta {
-  margin: 2px 0 var(--s3);
+  margin: var(--s2) 0 var(--s3);
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--faint);
@@ -1973,7 +1973,7 @@ label.qs-row {
   font-weight: 640;
   font-size: 14px;
   color: var(--text);
-  margin: 0 0 var(--s2);
+  margin: 0 0 var(--s3);
   overflow-wrap: anywhere;
 }
 /* SQL and result grid share the card's full width so they line up. The query text is
@@ -2524,7 +2524,7 @@ label.qs-row {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
 }
 .act-sess-meta {
   font-family: var(--font-mono);
