@@ -2,9 +2,9 @@ import { type CellComponent, type ColumnDefinition, TabulatorFull } from "tabula
 import type { HistResult } from "../result";
 import { classifyColumn } from "../sql/schema";
 
-// Cap the scroll viewport so a large result virtualizes inside the detail overlay
-// instead of pushing the footer off-screen; short results shrink to their rows.
-const GRID_MAX_HEIGHT = 340;
+// Let the grid fill most of the viewport height so a page uses the space it has (and the
+// page-size selector visibly changes the table height); rows past that virtualize + scroll.
+const GRID_MAX_HEIGHT = "max(280px, calc(100vh - 300px))";
 // Values are sampled, not fully scanned, to decide a column's alignment/sorter: enough
 // to classify without walking 100k held rows.
 const NUMERIC_SAMPLE = 40;
