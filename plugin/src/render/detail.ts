@@ -1,5 +1,5 @@
-import { capitalize, escapeHtml, relAge, sessionDisplayName } from "../html";
-import { agentBadge, checkIcon, clockIcon, copyIcon, messageIcon, xCircleIcon } from "../icons";
+import { capitalize, escapeHtml, outcomeMeta, relAge, sessionDisplayName } from "../html";
+import { agentBadge, checkIcon, clockIcon, copyIcon, xCircleIcon } from "../icons";
 import type { HistResult } from "../result";
 import { formatSql } from "../sql/format";
 import { highlight } from "../sql/highlight";
@@ -21,7 +21,7 @@ export function detailHtml(item: HistItem): string {
           ${agentBadge(harness)}
           <span class="detail-who">${escapeHtml(who)}</span>
           ${item.session?.sessionLabel ? `<span class="detail-scope" title="${escapeHtml(capitalize(item.session.sessionLabel))}">${escapeHtml(capitalize(item.session.sessionLabel))}</span>` : ""}
-          <span class="hstatus ${item.status}">${item.status}</span>
+          <span class="hstatus ${item.status}">${escapeHtml(outcomeMeta(item.status).label)}</span>
           <button class="detail-close" type="button" data-close aria-label="Close detail">&times;</button>
         </div>
         <div class="detail-meta">${audit.join(" &middot; ")}</div>
@@ -49,9 +49,10 @@ function outcomeInner(item: HistItem): string {
     );
   }
   if (item.status === "rejected") {
+    // A decline carries no reason to show; state it plainly, no placeholder note.
     return (
-      ocHead(messageIcon, "Changes requested", relAge(item.resolvedAt)) +
-      ocNote(item.note?.trim() || "Changes were requested without a note.")
+      ocHead(xCircleIcon, "Declined", relAge(item.resolvedAt)) +
+      ocMsg("You declined this proposal. Nothing ran against the database.")
     );
   }
   return (

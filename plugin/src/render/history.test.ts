@@ -46,7 +46,7 @@ describe("render/history", () => {
     expect(html).toContain('class="hrow approved"');
     // icon . project . label . status: the label sits between who and the status badge
     expect(html).toContain(
-      '<span class="hwho" title="gatekeeper">gatekeeper</span>\n          <span class="hlabel" title="Audit review">Audit review</span>\n          <span class="hstatus approved">approved</span>',
+      '<span class="hwho" title="gatekeeper">gatekeeper</span>\n          <span class="hlabel" title="Audit review">Audit review</span>\n          <span class="hstate approved" title="Approved" aria-label="Approved"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></span>',
     );
     expect(html).toContain('<span class="hintent">Check a user\'s email</span>');
     expect(html).toContain("<span class=\"st\">'jane@acme.io'</span>");
@@ -57,7 +57,9 @@ describe("render/history", () => {
     expect(html).toContain('class="hrow rejected"');
     expect(html).toContain("data-no-intent");
     expect(html).toContain('<span class="hlabel" title=""></span>');
-    expect(html).toContain('<span class="hstatus rejected">rejected</span>');
+    expect(html).toContain(
+      '<span class="hstate rejected" title="Declined" aria-label="Declined"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg></span>',
+    );
     expect(html).not.toContain("approved");
   });
 });

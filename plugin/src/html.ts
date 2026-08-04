@@ -79,7 +79,8 @@ export function outcomeMeta(state: string): { cls: "ok" | "no" | "mut"; label: s
     return { cls: "ok", label: "approved" };
   }
   if (state === "rejected") {
-    return { cls: "no", label: "rejected" };
+    // A rejection is a one-click decline, not a changes-requested round trip.
+    return { cls: "no", label: "declined" };
   }
   if (state === "failed") {
     return { cls: "no", label: "failed" };

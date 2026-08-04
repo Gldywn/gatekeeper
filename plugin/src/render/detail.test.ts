@@ -112,22 +112,20 @@ describe("render/detail", () => {
     );
   });
 
-  it("renders a rejected outcome as the human's note, with a fallback when empty", () => {
-    const rejected = detailHtml({
+  it("renders a decline outcome as a plain statement, no reason note", () => {
+    const declined = detailHtml({
       ...item,
       status: "rejected",
       note: "Please scope this to a single company.",
       result: undefined,
     });
-    expect(rejected).toContain('<div class="detail-rail rejected">');
-    expect(rejected).toContain('<span class="detail-oc-title">Changes requested</span>');
-    expect(rejected).toContain(
-      '<div class="detail-oc-note">Please scope this to a single company.</div>',
+    expect(declined).toContain('<div class="detail-rail rejected">');
+    expect(declined).toContain('<span class="detail-oc-title">Declined</span>');
+    expect(declined).toContain(
+      '<div class="detail-oc-msg">You declined this proposal. Nothing ran against the database.</div>',
     );
-    const noNote = detailHtml({ ...item, status: "rejected", note: "", result: undefined });
-    expect(noNote).toContain(
-      '<div class="detail-oc-note">Changes were requested without a note.</div>',
-    );
+    // A decline carries no reason, so the boxed note is gone whatever the stored note.
+    expect(declined).not.toContain("detail-oc-note");
   });
 
   it("renders an expired outcome that ran nothing against the database", () => {

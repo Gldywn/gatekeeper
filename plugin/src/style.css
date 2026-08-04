@@ -1716,7 +1716,7 @@ label.qs-row {
    base: badge status intent time (hwho + hsql hidden). */
 .hrow {
   display: grid;
-  grid-template-columns: 15px 54px 1fr auto;
+  grid-template-columns: 15px 22px 1fr auto;
   gap: var(--s2);
   align-items: baseline;
   width: 100%;
@@ -1753,7 +1753,7 @@ label.qs-row {
 /* + who: badge who status intent time. */
 @container gk-main (min-width: 23.75rem) {
   .hrow {
-    grid-template-columns: 15px 72px 72px 54px 1fr auto;
+    grid-template-columns: 15px 58px 110px 22px 1fr auto;
   }
   .hwho,
   .hlabel {
@@ -1763,7 +1763,7 @@ label.qs-row {
 /* + sql: badge who status intent sql time. */
 @container gk-main (min-width: 40rem) {
   .hrow {
-    grid-template-columns: 15px 72px 72px 54px minmax(0, 1.3fr) minmax(0, 1fr) auto;
+    grid-template-columns: 15px 58px 110px 22px minmax(0, 1.3fr) minmax(0, 1fr) auto;
   }
   .hsql {
     display: block;
@@ -1776,7 +1776,7 @@ label.qs-row {
 }
 @container gk-main (min-width: 40rem) {
   .hrow[data-no-intent] {
-    grid-template-columns: 15px 72px 72px 54px 1fr auto;
+    grid-template-columns: 15px 58px 110px 22px 1fr auto;
   }
 }
 .hrow:hover {
@@ -1820,6 +1820,30 @@ label.qs-row {
   color: var(--danger);
 }
 .hstatus.expired {
+  color: var(--faint);
+}
+/* The history row's status is a coloured glyph (the colour is the code); the word is on
+   the tooltip. Distinct from .hstatus, which the detail head still uses for its word. */
+.hstate {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.hstate svg {
+  width: 15px;
+  height: 15px;
+}
+.hstate.approved {
+  color: var(--ok);
+}
+.hstate.rejected {
+  color: var(--amber);
+}
+.hstate.failed {
+  color: var(--danger);
+}
+.hstate.expired {
   color: var(--faint);
 }
 .hintent {
@@ -2037,6 +2061,10 @@ label.qs-row {
 .detail-oc-msg {
   font-size: 12.5px;
   color: var(--muted);
+}
+/* A decline states its outcome in the outcome colour, no boxed reason under it. */
+.detail-rail.rejected .detail-oc-msg {
+  color: color-mix(in oklch, var(--amber) 82%, var(--text));
 }
 /* Failed error / rejected note: a wrapped mono block, tinted toward the outcome. */
 .detail-oc-note {
@@ -2881,7 +2909,7 @@ label.qs-row {
 @supports not (container-type: inline-size) {
   @media (min-width: 380px) {
     .hrow {
-      grid-template-columns: 15px 72px 72px 54px 1fr auto;
+      grid-template-columns: 15px 58px 110px 22px 1fr auto;
     }
     .hwho,
     .hlabel {
@@ -2890,13 +2918,13 @@ label.qs-row {
   }
   @media (min-width: 640px) {
     .hrow {
-      grid-template-columns: 15px 72px 72px 54px minmax(0, 1.3fr) minmax(0, 1fr) auto;
+      grid-template-columns: 15px 58px 110px 22px minmax(0, 1.3fr) minmax(0, 1fr) auto;
     }
     .hsql {
       display: block;
     }
     .hrow[data-no-intent] {
-      grid-template-columns: 15px 72px 72px 54px 1fr auto;
+      grid-template-columns: 15px 58px 110px 22px 1fr auto;
     }
   }
 }
