@@ -2143,7 +2143,7 @@ label.qs-row {
   border-radius: var(--r);
   overflow: hidden;
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text);
 }
 .gk-grid .tabulator-tableholder {
@@ -2163,15 +2163,15 @@ label.qs-row {
   border-right: 1px solid var(--hi);
 }
 .gk-grid .tabulator-col .tabulator-col-content {
-  padding: 6px var(--s3);
+  padding: 8px var(--s3);
 }
 .gk-grid .tabulator-col .tabulator-col-title {
   font-family: var(--font-ui);
-  font-size: 10px;
-  font-weight: 600;
+  font-size: 10.5px;
+  font-weight: 650;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
+  letter-spacing: 0.05em;
+  color: color-mix(in oklch, var(--text) 68%, transparent);
 }
 /* Sort arrow: faint at rest, amber (with a lit title) on the sorted column. */
 .gk-grid .tabulator-col .tabulator-col-sorter .tabulator-arrow {
@@ -2194,16 +2194,16 @@ label.qs-row {
 .gk-grid .tabulator-row {
   background: transparent;
   border-bottom: 1px solid var(--hi);
-  min-height: 28px;
+  min-height: 31px;
 }
 .gk-grid .tabulator-row.tabulator-row-even {
-  background: color-mix(in oklch, var(--text) 2.5%, transparent);
+  background: color-mix(in oklch, var(--text) 4%, transparent);
 }
 .gk-grid .tabulator-row:hover {
-  background: var(--hi);
+  background: color-mix(in oklch, var(--amber) 7%, transparent);
 }
 .gk-grid .tabulator-cell {
-  padding: 6px var(--s3);
+  padding: 7px var(--s3);
   border-right: 1px solid transparent;
   color: var(--text);
   white-space: nowrap;
