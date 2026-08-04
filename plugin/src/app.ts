@@ -210,6 +210,7 @@ export class Gatekeeper {
       // security record, so it always flags PII/client/values even on a connection whose
       // detection toggles are off (unlike the pending cards and the detail, which honour them).
       schemaFor: (sql) => this.annotator.schemaFor(sql),
+      dialect: () => this.dialect,
     });
     this.settingsView = new SettingsView({
       root,

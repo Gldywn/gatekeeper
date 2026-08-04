@@ -26,6 +26,8 @@ interface ActivityViewDeps {
   // Host-side schema resolver (app's annotator): null when the SQL won't parse,
   // undefined when a connection switch invalidated the fetch mid-flight.
   schemaFor: (sql: string) => Promise<SchemaContext | null | undefined>;
+  // The connection dialect, so each entry's read/write/destructive class can be parsed.
+  dialect: () => string;
 }
 
 // Owns the connection-scoped activity overlay (#activity): a durable, PII-safe audit
@@ -42,6 +44,7 @@ export class ActivityView {
   private readonly scope: () => string | undefined;
   private readonly connChip: () => string;
   private readonly schemaFor: (sql: string) => Promise<SchemaContext | null | undefined>;
+  private readonly dialect: () => string;
   // Bumped on every open and on close, so a slow flag pass abandons itself once its
   // feed is gone (a reopen or a connection switch) rather than patching stale rows.
   private flagGen = 0;
@@ -53,6 +56,7 @@ export class ActivityView {
     this.scope = deps.scope;
     this.connChip = deps.connChip;
     this.schemaFor = deps.schemaFor;
+    this.dialect = deps.dialect;
   }
 
   async open(): Promise<void> {
@@ -119,7 +123,7 @@ export class ActivityView {
       this.setActivityBody('<p class="act-status">No activity on this connection yet.</p>');
       return;
     }
-    this.setActivityBody(activityDaysHtml(this.activity, this.activityExpanded));
+    this.setActivityBody(activityDaysHtml(this.activity, this.activityExpanded, this.dialect()));
     // The list is on screen now; the sensitivity flags fill in as the schema resolves.
     void this.patchFlags();
   }

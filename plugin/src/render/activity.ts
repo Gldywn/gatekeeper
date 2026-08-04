@@ -15,8 +15,11 @@ import {
   harnessIcon,
   historyIcon,
   markdownIcon,
+  pencilIcon,
   tableIcon,
+  trashIcon,
 } from "../icons";
+import { classifyQuery } from "../sql/classify";
 import { formatSql } from "../sql/format";
 import { highlight } from "../sql/highlight";
 import type { SchemaContext } from "../sql/schema";
@@ -38,7 +41,11 @@ export function activityShell(body: string, connChip: string): string {
 // Group the feed by day, then by session within each day, preserving the server's
 // newest-first order throughout. Today lands open; older days fold so the log opens
 // on the latest activity, one click from any deeper day.
-export function activityDaysHtml(activity: ActivityEntry[], expanded: Set<string>): string {
+export function activityDaysHtml(
+  activity: ActivityEntry[],
+  expanded: Set<string>,
+  dialect: string,
+): string {
   const days: { key: string; label: string; sessions: Map<string, ActivityEntry[]> }[] = [];
   for (const e of activity) {
     const ts = e.decidedAt ?? e.createdAt;
@@ -65,7 +72,7 @@ export function activityDaysHtml(activity: ActivityEntry[], expanded: Set<string
       const collapsed = d.key !== openKey;
       const count = `&middot; ${total} ${total === 1 ? "query" : "queries"} &middot; ${sessions} ${sessions === 1 ? "session" : "sessions"}`;
       const groups = [...d.sessions.entries()]
-        .map(([sid, entries]) => activityGroupHtml(d.key, sid, entries, expanded))
+        .map(([sid, entries]) => activityGroupHtml(d.key, sid, entries, expanded, dialect))
         .join("");
       return `
         <section class="act-day${collapsed ? " collapsed" : ""}">
@@ -107,6 +114,7 @@ export function activityGroupHtml(
   sessionId: string,
   entries: ActivityEntry[],
   expanded: Set<string>,
+  dialect: string,
 ): string {
   const first = entries[0];
   const harness = first.harness?.trim() || null;
@@ -125,7 +133,7 @@ export function activityGroupHtml(
             <span class="act-sess-n">${entries.length}</span>
             ${exportControl(day, sessionId)}
           </div>
-          <div class="act-entries">${entries.map((e) => activityEntryHtml(e, expanded)).join("")}</div>
+          <div class="act-entries">${entries.map((e) => activityEntryHtml(e, expanded, dialect)).join("")}</div>
         </section>`;
 }
 
@@ -145,7 +153,20 @@ function exportControl(day: string, sessionId: string): string {
             </span>`;
 }
 
-export function activityEntryHtml(e: ActivityEntry, expanded: Set<string>): string {
+// A pencil for a write, a trash for a destructive, nothing for a read (the norm), so the eye
+// lands on the entries that changed data. Reuses the pending cards' classifier for one truth.
+function riskIcon(sql: string, dialect: string): string {
+  const cls = classifyQuery(sql, dialect).class;
+  if (cls === "write") {
+    return `<span class="act-risk write" title="Write">${pencilIcon}</span>`;
+  }
+  if (cls === "destructive") {
+    return `<span class="act-risk destructive" title="Destructive">${trashIcon}</span>`;
+  }
+  return "";
+}
+
+export function activityEntryHtml(e: ActivityEntry, expanded: Set<string>, dialect: string): string {
   const ts = e.decidedAt ?? e.createdAt;
   const intent = e.intent?.trim();
   const headline = intent ? capitalize(intent) : previewSql(e.sql);
@@ -161,7 +182,7 @@ export function activityEntryHtml(e: ActivityEntry, expanded: Set<string>): stri
               <span class="chev">${chevronDown}</span>
               <span class="act-time">${escapeHtml(clockTime(ts))}</span>
               <span class="act-state ${escapeHtml(state)}">${escapeHtml(label)}</span>
-              <span class="act-intent">${escapeHtml(headline)}</span>
+              ${riskIcon(e.sql, dialect)}<span class="act-intent">${escapeHtml(headline)}</span>
               <span class="act-flags" data-act-flags="${escapeHtml(e.id)}"></span>
               <span class="act-lat">${escapeHtml(activityLatency(e))}</span>
             </button>

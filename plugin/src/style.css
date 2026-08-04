@@ -2748,6 +2748,23 @@ label.qs-row {
   color: var(--text);
 }
 /* Condensed sensitivity flags: micro-badges signalling presence, not the columns. */
+/* Risk marker: a pencil (write) or trash (destructive) between the status and the intent,
+   nothing for a read, so a data-changing entry stands out in a column of reads. */
+.act-risk {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+}
+.act-risk svg {
+  width: 14px;
+  height: 14px;
+}
+.act-risk.write {
+  color: var(--amber);
+}
+.act-risk.destructive {
+  color: var(--danger);
+}
 .act-flags {
   display: inline-flex;
   gap: 4px;
