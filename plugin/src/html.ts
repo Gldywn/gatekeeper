@@ -87,6 +87,23 @@ export function outcomeMeta(state: string): { cls: "ok" | "no" | "mut"; label: s
   return { cls: "mut", label: state };
 }
 
+// Execution latency, shown only for outcomes that actually ran a query; a rejected
+// or expired proposal never reached the database, so it reads as a dash. Sub-500ms
+// stays in milliseconds, above that one decimal second reads more calmly.
+export function activityLatency(e: ActivityEntry): string {
+  if (e.state !== "approved" && e.state !== "failed") {
+    return "—";
+  }
+  if (e.decidedAt == null) {
+    return "—";
+  }
+  const ms = e.decidedAt - e.createdAt;
+  if (ms < 0) {
+    return "—";
+  }
+  return ms >= 500 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
+}
+
 // The short outcome note on a collapsed row: a scalar row count, the rejection
 // reason, or the failure error. Never any row content.
 export function activityNote(e: ActivityEntry): string {

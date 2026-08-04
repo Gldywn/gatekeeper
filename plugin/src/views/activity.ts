@@ -1,7 +1,13 @@
 import { log, requestFileSave } from "@beekeeperstudio/plugin";
 import { dayKey } from "../html";
 import type { BrokerClient } from "../net/broker";
-import { activityDaysHtml, activityMarkdown, activityShell } from "../render/activity";
+import {
+  activityDaysHtml,
+  activityFlagsHtml,
+  activityMarkdown,
+  activityShell,
+} from "../render/activity";
+import type { SchemaContext } from "../sql/schema";
 import type { ActivityEntry } from "../types";
 
 interface ActivityViewDeps {
@@ -11,6 +17,11 @@ interface ActivityViewDeps {
   // Raw connection name for the broker's scope header, which unlike the display
   // connectionName has no databaseName/"connection" fallback.
   scope: () => string | undefined;
+  // The audit-trail head's connection chip, built from the live snapshot by app.ts.
+  connChip: () => string;
+  // Host-side schema resolver (app's annotator): null when the SQL won't parse,
+  // undefined when a connection switch invalidated the fetch mid-flight.
+  schemaFor: (sql: string) => Promise<SchemaContext | null | undefined>;
 }
 
 // Owns the connection-scoped activity overlay (#activity): a durable, PII-safe audit
@@ -25,12 +36,19 @@ export class ActivityView {
   private readonly broker: BrokerClient;
   private readonly connectionName: () => string;
   private readonly scope: () => string | undefined;
+  private readonly connChip: () => string;
+  private readonly schemaFor: (sql: string) => Promise<SchemaContext | null | undefined>;
+  // Bumped on every open and on close, so a slow flag pass abandons itself once its
+  // feed is gone (a reopen or a connection switch) rather than patching stale rows.
+  private flagGen = 0;
 
   constructor(deps: ActivityViewDeps) {
     this.root = deps.root;
     this.broker = deps.broker;
     this.connectionName = deps.connectionName;
     this.scope = deps.scope;
+    this.connChip = deps.connChip;
+    this.schemaFor = deps.schemaFor;
   }
 
   async open(): Promise<void> {
@@ -41,14 +59,16 @@ export class ActivityView {
     // A fresh open forgets which rows were expanded last time.
     this.activityExpanded.clear();
     panel.innerHTML = activityShell(
-      '<p class="act-status">Loading activity...</p>',
-      this.connectionName(),
+      '<p class="act-status">Loading audit trail...</p>',
+      this.connChip(),
     );
     panel.hidden = false;
     await this.loadActivity();
   }
 
   close(): void {
+    // Abandon any in-flight flag pass; its rows are about to be torn down.
+    this.flagGen++;
     const panel = this.root.querySelector<HTMLDivElement>("#activity");
     if (panel && !panel.hidden) {
       panel.hidden = true;
@@ -91,11 +111,52 @@ export class ActivityView {
   }
 
   private renderActivity(): void {
-    this.setActivityBody(
-      this.activity.length
-        ? activityDaysHtml(this.activity, this.activityExpanded)
-        : '<p class="act-status">No activity on this connection yet.</p>',
-    );
+    if (!this.activity.length) {
+      this.setActivityBody('<p class="act-status">No activity on this connection yet.</p>');
+      return;
+    }
+    this.setActivityBody(activityDaysHtml(this.activity, this.activityExpanded));
+    // The list is on screen now; the sensitivity flags fill in as the schema resolves.
+    void this.patchFlags();
+  }
+
+  // Flags need the schema, fetched (and cached) per table, so they can't be known at
+  // first render. Resolve them after the fact and patch each row in place, leaving the
+  // day folds and expanded rows the human may already be reading untouched.
+  private async patchFlags(): Promise<void> {
+    const gen = ++this.flagGen;
+    for (const e of this.activity) {
+      const schema = await this.schemaFor(e.sql);
+      // A newer pass, a reopen, or a connection switch has superseded this one.
+      if (gen !== this.flagGen) {
+        return;
+      }
+      // null: the SQL would not parse. undefined: a switch invalidated the fetch.
+      if (!schema) {
+        continue;
+      }
+      const html = activityFlagsHtml(schema);
+      if (!html) {
+        continue;
+      }
+      const el = this.root.querySelector<HTMLElement>(
+        `#activity [data-act-flags="${CSS.escape(e.id)}"]`,
+      );
+      if (el) {
+        el.innerHTML = html;
+      }
+    }
+  }
+
+  // Fold a day open or closed in place: days are pure DOM state, so nothing here
+  // touches the fetched feed or the expanded-row set.
+  toggleDay(head: HTMLElement): void {
+    const day = head.closest<HTMLElement>(".act-day");
+    if (!day) {
+      return;
+    }
+    const collapsed = day.classList.toggle("collapsed");
+    head.setAttribute("aria-expanded", String(!collapsed));
   }
 
   // Toggle a single entry's full SQL in place so expanding one row never rebuilds

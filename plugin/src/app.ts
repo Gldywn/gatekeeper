@@ -15,7 +15,6 @@ import {
   checkIcon,
   chevronDown,
   copyIcon,
-  dbCylinderIcon,
   externalLinkIcon,
   gearIcon,
   historyIcon,
@@ -27,6 +26,7 @@ import {
 import { BrokerClient } from "./net/broker";
 import { connectionScopeKey } from "./net/scope";
 import { ConfirmModal } from "./render/confirm";
+import { connChipInner } from "./render/connchip";
 import { modeDropdown, switchInput } from "./render/controls";
 import {
   buildDevCard,
@@ -202,6 +202,11 @@ export class Gatekeeper {
       broker: this.broker,
       connectionName: () => this.connectionName,
       scope: () => this.connScopeKey(),
+      connChip: () => {
+        const data = this.connChipData();
+        return data ? `<span class="conn-chip">${connChipInner(data)}</span>` : "";
+      },
+      schemaFor: (sql) => this.annotator.schemaFor(sql),
     });
     this.settingsView = new SettingsView({
       root,
@@ -425,6 +430,23 @@ export class Gatekeeper {
     this.onSettingsChanged();
   }
 
+  // The connection identity's display parts, shared by the header chip and the
+  // audit-trail head. null pre-snapshot, when only the bare name is known.
+  private connChipData(): { name: string; dialect: string; path: string } | null {
+    const c = this.conn;
+    if (!c) {
+      return null;
+    }
+    const path = [c.databaseName?.trim(), c.schema?.trim()]
+      .filter((part): part is string => Boolean(part))
+      .join(" / ");
+    return {
+      name: c.connectionName || this.connectionName,
+      dialect: mapDialect(c.databaseType),
+      path,
+    };
+  }
+
   // The connection context lives once, in the header: what database the whole
   // queue governs. Reads this.conn; falls back to the bare name pre-snapshot.
   private renderConnLabel(): void {
@@ -432,25 +454,12 @@ export class Gatekeeper {
     if (!el) {
       return;
     }
-    const c = this.conn;
-    if (!c) {
+    const data = this.connChipData();
+    if (!data) {
       el.innerHTML = this.connectionName ? escapeHtml(this.connectionName) : "";
       return;
     }
-    const dialect = mapDialect(c.databaseType);
-    const db = c.databaseName?.trim();
-    const schema = c.schema?.trim();
-    const name = c.connectionName || this.connectionName;
-    const path = [db, schema]
-      .filter((part): part is string => Boolean(part))
-      .map(escapeHtml)
-      .join(" / ");
-    el.innerHTML = `
-      <span class="chip-db" aria-hidden="true">${dbCylinderIcon}</span>
-      <span class="chip-name">${escapeHtml(name)}</span>
-      <span class="badge">${escapeHtml(dialect)}</span>
-      ${path ? `<span class="chip-path">${path}</span>` : ""}
-      <span class="dsep"></span>${this.readOnlyBadge()}`;
+    el.innerHTML = `${connChipInner(data)}<span class="dsep"></span>${this.readOnlyBadge()}`;
   }
 
   // Aggregate over the three layers (Gatekeeper mode, Beekeeper mode, endpoint): green
@@ -635,7 +644,7 @@ export class Gatekeeper {
           <section class="history">
             <div class="history-head">
               <button class="disclosure" id="htoggle" aria-expanded="true"><span class="chev">${chevronDown}</span>Recently resolved</button>
-              <button class="activity-link" id="activityBtn" type="button">${historyIcon}Activity</button>
+              <button class="activity-link" id="activityBtn" type="button">${historyIcon}Audit trail</button>
             </div>
             <div class="hist" id="hist"></div>
           </section>
@@ -786,6 +795,11 @@ export class Gatekeeper {
       const exp = target.closest<HTMLElement>("[data-export]");
       if (exp) {
         void this.activityView.exportSession(exp.getAttribute("data-export")!);
+        return;
+      }
+      const dayHead = target.closest<HTMLElement>("[data-day]");
+      if (dayHead) {
+        this.activityView.toggleDay(dayHead);
         return;
       }
       const sql = target.closest<HTMLElement>("[data-act-sql]");

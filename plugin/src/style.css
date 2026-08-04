@@ -2383,11 +2383,6 @@ label.qs-row {
 .activity-card {
   max-width: min(96vw, 1100px);
 }
-.act-conn {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--faint);
-}
 .act-status {
   font-family: var(--font-mono);
   font-size: 12px;
@@ -2395,94 +2390,192 @@ label.qs-row {
   margin: var(--s3) 0;
 }
 .act-body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s4);
+  padding: var(--s1) 0 var(--s2);
 }
+
+/* Day: a collapsible section with a count; today opens, older days start folded. */
 .act-day {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s3);
+  border-top: 1px solid var(--hi);
+}
+.act-day:first-child {
+  border-top: none;
 }
 .act-day-head {
-  font-size: 12px;
-  font-weight: 620;
-  color: var(--text);
-  padding-bottom: var(--s1);
-  border-bottom: 1px solid var(--edge);
-}
-.act-group {
   display: flex;
-  flex-direction: column;
-  gap: var(--s1);
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: var(--s3) var(--s1) var(--s2);
+  background: none;
+  border: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.act-day-head:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: -2px;
+  border-radius: 4px;
+}
+.act-day-chev {
+  display: inline-flex;
+  width: 13px;
+  height: 13px;
+  flex: none;
+  color: var(--faint);
+  transition: transform var(--dur) var(--ease);
+}
+.act-day-chev svg {
+  width: 100%;
+  height: 100%;
+}
+.act-day.collapsed .act-day-chev {
+  transform: rotate(-90deg);
+}
+.act-day-label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 650;
+  color: var(--muted);
+}
+.act-day-count {
+  font-size: 11px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+.act-day-body {
+  padding: 0 var(--s1) var(--s1);
+}
+.act-day.collapsed .act-day-body {
+  display: none;
+}
+
+/* Session group: a bordered card, the session task as its hero. */
+.act-group {
+  margin: var(--s1) 0 var(--s3);
+  border: 1px solid var(--edge);
+  border-radius: var(--r);
+  background: color-mix(in oklch, var(--sunken) 30%, transparent);
+  overflow: hidden;
 }
 .act-group-head {
   display: flex;
-  align-items: baseline;
-  gap: var(--s2);
-  padding: 0 var(--s1);
+  align-items: center;
+  gap: 11px;
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--hi);
 }
-.act-group-label {
+/* The harness mascot, seated in its own tile and centred against the two-line block. */
+.act-avatar {
+  width: 32px;
+  height: 32px;
   flex: none;
-  font-size: 12px;
-  font-weight: 560;
-  color: var(--text);
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--amber);
+  background: linear-gradient(
+    150deg,
+    color-mix(in oklch, var(--amber) 30%, var(--surface)),
+    var(--sunken)
+  );
+  border: 1px solid var(--edge-strong);
 }
-.act-group-intent {
+.act-avatar svg {
+  width: 16px;
+  height: 16px;
+}
+.act-avatar svg,
+.act-avatar svg * {
+  fill: currentColor;
+}
+.act-sess-idblock {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.act-sess-meta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.act-proj {
+  font-family: var(--font-ui);
+  font-weight: 600;
+  color: var(--muted);
+}
+.act-sess-title {
+  font-size: 14.5px;
+  font-weight: 640;
+  color: var(--text);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.act-sess-n {
+  flex: none;
   font-size: 11px;
   color: var(--faint);
-}
-/* The cryptic session tag maps a group back to its agent, as on the queue head. */
-.act-group-sess {
-  margin-left: auto;
-  flex: none;
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+  padding: 2px 8px;
+  border: 1px solid var(--edge);
+  border-radius: 20px;
 }
 .act-export {
   flex: none;
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  background: none;
-  border: none;
-  cursor: pointer;
   font: inherit;
   font-size: 11.5px;
-  color: var(--faint);
-  padding: 2px 4px;
-  transition: color var(--dur) var(--ease);
+  color: var(--muted);
+  background: color-mix(in oklch, var(--text) 5%, transparent);
+  border: 1px solid var(--edge);
+  border-radius: 5px;
+  padding: 4px 8px;
+  cursor: pointer;
+  transition:
+    color var(--dur) var(--ease),
+    background var(--dur) var(--ease);
 }
 .act-export:hover {
   color: var(--text);
+  background: var(--hi);
 }
 .act-export:focus-visible {
   outline: 2px solid var(--amber);
   outline-offset: 1px;
-  border-radius: 4px;
 }
 .act-export svg {
   width: 13px;
   height: 13px;
 }
+
+/* Entry: chevron, time, status pill, intent, sensitivity flags, latency. */
 .act-entries {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+}
+.act-entry {
+  border-top: 1px solid var(--hi);
+}
+.act-entry:first-child {
+  border-top: none;
 }
 .act-row {
   display: flex;
-  align-items: baseline;
-  gap: var(--s2);
+  align-items: center;
+  gap: 11px;
   width: 100%;
-  padding: 5px var(--s1);
+  padding: 9px 12px;
   border: none;
-  border-radius: 4px;
   background: none;
   color: inherit;
   font: inherit;
@@ -2491,17 +2584,16 @@ label.qs-row {
   transition: background var(--dur) var(--ease);
 }
 .act-row:hover {
-  background: var(--surface);
+  background: color-mix(in oklch, var(--amber) 5%, transparent);
 }
 .act-row:focus-visible {
   outline: 2px solid var(--amber);
-  outline-offset: -1px;
+  outline-offset: -2px;
 }
 .act-row .chev {
-  align-self: center;
   display: inline-flex;
-  width: 12px;
-  height: 12px;
+  width: 13px;
+  height: 13px;
   flex: none;
   color: var(--faint);
   transition: transform var(--dur) var(--ease);
@@ -2515,42 +2607,114 @@ label.qs-row {
 }
 .act-time {
   flex: none;
+  min-width: 64px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+/* Status pill: a tinted, coloured-text badge per outcome, fixed-width so the column
+   aligns. approved green, rejected amber, failed red, expired faint. */
+.act-state {
+  --sc: var(--faint);
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 74px;
+  padding: 2px 8px;
+  border-radius: 5px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--sc);
+  background: color-mix(in oklch, var(--sc) 15%, transparent);
+  border: 1px solid color-mix(in oklch, var(--sc) 32%, transparent);
+}
+.act-state.approved {
+  --sc: var(--ok);
+}
+.act-state.rejected {
+  --sc: var(--amber);
+}
+.act-state.failed {
+  --sc: var(--danger);
+}
+.act-state.expired {
+  --sc: var(--faint);
+}
+.act-intent {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--text);
+}
+/* Condensed sensitivity flags: micro-badges signalling presence, not the columns. */
+.act-flags {
+  display: inline-flex;
+  gap: 4px;
+  flex: none;
+}
+.act-flag {
+  padding: 2px 5px;
+  border-radius: 4px;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.act-flag.pii {
+  color: var(--danger);
+  background: color-mix(in oklch, var(--danger) 16%, transparent);
+}
+.act-flag.val {
+  color: var(--amber);
+  background: color-mix(in oklch, var(--amber) 16%, transparent);
+}
+.act-flag.client {
+  color: var(--client);
+  background: color-mix(in oklch, var(--client) 16%, transparent);
+}
+.act-lat {
+  flex: none;
+  min-width: 46px;
+  text-align: right;
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--faint);
   font-variant-numeric: tabular-nums;
 }
-.act-row .hstatus {
-  flex: none;
-}
-.act-intent {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
-  color: var(--text);
-}
-.act-note {
-  margin-left: auto;
-  flex: none;
-  max-width: 40%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--faint);
-  white-space: nowrap;
-}
 .act-detail {
-  padding: var(--s2) var(--s1) var(--s3) 26px;
+  padding: 2px 12px 12px 40px;
 }
 .act-meta {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--faint);
-  margin-bottom: var(--s2);
+  margin-bottom: 7px;
+}
+/* Expanded note, tinted toward the outcome for continuity with the detail overlay. */
+.act-enote {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--muted);
+  margin-bottom: 7px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.act-enote.rejected {
+  color: color-mix(in oklch, var(--amber) 82%, var(--text));
+}
+.act-enote.failed {
+  color: color-mix(in oklch, var(--danger) 78%, var(--text));
+}
+.act-enote.expired {
+  color: var(--muted);
 }
 .hstatus.mut {
   color: var(--faint);
