@@ -27,7 +27,7 @@ export function activityShell(body: string, connChip: string): string {
       <div class="detail-card activity-card">
         <div class="panel-head">
           <span class="panel-head-ico">${historyIcon}</span>
-          <span class="panel-title">Audit trail</span>
+          <span class="panel-title">Audit Trail</span>
           ${connChip}
           <button class="detail-close" type="button" data-close aria-label="Close audit trail">&times;</button>
         </div>
@@ -219,7 +219,7 @@ export function activityMarkdown(
 ): string {
   const first = entries[0];
   const label = first.project?.trim() || first.harness?.trim() || sessionId;
-  const lines: string[] = ["# Gatekeeper audit trail", ""];
+  const lines: string[] = ["# Gatekeeper Audit Trail", ""];
   if (connectionName) {
     lines.push(`- Connection: ${connectionName}`);
   }

@@ -66,7 +66,7 @@ describe("render/activity", () => {
     expect(
       activityMarkdown("2026-01-01", "s1", [approved, rejected], "prod-analytics", flags),
     ).toBe(
-      "# Gatekeeper audit trail\n\n- Connection: prod-analytics\n- Day: 2026-01-01\n- Session: gatekeeper (s1)\n- Harness: claude-code\n- Task: audit review\n- Queries: 2 (1 Approved · 1 Declined)\n\n## 9:29:30 AM · Declined · Remove a user\n- Request: q_cd34\n- Reason: read-only only\n\n```sql\nDELETE FROM audit.users WHERE id = 1\n```\n\n## 9:30:00 AM · Approved · List account contacts\n- Flags: PII, sensitive value\n- Latency: 5.0s\n- Request: q_ab12\n- Rows: 3\n\n```sql\nSELECT email FROM audit.users\n```\n",
+      "# Gatekeeper Audit Trail\n\n- Connection: prod-analytics\n- Day: 2026-01-01\n- Session: gatekeeper (s1)\n- Harness: claude-code\n- Task: audit review\n- Queries: 2 (1 Approved · 1 Declined)\n\n## 9:29:30 AM · Declined · Remove a user\n- Request: q_cd34\n- Reason: read-only only\n\n```sql\nDELETE FROM audit.users WHERE id = 1\n```\n\n## 9:30:00 AM · Approved · List account contacts\n- Flags: PII, sensitive value\n- Latency: 5.0s\n- Request: q_ab12\n- Rows: 3\n\n```sql\nSELECT email FROM audit.users\n```\n",
     );
   });
 

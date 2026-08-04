@@ -1939,6 +1939,9 @@ label.qs-row {
   font-weight: 650;
   letter-spacing: -0.01em;
   color: var(--text);
+  /* Tight box so the glyph centres on the head icon and chip; a 1.5 line-height dropped
+     the title a hair low against them. Same fix serves the settings head. */
+  line-height: 1;
 }
 /* The detail head is the same seated title bar as settings and activity, only its
    background is the outcome tint (below) instead of the neutral seated fill. */
@@ -2503,12 +2506,10 @@ label.qs-row {
   place-items: center;
   border-radius: 8px;
   color: var(--amber);
-  background: linear-gradient(
-    150deg,
-    color-mix(in oklch, var(--amber) 30%, var(--surface)),
-    var(--sunken)
-  );
-  border: 1px solid var(--edge-strong);
+  /* A neutral plate, not an amber wash: the amber wash bled a fuzzy edge; keep the mascot
+     the only amber so it stays crisp. */
+  background: linear-gradient(155deg, color-mix(in oklch, var(--text) 7%, var(--surface)), var(--sunken));
+  border: 1px solid var(--edge);
 }
 .act-avatar svg {
   width: 16px;

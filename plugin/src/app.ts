@@ -644,7 +644,7 @@ export class Gatekeeper {
           <section class="history">
             <div class="history-head">
               <button class="disclosure" id="htoggle" aria-expanded="true"><span class="chev">${chevronDown}</span>Recently resolved</button>
-              <button class="activity-link" id="activityBtn" type="button">${historyIcon}Audit trail</button>
+              <button class="activity-link" id="activityBtn" type="button">${historyIcon}Audit Trail</button>
             </div>
             <div class="hist" id="hist"></div>
           </section>
