@@ -97,6 +97,13 @@ export class SettingsView {
             </div>
             <span class="set-control" id="modeCtlSettings">${modeDropdown(this.mode())}</span>
           </div>
+          <div class="set-row">
+            <div class="set-text">
+              <span class="set-name">Confirm write &amp; destructive</span>
+              <span class="set-desc">Ask for a second one-click confirmation, showing the statement, before an approved write or destructive query runs. Reads never prompt.</span>
+            </div>
+            <span class="set-control">${switchInput("confirmWrites", "Confirm write and destructive", s.confirmWrites)}</span>
+          </div>
         </section>
         <section class="set-group">
           ${groupHead("Detection")}

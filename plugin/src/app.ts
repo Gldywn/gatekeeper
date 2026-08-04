@@ -619,6 +619,7 @@ export class Gatekeeper {
           <div class="pop-group">
             <div class="pop-eyebrow">Access</div>
             <div class="qs-row"><span class="qs-name">Mode</span><span class="qs-ctl" id="modeCtlHeader">${modeDropdown(this.mode, true)}</span></div>
+            ${quickSwitch("confirmWrites", "Confirm write & destructive", s.confirmWrites)}
           </div>
           <div class="pop-group">
             <div class="pop-eyebrow">Detection</div>
@@ -1425,7 +1426,7 @@ export class Gatekeeper {
     }
   }
 
-  private async approve(id: string): Promise<void> {
+  private async approve(id: string, confirmed = false): Promise<void> {
     // Developer-mode cards resolve locally and never reach the broker safety core;
     // branch before any connection/lease work so the two paths cannot entangle.
     const devCard = this.cards.find((c) => c.id === id && c.dev);
@@ -1449,6 +1450,23 @@ export class Gatekeeper {
         reason: this.modeBlockReason(verdict.blocked, verdict.class),
       });
       this.finish(id, "failed", "blocked");
+      return;
+    }
+    // Second gate: an opt-out double-confirmation before a write or destructive runs.
+    // Reads never prompt. The confirm re-enters approve() with confirmed=true, which
+    // re-runs every check above (connection, lease, mode) against live state.
+    if (!confirmed && verdict.class !== "read" && this.settingsStore.get().confirmWrites) {
+      const destructive = verdict.class === "destructive";
+      this.confirmModal.open({
+        tone: destructive ? "destructive" : "write",
+        heading: destructive ? "Run this destructive statement?" : "Run this write?",
+        body: destructive
+          ? "This deletes or drops data on the live database the moment you confirm, and Gatekeeper cannot undo it."
+          : "This changes data on the live database the moment you confirm.",
+        sql: card.sql,
+        confirmLabel: destructive ? "Run destructive" : "Run write",
+        onConfirm: () => void this.approve(id, true),
+      });
       return;
     }
     this.setCardState(id, "executing");

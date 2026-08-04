@@ -3271,6 +3271,21 @@ label.qs-row {
   line-height: 1.5;
   color: var(--muted);
 }
+.confirm-sql {
+  margin: 0 0 var(--s4);
+  max-height: 30vh;
+  overflow: auto;
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--sunken);
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .confirm-challenge {
   display: flex;
   flex-direction: column;

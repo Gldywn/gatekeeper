@@ -17,6 +17,9 @@ export interface ConfirmSpec {
   body: string;
   confirmLabel: string;
   cancelLabel?: string;
+  // Optional statement to recall verbatim above the actions, so the human re-reads
+  // exactly what will run before confirming.
+  sql?: string;
   challenge?: ConfirmChallenge;
   onConfirm: () => void;
   // Called on cancel, backdrop, or Escape, so a caller can revert an optimistic
@@ -39,10 +42,14 @@ export function confirmHtml(spec: ConfirmSpec): string {
             <input class="confirm-input" type="text" data-confirm-input autocomplete="off" spellcheck="false" placeholder="${escapeHtml(spec.challenge.placeholder)}" aria-label="${escapeHtml(spec.challenge.label)}" />
           </label>`
     : "";
+  const sql = spec.sql
+    ? `<pre class="confirm-sql"><code>${escapeHtml(spec.sql.trim())}</code></pre>`
+    : "";
   return `
       <div class="detail-card confirm-card">
         <h2 class="confirm-title ${spec.tone}">${escapeHtml(spec.heading)}</h2>
         <p class="confirm-text">${escapeHtml(spec.body)}</p>
+        ${sql}
         ${challenge}
         <div class="confirm-actions">
           <button class="confirm-cancel" type="button" data-confirm-cancel>${escapeHtml(spec.cancelLabel ?? "Cancel")}</button>

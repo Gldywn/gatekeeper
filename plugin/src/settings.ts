@@ -8,6 +8,9 @@ export interface Settings {
   clientFlagging: boolean;
   schemaAnnotation: boolean;
   sensitiveValues: boolean;
+  // Require a second one-click confirmation before an approved write or destructive
+  // statement runs. On by default; a read never prompts.
+  confirmWrites: boolean;
   recentlyResolved: number;
   // Approximate RAM ceiling (MB) for held result rows across history; a bigger value
   // keeps more of a large result reviewable before the "held" cap kicks in.
@@ -36,6 +39,7 @@ export function defaultSettings(): Settings {
     clientFlagging: true,
     schemaAnnotation: true,
     sensitiveValues: true,
+    confirmWrites: true,
     recentlyResolved: RECENTLY_RESOLVED_DEFAULT,
     resultCacheMb: RESULT_CACHE_DEFAULT,
     developerMode: false,
@@ -57,6 +61,7 @@ export function normalizeSettings(raw: unknown): Settings {
     clientFlagging: asBool(r.clientFlagging, true),
     schemaAnnotation: asBool(r.schemaAnnotation, true),
     sensitiveValues: asBool(r.sensitiveValues, true),
+    confirmWrites: asBool(r.confirmWrites, true),
     recentlyResolved: (RECENTLY_RESOLVED_OPTIONS as readonly number[]).includes(resolved)
       ? resolved
       : RECENTLY_RESOLVED_DEFAULT,
