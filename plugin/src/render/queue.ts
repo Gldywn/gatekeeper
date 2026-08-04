@@ -244,7 +244,8 @@ export function readyActions(id: string, gate: CardGate, denyDrafts: Map<string,
   const revise = denyDrafts.has(id)
     ? denyField(id, denyDrafts.get(id) ?? "")
     : `<button class="deny-open" type="button" data-deny-open="${id}" title="Reject and ask the agent to change something">${messageIcon}Request changes</button>`;
-  const tone = gate.cls === "destructive" ? " destructive" : "";
+  const tone =
+    gate.cls === "destructive" ? " destructive" : gate.cls === "write" ? " write" : "";
   const approveBtn = `<button class="btn approve${tone}" type="button" data-approve="${id}" ${gate.approveEnabled ? "" : "disabled"}>${gate.approveLabel}</button>`;
   // When blocked, the reason rides in a hover popover above the disabled Approve,
   // not as a loose line in the card body.
