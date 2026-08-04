@@ -1,9 +1,10 @@
-import { capitalize, escapeHtml, outcomeMeta, relAge, sessionDisplayName } from "../html";
+import { capitalize, escapeHtml, relAge, sessionDisplayName } from "../html";
 import { agentBadge, checkIcon, clockIcon, copyIcon, xCircleIcon } from "../icons";
 import type { HistResult } from "../result";
 import { formatSql } from "../sql/format";
 import { highlight } from "../sql/highlight";
 import type { HistItem } from "../types";
+import { statusIcon } from "./status";
 
 export function detailHtml(item: HistItem): string {
   const harness = item.session?.harness?.trim() || null;
@@ -21,7 +22,7 @@ export function detailHtml(item: HistItem): string {
           ${agentBadge(harness)}
           <span class="detail-who">${escapeHtml(who)}</span>
           ${item.session?.sessionLabel ? `<span class="detail-scope" title="${escapeHtml(capitalize(item.session.sessionLabel))}">${escapeHtml(capitalize(item.session.sessionLabel))}</span>` : ""}
-          <span class="hstatus ${item.status}">${escapeHtml(outcomeMeta(item.status).label)}</span>
+          ${statusIcon(item.status)}
           <button class="detail-close" type="button" data-close aria-label="Close detail">&times;</button>
         </div>
         <div class="detail-meta">${audit.join(" &middot; ")}</div>

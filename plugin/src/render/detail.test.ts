@@ -40,7 +40,7 @@ describe("render/detail", () => {
     const html = detailHtml(item);
     // head identity order matches the history row: who, then the scope label, then status
     expect(html).toContain(
-      '<span class="detail-who">gatekeeper</span>\n          <span class="detail-scope" title="Audit review">Audit review</span>\n          <span class="hstatus approved">approved</span>',
+      '<span class="detail-who">gatekeeper</span>\n          <span class="detail-scope" title="Audit review">Audit review</span>\n          <span class="hstate approved" title="Approved" aria-label="Approved"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></span>',
     );
     expect(html).toContain(
       '<div class="detail-meta">on prod-analytics &middot; claude-code &middot; s1 &middot; q_ab12 &middot; 1/1/2026, 12:00:00 AM</div>',

@@ -837,7 +837,7 @@ label.qs-row {
   grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: 11px;
-  padding: 9px 11px;
+  padding: 6px 11px;
   border-radius: 7px;
   cursor: pointer;
   user-select: none;
@@ -2421,7 +2421,7 @@ label.qs-row {
   margin: var(--s3) 0;
 }
 .act-body {
-  padding: var(--s1) 0 var(--s2);
+  padding: 2px 0 var(--s1);
 }
 
 /* Day: a collapsible section with a count; today opens, older days start folded. */
@@ -2436,7 +2436,7 @@ label.qs-row {
   align-items: center;
   gap: 9px;
   width: 100%;
-  padding: var(--s3) var(--s1) var(--s2);
+  padding: var(--s2) var(--s1) var(--s2);
   background: none;
   border: none;
   font: inherit;
@@ -2484,7 +2484,7 @@ label.qs-row {
 
 /* Session group: a bordered card, the session task as its hero. */
 .act-group {
-  margin: var(--s1) 0 var(--s3);
+  margin: var(--s1) 0 var(--s2);
   border: 1px solid var(--edge);
   border-radius: var(--r);
   background: color-mix(in oklch, var(--sunken) 30%, transparent);

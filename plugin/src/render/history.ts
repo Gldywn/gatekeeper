@@ -1,23 +1,8 @@
-import { capitalize, escapeHtml, outcomeMeta, previewSql, relAge, sessionDisplayName } from "../html";
-import { agentBadge, checkIcon, clockIcon, xCircleIcon } from "../icons";
+import { capitalize, escapeHtml, previewSql, relAge, sessionDisplayName } from "../html";
+import { agentBadge } from "../icons";
 import { highlight } from "../sql/highlight";
 import type { HistItem } from "../types";
-
-// Status as a coloured glyph: the colour is already the code, so an icon reads as fast as
-// the word and frees the row for the session label. The word rides the tooltip, the full
-// outcome is one click away. A rejection reads as "Declined".
-function statusIcon(status: string): string {
-  const icons: Record<string, string> = {
-    approved: checkIcon,
-    rejected: xCircleIcon,
-    failed: xCircleIcon,
-    expired: clockIcon,
-  };
-  const icon = icons[status] ?? clockIcon;
-  // Label from the shared outcomeMeta so the tooltip can't drift from the vocabulary.
-  const label = capitalize(outcomeMeta(status).label);
-  return `<span class="hstate ${escapeHtml(status)}" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">${icon}</span>`;
-}
+import { statusIcon } from "./status";
 
 export function historyRow(item: HistItem): string {
   const harness = item.session?.harness?.trim() || null;
