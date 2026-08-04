@@ -1,4 +1,4 @@
-import { capitalize, escapeHtml, previewSql, relAge, sessionDisplayName } from "../html";
+import { capitalize, escapeHtml, outcomeMeta, previewSql, relAge, sessionDisplayName } from "../html";
 import { agentBadge, checkIcon, clockIcon, xCircleIcon } from "../icons";
 import { highlight } from "../sql/highlight";
 import type { HistItem } from "../types";
@@ -7,14 +7,16 @@ import type { HistItem } from "../types";
 // the word and frees the row for the session label. The word rides the tooltip, the full
 // outcome is one click away. A rejection reads as "Declined".
 function statusIcon(status: string): string {
-  const map: Record<string, { icon: string; label: string }> = {
-    approved: { icon: checkIcon, label: "Approved" },
-    rejected: { icon: xCircleIcon, label: "Declined" },
-    failed: { icon: xCircleIcon, label: "Failed" },
-    expired: { icon: clockIcon, label: "Expired" },
+  const icons: Record<string, string> = {
+    approved: checkIcon,
+    rejected: xCircleIcon,
+    failed: xCircleIcon,
+    expired: clockIcon,
   };
-  const m = map[status] ?? { icon: clockIcon, label: capitalize(status) };
-  return `<span class="hstate ${escapeHtml(status)}" title="${escapeHtml(m.label)}" aria-label="${escapeHtml(m.label)}">${m.icon}</span>`;
+  const icon = icons[status] ?? clockIcon;
+  // Label from the shared outcomeMeta so the tooltip can't drift from the vocabulary.
+  const label = capitalize(outcomeMeta(status).label);
+  return `<span class="hstate ${escapeHtml(status)}" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">${icon}</span>`;
 }
 
 export function historyRow(item: HistItem): string {

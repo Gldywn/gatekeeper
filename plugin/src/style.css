@@ -2765,9 +2765,11 @@ label.qs-row {
   color: var(--danger);
   background: color-mix(in oklch, var(--danger) 16%, transparent);
 }
+/* A sensitive literal is as serious as PII (a hardcoded secret), so it reads red like the
+   SQL highlight gives it in the card, the detail, and the audit trail's own SQL. */
 .act-flag.val {
-  color: var(--amber);
-  background: color-mix(in oklch, var(--amber) 16%, transparent);
+  color: var(--danger);
+  background: color-mix(in oklch, var(--danger) 16%, transparent);
 }
 .act-flag.client {
   color: var(--client);

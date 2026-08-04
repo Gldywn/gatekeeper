@@ -206,6 +206,9 @@ export class Gatekeeper {
         const data = this.connChipData();
         return data ? `<span class="conn-chip">${connChipInner(data)}</span>` : "";
       },
+      // The raw annotator, deliberately not filterSchema: the audit trail is a durable
+      // security record, so it always flags PII/client/values even on a connection whose
+      // detection toggles are off (unlike the pending cards and the detail, which honour them).
       schemaFor: (sql) => this.annotator.schemaFor(sql),
     });
     this.settingsView = new SettingsView({

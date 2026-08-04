@@ -93,8 +93,8 @@ function ocNote(text: string): string {
 }
 
 // The held rows are already capped (capResult, at decision time). Tabulator mounts on the
-// .gk-grid host once this markup is in the DOM (views/detail.ts) and virtualizes over them;
-// the footer states the true total and the held cap, independent of the view's virtual slice.
+// .gk-grid host once this markup is in the DOM (views/detail.ts) and paginates over them;
+// the footer states the true total and the held cap, independent of the paged slice.
 function resultGrid(result: HistResult): string {
   return `<div class="gk-grid" data-result-grid></div>${gridFoot(result)}`;
 }
