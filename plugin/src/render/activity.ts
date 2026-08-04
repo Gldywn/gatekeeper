@@ -168,7 +168,7 @@ export function activityEntryHtml(e: ActivityEntry, expanded: Set<string>): stri
             <div class="act-detail"${isExpanded ? "" : " hidden"}>
               <div class="act-meta">${escapeHtml(e.id)} &middot; ${escapeHtml(new Date(ts).toLocaleString())}${rows}</div>
               ${note ? `<div class="act-enote ${escapeHtml(state)}">${escapeHtml(note)}</div>` : ""}
-              <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(e.sql)}" aria-label="Copy SQL">${copyIcon}</button><code>${highlight(formatSql(e.sql))}</code></pre>
+              <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(e.sql)}" aria-label="Copy SQL">${copyIcon}</button><code data-act-sqlbody="${escapeHtml(e.id)}">${highlight(formatSql(e.sql))}</code></pre>
             </div>
           </div>`;
 }

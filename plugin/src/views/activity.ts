@@ -9,6 +9,8 @@ import {
   activityMarkdown,
   activityShell,
 } from "../render/activity";
+import { formatSql } from "../sql/format";
+import { highlight } from "../sql/highlight";
 import type { SchemaContext } from "../sql/schema";
 import type { ActivityEntry } from "../types";
 
@@ -136,6 +138,14 @@ export class ActivityView {
       // null: the SQL would not parse. undefined: a switch invalidated the fetch.
       if (!schema) {
         continue;
+      }
+      // Light the sensitive columns/values in the SQL, exactly as the pending card and the
+      // detail do, so the audit trail stops dropping the red the schema already knows about.
+      const code = this.root.querySelector<HTMLElement>(
+        `#activity [data-act-sqlbody="${CSS.escape(e.id)}"]`,
+      );
+      if (code) {
+        code.innerHTML = highlight(formatSql(e.sql), schema.pii, schema.client, schema.literals);
       }
       const html = activityFlagsHtml(schema);
       if (!html) {
