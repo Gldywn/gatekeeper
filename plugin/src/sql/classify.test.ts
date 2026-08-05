@@ -79,8 +79,56 @@ describe("classifyQuery", () => {
     );
   });
 
-  it("unwraps EXPLAIN ANALYZE of a modifying statement to its risk", () => {
-    expect(classifyQuery("EXPLAIN ANALYZE DELETE FROM users", pg).class).toBe("destructive");
+  it("reads an EXPLAIN of a SELECT, approvable (the parser cannot parse EXPLAIN itself)", () => {
+    for (const sql of [
+      "EXPLAIN SELECT 1",
+      "EXPLAIN VERBOSE SELECT id FROM users",
+      "EXPLAIN (FORMAT JSON) SELECT 1",
+      "EXPLAIN (ANALYZE, BUFFERS) SELECT id FROM users WHERE id = 1",
+      // The reported query: schema-qualified tables, subqueries, ->> JSON access.
+      `EXPLAIN (ANALYZE, BUFFERS)
+       SELECT t.id FROM subvention.subvention_transaction t
+       WHERE t.subvention_id = (SELECT subvention_id FROM subvention.subvention_transaction WHERE id = 'x')
+         AND t.metadata->>'orderId' IN (SELECT s.metadata->>'orderId' FROM subvention.subvention_transaction s WHERE s.id = 'x')`,
+    ]) {
+      const v = classifyQuery(sql, pg);
+      expect(v.class, sql).toBe("read");
+      expect(v.blocked, sql).toBe(false);
+    }
+  });
+
+  // SECURITY: EXPLAIN ANALYZE (or ANALYSE) actually runs the wrapped statement, so it must
+  // carry that statement's risk and never read as a harmless plan.
+  it("never lets EXPLAIN ANALYZE hide a modifying statement", () => {
+    for (const [sql, cls] of [
+      ["EXPLAIN ANALYZE DELETE FROM users", "destructive"],
+      ["EXPLAIN ANALYSE DELETE FROM users", "destructive"],
+      ["EXPLAIN (ANALYZE, BUFFERS) DELETE FROM users WHERE id = 1", "destructive"],
+      ["EXPLAIN (ANALYSE) TRUNCATE users", "destructive"],
+      ["EXPLAIN ANALYZE UPDATE users SET name = 'x' WHERE id = 1", "write"],
+      ["EXPLAIN (ANALYZE) INSERT INTO users (id) VALUES (1)", "write"],
+    ] as const) {
+      const v = classifyQuery(sql, pg);
+      expect(v.class, sql).toBe(cls);
+      // Approvable under the matching mode (not a dead blocked card), but never a read.
+      expect(v.class === "read", sql).toBe(false);
+      expect(v.blocked, sql).toBe(false);
+    }
+  });
+
+  // A plain EXPLAIN (no ANALYZE) only plans; it never executes the wrapped DML.
+  it("treats a plain EXPLAIN of a modifying statement as a read (plan only)", () => {
+    for (const sql of ["EXPLAIN DELETE FROM users", "EXPLAIN VERBOSE UPDATE users SET x = 1"]) {
+      const v = classifyQuery(sql, pg);
+      expect(v.class, sql).toBe("read");
+      expect(v.blocked, sql).toBe(false);
+    }
+  });
+
+  it("still blocks a multi-statement or empty EXPLAIN", () => {
+    for (const sql of ["EXPLAIN SELECT 1; DROP TABLE users", "EXPLAIN"]) {
+      expect(classifyQuery(sql, pg).blocked, sql).toBe(true);
+    }
   });
 
   it("treats an unrecognized statement as destructive and blocked (fail safe)", () => {

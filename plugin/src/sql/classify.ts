@@ -84,9 +84,46 @@ function topClass(top: string): RiskClass {
   return "destructive"; // delete/drop/truncate/… and anything unrecognized fail safe
 }
 
+// node-sql-parser cannot parse EXPLAIN in any dialect (it throws), so peel a leading
+// EXPLAIN off and classify the statement it wraps. Returns null when there is none.
+function stripExplain(sql: string): { inner: string; analyze: boolean } | null {
+  const lead = /^\s*explain\b/i.exec(sql);
+  if (!lead) {
+    return null;
+  }
+  let rest = sql.slice(lead[0].length);
+  // Postgres accepts ANALYSE as well as ANALYZE; miss it and an EXPLAIN that actually
+  // runs a DELETE would read as a harmless plan. Match both, always fail toward "runs".
+  const paren = /^\s*\(([^)]*)\)/.exec(rest);
+  if (paren) {
+    return { inner: rest.slice(paren[0].length).trim(), analyze: /\banaly[sz]e\b/i.test(paren[1]) };
+  }
+  let analyze = false;
+  const opt = /^\s*(analy[sz]e|verbose)\b/i;
+  let m = opt.exec(rest);
+  while (m) {
+    if (/analy[sz]e/i.test(m[1])) {
+      analyze = true;
+    }
+    rest = rest.slice(m[0].length);
+    m = opt.exec(rest);
+  }
+  return { inner: rest.trim(), analyze };
+}
+
 // The plugin is the only component that runs SQL, so the risk gate lives here: a
 // dialect-aware parse, escalated on any embedded modify node; unparseable is blocked.
 export function classifyQuery(sql: string, dialect = "postgresql"): RiskVerdict {
+  const explain = stripExplain(sql);
+  if (explain && explain.inner.length > 0) {
+    const inner = classifyQuery(explain.inner, dialect);
+    // EXPLAIN ANALYZE executes the wrapped statement for real, so it carries that
+    // statement's risk; a plain EXPLAIN only plans it, which is read-only.
+    if (explain.analyze) {
+      return inner;
+    }
+    return { class: inner.blocked ? inner.class : "read", parseOk: inner.parseOk, blocked: inner.blocked };
+  }
   let ast: unknown;
   try {
     ast = parser.astify(sql, { database: dialect });

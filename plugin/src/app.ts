@@ -1606,7 +1606,7 @@ export class Gatekeeper {
 
   private modeBlockReason(blocked: boolean, cls: RiskClass): string {
     if (blocked) {
-      return "Blocked: only a single statement can be approved.";
+      return "Blocked: only a single, parseable statement can be approved.";
     }
     return cls === "destructive"
       ? "Blocked: destructive mode is not armed."
