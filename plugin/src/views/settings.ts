@@ -93,6 +93,7 @@ export class SettingsView {
           <div class="starbar-txt">
             <div class="starbar-t1">Enjoying Gatekeeper?</div>
             <div class="starbar-t2">A star helps others find it, and lets you follow releases.</div>
+            <div class="starbar-t2">It's open source and open to contributions, pull requests welcome.</div>
           </div>
           <button class="starbtn" type="button" data-gh-star><svg class="star" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg>Star</button>
         </div>

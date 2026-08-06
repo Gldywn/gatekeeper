@@ -3762,8 +3762,8 @@ label.qs-row {
   font: inherit;
   font-size: 12px;
   font-weight: 600;
+  position: relative;
   white-space: nowrap;
-  overflow: hidden;
   color: var(--muted);
   background: color-mix(in oklch, var(--surface) 90%, transparent);
   border: 1px solid var(--edge-strong);
@@ -3783,6 +3783,7 @@ label.qs-row {
 }
 .cta-fab .cta-lbl {
   max-width: 0;
+  overflow: hidden;
   opacity: 0;
   transition:
     max-width 0.28s var(--ease-out),
@@ -3811,32 +3812,39 @@ label.qs-row {
   color: var(--text);
   background: var(--surface);
 }
-.cta-fab.star.twinkle:hover .star {
-  animation: none;
+/* Not-yet-starred: a filled, tilted gold star with a pulsing amber halo, the same idea as
+   the Sharper-queries indicator, so the discreet pill still catches the eye. Stops once
+   starred (the .twinkle class is dropped). */
+.cta-fab.star.twinkle {
+  color: var(--amber);
+  border-color: color-mix(in oklch, var(--amber) 42%, transparent);
 }
-/* A periodic glint so the discreet star gets noticed; it stops for good once starred. */
+.cta-fab.star.twinkle .star {
+  fill: var(--amber);
+  transform: rotate(-10deg);
+}
 @media (prefers-reduced-motion: no-preference) {
-  .cta-fab.star.twinkle .star {
-    animation: star-twinkle 4.5s var(--ease-in-out) infinite;
+  .cta-fab.star.twinkle::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 999px;
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--amber) 55%, transparent);
+    animation: star-pulse 2.2s var(--ease-in-out) infinite;
+    pointer-events: none;
+  }
+  .cta-fab.star.twinkle:hover::after {
+    animation: none;
   }
 }
-@keyframes star-twinkle {
-  0%,
-  62%,
-  100% {
-    transform: none;
-    fill: transparent;
+@keyframes star-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--amber) 55%, transparent);
   }
   70% {
-    transform: rotate(-14deg) scale(1.18);
-    fill: color-mix(in oklch, var(--amber) 85%, transparent);
+    box-shadow: 0 0 0 9px color-mix(in oklch, var(--amber) 0%, transparent);
   }
-  78% {
-    transform: none;
-    fill: transparent;
-  }
-  84% {
-    transform: scale(1.08);
-    fill: color-mix(in oklch, var(--amber) 55%, transparent);
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--amber) 0%, transparent);
   }
 }
