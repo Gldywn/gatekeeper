@@ -93,7 +93,9 @@ body {
     "header"
     "rail"
     "main";
-  row-gap: var(--s4);
+  /* No header/rail gap: the rail is welded to the header as one card (its own margin
+     re-opens the space before .main). */
+  row-gap: 0;
 }
 
 /* .main is the only container context (gk-main); .gk gets none so the fixed
@@ -104,12 +106,15 @@ body {
   display: flex;
   flex-direction: column;
   gap: var(--s2);
+  margin-bottom: var(--s4);
   padding: var(--s3) var(--s4);
   border: 1px solid var(--edge);
-  border-radius: var(--r);
+  /* Welded under the header: no top border/radius/highlight so the header's bottom edge
+     is the single seam; only the bottom corners round. */
+  border-top: 0;
+  border-radius: 0 0 var(--r) var(--r);
   background: var(--surface);
   box-shadow:
-    inset 0 1px 0 var(--hi),
     inset 0 -1px 0 oklch(0% 0 0 / 0.18),
     var(--elev-2);
 }
@@ -128,7 +133,7 @@ body {
   align-items: center;
   gap: var(--s3);
   padding: var(--s3);
-  border-radius: var(--r);
+  border-radius: var(--r) var(--r) 0 0;
   background: var(--surface);
   border: 1px solid var(--edge);
   box-shadow:
@@ -145,7 +150,7 @@ body {
   inset: 0;
   z-index: 0;
   overflow: hidden;
-  border-radius: var(--r);
+  border-radius: var(--r) var(--r) 0 0;
   pointer-events: none;
 }
 .hive {
