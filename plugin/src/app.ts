@@ -1009,6 +1009,16 @@ export class Gatekeeper {
         void openExternal(ISSUES_URL);
         return;
       }
+      if (target.closest("[data-reset-settings]")) {
+        this.confirmModal.open({
+          tone: "destructive",
+          heading: "Reset all settings?",
+          body: "Every setting on this connection goes back to its default: detection, double confirmation, schema access, and result memory. This can't be undone.",
+          confirmLabel: "Reset to defaults",
+          onConfirm: () => void this.resetSettings(),
+        });
+        return;
+      }
       if (target === settings || target.closest("[data-close]")) {
         this.settingsView.close();
       }
@@ -1165,6 +1175,15 @@ export class Gatekeeper {
     if (key === "schemaAccess") {
       void this.reportSchema();
     }
+  }
+
+  private async resetSettings(): Promise<void> {
+    await this.settingsStore.reset();
+    // Re-render the open overlay to the defaults, re-sync the quick menu and hint, and clear
+    // the schema (schemaAccess is back off).
+    this.settingsView.open();
+    this.onSettingsChanged();
+    void this.reportSchema();
   }
 
   // A toggle from either settings surface. Enabling developer mode confirms through the

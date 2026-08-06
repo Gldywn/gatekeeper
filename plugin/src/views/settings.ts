@@ -142,6 +142,17 @@ export class SettingsView {
             <span class="set-control">${cacheSelectHtml(s.resultCacheMb)}</span>
           </div>
         </section>
+        <section class="set-group danger-zone">
+          <div class="set-group-head"><span class="set-group-name">Danger zone</span></div>
+          <div class="set-row">
+            <div class="set-text">
+              <span class="set-name">Reset all settings</span>
+              <span class="set-desc">Restore every setting on this connection to its default. This can't be undone.</span>
+            </div>
+            <button class="dz-reset" type="button" data-reset-settings>Reset to defaults</button>
+          </div>
+        </section>
+        <div class="settings-sep"></div>
         ${devZone(s)}
       </div>`;
   }

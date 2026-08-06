@@ -3373,6 +3373,38 @@ label.qs-row {
   padding: 3px 5px;
 }
 
+.danger-zone .set-group-name {
+  color: var(--danger);
+}
+.dz-reset {
+  flex: none;
+  margin-left: auto;
+  padding: 7px 12px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--danger);
+  background: transparent;
+  border: 1px solid color-mix(in oklch, var(--danger) 45%, transparent);
+  border-radius: 7px;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
+}
+.dz-reset:hover {
+  color: var(--danger-ink);
+  background: var(--danger);
+  border-color: transparent;
+}
+/* A dotted rule setting the dev block apart from the danger zone above it. */
+.settings-sep {
+  height: 0;
+  margin: var(--s4) 0 0;
+  border-top: 1px dotted var(--edge-strong);
+}
+
 /* Recessed block at the bottom of Settings, dimmer than the real rows. */
 .dev-zone {
   margin-top: var(--s5);

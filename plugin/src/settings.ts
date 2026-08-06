@@ -130,4 +130,17 @@ export class SettingsStore {
     }
     return this.current;
   }
+
+  // Restore this connection's settings to their defaults, persisting the same way set() does.
+  async reset(): Promise<Settings> {
+    this.current = defaultSettings();
+    try {
+      this.all = (await appStorage.getItem<Store>(STORE_KEY)) ?? this.all;
+      this.all[this.connectionName] = this.current;
+      await appStorage.setItem(STORE_KEY, this.all);
+    } catch {
+      this.all[this.connectionName] = this.current;
+    }
+    return this.current;
+  }
 }
