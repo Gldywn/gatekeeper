@@ -44,6 +44,7 @@ import { type CardGate, cardGate, queueHtml, readyActions, schemaInner } from ".
 import { type LayerState, readOnlyView } from "./render/readonly";
 import { devRosterRow, presence, rosterRow } from "./render/roster";
 import { capResult, type Field, type HistResult } from "./result";
+import { collectSchema } from "./schema-collect";
 import { filterSchema, resultBudgetBytes, type Settings, SettingsStore } from "./settings";
 import { classifyQuery, type RiskClass, rank } from "./sql/classify";
 import { formatSql } from "./sql/format";
@@ -329,13 +330,17 @@ export class Gatekeeper {
     // The schema annotation caches columns per table; a DDL change invalidates it.
     if (!this.wiredNotifications) {
       this.wiredNotifications = true;
-      addNotificationListener("tablesChanged", () => this.annotator.clearCache());
+      addNotificationListener("tablesChanged", () => {
+        this.annotator.clearCache();
+        void this.reportSchema();
+      });
     }
     this.polling = true;
     void this.loadInflight();
     void this.poll();
     void this.pollRoster(++this.pollGeneration);
     void this.reportConnection();
+    void this.reportSchema();
     void this.probeEndpoint();
     this.startTimers();
   }
@@ -497,6 +502,7 @@ export class Gatekeeper {
     this.renderConnLabel();
     this.renderModeSurfaces();
     void this.reportConnection();
+    void this.reportSchema();
     void this.probeEndpoint();
     void this.reloadSettings();
     this.renderQueue();
@@ -598,6 +604,27 @@ export class Gatekeeper {
     }
   }
 
+  // Push the structural schema for get_schema when the human has schema access on, or an
+  // explicit "off" so a switched-away or opted-out connection never serves a stale schema.
+  private async reportSchema(): Promise<void> {
+    if (!this.conn) {
+      return;
+    }
+    const name = this.connectionName;
+    try {
+      const payload = this.settingsStore.get().schemaAccess
+        ? await collectSchema(name)
+        : { connectionName: name, access: false, tables: [] };
+      // A connection switch mid-collect: the payload is for the old database, drop it.
+      if (this.connectionName !== name) {
+        return;
+      }
+      await this.broker.postSchema(payload);
+    } catch (err) {
+      log.error(err instanceof Error ? err : String(err));
+    }
+  }
+
   // connGeneration-guarded like the annotator: a switch mid-probe discards the
   // result. Runs via runQuery directly (host-side, not the approval gate) and is
   // stored on the class only, never posted to the broker.
@@ -657,6 +684,7 @@ export class Gatekeeper {
       void this.poll();
       void this.pollRoster(++this.pollGeneration);
       void this.reportConnection();
+      void this.reportSchema();
       void this.probeEndpoint();
       this.startTimers();
     };
@@ -1025,6 +1053,10 @@ export class Gatekeeper {
   private async updateSetting(key: string, value: boolean | number): Promise<void> {
     await this.settingsStore.set({ [key]: value });
     this.onSettingsChanged();
+    // Turning schema access on/off must push (or clear) the schema right away.
+    if (key === "schemaAccess") {
+      void this.reportSchema();
+    }
   }
 
   // A toggle from either settings surface. Enabling developer mode confirms through the

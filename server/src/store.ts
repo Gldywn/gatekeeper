@@ -1,4 +1,5 @@
 import type { ConnectionSnapshot } from "./connection.js";
+import type { SchemaSnapshot } from "./schema.js";
 import { listActivity, readAudit } from "./store/audit.js";
 import { getConnection, setConnection } from "./store/connection.js";
 import { createContext, migrate, type StoreContext } from "./store/db.js";
@@ -15,6 +16,7 @@ import {
   submit,
   sweep,
 } from "./store/requests.js";
+import { getSchema, setSchema } from "./store/schema.js";
 import {
   getSession,
   heartbeatSession,
@@ -119,6 +121,14 @@ export class RequestStore {
 
   getConnection(): ConnectionSnapshot | null {
     return getConnection(this.ctx);
+  }
+
+  setSchema(input: Record<string, unknown>): SchemaSnapshot {
+    return setSchema(this.ctx, input);
+  }
+
+  getSchema(): SchemaSnapshot | null {
+    return getSchema(this.ctx);
   }
 
   upsertSession(input: {

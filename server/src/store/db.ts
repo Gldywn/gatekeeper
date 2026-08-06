@@ -85,6 +85,11 @@ export function migrate(db: Database.Database): void {
         snapshot_json TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS db_schema (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        schema_json TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS sessions (
         session_id TEXT PRIMARY KEY,
         harness TEXT,

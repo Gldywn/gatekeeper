@@ -3,6 +3,8 @@ import { basename } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { MAX_WAIT_MS, SESSION_HEARTBEAT_MS } from "./config.js";
+import type { ConnectionSnapshot } from "./connection.js";
+import type { SchemaSnapshot } from "./schema.js";
 import {
   cancelQuery,
   getQueryResult,
@@ -12,6 +14,34 @@ import {
   type Ticket,
 } from "./service.js";
 import { type RequestStore, StoreError } from "./store.js";
+
+// Serve the last-posted structure only when the human has schema access on, and only for
+// the connection it was captured against (a switch since it was posted makes it stale).
+export function schemaPayload(
+  snap: SchemaSnapshot | null,
+  conn: ConnectionSnapshot | null,
+): unknown {
+  if (!snap?.access) {
+    return {
+      available: false,
+      reason:
+        "Schema access is off for this connection (or not reported yet). Ask the human to turn on Schema access in the Gatekeeper plugin settings.",
+    };
+  }
+  if (conn && snap.connectionName && conn.connectionName !== snap.connectionName) {
+    return {
+      available: false,
+      reason: "The reported schema is stale (the connection changed); it will refresh shortly.",
+    };
+  }
+  return {
+    available: true,
+    connectionName: snap.connectionName,
+    capturedAt: snap.capturedAt,
+    tableCount: snap.tables.length,
+    tables: snap.tables,
+  };
+}
 
 export function createMcpServer(store: RequestStore): { server: McpServer; sessionId: string } {
   // One stdio client per process; this identifies its request ownership.
@@ -149,6 +179,21 @@ export function createMcpServer(store: RequestStore): { server: McpServer; sessi
       store.upsertSession({ sessionId, ...identity() });
       const info = store.getConnection();
       const payload = info ?? { connected: false };
+      return { content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }] };
+    },
+  );
+
+  server.registerTool(
+    "get_schema",
+    {
+      title: "Read the connected database's table and column structure",
+      description:
+        "Return the structure of the database the plugin is connected to (schemas, tables, columns with types and nullability, primary and foreign keys) so you can write correct, valid SQL and refresh your understanding before proposing a query. Never returns any row data, default values, view/function bodies, or comments. Available only when the human has turned on Schema access for this connection; otherwise it reports unavailable. The structure can be large, so read it once and reuse it.",
+      inputSchema: {},
+    },
+    async () => {
+      store.upsertSession({ sessionId, ...identity() });
+      const payload = schemaPayload(store.getSchema(), store.getConnection());
       return { content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }] };
     },
   );

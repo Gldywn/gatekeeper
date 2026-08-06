@@ -104,6 +104,13 @@ export class SettingsView {
             </div>
             <span class="set-control">${switchInput("confirmWrites", "Double confirmation", s.confirmWrites)}</span>
           </div>
+          <div class="set-row">
+            <div class="set-text">
+              <span class="set-name">Schema access</span>
+              <span class="set-desc">Let connected agents read this database's table, column and type structure (never any row data) so they write correct queries. Off by default.</span>
+            </div>
+            <span class="set-control">${switchInput("schemaAccess", "Schema access", s.schemaAccess)}</span>
+          </div>
         </section>
         <section class="set-group">
           ${groupHead("Detection")}

@@ -1,0 +1,90 @@
+import { describe, expect, it } from "vitest";
+import type { ConnectionSnapshot } from "./connection.js";
+import { schemaPayload } from "./mcp.js";
+import { type SchemaSnapshot, sanitizeSchema } from "./schema.js";
+
+const conn = (name: string): ConnectionSnapshot => ({
+  connectionName: name,
+  databaseType: "postgresql",
+  databaseName: name,
+  schema: "public",
+  readOnly: false,
+  mode: "read",
+  capturedAt: 1,
+});
+
+describe("sanitizeSchema", () => {
+  it("keeps a structural skeleton and coerces loose fields", () => {
+    const snap = sanitizeSchema(
+      {
+        connectionName: "prod",
+        access: true,
+        tables: [
+          {
+            schema: "public",
+            name: "users",
+            columns: [
+              { name: "id", type: "int4", primaryKey: true },
+              { name: "email", type: "text" },
+            ],
+            foreignKeys: [{ column: "company_id", refTable: "public.companies", refColumn: "id" }],
+          },
+        ],
+      },
+      42,
+    );
+    expect(snap.access).toBe(true);
+    expect(snap.capturedAt).toBe(42);
+    expect(snap.tables[0].columns).toEqual([
+      { name: "id", type: "int4", primaryKey: true },
+      { name: "email", type: "text", primaryKey: false },
+    ]);
+    expect(snap.tables[0].foreignKeys[0].refTable).toBe("public.companies");
+  });
+
+  it("empties the tables when access is off", () => {
+    const snap = sanitizeSchema(
+      { connectionName: "prod", access: false, tables: [{ name: "users", columns: [] }] },
+      1,
+    );
+    expect(snap.access).toBe(false);
+    expect(snap.tables).toEqual([]);
+  });
+
+  it("survives a malformed payload", () => {
+    const snap = sanitizeSchema({ access: true, tables: "nope" as unknown }, 1);
+    expect(snap.connectionName).toBe("");
+    expect(snap.tables).toEqual([]);
+  });
+});
+
+describe("schemaPayload", () => {
+  const snap: SchemaSnapshot = {
+    connectionName: "prod",
+    access: true,
+    tables: [{ schema: "public", name: "users", columns: [], foreignKeys: [] }],
+    capturedAt: 5,
+  };
+
+  it("reports unavailable when nothing is stored", () => {
+    expect(schemaPayload(null, conn("prod"))).toMatchObject({ available: false });
+  });
+
+  it("reports unavailable when access is off", () => {
+    expect(schemaPayload({ ...snap, access: false, tables: [] }, conn("prod"))).toMatchObject({
+      available: false,
+    });
+  });
+
+  it("refuses a schema captured for a different connection (stale after a switch)", () => {
+    expect(schemaPayload(snap, conn("staging"))).toMatchObject({ available: false });
+  });
+
+  it("serves the structure for the matching connection", () => {
+    expect(schemaPayload(snap, conn("prod"))).toMatchObject({
+      available: true,
+      connectionName: "prod",
+      tableCount: 1,
+    });
+  });
+});

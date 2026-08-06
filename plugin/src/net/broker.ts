@@ -130,6 +130,14 @@ export class BrokerClient {
     });
   }
 
+  async postSchema(schema: unknown): Promise<void> {
+    await this.request("/schema", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(schema),
+    });
+  }
+
   private request(path: string, init?: RequestInit): Promise<Response> {
     return fetch(`${this.baseUrl}${path}`, {
       ...init,

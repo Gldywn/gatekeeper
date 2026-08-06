@@ -11,6 +11,9 @@ export interface Settings {
   // Require a second one-click confirmation before an approved write or destructive
   // statement runs. On by default; a read never prompts.
   confirmWrites: boolean;
+  // Let connected agents read the database's table/column/type structure (never data)
+  // through the get_schema tool. Off by default; the human opts in per connection.
+  schemaAccess: boolean;
   recentlyResolved: number;
   // Approximate RAM ceiling (MB) for held result rows across history; a bigger value
   // keeps more of a large result reviewable before the "held" cap kicks in.
@@ -40,6 +43,7 @@ export function defaultSettings(): Settings {
     schemaAnnotation: true,
     sensitiveValues: true,
     confirmWrites: true,
+    schemaAccess: false,
     recentlyResolved: RECENTLY_RESOLVED_DEFAULT,
     resultCacheMb: RESULT_CACHE_DEFAULT,
     developerMode: false,
@@ -62,6 +66,7 @@ export function normalizeSettings(raw: unknown): Settings {
     schemaAnnotation: asBool(r.schemaAnnotation, true),
     sensitiveValues: asBool(r.sensitiveValues, true),
     confirmWrites: asBool(r.confirmWrites, true),
+    schemaAccess: asBool(r.schemaAccess, false),
     recentlyResolved: (RECENTLY_RESOLVED_OPTIONS as readonly number[]).includes(resolved)
       ? resolved
       : RECENTLY_RESOLVED_DEFAULT,

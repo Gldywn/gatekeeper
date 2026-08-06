@@ -132,6 +132,13 @@ async function handle(
     return;
   }
 
+  if (req.method === "POST" && url.pathname === "/schema") {
+    const body = await readJson(req);
+    store.setSchema(body);
+    send(res, 200, { ok: true });
+    return;
+  }
+
   if (req.method === "POST" && url.pathname === "/lease/renew") {
     const body = await readJson(req);
     guarded(res, () => {
