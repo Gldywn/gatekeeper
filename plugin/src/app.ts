@@ -195,6 +195,9 @@ export class Gatekeeper {
   private pollGeneration = 0;
   private single?: SingleInstance;
   private wiredNotifications = false;
+  // Bumped on every activate/deactivate so an async activate() that was overtaken by a
+  // demotion bails before it starts polling (a standby must never touch the broker).
+  private activeGen = 0;
   private connectionState: ConnectionState = "connecting";
   private readonly root: HTMLElement;
   private readonly broker = new BrokerClient({ baseUrl: BROKER_URL, tokenKey: TOKEN_KEY });
@@ -313,6 +316,7 @@ export class Gatekeeper {
   }
 
   private async activate(): Promise<void> {
+    const gen = ++this.activeGen;
     this.token = await this.broker.loadToken();
     try {
       this.applyConnection(await getConnectionInfo());
@@ -321,11 +325,18 @@ export class Gatekeeper {
       // Connection info is best-effort; the queue still works without it. A
       // failed initial read leaves lastConnCheck at 0 so the first tick retries.
     }
+    // A demotion during the awaits above wins: bail before polling or rendering the shell.
+    if (gen !== this.activeGen) {
+      return;
+    }
     if (!this.token) {
       this.renderPairing();
       return;
     }
     await this.settingsStore.load(this.connectionName);
+    if (gen !== this.activeGen) {
+      return;
+    }
     this.renderShell();
     // The schema annotation caches columns per table; a DDL change invalidates it.
     if (!this.wiredNotifications) {
@@ -348,6 +359,7 @@ export class Gatekeeper {
   // Lost the election (another tab owns the slot): stop every broker-touching loop and
   // show the inert standby screen. A later promotion re-runs activate().
   private deactivate(): void {
+    this.activeGen++;
     this.polling = false;
     this.pollGeneration++;
     if (this.pollTimer !== undefined) {
@@ -366,6 +378,8 @@ export class Gatekeeper {
       loop.stop();
     }
     this.rosterLoops = [];
+    this.breatheLoop?.stop();
+    this.breatheLoop = undefined;
     this.rosterSig = "";
     this.rosterLive = -1;
     this.renderStandby();
@@ -673,12 +687,17 @@ export class Gatekeeper {
       if (!value) {
         return;
       }
+      const gen = this.activeGen;
       // Re-pairing is a fresh session; the armed mode never survives it.
       this.mode = "read";
       await this.broker.setToken(value);
       this.token = value;
-      this.polling = true;
       await this.settingsStore.load(this.connectionName);
+      // Demoted while pairing (another tab took the slot): never start polling.
+      if (gen !== this.activeGen) {
+        return;
+      }
+      this.polling = true;
       this.renderShell();
       void this.loadInflight();
       void this.poll();
