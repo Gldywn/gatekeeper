@@ -75,6 +75,8 @@ const CONN_CHECK_MS = 5000;
 // Re-touch the reported schema this often so it stays inside the server's TTL while the tab
 // is active with schema access on; when the tab stops, the snapshot expires and is dropped.
 const SCHEMA_HEARTBEAT_MS = 60_000;
+// Coalesce a burst of DDL (tablesChanged) notifications into a single re-collection.
+const SCHEMA_DEBOUNCE_MS = 2000;
 const TOKEN_KEY = "gatekeeper.token";
 const ROSTER_POLL_MS = 2000;
 
@@ -206,6 +208,7 @@ export class Gatekeeper {
   private renewTimer?: number;
   private tickTimer?: number;
   private schemaTimer?: number;
+  private schemaReportTimer?: number;
   private pollTimer?: number;
   private pollFailures = 0;
   private pollGeneration = 0;
@@ -365,7 +368,7 @@ export class Gatekeeper {
       this.wiredNotifications = true;
       addNotificationListener("tablesChanged", () => {
         this.annotator.clearCache();
-        void this.reportSchema();
+        this.scheduleSchemaReport();
       });
     }
     this.polling = true;
@@ -399,6 +402,10 @@ export class Gatekeeper {
     if (this.schemaTimer !== undefined) {
       window.clearInterval(this.schemaTimer);
       this.schemaTimer = undefined;
+    }
+    if (this.schemaReportTimer !== undefined) {
+      window.clearTimeout(this.schemaReportTimer);
+      this.schemaReportTimer = undefined;
     }
     for (const loop of this.rosterLoops) {
       loop.stop();
@@ -686,6 +693,15 @@ export class Gatekeeper {
     } catch (err) {
       log.error(err instanceof Error ? err : String(err));
     }
+  }
+
+  // A big schema re-collects with many host round-trips, so under DDL churn debounce it: one
+  // re-collection after the burst settles, not one per tablesChanged.
+  private scheduleSchemaReport(): void {
+    if (this.schemaReportTimer !== undefined) {
+      window.clearTimeout(this.schemaReportTimer);
+    }
+    this.schemaReportTimer = window.setTimeout(() => void this.reportSchema(), SCHEMA_DEBOUNCE_MS);
   }
 
   // connGeneration-guarded like the annotator: a switch mid-probe discards the
