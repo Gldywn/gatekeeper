@@ -3096,9 +3096,6 @@ label.qs-row {
   border-radius: 10px;
   background: color-mix(in oklch, var(--amber) 5%, transparent);
 }
-.set-row + .set-row.recommend {
-  border-top: 0;
-}
 .set-ico {
   display: inline-flex;
   color: var(--amber);
