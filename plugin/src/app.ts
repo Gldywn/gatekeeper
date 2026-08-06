@@ -164,6 +164,8 @@ export class Gatekeeper {
   private readonly history: HistItem[] = [];
   private roster: SessionRoster[] = [];
   private rosterSig = "";
+  private rosterOpen = true;
+  private rosterLive = -1;
   private rosterLoops: Loop[] = [];
   private breatheLoop?: Loop;
   private prevCardIds = new Set<string>();
@@ -669,6 +671,27 @@ export class Gatekeeper {
       const open = hist.style.display !== "none";
       hist.style.display = open ? "none" : "";
       toggle.setAttribute("aria-expanded", String(!open));
+    });
+    const rosterEl = this.root.querySelector<HTMLElement>("#roster")!;
+    rosterEl.addEventListener("click", (e) => {
+      if (!(e.target as HTMLElement).closest("[data-roster-toggle]")) {
+        return;
+      }
+      this.rosterOpen = !this.rosterOpen;
+      rosterEl
+        .querySelector("[data-roster-toggle]")
+        ?.setAttribute("aria-expanded", String(this.rosterOpen));
+      if (this.rosterOpen) {
+        // Re-arm the cascade: drop .play, force one reflow, re-add so it replays.
+        const rows = [...rosterEl.querySelectorAll<HTMLElement>(".roster-row")];
+        for (const r of rows) {
+          r.classList.remove("play");
+        }
+        void rosterEl.offsetWidth;
+        for (const r of rows) {
+          r.classList.add("play");
+        }
+      }
     });
     const queue = this.root.querySelector<HTMLDivElement>("#queue")!;
     queue.addEventListener("click", (e) => {
@@ -1222,11 +1245,26 @@ export class Gatekeeper {
     }
     this.rosterSig = sig;
     const live = rows.filter((r) => r.p !== "gone").length + (dev ? 1 : 0);
+    // Cascade only when the roster grew (an agent joined) or first populated, never on a
+    // minor in-place update, so the list does not re-animate on every pending tick.
+    const grew = live > this.rosterLive;
+    this.rosterLive = live;
     const realList = rows.map(({ s, p }) => rosterRow(s, p)).join("");
     const list = dev
       ? devRosterRow() + realList
       : realList || '<div class="empty">No agents connected.</div>';
-    el.innerHTML = `<div class="roster-head"><span class="label">Connected agents</span><span class="roster-count count-badge">${live}</span></div><div class="roster-list">${list}</div>`;
+    el.innerHTML = `<button class="disclosure roster-toggle" type="button" data-roster-toggle aria-expanded="${this.rosterOpen}"><span class="chev">${chevronDown}</span>Connected agents<span class="roster-count count-badge">${live}</span></button><div class="roster-fold"><div class="roster-fold-inner"><div class="roster-list">${list}</div></div></div>`;
+    // Stagger index for the unfold cascade, set here so the row markup (and its test)
+    // stays free of presentation state.
+    const rowEls = [...el.querySelectorAll<HTMLElement>(".roster-row")];
+    rowEls.forEach((r, i) => {
+      r.style.setProperty("--i", String(i));
+    });
+    if (this.rosterOpen && grew) {
+      for (const r of rowEls) {
+        r.classList.add("play");
+      }
+    }
     for (const loop of this.rosterLoops) {
       loop.stop();
     }

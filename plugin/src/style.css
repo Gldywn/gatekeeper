@@ -897,12 +897,9 @@ label.qs-row {
   color: var(--muted);
   margin: var(--s5) 0 var(--s3);
 }
-/* Eyebrow section labels: uppercase, tracked micro-labels with a hairline that
-   fades as it leaves the text. Scoped to the section headers only (Connected
-   agents via .roster-head, Pending approval as the direct .main child); the
-   Recently-resolved header gets the same treatment on its own .disclosure rule.
-   Never a bare .label, so no other text is uppercased. */
-.roster-head .label,
+/* Eyebrow section labels: uppercase, tracked micro-labels. Scoped to Pending approval
+   (the direct .main child); Connected agents and Recently resolved get the same look
+   from the shared .disclosure rule. Never a bare .label, so nothing else is uppercased. */
 .main > .label {
   display: flex;
   align-items: center;
@@ -1631,17 +1628,57 @@ label.qs-row {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--s2);
+  gap: 0;
 }
-.roster-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0;
-  flex: none;
+/* The head reuses the shared .disclosure eyebrow+chevron (like Recently resolved); the
+   list lives in a grid-rows accordion so folding animates instead of snapping. */
+.roster-fold {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows var(--dur-short) var(--ease-in-out);
 }
-.roster-head .label {
-  margin: 0;
+.roster-toggle[aria-expanded="false"] + .roster-fold {
+  grid-template-rows: 0fr;
+}
+.roster-fold-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+@keyframes roster-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+/* A gone agent settles at its dimmed rest state, not full opacity. */
+@keyframes roster-row-in-gone {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 0.5;
+    transform: none;
+  }
+}
+.roster-toggle[aria-expanded="true"] + .roster-fold .roster-row.play {
+  animation: roster-row-in var(--dur-short) var(--ease-out) both;
+  animation-delay: calc(var(--i) * 40ms);
+}
+.roster-toggle[aria-expanded="true"] + .roster-fold .roster-row.play[data-presence="gone"] {
+  animation-name: roster-row-in-gone;
+}
+@media (prefers-reduced-motion: reduce) {
+  .roster-fold {
+    transition: none;
+  }
+  .roster-row.play {
+    animation: none !important;
+  }
 }
 .roster-count {
   font-family: var(--font-mono);
