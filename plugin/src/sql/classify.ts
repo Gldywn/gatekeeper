@@ -116,6 +116,11 @@ function stripExplain(sql: string): { inner: string; analyze: boolean } | null {
 export function classifyQuery(sql: string, dialect = "postgresql"): RiskVerdict {
   const explain = stripExplain(sql);
   if (explain && explain.inner.length > 0) {
+    // Nested EXPLAIN is invalid in every supported dialect; fail it closed rather than let
+    // the plain-EXPLAIN downgrade below turn an inner EXPLAIN ANALYZE <modify> into a read.
+    if (stripExplain(explain.inner)) {
+      return { class: "destructive", parseOk: false, blocked: true };
+    }
     const inner = classifyQuery(explain.inner, dialect);
     // EXPLAIN ANALYZE executes the wrapped statement for real, so it carries that
     // statement's risk; a plain EXPLAIN only plans it, which is read-only.

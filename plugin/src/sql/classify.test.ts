@@ -131,6 +131,18 @@ describe("classifyQuery", () => {
     }
   });
 
+  // Nested EXPLAIN is invalid SQL; it must never downgrade an inner ANALYZE modify to read.
+  it("blocks a nested EXPLAIN instead of reading its inner ANALYZE", () => {
+    for (const sql of [
+      "EXPLAIN EXPLAIN ANALYZE DELETE FROM users",
+      "EXPLAIN ANALYZE EXPLAIN SELECT 1",
+    ]) {
+      const v = classifyQuery(sql, pg);
+      expect(v.class === "read", sql).toBe(false);
+      expect(v.blocked, sql).toBe(true);
+    }
+  });
+
   it("treats an unrecognized statement as destructive and blocked (fail safe)", () => {
     const v = classifyQuery("VACUUM", pg);
     expect(v.class).toBe("destructive");
