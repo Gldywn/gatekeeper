@@ -141,7 +141,7 @@ function newInstanceId(): string {
 // Placeholder until the public repo exists; both open in the user's browser via the host.
 const REPO_URL = "https://github.com/gatekeeper/gatekeeper";
 const ISSUES_URL = `${REPO_URL}/issues/new/choose`;
-const STARRED_KEY = "gatekeeper.starred.v2";
+const STARRED_KEY = "gatekeeper.starred";
 
 const starGlyph =
   '<svg class="star" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg>';
