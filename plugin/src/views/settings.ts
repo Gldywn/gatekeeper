@@ -107,7 +107,7 @@ export class SettingsView {
           <div class="set-row">
             <div class="set-text">
               <span class="set-name">Schema access</span>
-              <span class="set-desc">Let connected agents read this database's table, column and type structure (never any row data) so they write correct queries. Off by default.</span>
+              <span class="set-desc">Give connected agents your database structure (tables, columns, types, keys) so they write more accurate, valid SQL instead of guessing names. Never exposes any row data. Off by default.</span>
             </div>
             <span class="set-control">${switchInput("schemaAccess", "Schema access", s.schemaAccess)}</span>
           </div>
