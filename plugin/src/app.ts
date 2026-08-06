@@ -731,6 +731,17 @@ export class Gatekeeper {
     <span class="conn-chip" id="conn"></span>
     <span class="armed" id="armed"></span>
     <span class="bar-right">
+      <span class="sa-hint-wrap" id="schemaHint"${s.schemaAccess ? " hidden" : ""}>
+        <button class="sa-hint" type="button" data-schema-hint aria-label="Schema access is off">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3"/></svg>
+          <span class="sa-dot"></span>
+        </button>
+        <span class="sa-pop">
+          <span class="sa-pt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg>Sharper queries</span>
+          <p>Agents work from your code, but they can't see the database itself. Turn on Schema access so they read your tables, columns and keys through get_schema and stop guessing names. Never exposes row data.</p>
+          <button class="sa-enable" type="button" data-schema-enable>Enable Schema access</button>
+        </span>
+      </span>
       <span class="conn-status" id="connStatus" aria-live="polite"></span>
       <span class="dsep"></span>
       <span class="gear-wrap">
@@ -909,6 +920,14 @@ export class Gatekeeper {
     this.root.querySelector<HTMLButtonElement>("#settingsAll")!.addEventListener("click", () => {
       this.setSettingsOpen(false);
       this.settingsView.open();
+    });
+    // The header schema hint (and its Enable button) opens the settings, never toggles
+    // Schema access directly, so enabling it stays a deliberate act in one place.
+    this.root.querySelector<HTMLElement>("#schemaHint")?.addEventListener("click", (e) => {
+      if ((e.target as HTMLElement).closest("[data-schema-enable], [data-schema-hint]")) {
+        this.setSettingsOpen(false);
+        this.settingsView.open();
+      }
     });
     // The quick-menu switches are real inputs; persist on toggle and re-sync surfaces.
     this.root.querySelector<HTMLElement>("#settingsPop")!.addEventListener("change", (e) => {
@@ -1194,6 +1213,10 @@ export class Gatekeeper {
   // a dropped detection axis stops flagging at once.
   private onSettingsChanged(): void {
     this.syncSettingControls();
+    const hint = this.root.querySelector<HTMLElement>("#schemaHint");
+    if (hint) {
+      hint.hidden = this.settingsStore.get().schemaAccess;
+    }
     this.trimHistory();
     this.renderHistory();
     for (const card of [...this.cards]) {

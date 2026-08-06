@@ -607,6 +607,139 @@ body {
 }
 
 /* Settings gear + its safeguards popover, anchored at the bar's right edge. */
+/* The "schema access is off" header nudge: a database glyph with a pulsing amber dot and
+   a hover popover; shown only while the setting is off, hidden the moment it is on. */
+.sa-hint-wrap {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+.sa-hint {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  color: var(--muted);
+  background: var(--hi);
+  cursor: pointer;
+}
+.sa-hint:hover {
+  color: var(--text);
+}
+.sa-hint:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+.sa-hint svg {
+  width: 16px;
+  height: 16px;
+}
+.sa-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--amber);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .sa-dot::after {
+    content: "";
+    position: absolute;
+    inset: -3px;
+    border-radius: 50%;
+    border: 1.5px solid var(--amber);
+    animation: sa-ping 2.2s var(--ease-out) infinite;
+  }
+}
+@keyframes sa-ping {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.7;
+  }
+  70%,
+  100% {
+    transform: scale(1.7);
+    opacity: 0;
+  }
+}
+.sa-pop {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: 268px;
+  padding: 12px 13px;
+  background: var(--surface-2);
+  border: 1px solid var(--edge-strong);
+  border-radius: 10px;
+  box-shadow: var(--elev-pop);
+  z-index: 20;
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  transition:
+    opacity var(--dur) var(--ease-out),
+    transform var(--dur) var(--ease-out);
+}
+.sa-hint-wrap:hover .sa-pop,
+.sa-hint-wrap:focus-within .sa-pop {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+.sa-pop::before {
+  content: "";
+  position: absolute;
+  top: -5px;
+  right: 15px;
+  width: 9px;
+  height: 9px;
+  background: var(--surface-2);
+  border-left: 1px solid var(--edge-strong);
+  border-top: 1px solid var(--edge-strong);
+  transform: rotate(45deg);
+}
+.sa-pt {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 5px;
+  font-size: 12px;
+  font-weight: 620;
+}
+.sa-pt svg {
+  width: 14px;
+  height: 14px;
+  color: var(--amber);
+}
+.sa-pop p {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.sa-enable {
+  margin-top: 9px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 640;
+  color: var(--amber-ink);
+  background: var(--amber);
+  border: 0;
+  border-radius: 6px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+.sa-enable:hover {
+  background: color-mix(in oklch, var(--amber) 88%, white);
+}
 .gear-wrap {
   position: relative;
   display: inline-flex;
@@ -2943,6 +3076,36 @@ label.qs-row {
 .set-row + .set-row {
   border-top: 1px solid var(--hi);
 }
+/* A gently emphasised setting (Schema access): a boxed, amber-tinted row with an icon and
+   a "recommended" tag; the toggle stays top-right like every other row. */
+.set-row.recommend {
+  align-items: flex-start;
+  margin: var(--s2) 0;
+  padding: var(--s3);
+  border: 1px dashed color-mix(in oklch, var(--amber) 38%, transparent);
+  border-radius: 10px;
+  background: color-mix(in oklch, var(--amber) 5%, transparent);
+}
+.set-row + .set-row.recommend {
+  border-top: 0;
+}
+.set-ico {
+  display: inline-flex;
+  color: var(--amber);
+}
+.set-ico svg {
+  width: 15px;
+  height: 15px;
+}
+.set-rec {
+  padding: 1px 5px;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--amber);
+  border: 1px solid color-mix(in oklch, var(--amber) 45%, transparent);
+  border-radius: 4px;
+}
 .set-text {
   display: flex;
   flex-direction: column;
@@ -2953,6 +3116,11 @@ label.qs-row {
   font-size: 13px;
   font-weight: 560;
   color: var(--text);
+}
+.recommend .set-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
 }
 /* The name and its inline detection example share one line. */
 .set-name-line {
