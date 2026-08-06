@@ -99,10 +99,10 @@ export class SettingsView {
           </div>
           <div class="set-row">
             <div class="set-text">
-              <span class="set-name">Confirm write &amp; destructive</span>
+              <span class="set-name">Double confirmation</span>
               <span class="set-desc">Ask for a second one-click confirmation, showing the statement, before an approved write or destructive query runs. Reads never prompt.</span>
             </div>
-            <span class="set-control">${switchInput("confirmWrites", "Confirm write and destructive", s.confirmWrites)}</span>
+            <span class="set-control">${switchInput("confirmWrites", "Double confirmation", s.confirmWrites)}</span>
           </div>
         </section>
         <section class="set-group">
@@ -121,7 +121,7 @@ export class SettingsView {
           <div class="set-row">
             <div class="set-text">
               <span class="set-name">Result memory</span>
-              <span class="set-desc">How much approved-result data to keep in this tab for review. Larger results page fully up to this; beyond it the oldest rows are dropped.</span>
+              <span class="set-desc">How much result data this tab keeps in memory so you can reopen a past result and scroll its full table. Once the limit is reached, the oldest results are dropped.</span>
             </div>
             <span class="set-control">${cacheSelectHtml(s.resultCacheMb)}</span>
           </div>

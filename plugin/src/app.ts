@@ -692,7 +692,7 @@ export class Gatekeeper {
           <div class="pop-group">
             <div class="pop-eyebrow">Access</div>
             <div class="qs-row"><span class="qs-name">Mode</span><span class="qs-ctl" id="modeCtlHeader">${modeDropdown(this.mode, true)}</span></div>
-            ${quickSwitch("confirmWrites", "Confirm write & destructive", s.confirmWrites)}
+            <div id="confirmQuickRow"${this.mode === "read" ? " hidden" : ""}>${quickSwitch("confirmWrites", "Double confirmation", s.confirmWrites)}</div>
           </div>
           <div class="pop-group">
             <div class="pop-eyebrow">Detection</div>
@@ -1111,6 +1111,12 @@ export class Gatekeeper {
     const overlay = this.root.querySelector<HTMLElement>("#modeCtlSettings");
     if (overlay) {
       overlay.innerHTML = modeDropdown(this.mode);
+    }
+    // Double-confirmation only matters once a write/destructive mode is armed, so the quick
+    // menu surfaces it only then; the full settings screen always shows it to preconfigure.
+    const confirmRow = this.root.querySelector<HTMLElement>("#confirmQuickRow");
+    if (confirmRow) {
+      confirmRow.hidden = this.mode === "read";
     }
     this.renderArmed();
   }
