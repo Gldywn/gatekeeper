@@ -1,11 +1,13 @@
 import type { ConnectionInfo, JsonValue, RunQueryResult } from "@beekeeperstudio/plugin";
 import {
   addNotificationListener,
+  appStorage,
   broadcast,
   clipboard,
   getColumns,
   getConnectionInfo,
   log,
+  openExternal,
   runQuery,
   setTabTitle,
 } from "@beekeeperstudio/plugin";
@@ -136,6 +138,16 @@ function newInstanceId(): string {
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+// Placeholder until the public repo exists; both open in the user's browser via the host.
+const REPO_URL = "https://github.com/gatekeeper/gatekeeper";
+const ISSUES_URL = `${REPO_URL}/issues/new/choose`;
+const STARRED_KEY = "gatekeeper.starred";
+
+const starGlyph =
+  '<svg class="star" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg>';
+const feedbackGlyph =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22z"/><path d="M9.5 9h5M9.5 13h3"/></svg>';
+
 function layerGlyph(state: LayerState): string {
   return state === "ok" ? shieldCheckIcon : state === "warn" ? warnIcon : shieldQuestionIcon;
 }
@@ -195,6 +207,7 @@ export class Gatekeeper {
   private pollGeneration = 0;
   private single?: SingleInstance;
   private wiredNotifications = false;
+  private starred = false;
   // Bumped on every activate/deactivate so an async activate() that was overtaken by a
   // demotion bails before it starts polling (a standby must never touch the broker).
   private activeGen = 0;
@@ -299,6 +312,11 @@ export class Gatekeeper {
   }
 
   async start(): Promise<void> {
+    try {
+      this.starred = (await appStorage.getItem<boolean>(STARRED_KEY)) === true;
+    } catch {
+      this.starred = false;
+    }
     // Gate the whole boot behind a cross-tab election: only the active instance talks to
     // the broker, the rest sit inert, so several open tabs never double-poll or race.
     this.single = new SingleInstance(
@@ -398,6 +416,22 @@ export class Gatekeeper {
     this.root
       .querySelector<HTMLButtonElement>("#takeover")
       ?.addEventListener("click", () => this.single?.takeOver());
+  }
+
+  // Once the human has starred (from anywhere), the home star stops twinkling for good.
+  private async markStarred(): Promise<void> {
+    if (this.starred) {
+      return;
+    }
+    this.starred = true;
+    for (const el of this.root.querySelectorAll(".cta-fab.star")) {
+      el.classList.remove("twinkle");
+    }
+    try {
+      await appStorage.setItem(STARRED_KEY, true);
+    } catch {
+      // A failed write just risks the star twinkling again next launch; harmless.
+    }
   }
 
   // Re-adopt the proposals still leased to this plugin so a reopened tab shows them
@@ -744,8 +778,8 @@ export class Gatekeeper {
             <button class="sa-enable" type="button" data-schema-enable>Enable Schema access</button>
           </span>
           <span class="sa-body sa-on">
-            <span class="sa-pt ok"><span class="sa-pt-ico">${checkIcon}</span>Schema access is on</span>
-            <p>Agents now read your structure (tables, columns, types, keys) through get_schema and write more accurate SQL. Never exposes any row data.</p>
+            <span class="sa-pt ok"><span class="sa-pt-ico">${checkIcon}</span>Sharper queries</span>
+            <p>Schema access is on. Agents read your structure (tables, columns, types, keys) through get_schema and write more accurate SQL. Never exposes any row data.</p>
           </span>
         </span>
       </span>
@@ -798,6 +832,10 @@ export class Gatekeeper {
         <div class="detail activity-overlay" id="activity" hidden></div>
         <div class="detail settings-overlay" id="settings" hidden></div>
         <div class="detail confirm-overlay" id="confirm" hidden></div>
+        <div class="cta-cluster" id="ctaCluster">
+          <button class="cta-fab star${this.starred ? "" : " twinkle"}" type="button" data-gh-star aria-label="Star Gatekeeper on GitHub">${starGlyph}<span class="cta-lbl">Star on GitHub</span></button>
+          <button class="cta-fab fb" type="button" data-gh-feedback aria-label="Request a feature">${feedbackGlyph}<span class="cta-lbl">Request a feature</span></button>
+        </div>
       </div>`;
     this.renderConnLabel();
     this.renderArmed();
@@ -936,6 +974,15 @@ export class Gatekeeper {
         this.settingsView.open();
       }
     });
+    this.root.querySelector<HTMLElement>("#ctaCluster")?.addEventListener("click", (e) => {
+      const target = e.target as HTMLElement;
+      if (target.closest("[data-gh-star]")) {
+        void this.markStarred();
+        void openExternal(REPO_URL);
+      } else if (target.closest("[data-gh-feedback]")) {
+        void openExternal(ISSUES_URL);
+      }
+    });
     // The quick-menu switches are real inputs; persist on toggle and re-sync surfaces.
     this.root.querySelector<HTMLElement>("#settingsPop")!.addEventListener("change", (e) => {
       const input = (e.target as HTMLElement).closest<HTMLInputElement>("input[data-setting]");
@@ -946,6 +993,15 @@ export class Gatekeeper {
     const settings = this.root.querySelector<HTMLDivElement>("#settings")!;
     settings.addEventListener("click", (e) => {
       const target = e.target as HTMLElement;
+      if (target.closest("[data-gh-star]")) {
+        void this.markStarred();
+        void openExternal(REPO_URL);
+        return;
+      }
+      if (target.closest("[data-gh-feedback]")) {
+        void openExternal(ISSUES_URL);
+        return;
+      }
       if (target === settings || target.closest("[data-close]")) {
         this.settingsView.close();
       }

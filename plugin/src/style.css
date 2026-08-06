@@ -3660,3 +3660,183 @@ label.qs-row {
   background: var(--danger);
   color: var(--danger-ink);
 }
+
+/* ---- GitHub star & feedback ---- */
+.starbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: var(--s4);
+  padding: 13px 14px;
+  border-radius: 10px;
+  background:
+    radial-gradient(
+      120% 180% at 100% 0,
+      color-mix(in oklch, var(--amber) 15%, transparent),
+      transparent 60%
+    ),
+    var(--surface);
+  border: 1px solid color-mix(in oklch, var(--amber) 22%, var(--edge));
+}
+.starbar .ghtile {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  color: var(--text);
+  background: var(--sunken);
+  border: 1px solid var(--edge);
+}
+.starbar .ghtile svg {
+  width: 20px;
+  height: 20px;
+}
+.starbar-txt {
+  flex: 1;
+  min-width: 0;
+}
+.starbar-t1 {
+  font-size: 13px;
+  font-weight: 600;
+}
+.starbar-t2 {
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.starbtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 640;
+  color: var(--amber-ink);
+  background: var(--amber);
+  border: 0;
+  border-radius: 8px;
+  transition:
+    transform 0.15s var(--ease-out),
+    box-shadow 0.2s;
+}
+.starbtn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px color-mix(in oklch, var(--amber) 30%, transparent);
+}
+.starbtn .star {
+  width: 15px;
+  height: 15px;
+  transition:
+    fill 0.2s var(--ease-out),
+    transform 0.2s var(--ease-out);
+}
+.starbtn:hover .star {
+  fill: var(--amber-ink);
+  transform: rotate(-16deg) scale(1.1);
+}
+.cta-cluster {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  align-items: flex-end;
+}
+.cta-fab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  color: var(--muted);
+  background: color-mix(in oklch, var(--surface) 90%, transparent);
+  border: 1px solid var(--edge-strong);
+  box-shadow: var(--elev-2);
+  backdrop-filter: blur(6px);
+  transition:
+    width 0.28s var(--ease-out),
+    padding 0.28s var(--ease-out),
+    color 0.18s,
+    border-color 0.18s,
+    background 0.18s;
+}
+.cta-fab svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+.cta-fab .cta-lbl {
+  max-width: 0;
+  opacity: 0;
+  transition:
+    max-width 0.28s var(--ease-out),
+    opacity 0.18s,
+    margin 0.28s;
+}
+.cta-fab:hover {
+  width: auto;
+  padding: 0 14px;
+  gap: 8px;
+}
+.cta-fab:hover .cta-lbl {
+  max-width: 170px;
+  opacity: 1;
+  margin-left: 2px;
+}
+.cta-fab.star:hover {
+  color: var(--amber);
+  border-color: color-mix(in oklch, var(--amber) 40%, transparent);
+  background: color-mix(in oklch, var(--amber) 14%, var(--surface));
+}
+.cta-fab.star:hover .star {
+  fill: var(--amber);
+}
+.cta-fab.fb:hover {
+  color: var(--text);
+  background: var(--surface);
+}
+.cta-fab.star.twinkle:hover .star {
+  animation: none;
+}
+/* A periodic glint so the discreet star gets noticed; it stops for good once starred. */
+@media (prefers-reduced-motion: no-preference) {
+  .cta-fab.star.twinkle .star {
+    animation: star-twinkle 4.5s var(--ease-in-out) infinite;
+  }
+}
+@keyframes star-twinkle {
+  0%,
+  62%,
+  100% {
+    transform: none;
+    fill: transparent;
+  }
+  70% {
+    transform: rotate(-14deg) scale(1.18);
+    fill: color-mix(in oklch, var(--amber) 85%, transparent);
+  }
+  78% {
+    transform: none;
+    fill: transparent;
+  }
+  84% {
+    transform: scale(1.08);
+    fill: color-mix(in oklch, var(--amber) 55%, transparent);
+  }
+}
