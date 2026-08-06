@@ -3,7 +3,7 @@ import { basename } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { MAX_WAIT_MS, SESSION_HEARTBEAT_MS } from "./config.js";
-import type { ConnectionSnapshot } from "./connection.js";
+import { type ConnectionSnapshot, connectionScopeKey } from "./connection.js";
 import type { SchemaSnapshot } from "./schema.js";
 import {
   cancelQuery,
@@ -28,7 +28,10 @@ export function schemaPayload(
         "Schema access is off for this connection (or not reported yet). Ask the human to turn on Schema access in the Gatekeeper plugin settings.",
     };
   }
-  if (conn && snap.connectionName && conn.connectionName !== snap.connectionName) {
+  // Serve only while the snapshot's scope still matches the live connection. A switch (even
+  // between same-named connections on different databases) or a forged/empty scope fails closed.
+  const scope = conn ? connectionScopeKey(conn) : "";
+  if (!snap.scope || snap.scope !== scope) {
     return {
       available: false,
       reason: "The reported schema is stale (the connection changed); it will refresh shortly.",
@@ -188,7 +191,7 @@ export function createMcpServer(store: RequestStore): { server: McpServer; sessi
     {
       title: "Read the connected database's table and column structure",
       description:
-        "Return the structure of the database the plugin is connected to (schemas, tables, columns with types and nullability, primary and foreign keys) so you can write correct, valid SQL and refresh your understanding before proposing a query. Never returns any row data, default values, view/function bodies, or comments. Available only when the human has turned on Schema access for this connection; otherwise it reports unavailable. The structure can be large, so read it once and reuse it.",
+        "Return the structure of the database the plugin is connected to (schemas, tables, columns with types, primary and foreign keys) so you can write correct, valid SQL and refresh your understanding before proposing a query. Never returns any row data, default values, view/function bodies, or comments. Available only when the human has turned on Schema access for this connection; otherwise it reports unavailable. The structure can be large, so read it once and reuse it.",
       inputSchema: {},
     },
     async () => {

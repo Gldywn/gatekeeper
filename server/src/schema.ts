@@ -23,6 +23,9 @@ export interface SchemaTable {
 
 export interface SchemaSnapshot {
   connectionName: string;
+  // The composite connection scope (name + engine + database) the schema was captured for;
+  // the tool serves it only while this still matches the live connection.
+  scope: string;
   // false when the human has schema access turned off; the tables are then empty and the
   // MCP tool reports it as unavailable rather than serving a stale structure.
   access: boolean;
@@ -71,6 +74,7 @@ export function sanitizeSchema(input: Record<string, unknown>, capturedAt: numbe
   const access = input.access === true;
   return {
     connectionName: str(input.connectionName),
+    scope: str(input.scope),
     access,
     tables: access ? arr(input.tables).slice(0, MAX_TABLES).map(table) : [],
     capturedAt,

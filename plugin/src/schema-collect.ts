@@ -27,6 +27,9 @@ interface CollectedTable {
 }
 export interface CollectedSchema {
   connectionName: string;
+  // The composite connection scope (name + engine + database); the server serves the schema
+  // only when it still matches the live connection, so a switch never leaks the wrong db.
+  scope: string;
   access: boolean;
   tables: CollectedTable[];
 }
@@ -45,7 +48,10 @@ function joinCols(value: string | string[]): string {
   return Array.isArray(value) ? value.join(", ") : value;
 }
 
-export async function collectSchema(connectionName: string): Promise<CollectedSchema> {
+export async function collectSchema(
+  connectionName: string,
+  scope: string,
+): Promise<CollectedSchema> {
   const schemas = await safe(() => getSchemas(), [] as string[]);
   // A single undefined pass covers engines with no schema concept (SQLite, MySQL).
   const passes: (string | undefined)[] = schemas.length > 0 ? schemas : [undefined];
@@ -72,5 +78,5 @@ export async function collectSchema(connectionName: string): Promise<CollectedSc
       });
     }
   }
-  return { connectionName, access: true, tables };
+  return { connectionName, scope, access: true, tables };
 }

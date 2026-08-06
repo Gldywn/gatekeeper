@@ -550,9 +550,13 @@ export class Gatekeeper {
     this.renderConnLabel();
     this.renderModeSurfaces();
     void this.reportConnection();
-    void this.reportSchema();
     void this.probeEndpoint();
-    void this.reloadSettings();
+    // Load the NEW connection's settings before reporting its schema, so schema access is
+    // read from the connection the human is now on, never from the previous one's consent.
+    void (async () => {
+      await this.reloadSettings();
+      await this.reportSchema();
+    })();
     this.renderQueue();
     this.renderHistory();
     this.renderRoster();
@@ -658,13 +662,16 @@ export class Gatekeeper {
     if (!this.conn) {
       return;
     }
+    const scope = this.connScopeKey() ?? "";
     const name = this.connectionName;
+    const on = this.settingsStore.get().schemaAccess;
     try {
-      const payload = this.settingsStore.get().schemaAccess
-        ? await collectSchema(name)
-        : { connectionName: name, access: false, tables: [] };
-      // A connection switch mid-collect: the payload is for the old database, drop it.
-      if (this.connectionName !== name) {
+      const payload = on
+        ? await collectSchema(name, scope)
+        : { connectionName: name, scope, access: false, tables: [] };
+      // Re-validate after the (possibly slow) collect: a connection switch or a toggle flip
+      // in between must never post a schema for the wrong database, or one without consent.
+      if ((this.connScopeKey() ?? "") !== scope || this.settingsStore.get().schemaAccess !== on) {
         return;
       }
       await this.broker.postSchema(payload);

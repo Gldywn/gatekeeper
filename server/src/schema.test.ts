@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ConnectionSnapshot } from "./connection.js";
+import { type ConnectionSnapshot, connectionScopeKey } from "./connection.js";
 import { schemaPayload } from "./mcp.js";
 import { type SchemaSnapshot, sanitizeSchema } from "./schema.js";
 
@@ -61,10 +61,15 @@ describe("sanitizeSchema", () => {
 describe("schemaPayload", () => {
   const snap: SchemaSnapshot = {
     connectionName: "prod",
+    scope: connectionScopeKey(conn("prod")),
     access: true,
     tables: [{ schema: "public", name: "users", columns: [], foreignKeys: [] }],
     capturedAt: 5,
   };
+
+  it("refuses a schema with no scope (a forged or empty-scope post)", () => {
+    expect(schemaPayload({ ...snap, scope: "" }, conn("prod"))).toMatchObject({ available: false });
+  });
 
   it("reports unavailable when nothing is stored", () => {
     expect(schemaPayload(null, conn("prod"))).toMatchObject({ available: false });

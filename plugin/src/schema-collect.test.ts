@@ -24,8 +24,12 @@ import { collectSchema } from "./schema-collect";
 
 describe("collectSchema", () => {
   it("maps SDK introspection into a structural payload with PK and FK", async () => {
-    const s = await collectSchema("prod");
-    expect(s).toMatchObject({ connectionName: "prod", access: true });
+    const s = await collectSchema("prod", "prodpostgresqlapp");
+    expect(s).toMatchObject({
+      connectionName: "prod",
+      scope: "prodpostgresqlapp",
+      access: true,
+    });
     expect(s.tables).toHaveLength(1);
     const t = s.tables[0];
     expect(t).toMatchObject({ schema: "public", name: "users" });
