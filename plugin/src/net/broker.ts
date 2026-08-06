@@ -138,6 +138,10 @@ export class BrokerClient {
     });
   }
 
+  async touchSchema(): Promise<void> {
+    await this.request("/schema/touch", { method: "POST" });
+  }
+
   private request(path: string, init?: RequestInit): Promise<Response> {
     return fetch(`${this.baseUrl}${path}`, {
       ...init,

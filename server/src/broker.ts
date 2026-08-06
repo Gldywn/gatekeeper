@@ -139,6 +139,12 @@ async function handle(
     return;
   }
 
+  if (req.method === "POST" && url.pathname === "/schema/touch") {
+    store.touchSchema();
+    send(res, 200, { ok: true });
+    return;
+  }
+
   if (req.method === "POST" && url.pathname === "/lease/renew") {
     const body = await readJson(req);
     guarded(res, () => {

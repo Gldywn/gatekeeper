@@ -15,11 +15,16 @@ import {
 } from "./service.js";
 import { type RequestStore, StoreError } from "./store.js";
 
-// Serve the last-posted structure only when the human has schema access on, and only for
-// the connection it was captured against (a switch since it was posted makes it stale).
+// The plugin re-touches the snapshot ~every minute; past this it is presumed dead (plugin
+// closed, or a lost schema-access-off), so the tool fails closed instead of serving it.
+const SCHEMA_TTL_MS = 3 * 60_000;
+
+// Serve the last-posted structure only when the human has schema access on, only for the
+// connection it was captured against, and only while it is still fresh (see the TTL above).
 export function schemaPayload(
   snap: SchemaSnapshot | null,
   conn: ConnectionSnapshot | null,
+  now: number,
 ): unknown {
   if (!snap?.access) {
     return {
@@ -35,6 +40,13 @@ export function schemaPayload(
     return {
       available: false,
       reason: "The reported schema is stale (the connection changed); it will refresh shortly.",
+    };
+  }
+  if (now - snap.capturedAt > SCHEMA_TTL_MS) {
+    return {
+      available: false,
+      reason:
+        "The schema has not been refreshed recently; the plugin may be closed or Schema access turned off. It returns once the plugin is open with Schema access on.",
     };
   }
   return {
@@ -196,7 +208,7 @@ export function createMcpServer(store: RequestStore): { server: McpServer; sessi
     },
     async () => {
       store.upsertSession({ sessionId, ...identity() });
-      const payload = schemaPayload(store.getSchema(), store.getConnection());
+      const payload = schemaPayload(store.getSchema(), store.getConnection(), Date.now());
       return { content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }] };
     },
   );

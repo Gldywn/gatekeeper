@@ -67,26 +67,36 @@ describe("schemaPayload", () => {
     capturedAt: 5,
   };
 
+  const fresh = snap.capturedAt + 1;
+
   it("refuses a schema with no scope (a forged or empty-scope post)", () => {
-    expect(schemaPayload({ ...snap, scope: "" }, conn("prod"))).toMatchObject({ available: false });
-  });
-
-  it("reports unavailable when nothing is stored", () => {
-    expect(schemaPayload(null, conn("prod"))).toMatchObject({ available: false });
-  });
-
-  it("reports unavailable when access is off", () => {
-    expect(schemaPayload({ ...snap, access: false, tables: [] }, conn("prod"))).toMatchObject({
+    expect(schemaPayload({ ...snap, scope: "" }, conn("prod"), fresh)).toMatchObject({
       available: false,
     });
   });
 
-  it("refuses a schema captured for a different connection (stale after a switch)", () => {
-    expect(schemaPayload(snap, conn("staging"))).toMatchObject({ available: false });
+  it("reports unavailable when nothing is stored", () => {
+    expect(schemaPayload(null, conn("prod"), fresh)).toMatchObject({ available: false });
   });
 
-  it("serves the structure for the matching connection", () => {
-    expect(schemaPayload(snap, conn("prod"))).toMatchObject({
+  it("reports unavailable when access is off", () => {
+    expect(
+      schemaPayload({ ...snap, access: false, tables: [] }, conn("prod"), fresh),
+    ).toMatchObject({ available: false });
+  });
+
+  it("refuses a schema captured for a different connection (stale after a switch)", () => {
+    expect(schemaPayload(snap, conn("staging"), fresh)).toMatchObject({ available: false });
+  });
+
+  it("refuses a schema that has gone past its TTL (plugin closed / not refreshing)", () => {
+    expect(schemaPayload(snap, conn("prod"), snap.capturedAt + 10 * 60_000)).toMatchObject({
+      available: false,
+    });
+  });
+
+  it("serves the structure for the matching, fresh connection", () => {
+    expect(schemaPayload(snap, conn("prod"), fresh)).toMatchObject({
       available: true,
       connectionName: "prod",
       tableCount: 1,

@@ -72,6 +72,9 @@ const POLL_MS = 1000;
 const RENEW_MS = 15_000;
 const TICK_MS = 1000;
 const CONN_CHECK_MS = 5000;
+// Re-touch the reported schema this often so it stays inside the server's TTL while the tab
+// is active with schema access on; when the tab stops, the snapshot expires and is dropped.
+const SCHEMA_HEARTBEAT_MS = 60_000;
 const TOKEN_KEY = "gatekeeper.token";
 const ROSTER_POLL_MS = 2000;
 
@@ -202,6 +205,7 @@ export class Gatekeeper {
   private endpointProbed = false;
   private renewTimer?: number;
   private tickTimer?: number;
+  private schemaTimer?: number;
   private pollTimer?: number;
   private pollFailures = 0;
   private pollGeneration = 0;
@@ -391,6 +395,10 @@ export class Gatekeeper {
     if (this.tickTimer !== undefined) {
       window.clearInterval(this.tickTimer);
       this.tickTimer = undefined;
+    }
+    if (this.schemaTimer !== undefined) {
+      window.clearInterval(this.schemaTimer);
+      this.schemaTimer = undefined;
     }
     for (const loop of this.rosterLoops) {
       loop.stop();
@@ -706,8 +714,16 @@ export class Gatekeeper {
     if (this.tickTimer !== undefined) {
       window.clearInterval(this.tickTimer);
     }
+    if (this.schemaTimer !== undefined) {
+      window.clearInterval(this.schemaTimer);
+    }
     this.renewTimer = window.setInterval(() => void this.renew(), RENEW_MS);
     this.tickTimer = window.setInterval(() => this.tick(), TICK_MS);
+    this.schemaTimer = window.setInterval(() => {
+      if (this.settingsStore.get().schemaAccess) {
+        void this.broker.touchSchema();
+      }
+    }, SCHEMA_HEARTBEAT_MS);
   }
 
   private renderPairing(errorMessage = ""): void {

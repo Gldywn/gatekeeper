@@ -16,3 +16,16 @@ export function getSchema(ctx: StoreContext): SchemaSnapshot | null {
     | undefined;
   return row ? (JSON.parse(row.schema_json) as SchemaSnapshot) : null;
 }
+
+// The plugin's liveness ping: bump capturedAt so the snapshot stays within its TTL while the
+// plugin is open with schema access on. A no-op when nothing is stored.
+export function touchSchema(ctx: StoreContext): void {
+  const snap = getSchema(ctx);
+  if (!snap) {
+    return;
+  }
+  snap.capturedAt = ctx.now();
+  ctx.db
+    .prepare("INSERT OR REPLACE INTO db_schema (id, schema_json) VALUES (1, ?)")
+    .run(JSON.stringify(snap));
+}

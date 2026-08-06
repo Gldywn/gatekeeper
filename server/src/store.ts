@@ -16,7 +16,7 @@ import {
   submit,
   sweep,
 } from "./store/requests.js";
-import { getSchema, setSchema } from "./store/schema.js";
+import { getSchema, setSchema, touchSchema } from "./store/schema.js";
 import {
   getSession,
   heartbeatSession,
@@ -129,6 +129,10 @@ export class RequestStore {
 
   getSchema(): SchemaSnapshot | null {
     return getSchema(this.ctx);
+  }
+
+  touchSchema(): void {
+    touchSchema(this.ctx);
   }
 
   upsertSession(input: {
