@@ -3775,27 +3775,6 @@ label.qs-row {
   height: 15px;
   flex: none;
 }
-.dbn-star {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11px;
-  color: var(--faint);
-  cursor: pointer;
-}
-.dbn-star:hover {
-  color: var(--amber);
-}
-.dbn-star svg {
-  width: 12px;
-  height: 12px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.7;
-}
-.dbn-star:hover svg {
-  fill: var(--amber);
-}
 .dbn-actions {
   display: flex;
   align-items: center;

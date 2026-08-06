@@ -173,8 +173,6 @@ function dbNoticeKey(type: string): string {
 
 const githubMark =
   '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>';
-const starGlyph =
-  '<svg class="star" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg>';
 const feedbackGlyph =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22z"/><path d="M9.5 9h5M9.5 13h3"/></svg>';
 
@@ -517,7 +515,6 @@ export class Gatekeeper {
           <p class="dbn-p">Gatekeeper is open source and still young. If you run it on ${name} and can help put it through its paces, even a short set of test notes or a small fix is enough for us to move it onto the officially supported list, for you and everyone who comes after. Contributions are genuinely welcome.</p>
           <div class="dbn-foot">
             <button class="dbn-gh" type="button" data-notice-contribute>${githubMark}Contribute on GitHub</button>
-            <span class="dbn-star" data-notice-star>${starGlyph}or just star the repo</span>
           </div>
         </div>
         <div class="dbn-actions">
@@ -953,7 +950,7 @@ export class Gatekeeper {
         <div class="detail confirm-overlay" id="confirm" hidden></div>
         <div class="detail db-notice-overlay" id="notice" hidden></div>
         <div class="cta-cluster" id="ctaCluster">
-          <button class="cta-fab star${this.starred ? "" : " twinkle"}" type="button" data-gh-star aria-label="Star Gatekeeper on GitHub">${starGlyph}<span class="cta-lbl">Star on GitHub</span></button>
+          <button class="cta-fab star${this.starred ? "" : " twinkle"}" type="button" data-gh-star aria-label="Star Gatekeeper on GitHub">${githubMark}<span class="cta-lbl">Star on GitHub</span></button>
           <button class="cta-fab fb" type="button" data-gh-feedback aria-label="Request a feature">${feedbackGlyph}<span class="cta-lbl">Request a feature</span></button>
         </div>
       </div>`;
@@ -1140,11 +1137,6 @@ export class Gatekeeper {
     notice.addEventListener("click", (e) => {
       const target = e.target as HTMLElement;
       if (target.closest("[data-notice-contribute]")) {
-        void openExternal(REPO_URL);
-        return;
-      }
-      if (target.closest("[data-notice-star]")) {
-        void this.markStarred();
         void openExternal(REPO_URL);
         return;
       }
