@@ -1,6 +1,7 @@
-import type { ConnectionInfo, RunQueryResult } from "@beekeeperstudio/plugin";
+import type { ConnectionInfo, JsonValue, RunQueryResult } from "@beekeeperstudio/plugin";
 import {
   addNotificationListener,
+  broadcast,
   clipboard,
   getColumns,
   getConnectionInfo,
@@ -27,6 +28,7 @@ import {
 } from "./icons";
 import { BrokerClient } from "./net/broker";
 import { connectionScopeKey } from "./net/scope";
+import { SingleInstance, type SingleInstanceWire } from "./net/singleinstance";
 import { ConfirmModal } from "./render/confirm";
 import { connChipInner } from "./render/connchip";
 import { modeDropdown, switchInput } from "./render/controls";
@@ -127,6 +129,12 @@ function quickSwitch(setting: string, label: string, checked: boolean): string {
   return `<label class="qs-row switch-row"><span class="qs-name">${label}</span>${switchInput(setting, label, checked)}</label>`;
 }
 
+function newInstanceId(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 function layerGlyph(state: LayerState): string {
   return state === "ok" ? shieldCheckIcon : state === "warn" ? warnIcon : shieldQuestionIcon;
 }
@@ -184,6 +192,8 @@ export class Gatekeeper {
   private pollTimer?: number;
   private pollFailures = 0;
   private pollGeneration = 0;
+  private single?: SingleInstance;
+  private wiredNotifications = false;
   private connectionState: ConnectionState = "connecting";
   private readonly root: HTMLElement;
   private readonly broker = new BrokerClient({ baseUrl: BROKER_URL, tokenKey: TOKEN_KEY });
@@ -285,6 +295,23 @@ export class Gatekeeper {
   }
 
   async start(): Promise<void> {
+    // Gate the whole boot behind a cross-tab election: only the active instance talks to
+    // the broker, the rest sit inert, so several open tabs never double-poll or race.
+    this.single = new SingleInstance(
+      {
+        post: (m) => broadcast.post(m as unknown as JsonValue),
+        subscribe: (h) => broadcast.on((m) => h(m as unknown as SingleInstanceWire)),
+        now: () => Date.now(),
+        onActive: () => void this.activate(),
+        onStandby: () => this.deactivate(),
+      },
+      newInstanceId(),
+    );
+    window.addEventListener("pagehide", () => this.single?.dispose());
+    this.single.join();
+  }
+
+  private async activate(): Promise<void> {
     this.token = await this.broker.loadToken();
     try {
       this.applyConnection(await getConnectionInfo());
@@ -300,7 +327,10 @@ export class Gatekeeper {
     await this.settingsStore.load(this.connectionName);
     this.renderShell();
     // The schema annotation caches columns per table; a DDL change invalidates it.
-    addNotificationListener("tablesChanged", () => this.annotator.clearCache());
+    if (!this.wiredNotifications) {
+      this.wiredNotifications = true;
+      addNotificationListener("tablesChanged", () => this.annotator.clearCache());
+    }
     this.polling = true;
     void this.loadInflight();
     void this.poll();
@@ -308,6 +338,47 @@ export class Gatekeeper {
     void this.reportConnection();
     void this.probeEndpoint();
     this.startTimers();
+  }
+
+  // Lost the election (another tab owns the slot): stop every broker-touching loop and
+  // show the inert standby screen. A later promotion re-runs activate().
+  private deactivate(): void {
+    this.polling = false;
+    this.pollGeneration++;
+    if (this.pollTimer !== undefined) {
+      window.clearTimeout(this.pollTimer);
+      this.pollTimer = undefined;
+    }
+    if (this.renewTimer !== undefined) {
+      window.clearInterval(this.renewTimer);
+      this.renewTimer = undefined;
+    }
+    if (this.tickTimer !== undefined) {
+      window.clearInterval(this.tickTimer);
+      this.tickTimer = undefined;
+    }
+    for (const loop of this.rosterLoops) {
+      loop.stop();
+    }
+    this.rosterLoops = [];
+    this.rosterSig = "";
+    this.rosterLive = -1;
+    this.renderStandby();
+  }
+
+  private renderStandby(): void {
+    this.root.innerHTML = `
+      <div class="standby">
+        <div class="standby-card">
+          <span class="standby-ico">${copyIcon}</span>
+          <h1>Open in another tab</h1>
+          <p>Gatekeeper runs in a single tab so two tabs never race an approval. This tab is inactive.</p>
+          <button class="btn approve" id="takeover" type="button">Use Gatekeeper here</button>
+        </div>
+      </div>`;
+    this.root
+      .querySelector<HTMLButtonElement>("#takeover")
+      ?.addEventListener("click", () => this.single?.takeOver());
   }
 
   // Re-adopt the proposals still leased to this plugin so a reopened tab shows them
