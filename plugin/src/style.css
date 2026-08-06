@@ -675,7 +675,7 @@ body {
   right: 0;
   width: 268px;
   padding: 12px 13px;
-  background: var(--surface-2);
+  background: var(--surface);
   border: 1px solid var(--edge-strong);
   border-radius: 10px;
   box-shadow: var(--elev-pop);
@@ -700,10 +700,20 @@ body {
   right: 15px;
   width: 9px;
   height: 9px;
-  background: var(--surface-2);
+  background: var(--surface);
   border-left: 1px solid var(--edge-strong);
   border-top: 1px solid var(--edge-strong);
   transform: rotate(45deg);
+}
+/* Invisible bridge over the icon-to-popover gap so the cursor can travel down without
+   :hover dropping and closing the popover mid-move. */
+.sa-pop::after {
+  content: "";
+  position: absolute;
+  top: -11px;
+  left: 0;
+  right: 0;
+  height: 11px;
 }
 .sa-pt {
   display: flex;
@@ -3080,7 +3090,7 @@ label.qs-row {
    a "recommended" tag; the toggle stays top-right like every other row. */
 .set-row.recommend {
   align-items: flex-start;
-  margin: var(--s2) 0;
+  margin: var(--s3) 0 var(--s2);
   padding: var(--s3);
   border: 1px dashed color-mix(in oklch, var(--amber) 38%, transparent);
   border-radius: 10px;

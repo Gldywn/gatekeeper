@@ -738,7 +738,7 @@ export class Gatekeeper {
         </button>
         <span class="sa-pop">
           <span class="sa-pt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg>Sharper queries</span>
-          <p>Agents work from your code, but they can't see the database itself. Turn on Schema access so they read your tables, columns and keys through get_schema and stop guessing names. Never exposes row data.</p>
+          <p>Without this, agents guess your table and column names. Turn on Schema access so they read the real structure through get_schema and write accurate SQL. Never exposes any row data.</p>
           <button class="sa-enable" type="button" data-schema-enable>Enable Schema access</button>
         </span>
       </span>
