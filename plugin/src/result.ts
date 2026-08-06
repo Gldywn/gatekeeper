@@ -11,6 +11,15 @@ export interface HistResult {
   bytes?: number;
 }
 
+// The column order shared by the grid and every export: the declared field order when
+// present, else the keys of the first row, so all surfaces agree on layout.
+export function resultColumns(result: HistResult): string[] {
+  if (result.fields.length) {
+    return result.fields.map((f) => f.name);
+  }
+  return Object.keys(result.rows[0] ?? {});
+}
+
 // A hard ceiling on held rows independent of the byte budget, so one pathological
 // result can never make the pager math or a stringify pass run away.
 const HIST_MAX_ROWS = 100_000;

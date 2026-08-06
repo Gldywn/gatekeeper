@@ -2,6 +2,37 @@ import { escapeHtml } from "../html";
 import { checkIcon, chevronDown } from "../icons";
 import type { RiskMode } from "../sql/mode";
 
+export interface FlyoutOption {
+  fmt: string;
+  icon: string;
+  name: string;
+}
+
+// A compact trigger + format popover, shared by the audit-trail export and the result
+// copy/export controls. Each option carries the action and key, so the app's delegated
+// click handler stays stateless; the app wires open/close on the data-flyout-* hooks.
+export function flyoutMenu(
+  action: string,
+  key: string,
+  triggerIcon: string,
+  triggerLabel: string,
+  options: FlyoutOption[],
+): string {
+  const k = escapeHtml(key);
+  const opts = options
+    .map(
+      (o) =>
+        `<button class="flyout-opt" type="button" role="menuitem" data-flyout-action="${action}" data-flyout-key="${k}" data-flyout-fmt="${o.fmt}">${o.icon}${o.name}<span class="flyout-ext">.${o.fmt}</span></button>`,
+    )
+    .join("\n                ");
+  return `<span class="flyout-wrap">
+              <button class="flyout" type="button" data-flyout-trigger="${k}" aria-haspopup="menu" aria-expanded="false">${triggerIcon}${triggerLabel}<span class="flyout-chev">${chevronDown}</span></button>
+              <div class="flyout-menu" data-flyout-menu role="menu" hidden>
+                ${opts}
+              </div>
+            </span>`;
+}
+
 // A real, persisted toggle: an appearance:none checkbox styled as a track+knob. Its
 // data-setting maps it to a Settings key; the app's delegated change handler persists it.
 export function switchInput(setting: string, ariaLabel: string, checked: boolean): string {

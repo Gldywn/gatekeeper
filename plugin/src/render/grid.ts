@@ -1,5 +1,5 @@
 import { type CellComponent, type ColumnDefinition, TabulatorFull } from "tabulator-tables";
-import type { HistResult } from "../result";
+import { type HistResult, resultColumns } from "../result";
 import { classifyColumn } from "../sql/schema";
 
 // Values are sampled, not fully scanned, to decide a column's alignment/sorter: enough
@@ -12,7 +12,7 @@ const TOOLTIP_MIN_CHARS = 40;
 // (capResult stays the source of truth for the memory cap and the truncation footer).
 // Display only: no editing, sorting/resize/reorder are read-only affordances.
 export function mountResultGrid(host: HTMLElement, result: HistResult): TabulatorFull {
-  const names = columnNames(result);
+  const names = resultColumns(result);
   // Size the grid to the space left below its host so the detail popup never overflows the
   // viewport (only the tableholder scrolls); read from the host's live position, so a long
   // or short query above it simply gives the grid less or more room.
@@ -42,13 +42,6 @@ export function mountResultGrid(host: HTMLElement, result: HistResult): Tabulato
       minWidth: 80,
     },
   });
-}
-
-function columnNames(result: HistResult): string[] {
-  if (result.fields.length) {
-    return result.fields.map((f) => f.name);
-  }
-  return Object.keys(result.rows[0] ?? {});
 }
 
 function columnDef(name: string, rows: Record<string, unknown>[]): ColumnDefinition {

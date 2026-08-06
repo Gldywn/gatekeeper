@@ -1,9 +1,20 @@
 import { capitalize, escapeHtml, relAge, sessionDisplayName } from "../html";
-import { agentBadge, checkIcon, clockIcon, copyIcon, xCircleIcon } from "../icons";
+import {
+  agentBadge,
+  checkIcon,
+  clockIcon,
+  copyIcon,
+  downloadIcon,
+  jsonIcon,
+  markdownIcon,
+  tableIcon,
+  xCircleIcon,
+} from "../icons";
 import type { HistResult } from "../result";
 import { formatSql } from "../sql/format";
 import { highlight } from "../sql/highlight";
 import type { HistItem } from "../types";
+import { flyoutMenu } from "./controls";
 import { statusIcon } from "./status";
 
 export function detailHtml(item: HistItem): string {
@@ -105,7 +116,22 @@ export function gridFoot(result: HistResult): string {
   const capTag = result.truncated
     ? ` <span class="cap-tag">first ${formatCount(result.rows.length)} held</span>`
     : "";
-  return `<div class="grid-foot"><span class="rc"><b>${formatCount(result.rowCount)}</b> ${noun}${capTag}</span></div>`;
+  // The copy/export controls act on the rows on screen, so they show only when rows are
+  // held; the copy icon is wrapped so a copy can flash a check on it without disturbing
+  // the label. When truncated, both operate on the held slice, not the full result.
+  const actions = result.rows.length
+    ? `<span class="grid-foot-actions">${flyoutMenu(
+        "copy",
+        "result",
+        `<span class="flyout-ico" data-flyout-ico>${copyIcon}</span>`,
+        "Copy",
+        [{ fmt: "md", icon: markdownIcon, name: "Markdown" }],
+      )}${flyoutMenu("export", "result", downloadIcon, "Export", [
+        { fmt: "csv", icon: tableIcon, name: "CSV" },
+        { fmt: "json", icon: jsonIcon, name: "JSON" },
+      ])}</span>`
+    : "";
+  return `<div class="grid-foot"><span class="rc"><b>${formatCount(result.rowCount)}</b> ${noun}${capTag}</span>${actions}</div>`;
 }
 
 // Thousands separators without toLocaleString, so the rendered count is byte-stable

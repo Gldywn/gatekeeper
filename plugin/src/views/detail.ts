@@ -1,8 +1,12 @@
+import { clipboard, log, requestFileSave } from "@beekeeperstudio/plugin";
 import type { TabulatorFull } from "tabulator-tables";
 import type { SchemaAnnotator } from "../annotate";
+import { dayKey, sessionDisplayName } from "../html";
+import { checkIcon, copyIcon } from "../icons";
 import { detailHtml } from "../render/detail";
 import { mountResultGrid } from "../render/grid";
 import { schemaInner } from "../render/queue";
+import { resultCsv, resultJson, resultMarkdown } from "../render/resultexport";
 import { filterSchema, type Settings } from "../settings";
 import { formatSql } from "../sql/format";
 import { highlight } from "../sql/highlight";
@@ -85,6 +89,47 @@ export class DetailView {
         schema?.client,
         schema?.literals,
       );
+    }
+  }
+
+  // Save the held rows through the host's file dialog as CSV or JSON. A no-op once the
+  // result has been purged (retention or the byte budget) after the overlay opened.
+  async exportResult(fmt: "csv" | "json"): Promise<void> {
+    const item = this.detailItem;
+    if (!item?.result) {
+      return;
+    }
+    const who = sessionDisplayName(item.session, item.id).toLowerCase();
+    const slug = who.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "result";
+    const json = fmt === "json";
+    try {
+      await requestFileSave({
+        data: json ? resultJson(item.result) : resultCsv(item.result),
+        fileName: `gatekeeper-result-${dayKey(Date.now())}-${slug}.${fmt}`,
+        encoding: "utf8",
+        filters: [
+          json ? { name: "JSON", extensions: ["json"] } : { name: "CSV", extensions: ["csv"] },
+        ],
+      });
+    } catch (err) {
+      log.error(err instanceof Error ? err : String(err));
+    }
+  }
+
+  // Quick copy of the held rows to the clipboard as Markdown, flashing a check on the
+  // trigger's icon (like copySql). A no-op if the result was purged.
+  async copyResult(_fmt: "md"): Promise<void> {
+    const result = this.detailItem?.result;
+    if (!result) {
+      return;
+    }
+    await clipboard.writeText(resultMarkdown(result));
+    const ico = this.root.querySelector<HTMLElement>("#detail [data-flyout-ico]");
+    if (ico) {
+      ico.innerHTML = checkIcon;
+      window.setTimeout(() => {
+        ico.innerHTML = copyIcon;
+      }, 1200);
     }
   }
 

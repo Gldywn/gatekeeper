@@ -6,6 +6,7 @@ import {
   activityDaysHtml,
   activityFlagLabels,
   activityFlagsHtml,
+  activityJson,
   activityMarkdown,
   activityShell,
 } from "../render/activity";
@@ -198,10 +199,10 @@ export class ActivityView {
       ?.setAttribute("aria-expanded", String(!open));
   }
 
-  // Deliberate human export of one session-day's timeline via the host's save dialog,
-  // as markdown or CSV. The SQL is host-side only and no result rows are included; an
+  // Deliberate human export of one session-day's timeline via the host's save dialog, as
+  // markdown, CSV, or JSON. The SQL is host-side only and no result rows are included; an
   // approved query contributes just its scalar row count.
-  async exportSession(key: string, format: "md" | "csv"): Promise<void> {
+  async exportSession(key: string, format: "md" | "csv" | "json"): Promise<void> {
     const sep = key.indexOf("|");
     if (sep === -1) {
       return;
@@ -227,17 +228,24 @@ export class ActivityView {
     const first = entries[0];
     const who = (first.project?.trim() || first.harness?.trim() || sessionId).toLowerCase();
     const slug = who.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "session";
-    const csv = format === "csv";
+    const data =
+      format === "csv"
+        ? activityCsv(entries, flags)
+        : format === "json"
+          ? activityJson(entries, flags)
+          : activityMarkdown(day, sessionId, entries, this.connectionName(), flags);
+    const filter =
+      format === "csv"
+        ? { name: "CSV", extensions: ["csv"] }
+        : format === "json"
+          ? { name: "JSON", extensions: ["json"] }
+          : { name: "Markdown", extensions: ["md"] };
     try {
       await requestFileSave({
-        data: csv
-          ? activityCsv(entries, flags)
-          : activityMarkdown(day, sessionId, entries, this.connectionName(), flags),
-        fileName: `gatekeeper-activity-${day}-${slug}.${csv ? "csv" : "md"}`,
+        data,
+        fileName: `gatekeeper-activity-${day}-${slug}.${format === "md" ? "md" : format}`,
         encoding: "utf8",
-        filters: [
-          csv ? { name: "CSV", extensions: ["csv"] } : { name: "Markdown", extensions: ["md"] },
-        ],
+        filters: [filter],
       });
     } catch (err) {
       log.error(err instanceof Error ? err : String(err));

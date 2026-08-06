@@ -1,3 +1,4 @@
+import { csvFormulaGuard, csvQuote } from "../csv";
 import {
   activityLatency,
   capitalize,
@@ -14,6 +15,7 @@ import {
   downloadIcon,
   harnessIcon,
   historyIcon,
+  jsonIcon,
   markdownIcon,
   pencilIcon,
   tableIcon,
@@ -24,6 +26,7 @@ import { formatSql } from "../sql/format";
 import { highlight } from "../sql/highlight";
 import type { SchemaContext } from "../sql/schema";
 import type { ActivityEntry } from "../types";
+import { flyoutMenu } from "./controls";
 
 export function activityShell(body: string, connChip: string): string {
   return `
@@ -137,20 +140,14 @@ export function activityGroupHtml(
         </section>`;
 }
 
-// The Export trigger and its compact format menu. The trigger toggles the menu; each
-// option carries both the session-day key and its format, so the click handler stays
-// stateless. Kept lighter than the mode dropdown: two icon rows, no descriptions.
+// The per-session-day export: the shared flyout keyed on the session-day so the click
+// handler stays stateless, offering the whole timeline as Markdown, CSV, or JSON.
 function exportControl(day: string, sessionId: string): string {
-  const key = escapeHtml(`${day}|${sessionId}`);
-  const opt = (fmt: "md" | "csv", icon: string, name: string) =>
-    `<button class="act-export-opt" type="button" role="menuitem" data-export="${key}" data-export-fmt="${fmt}">${icon}${name}<span class="act-export-ext">.${fmt}</span></button>`;
-  return `<span class="act-export-wrap">
-              <button class="act-export" type="button" data-export-trigger="${key}" aria-haspopup="menu" aria-expanded="false">${downloadIcon}Export<span class="act-export-chev">${chevronDown}</span></button>
-              <div class="act-export-menu" data-export-menu role="menu" hidden>
-                ${opt("md", markdownIcon, "Markdown")}
-                ${opt("csv", tableIcon, "CSV")}
-              </div>
-            </span>`;
+  return flyoutMenu("export", `${day}|${sessionId}`, downloadIcon, "Export", [
+    { fmt: "md", icon: markdownIcon, name: "Markdown" },
+    { fmt: "csv", icon: tableIcon, name: "CSV" },
+    { fmt: "json", icon: jsonIcon, name: "JSON" },
+  ]);
 }
 
 type RiskClass = ReturnType<typeof classifyQuery>["class"];
@@ -177,7 +174,11 @@ function activityMetric(e: ActivityEntry, cls: RiskClass): string {
   return cls === "read" ? `${e.rowCount} rows` : `${e.rowCount} affected`;
 }
 
-export function activityEntryHtml(e: ActivityEntry, expanded: Set<string>, dialect: string): string {
+export function activityEntryHtml(
+  e: ActivityEntry,
+  expanded: Set<string>,
+  dialect: string,
+): string {
   const ts = e.decidedAt ?? e.createdAt;
   const intent = e.intent?.trim();
   const headline = intent ? capitalize(intent) : previewSql(e.sql);
@@ -317,12 +318,9 @@ const CSV_HEADER = [
   "sql",
 ];
 
-// RFC 4180 field: double internal quotes and wrap when the value carries a comma,
-// quote, or newline. A leading =, +, -, or @ is neutralised with a ' so a spreadsheet
-// imports it as text, not a formula (CSV-injection guard).
+// Every activity field is free text, so the formula guard always applies before quoting.
 function csvField(value: string): string {
-  const guarded = /^[=+\-@]/.test(value) ? `'${value}` : value;
-  return /[",\r\n]/.test(guarded) ? `"${guarded.replace(/"/g, '""')}"` : guarded;
+  return csvQuote(csvFormulaGuard(value));
 }
 
 // session_id leads so exports merge across sessions; the SQL is flattened so a row is
@@ -351,4 +349,28 @@ export function activityCsv(entries: ActivityEntry[], flags: ActivityFlagMap = n
   const body = [CSV_HEADER.join(","), ...rows].join("\r\n");
   // Lead with a UTF-8 BOM so Excel decodes accented intents as UTF-8, not Latin-1.
   return `﻿${body}\r\n`;
+}
+
+// The same session-day timeline as an array of native-typed rows: numbers stay numbers,
+// absent optionals are null, and the SQL is kept whole rather than flattened onto a line.
+export function activityJson(entries: ActivityEntry[], flags: ActivityFlagMap = new Map()): string {
+  const rows = [...entries].reverse().map((e) => {
+    const ts = e.decidedAt ?? e.createdAt;
+    const latencyMs =
+      activityLatency(e) !== "—" && e.decidedAt != null ? e.decidedAt - e.createdAt : null;
+    return {
+      session_id: e.sessionId,
+      timestamp: new Date(ts).toISOString(),
+      status: outcomeMeta(e.state).label,
+      latency_ms: latencyMs,
+      intent: e.intent?.trim() || null,
+      flags: flags.get(e.id) ?? [],
+      request_id: e.id,
+      rows: e.rowCount,
+      reason: e.reason?.trim() || null,
+      error: e.error?.trim() || null,
+      sql: e.sql.trim(),
+    };
+  });
+  return `${JSON.stringify(rows, null, 2)}\n`;
 }

@@ -51,9 +51,20 @@ describe("render/detail", () => {
       '<span class="kw">SELECT</span>\n  email,\n  company_name\n<span class="kw">FROM</span> audit.users',
     );
     // The outcome lives in the tinted recessed well: header (icon + word + meta), then the
-    // grid host Tabulator mounts into (render/grid.ts), and the plain row-count footer.
+    // grid host Tabulator mounts into (render/grid.ts), and the row-count footer.
     expect(html).toContain(
-      '<div class="detail-rail approved"><div class="detail-oc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span class="detail-oc-title">Approved</span><span class="detail-oc-meta">2 rows</span></div><div class="detail-oc-body" id="detail-grid"><div class="gk-grid" data-result-grid></div><div class="grid-foot"><span class="rc"><b>2</b> rows</span></div></div>',
+      '<div class="detail-rail approved"><div class="detail-oc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span class="detail-oc-title">Approved</span><span class="detail-oc-meta">2 rows</span></div><div class="detail-oc-body" id="detail-grid"><div class="gk-grid" data-result-grid></div><div class="grid-foot"><span class="rc"><b>2</b> rows</span>',
+    );
+    // Copy (Markdown) and Export (CSV, JSON) sit to the right of the row count.
+    expect(html).toContain('<span class="grid-foot-actions"><span class="flyout-wrap">');
+    expect(html).toContain(
+      'data-flyout-action="copy" data-flyout-key="result" data-flyout-fmt="md"',
+    );
+    expect(html).toContain(
+      'data-flyout-action="export" data-flyout-key="result" data-flyout-fmt="csv"',
+    );
+    expect(html).toContain(
+      'data-flyout-action="export" data-flyout-key="result" data-flyout-fmt="json"',
     );
   });
 

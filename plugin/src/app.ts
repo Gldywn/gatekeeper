@@ -285,9 +285,9 @@ export class Gatekeeper {
         if (this.confirmModal.cancel()) {
           return;
         }
-        // An open mode or export menu swallows the first Escape so it dismisses without
+        // An open mode or flyout menu swallows the first Escape so it dismisses without
         // also tearing down the overlay or popover it sits inside.
-        if (this.closeModeMenus() || this.closeExportMenus()) {
+        if (this.closeModeMenus() || this.closeFlyoutMenus()) {
           return;
         }
         this.activityView.close();
@@ -1058,6 +1058,25 @@ export class Gatekeeper {
         this.copySql(copy);
         return;
       }
+      // A result copy/export option: dispatch by action, the view holds the open item.
+      const opt = target.closest<HTMLElement>("[data-flyout-action]");
+      if (opt) {
+        this.closeFlyoutMenus();
+        const fmt = opt.getAttribute("data-flyout-fmt")!;
+        if (opt.getAttribute("data-flyout-action") === "export") {
+          void this.detailView.exportResult(fmt as "csv" | "json");
+        } else {
+          void this.detailView.copyResult(fmt as "md");
+        }
+        return;
+      }
+      const trigger = target.closest<HTMLElement>("[data-flyout-trigger]");
+      if (trigger) {
+        this.toggleFlyoutMenu(trigger);
+        return;
+      }
+      // Any other click dismisses an open format menu.
+      this.closeFlyoutMenus();
       // Close on the backdrop or the close button, not on the card itself.
       if (target === detail || target.closest("[data-close]")) {
         this.detailView.close();
@@ -1168,22 +1187,24 @@ export class Gatekeeper {
         this.copySql(copy);
         return;
       }
-      const fmt = target.closest<HTMLElement>("[data-export-fmt]");
-      if (fmt) {
-        this.closeExportMenus();
-        void this.activityView.exportSession(
-          fmt.getAttribute("data-export")!,
-          fmt.getAttribute("data-export-fmt") as "md" | "csv",
-        );
+      const opt = target.closest<HTMLElement>("[data-flyout-action]");
+      if (opt) {
+        this.closeFlyoutMenus();
+        if (opt.getAttribute("data-flyout-action") === "export") {
+          void this.activityView.exportSession(
+            opt.getAttribute("data-flyout-key")!,
+            opt.getAttribute("data-flyout-fmt") as "md" | "csv" | "json",
+          );
+        }
         return;
       }
-      const expTrigger = target.closest<HTMLElement>("[data-export-trigger]");
+      const expTrigger = target.closest<HTMLElement>("[data-flyout-trigger]");
       if (expTrigger) {
-        this.toggleExportMenu(expTrigger);
+        this.toggleFlyoutMenu(expTrigger);
         return;
       }
       // Any other click in the panel dismisses an open format menu.
-      this.closeExportMenus();
+      this.closeFlyoutMenus();
       const dayHead = target.closest<HTMLElement>("[data-day]");
       if (dayHead) {
         this.activityView.toggleDay(dayHead);
@@ -1239,30 +1260,30 @@ export class Gatekeeper {
     }
   }
 
-  // The export format menu opens/closes like the mode menus: one at a time, trigger
-  // toggles, a click elsewhere dismisses.
-  private toggleExportMenu(trigger: HTMLElement): void {
-    const menu = trigger.parentElement?.querySelector<HTMLElement>("[data-export-menu]");
+  // A flyout format menu (audit export, result copy/export) opens/closes like the mode
+  // menus: one at a time, the trigger toggles, a click elsewhere dismisses.
+  private toggleFlyoutMenu(trigger: HTMLElement): void {
+    const menu = trigger.parentElement?.querySelector<HTMLElement>("[data-flyout-menu]");
     if (!menu) {
       return;
     }
     const open = menu.hidden;
-    this.closeExportMenus();
+    this.closeFlyoutMenus();
     if (open) {
       menu.hidden = false;
       trigger.setAttribute("aria-expanded", "true");
     }
   }
 
-  private closeExportMenus(): boolean {
+  private closeFlyoutMenus(): boolean {
     let closed = false;
-    for (const menu of this.root.querySelectorAll<HTMLElement>("[data-export-menu]")) {
+    for (const menu of this.root.querySelectorAll<HTMLElement>("[data-flyout-menu]")) {
       if (!menu.hidden) {
         menu.hidden = true;
         closed = true;
       }
     }
-    for (const trigger of this.root.querySelectorAll<HTMLElement>("[data-export-trigger]")) {
+    for (const trigger of this.root.querySelectorAll<HTMLElement>("[data-flyout-trigger]")) {
       trigger.setAttribute("aria-expanded", "false");
     }
     return closed;

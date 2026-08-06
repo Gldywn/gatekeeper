@@ -4,7 +4,13 @@ process.env.TZ = "UTC";
 
 import { describe, expect, it } from "vitest";
 import type { ActivityEntry } from "../types";
-import { activityCsv, activityEntryHtml, activityGroupHtml, activityMarkdown } from "./activity";
+import {
+  activityCsv,
+  activityEntryHtml,
+  activityGroupHtml,
+  activityJson,
+  activityMarkdown,
+} from "./activity";
 
 const T = new Date("2026-01-01T09:30:00Z").getTime();
 
@@ -53,12 +59,19 @@ describe("render/activity", () => {
     );
   });
 
-  it("renders the export trigger and its format menu", () => {
+  it("renders the export trigger and its Markdown/CSV/JSON format menu", () => {
     const html = activityGroupHtml("2026-01-01", "s1", [approved], new Set(), "postgresql");
-    expect(html).toContain('data-export-trigger="2026-01-01|s1"');
-    expect(html).toContain("data-export-menu");
-    expect(html).toContain('data-export="2026-01-01|s1" data-export-fmt="md"');
-    expect(html).toContain('data-export="2026-01-01|s1" data-export-fmt="csv"');
+    expect(html).toContain('data-flyout-trigger="2026-01-01|s1"');
+    expect(html).toContain("data-flyout-menu");
+    expect(html).toContain(
+      'data-flyout-action="export" data-flyout-key="2026-01-01|s1" data-flyout-fmt="md"',
+    );
+    expect(html).toContain(
+      'data-flyout-action="export" data-flyout-key="2026-01-01|s1" data-flyout-fmt="csv"',
+    );
+    expect(html).toContain(
+      'data-flyout-action="export" data-flyout-key="2026-01-01|s1" data-flyout-fmt="json"',
+    );
   });
 
   it("renders a session-day markdown export with intent in the title, flags and latency", () => {
@@ -77,6 +90,38 @@ describe("render/activity", () => {
         "s1,2026-01-01T09:29:30.000Z,declined,,remove a user,,q_cd34,,read-only only,,DELETE FROM audit.users WHERE id = 1\r\n" +
         "s1,2026-01-01T09:30:00.000Z,approved,5000,list account contacts,PII,q_ab12,3,,,SELECT email FROM audit.users\r\n",
     );
+  });
+
+  it("renders a session-day JSON export: oldest-first, native-typed rows", () => {
+    const flags = new Map([["q_ab12", ["PII"]]]);
+    expect(JSON.parse(activityJson([approved, rejected], flags))).toEqual([
+      {
+        session_id: "s1",
+        timestamp: "2026-01-01T09:29:30.000Z",
+        status: "declined",
+        latency_ms: null,
+        intent: "remove a user",
+        flags: [],
+        request_id: "q_cd34",
+        rows: null,
+        reason: "read-only only",
+        error: null,
+        sql: "DELETE FROM audit.users WHERE id = 1",
+      },
+      {
+        session_id: "s1",
+        timestamp: "2026-01-01T09:30:00.000Z",
+        status: "approved",
+        latency_ms: 5000,
+        intent: "list account contacts",
+        flags: ["PII"],
+        request_id: "q_ab12",
+        rows: 3,
+        reason: null,
+        error: null,
+        sql: "SELECT email FROM audit.users",
+      },
+    ]);
   });
 
   it("quotes and neutralises CSV fields that could break a spreadsheet", () => {

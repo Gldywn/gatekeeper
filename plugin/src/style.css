@@ -2419,6 +2419,11 @@ label.qs-row {
   color: var(--text);
   font-variant-numeric: tabular-nums;
 }
+.grid-foot-actions {
+  margin-left: auto;
+  display: flex;
+  gap: var(--s2);
+}
 .cap-tag {
   font-size: 10px;
   color: var(--amber);
@@ -2811,7 +2816,7 @@ label.qs-row {
   border: 1px solid var(--edge);
   border-radius: 20px;
 }
-.act-export {
+.flyout {
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -2828,35 +2833,39 @@ label.qs-row {
     color var(--dur) var(--ease),
     background var(--dur) var(--ease);
 }
-.act-export:hover {
+.flyout:hover {
   color: var(--text);
   background: var(--hi);
 }
-.act-export:focus-visible {
+.flyout:focus-visible {
   outline: 2px solid var(--amber);
   outline-offset: 1px;
 }
-.act-export svg {
+.flyout svg {
   width: 13px;
   height: 13px;
 }
-.act-export-wrap {
+/* The swappable copy-icon span: inline-flex so the check/copy glyph stays centred. */
+.flyout-ico {
+  display: inline-flex;
+}
+.flyout-wrap {
   position: relative;
   flex: none;
 }
-.act-export-chev {
+.flyout-chev {
   display: inline-flex;
   color: var(--faint);
 }
-.act-export-chev svg {
+.flyout-chev svg {
   width: 11px;
   height: 11px;
 }
-.act-export[aria-expanded="true"] .act-export-chev {
+.flyout[aria-expanded="true"] .flyout-chev {
   transform: rotate(180deg);
 }
 /* Compact format menu: two icon rows, tighter than the mode dropdown. */
-.act-export-menu {
+.flyout-menu {
   position: absolute;
   top: calc(100% + 5px);
   right: 0;
@@ -2868,10 +2877,10 @@ label.qs-row {
   border-radius: 8px;
   box-shadow: var(--elev-pop);
 }
-.act-export-menu[hidden] {
+.flyout-menu[hidden] {
   display: none;
 }
-.act-export-opt {
+.flyout-opt {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2886,20 +2895,20 @@ label.qs-row {
   cursor: pointer;
   text-align: left;
 }
-.act-export-opt:hover {
+.flyout-opt:hover {
   background: var(--hi);
 }
-.act-export-opt:focus-visible {
+.flyout-opt:focus-visible {
   outline: 2px solid var(--amber);
   outline-offset: -2px;
 }
-.act-export-opt svg {
+.flyout-opt svg {
   width: 14px;
   height: 14px;
   flex: none;
   color: var(--muted);
 }
-.act-export-ext {
+.flyout-ext {
   margin-left: auto;
   font-family: var(--font-mono);
   font-size: 10.5px;
