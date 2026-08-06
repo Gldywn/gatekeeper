@@ -731,15 +731,22 @@ export class Gatekeeper {
     <span class="conn-chip" id="conn"></span>
     <span class="armed" id="armed"></span>
     <span class="bar-right">
-      <span class="sa-hint-wrap" id="schemaHint"${s.schemaAccess ? " hidden" : ""}>
-        <button class="sa-hint" type="button" data-schema-hint aria-label="Schema access is off">
+      <span class="sa-hint-wrap" id="schemaHint" data-on="${s.schemaAccess}">
+        <button class="sa-hint" type="button" data-schema-hint aria-label="Schema access">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3"/></svg>
           <span class="sa-dot"></span>
+          <span class="sa-check">${checkIcon}</span>
         </button>
         <span class="sa-pop">
-          <span class="sa-pt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg>Sharper queries</span>
-          <p>Without this, agents guess your table and column names. Turn on Schema access so they read the real structure through get_schema and write accurate SQL. Never exposes any row data.</p>
-          <button class="sa-enable" type="button" data-schema-enable>Enable Schema access</button>
+          <span class="sa-body sa-off">
+            <span class="sa-pt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg>Sharper queries</span>
+            <p>Without this, agents guess your table and column names. Turn on Schema access so they read the real structure through get_schema and write accurate SQL. Never exposes any row data.</p>
+            <button class="sa-enable" type="button" data-schema-enable>Enable Schema access</button>
+          </span>
+          <span class="sa-body sa-on">
+            <span class="sa-pt ok"><span class="sa-pt-ico">${checkIcon}</span>Schema access is on</span>
+            <p>Agents now read your structure (tables, columns, types, keys) through get_schema and write more accurate SQL. Never exposes any row data.</p>
+          </span>
         </span>
       </span>
       <span class="conn-status" id="connStatus" aria-live="polite"></span>
@@ -1215,7 +1222,7 @@ export class Gatekeeper {
     this.syncSettingControls();
     const hint = this.root.querySelector<HTMLElement>("#schemaHint");
     if (hint) {
-      hint.hidden = this.settingsStore.get().schemaAccess;
+      hint.dataset.on = String(this.settingsStore.get().schemaAccess);
     }
     this.trimHistory();
     this.renderHistory();

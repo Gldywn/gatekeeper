@@ -669,6 +669,43 @@ body {
     opacity: 0;
   }
 }
+/* Enabled state: the amber pulse gives way to a quiet green check, and the popover swaps
+   its "turn it on" body for a confirmation. Driven by data-on on the wrapper. */
+.sa-check {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  display: none;
+  place-items: center;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  color: var(--surface);
+  background: var(--ok);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.sa-check svg {
+  width: 8px;
+  height: 8px;
+}
+.sa-hint-wrap[data-on="true"] .sa-dot {
+  display: none;
+}
+.sa-hint-wrap[data-on="true"] .sa-check {
+  display: grid;
+}
+.sa-hint-wrap[data-on="true"] .sa-off,
+.sa-hint-wrap[data-on="false"] .sa-on {
+  display: none;
+}
+.sa-pt-ico {
+  display: inline-flex;
+}
+.sa-pt.ok .sa-pt-ico svg {
+  width: 14px;
+  height: 14px;
+  color: var(--ok);
+}
 .sa-pop {
   position: absolute;
   top: calc(100% + 10px);
