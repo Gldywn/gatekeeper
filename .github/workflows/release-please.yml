@@ -1,0 +1,23 @@
+name: release-please
+
+# Conventional-commit-driven releases: this maintains a "Release PR" that bumps versions
+# and updates CHANGELOGs per package; merging it tags the release. Versioning/tagging only,
+# the build+publish of artifacts is a separate workflow triggered by the tag.
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
