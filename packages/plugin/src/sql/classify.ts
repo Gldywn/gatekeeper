@@ -1,6 +1,9 @@
+import type { AccessMode } from "@gatekeeper/shared";
 import { parser } from "./sql-parser";
 
-export type RiskClass = "read" | "write" | "destructive";
+// The plugin's risk class is the shared access mode; kept as a local alias so the many
+// call sites that import RiskClass keep working.
+export type RiskClass = AccessMode;
 
 export interface RiskVerdict {
   // Highest risk the statement carries.
@@ -127,7 +130,11 @@ export function classifyQuery(sql: string, dialect = "postgresql"): RiskVerdict 
     if (explain.analyze) {
       return inner;
     }
-    return { class: inner.blocked ? inner.class : "read", parseOk: inner.parseOk, blocked: inner.blocked };
+    return {
+      class: inner.blocked ? inner.class : "read",
+      parseOk: inner.parseOk,
+      blocked: inner.blocked,
+    };
   }
   let ast: unknown;
   try {

@@ -1,8 +1,8 @@
-@import "../../../shared/tokens.css";
+@import "@gatekeeper/shared/tokens.css";
 
 /* ============================================================================
    Gatekeeper landing page.
-   The design tokens are imported from shared/tokens.css (the single source of
+   The design tokens are imported from @gatekeeper/shared/tokens.css (the single source of
    truth shared with the plugin) so this page reads as the same product.
    Component looks (bar, cards, SQL block, audit trail, roster, mode dots,
    confirm) are ported with their exact values. Two asset url()s from the plugin
@@ -256,7 +256,7 @@ h3 { font-size: 1.12rem; font-weight: 640; letter-spacing: -0.015em; }
 .demo-play svg { width: 20px; height: 20px; margin-left: 2px; }
 .demo-cap { font-family: var(--font-mono); font-size: 11px; color: var(--faint); text-align: center; }
 
-/* ==== Ported component CSS (values verbatim from plugin/src/style.css) ==== */
+/* ==== Ported component CSS (values verbatim from packages/plugin/src/style.css) ==== */
 /* Header bar. grid-area is dropped (no .gk grid here); every visual value is exact. */
 .bar {
   position: relative;

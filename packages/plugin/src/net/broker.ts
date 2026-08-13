@@ -1,4 +1,5 @@
 import { appStorage } from "@beekeeperstudio/plugin";
+import type { ConnectionInput } from "@gatekeeper/shared";
 import type { ActivityEntry, Proposal, SessionRoster } from "../types";
 
 export interface BrokerConfig {
@@ -6,16 +7,9 @@ export interface BrokerConfig {
   tokenKey: string;
 }
 
-// The non-sensitive connection context handed to the agent via POST /connection:
-// dialect, database, schema, read-only, the armed mode; never host/user/credentials.
-export interface ConnectionSnapshot {
-  connectionName: string;
-  databaseType: string;
-  databaseName: string;
-  schema: string | null;
-  readOnly: boolean;
-  mode: "read" | "write" | "destructive";
-}
+// The non-sensitive connection context the plugin POSTs to /connection (the server stamps
+// capturedAt on its side). Never host/user/credentials.
+export type ConnectionSnapshot = ConnectionInput;
 
 // A refused renewal (cancelled or lost lease) tells the caller to drop the card.
 export type RenewResult = { ok: false } | { ok: true; leaseExpiresAt: number };

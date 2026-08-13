@@ -2,7 +2,7 @@
   "mcpServers": {
     "gatekeeper": {
       "command": "node",
-      "args": ["/absolute/path/to/gatekeeper/server/dist/index.js"],
+      "args": ["/absolute/path/to/gatekeeper/packages/server/dist/index.js"],
       "env": {
         "GATEKEEPER_BROKER_PORT": "9999"
       }

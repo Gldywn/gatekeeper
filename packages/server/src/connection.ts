@@ -1,16 +1,9 @@
-export type ConnectionMode = "read" | "write" | "destructive";
+import type { AccessMode, ConnectionSnapshot } from "@gatekeeper/shared";
 
-export interface ConnectionSnapshot {
-  connectionName: string;
-  databaseType: string;
-  databaseName: string;
-  schema: string | null;
-  readOnly: boolean;
-  // The plugin's ephemeral armed access mode; defaults to read-only. Informational
-  // only (any token holder can post it), never an authorization boundary.
-  mode: ConnectionMode;
-  capturedAt: number;
-}
+// Local alias so existing ConnectionMode call sites resolve; re-export the served snapshot
+// (with capturedAt) as the single source of truth for this module's consumers.
+export type ConnectionMode = AccessMode;
+export type { ConnectionSnapshot };
 
 // Unit separator: header-safe (0x1F ≤ 0xFF, unlike the glyph U+241F a browser
 // fetch rejects) and won't occur inside a name, engine, or database.
@@ -18,7 +11,7 @@ export const SCOPE_SEP = "\u001f";
 
 // Two connections sharing a display name but pointing at different engines/databases
 // must never share state, so scoping joins name + engine + database (plain and
-// debuggable, never a hash). Kept byte-identical to plugin/src/net/scope.ts.
+// debuggable, never a hash). Kept byte-identical to packages/plugin/src/net/scope.ts.
 export function connectionScopeKey(c: {
   connectionName: string;
   databaseType: string;

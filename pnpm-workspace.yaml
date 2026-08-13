@@ -1,6 +1,5 @@
 packages:
-  - plugin
-  - server
+  - "packages/*"
   - landing
 
 # Supply chain: refuse any dependency version published less than 7 days ago.

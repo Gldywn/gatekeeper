@@ -1,4 +1,7 @@
-export type RiskClass = "read" | "write" | "destructive";
+import type { AccessMode } from "@gatekeeper/shared";
+
+// The server's advisory risk class is the shared access mode.
+export type RiskClass = AccessMode;
 
 export interface RiskAssessment {
   class: RiskClass;

@@ -1,8 +1,8 @@
 /* Design tokens (the palette, spacing, type, easings, elevation) live in the
-   repo-root shared/ single source, imported by both this plugin and the landing
-   site so the two can never drift. Kept at the very top: @import must precede all
+   @gatekeeper/shared package, imported by both this plugin and the landing site
+   so the two can never drift. Kept at the very top: @import must precede all
    other rules, and the tokens must resolve before anything references them. */
-@import "../../shared/tokens.css";
+@import "@gatekeeper/shared/tokens.css";
 
 * {
   box-sizing: border-box;

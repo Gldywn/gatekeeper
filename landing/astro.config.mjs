@@ -2,8 +2,8 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig, passthroughImageService } from "astro/config";
 
-// The design tokens live at the repo root (shared/tokens.css), one level above this
-// Astro project; allow Vite's dev server to read outside the landing/ root.
+// The design tokens come from the @gatekeeper/shared workspace package, whose files sit
+// outside landing/; allow Vite's dev server to read the repo root so the symlink resolves.
 const repoRoot = fileURLToPath(new URL("../", import.meta.url));
 
 export default defineConfig({

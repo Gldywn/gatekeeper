@@ -1,12 +1,7 @@
-export type RequestState =
-  | "pending"
-  | "leased"
-  | "executing"
-  | "approved"
-  | "rejected"
-  | "failed"
-  | "expired"
-  | "cancelled";
+import type { RequestState } from "@gatekeeper/shared";
+
+// Re-export so the many `./types`/store imports of RequestState keep resolving here.
+export type { RequestState };
 
 export type StoreErrorCode =
   | "QUEUE_FULL"

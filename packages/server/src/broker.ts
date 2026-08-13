@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type { AccessMode, ActivityEntry, Proposal, SessionRoster } from "@gatekeeper/shared";
 import { BROKER_HOST, brokerPort, LEASE_MS } from "./config.js";
 import { connectionScopeKey } from "./connection.js";
 import { type Outcome, type RequestStore, StoreError } from "./store.js";
@@ -54,7 +55,8 @@ async function handle(
   const url = new URL(req.url ?? "/", `http://${BROKER_HOST}`);
 
   if (req.method === "GET" && url.pathname === "/sessions") {
-    send(res, 200, { sessions: store.listSessions(resolveConnection(store, req)) });
+    const sessions: SessionRoster[] = store.listSessions(resolveConnection(store, req));
+    send(res, 200, { sessions });
     return;
   }
 
@@ -62,7 +64,8 @@ async function handle(
   // connection scoping as /sessions. Never an MCP tool; the SQL it carries can
   // hold PII literals, so no agent-facing surface exposes it.
   if (req.method === "GET" && url.pathname === "/activity") {
-    send(res, 200, { activity: store.listActivity(resolveConnection(store, req)) });
+    const activity: ActivityEntry[] = store.listActivity(resolveConnection(store, req));
+    send(res, 200, { activity });
     return;
   }
 
@@ -73,36 +76,39 @@ async function handle(
       res.end();
       return;
     }
-    send(res, 200, {
+    const wire: Proposal = {
       id: proposal.id,
       sql: proposal.sql,
-      intent: proposal.intent,
+      intent: proposal.intent ?? undefined,
       class: proposalClass(proposal.policy),
       createdAt: proposal.createdAt,
       expiresAt: proposal.expiresAt,
-      leaseId: proposal.leaseId,
-      leaseExpiresAt: proposal.leaseExpiresAt,
+      leaseId: proposal.leaseId!,
+      leaseExpiresAt: proposal.leaseExpiresAt!,
       sessionId: proposal.sessionId,
       session: store.getSession(proposal.sessionId),
-    });
+    };
+    send(res, 200, wire);
     return;
   }
 
   // Re-hydrate a reopened plugin: the proposals this pluginId already holds under
   // a live lease, so a fresh tab shows them without waiting for the lease to lapse.
   if (req.method === "GET" && url.pathname === "/inflight") {
-    const inflight = store.listInflight(pluginId, resolveConnection(store, req)).map((p) => ({
-      id: p.id,
-      sql: p.sql,
-      intent: p.intent,
-      class: proposalClass(p.policy),
-      createdAt: p.createdAt,
-      expiresAt: p.expiresAt,
-      leaseId: p.leaseId,
-      leaseExpiresAt: p.leaseExpiresAt,
-      sessionId: p.sessionId,
-      session: store.getSession(p.sessionId),
-    }));
+    const inflight: Proposal[] = store.listInflight(pluginId, resolveConnection(store, req)).map(
+      (p): Proposal => ({
+        id: p.id,
+        sql: p.sql,
+        intent: p.intent ?? undefined,
+        class: proposalClass(p.policy),
+        createdAt: p.createdAt,
+        expiresAt: p.expiresAt,
+        leaseId: p.leaseId!,
+        leaseExpiresAt: p.leaseExpiresAt!,
+        sessionId: p.sessionId,
+        session: store.getSession(p.sessionId),
+      }),
+    );
     send(res, 200, { inflight });
     return;
   }
@@ -195,10 +201,10 @@ function guarded(res: ServerResponse, fn: () => void): void {
 
 // The advisory risk class stamped at submit, surfaced on the proposal so the plugin
 // can show it while still recomputing authoritatively.
-function proposalClass(policy: unknown): string | null {
+function proposalClass(policy: unknown): AccessMode | null {
   if (policy && typeof policy === "object" && "class" in policy) {
     const c = (policy as { class: unknown }).class;
-    return typeof c === "string" ? c : null;
+    return c === "read" || c === "write" || c === "destructive" ? c : null;
   }
   return null;
 }

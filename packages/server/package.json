@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
+    "typecheck": "tsc --noEmit",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "test": "vitest run",
@@ -16,6 +17,7 @@
     "zod": "3.25.76"
   },
   "devDependencies": {
+    "@gatekeeper/shared": "workspace:*",
     "@types/better-sqlite3": "7.6.13",
     "@types/node": "22.20.1",
     "tsx": "4.23.1",

@@ -5,8 +5,10 @@
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r test",
+    "typecheck": "pnpm -r --if-present typecheck",
     "lint": "biome check .",
-    "format": "biome format --write ."
+    "format": "biome format --write .",
+    "ci": "pnpm typecheck && pnpm build && pnpm test"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.4"

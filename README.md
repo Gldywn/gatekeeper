@@ -186,10 +186,10 @@ Prerequisites: Node >= 20.19, pnpm, Beekeeper Studio >= 5.4.
    pnpm build
    ```
 2. **Register the MCP server** with your client. Copy `.mcp.json.example` and point
-   `args` at the absolute path of `server/dist/index.js`. The client launches the server
-   over stdio.
-3. **Install the plugin** into Beekeeper Studio. Symlink the `plugin/` directory into
-   Beekeeper's plugins folder (see Beekeeper's plugin development docs) under the name
+   `args` at the absolute path of `packages/server/dist/index.js`. The client launches the
+   server over stdio.
+3. **Install the plugin** into Beekeeper Studio. Symlink the `packages/plugin/` directory
+   into Beekeeper's plugins folder (see Beekeeper's plugin development docs) under the name
    `gatekeeper`; the folder name must match the manifest `id`.
 4. **Pair the plugin.** Open Gatekeeper from Beekeeper's Tools menu, read the token with
    `cat ~/.gatekeeper/broker-token`, and paste it into the pairing screen.
@@ -205,29 +205,34 @@ Environment variables:
 ## Repo layout
 
 ```
-server/
-  src/
-    index.ts       broker + MCP wiring, token, shutdown
-    broker.ts      loopback HTTP endpoints
-    mcp.ts         MCP tools
-    service.ts     submit / get / cancel, ticket shaping, read-only preflight
-    store.ts       durable SQLite lease queue + audit trail
-    connection.ts  non-sensitive connection snapshot
-    policy.ts      server-side advisory risk classifier (blocks empty/multi-statement)
-    config.ts      environment and constants
-plugin/
-  manifest.json
-  index.html
-  src/
-    app.ts         UI, polling, lease renewal, approve / reject, history
-    sql/classify.ts  dialect-aware risk classifier (the execution gate)
-    sql/sanitize.ts  surfaces bidi/invisible chars in displayed SQL
-    result.ts      result caps (local history + agent-bound)
-    style.css
-  DESIGN.md        plugin design system
-.mcp.json.example  MCP client stub
-biome.json         lint + format
-SECURITY.md        supply-chain policy + DB boundary
+packages/
+  server/
+    src/
+      index.ts       broker + MCP wiring, token, shutdown
+      broker.ts      loopback HTTP endpoints
+      mcp.ts         MCP tools
+      service.ts     submit / get / cancel, ticket shaping, read-only preflight
+      store.ts       durable SQLite lease queue + audit trail
+      connection.ts  non-sensitive connection snapshot
+      policy.ts      server-side advisory risk classifier (blocks empty/multi-statement)
+      config.ts      environment and constants
+  plugin/
+    manifest.json
+    index.html
+    src/
+      app.ts         UI, polling, lease renewal, approve / reject, history
+      sql/classify.ts  dialect-aware risk classifier (the execution gate)
+      sql/sanitize.ts  surfaces bidi/invisible chars in displayed SQL
+      result.ts      result caps (local history + agent-bound)
+      style.css
+    DESIGN.md        plugin design system
+  shared/
+    src/index.ts     wire-contract types shared by server + plugin
+    tokens.css       design tokens shared by plugin + landing
+landing/             marketing site (not part of the shipped product)
+.mcp.json.example    MCP client stub
+biome.json           lint + format
+SECURITY.md          supply-chain policy + DB boundary
 ```
 
 ## Development
