@@ -28,3 +28,6 @@ design/
 # Local scratchpad for throwaway experiments (contents ignored, README kept)
 scratch/*
 !scratch/README.md
+
+# Local planning notes, never shipped
+/TODO.md
