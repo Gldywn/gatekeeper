@@ -26,6 +26,10 @@ const classCases: Array<[string, RiskClass]> = [
   // SELECT ... INTO creates a table or writes a file, never a plain read.
   ["SELECT * INTO stolen FROM users", "destructive"],
   ["SELECT * FROM users INTO OUTFILE '/tmp/x'", "destructive"],
+  // MySQL executable comments (/*! ... */) run their body, so a modify keyword hidden
+  // inside one must not be stripped down to a read; a benign optimizer hint still reads.
+  ["SELECT 1 /*!40000 DROP TABLE t */", "destructive"],
+  ["SELECT /*!40001 SQL_NO_CACHE */ * FROM t", "read"],
 ];
 
 describe("classifyRisk", () => {

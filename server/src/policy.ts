@@ -36,7 +36,9 @@ const EMBED_INTO = /\binto\b/i;
 // two cases no mode may approve: empty and multi-statement.
 export function classifyRisk(sql: string): RiskAssessment {
   const stripped = sql
-    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    // Strip ordinary block comments, but keep MySQL executable comments (/*! ... */):
+    // MySQL runs their body, so stripping it would hide a write from this stamp.
+    .replace(/\/\*(?!!)[\s\S]*?\*\//g, " ")
     .replace(/--[^\n]*/g, " ")
     .trim();
   if (stripped.length === 0) {
