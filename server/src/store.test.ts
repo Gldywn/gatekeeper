@@ -34,12 +34,20 @@ describe("submit", () => {
     expect(store.get(req.id)?.state).toBe("pending");
   });
 
-  it("returns the same request for a repeated idempotency key", () => {
+  it("returns the same request for a repeated idempotency key with the same SQL", () => {
     const { store } = makeStore();
     const a = store.submit({ sessionId: "s1", sql: "SELECT 1", idempotencyKey: "k1" });
-    const b = store.submit({ sessionId: "s1", sql: "SELECT 2", idempotencyKey: "k1" });
+    const b = store.submit({ sessionId: "s1", sql: "SELECT 1", idempotencyKey: "k1" });
     expect(b.id).toBe(a.id);
     expect(b.sql).toBe("SELECT 1");
+  });
+
+  it("rejects a repeated idempotency key carrying different SQL", () => {
+    const { store } = makeStore();
+    store.submit({ sessionId: "s1", sql: "SELECT 1", idempotencyKey: "k1" });
+    expect(() =>
+      store.submit({ sessionId: "s1", sql: "SELECT 2", idempotencyKey: "k1" }),
+    ).toThrowError(StoreError);
   });
 
   it("enforces per-session backpressure", () => {
@@ -82,7 +90,12 @@ describe("claim + resolve", () => {
       fields: [{ name: "ok" }],
     });
     expect(done.state).toBe("approved");
-    expect(done.result).toEqual({ rows: [{ ok: 1 }], fields: [{ name: "ok" }] });
+    expect(done.result).toEqual({
+      rows: [{ ok: 1 }],
+      fields: [{ name: "ok" }],
+      truncated: false,
+      rowCount: 1,
+    });
   });
 
   it("rejects a stale lease and cannot double-resolve", () => {

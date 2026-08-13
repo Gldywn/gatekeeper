@@ -32,6 +32,10 @@ export interface TerminalResult {
   error?: string;
   /** True when the result rows were stripped after the retention window. */
   purged?: boolean;
+  /** True when the plugin capped the forwarded rows (see rowCount for the real total). */
+  truncated?: boolean;
+  /** The true number of rows the query returned, even if `rows` was capped below it. */
+  rowCount?: number;
 }
 
 export interface Ticket {
@@ -49,13 +53,21 @@ function terminalOf(req: GatekeeperRequest): TerminalResult {
     reason?: string | null;
     error?: string;
     purged?: boolean;
+    truncated?: boolean;
+    rowCount?: number;
   };
   switch (req.state) {
     case "approved":
       if (result.purged) {
         return { status: "approved", purged: true, rows: [], fields: [] };
       }
-      return { status: "approved", rows: result.rows ?? [], fields: result.fields ?? [] };
+      return {
+        status: "approved",
+        rows: result.rows ?? [],
+        fields: result.fields ?? [],
+        truncated: result.truncated ?? false,
+        rowCount: result.rowCount ?? (result.rows?.length ?? 0),
+      };
     case "rejected":
       return { status: "rejected", reason: result.reason ?? undefined };
     case "failed":

@@ -27,6 +27,15 @@ export function submit(
         .prepare("SELECT * FROM requests WHERE session_id = ? AND idempotency_key = ?")
         .get(input.sessionId, input.idempotencyKey) as RawRow | undefined;
       if (existing) {
+        // A key is a promise that the same statement is being retried. Reusing it for
+        // different SQL would hand back the first statement's approval as if the second
+        // had run; refuse it loudly rather than silently confirm the wrong query.
+        if (existing.sql !== input.sql) {
+          throw new StoreError(
+            "IDEMPOTENCY_MISMATCH",
+            "This idempotency_key was already used for a different statement.",
+          );
+        }
         return toRequest(existing);
       }
     }
@@ -79,6 +88,12 @@ export function submit(
           .prepare("SELECT * FROM requests WHERE session_id = ? AND idempotency_key = ?")
           .get(input.sessionId, input.idempotencyKey) as RawRow | undefined;
         if (existing) {
+          if (existing.sql !== input.sql) {
+            throw new StoreError(
+              "IDEMPOTENCY_MISMATCH",
+              "This idempotency_key was already used for a different statement.",
+            );
+          }
           return toRequest(existing);
         }
       }
@@ -217,7 +232,12 @@ export function resolve(
         : "failed";
   const result =
     outcome.status === "approved"
-      ? { rows: outcome.rows, fields: outcome.fields }
+      ? {
+          rows: outcome.rows,
+          fields: outcome.fields,
+          truncated: outcome.truncated ?? false,
+          rowCount: outcome.rowCount ?? outcome.rows.length,
+        }
       : outcome.status === "rejected"
         ? { reason: outcome.reason ?? null }
         : { error: outcome.error };
@@ -239,7 +259,7 @@ export function resolve(
       toState: state,
       detail:
         outcome.status === "approved"
-          ? `${outcome.rows.length} rows`
+          ? `${outcome.rowCount ?? outcome.rows.length} rows`
           : outcome.status === "rejected"
             ? (outcome.reason ?? null)
             : outcome.error,

@@ -13,7 +13,8 @@ export type StoreErrorCode =
   | "NOT_FOUND"
   | "NOT_OWNER"
   | "LEASE_CONFLICT"
-  | "INVALID_STATE";
+  | "INVALID_STATE"
+  | "IDEMPOTENCY_MISMATCH";
 
 export class StoreError extends Error {
   constructor(
@@ -57,7 +58,15 @@ export interface AuditEntry {
 }
 
 export type Outcome =
-  | { status: "approved"; rows: unknown[]; fields: unknown[] }
+  | {
+      status: "approved";
+      rows: unknown[];
+      fields: unknown[];
+      // The plugin caps the rows it forwards so a bulk read never floods the agent
+      // context; `truncated` says it capped, `rowCount` is the true pre-cap total.
+      truncated?: boolean;
+      rowCount?: number;
+    }
   | { status: "rejected"; reason?: string }
   | { status: "failed"; error: string };
 

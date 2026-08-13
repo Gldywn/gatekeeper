@@ -125,8 +125,14 @@ export function outcomeFacts(
   } else if (state === "failed") {
     facts.error = typeof result.error === "string" ? result.error : null;
   } else if (state === "approved") {
-    // A scalar count only: the array length, never its elements.
-    facts.rowCount = Array.isArray(result.rows) ? result.rows.length : null;
+    // A scalar count only, never the elements. Prefer the stored true count (the plugin
+    // may have capped the forwarded rows), falling back to the array length.
+    facts.rowCount =
+      typeof result.rowCount === "number"
+        ? result.rowCount
+        : Array.isArray(result.rows)
+          ? result.rows.length
+          : null;
   }
   return facts;
 }

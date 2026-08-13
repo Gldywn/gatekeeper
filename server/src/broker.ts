@@ -208,10 +208,13 @@ function toOutcome(body: Record<string, unknown>): Outcome {
     if (body.error) {
       return { status: "failed", error: String(body.error) };
     }
+    const rows = Array.isArray(body.rows) ? body.rows : [];
     return {
       status: "approved",
-      rows: Array.isArray(body.rows) ? body.rows : [],
+      rows,
       fields: Array.isArray(body.fields) ? body.fields : [],
+      truncated: body.truncated === true,
+      rowCount: typeof body.rowCount === "number" ? body.rowCount : rows.length,
     };
   }
   return {

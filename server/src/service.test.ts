@@ -72,6 +72,8 @@ describe("getQueryResult", () => {
       status: "approved",
       rows: [{ ok: 1 }],
       fields: [{ name: "ok" }],
+      truncated: false,
+      rowCount: 1,
     });
   });
 
