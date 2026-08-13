@@ -4,9 +4,9 @@
   "version": "0.0.1",
   "minAppVersion": "5.4.0",
   "manifestVersion": 2,
-  "description": "Human-approved, read-only SQL bridge. Spike A: proves the plugin loads and runQuery returns data.",
+  "description": "Human-approved SQL bridge between AI agents and Beekeeper Studio: read-only by default, with ephemeral human-armed write modes.",
   "author": {
-    "name": "Gatekeeper"
+    "name": "Gldywn"
   },
   "icon": "hexagon",
   "capabilities": {
