@@ -32,4 +32,12 @@ describe("capResult", () => {
     const rows = Array.from({ length: 250 }, (_, i) => ({ i }));
     expect(capResult(rows, [], 64).rowCount).toBe(250);
   });
+
+  it("applies a tighter explicit row cap for the agent-bound path", () => {
+    const rows = Array.from({ length: 5000 }, (_, i) => ({ i }));
+    const r = capResult(rows, [{ name: "i" }], Number.MAX_SAFE_INTEGER, 1000);
+    expect(r.rows).toHaveLength(1000);
+    expect(r.rowCount).toBe(5000);
+    expect(r.truncated).toBe(true);
+  });
 });

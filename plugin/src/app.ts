@@ -143,10 +143,15 @@ function newInstanceId(): string {
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-// Placeholder until the public repo exists; both open in the user's browser via the host.
-const REPO_URL = "https://github.com/gatekeeper/gatekeeper";
+const REPO_URL = "https://github.com/Gldywn/gatekeeper";
 const ISSUES_URL = `${REPO_URL}/issues/new/choose`;
 const STARRED_KEY = "gatekeeper.starred";
+
+// The rows forwarded to the agent are capped independently of the local history budget:
+// a bulk read must never flood the agent context (and the LLM provider) or overrun the
+// broker's body limit. The true count still reaches the agent via rowCount + truncated.
+const AGENT_MAX_ROWS = 10_000;
+const AGENT_MAX_BYTES = 8 * 1024 * 1024;
 
 // Officially tested engines; every other Beekeeper database type gets the untested notice.
 const DB_SUPPORTED = new Set(["postgresql", "mysql"]);
@@ -1919,11 +1924,29 @@ export class Gatekeeper {
         return;
       }
       this.setCardState(id, "posting");
-      await this.postResult(card, { status: "approved", rows, fields });
+      // Cap what the agent receives, and keep the true count so it learns the shape.
+      const forAgent = capResult(rows, fields, AGENT_MAX_BYTES, AGENT_MAX_ROWS);
+      const posted = await this.postResult(card, {
+        status: "approved",
+        rows: forAgent.rows,
+        fields: forAgent.fields,
+        truncated: forAgent.truncated,
+        rowCount: forAgent.rowCount,
+      });
+      // The rows already ran on the live database; if the outcome never reached the
+      // broker the agent cannot see them, so record a failure rather than a false approve.
+      if (!posted) {
+        this.finish(id, "failed", "result not delivered");
+        return;
+      }
+      // Tell the human when the agent got fewer rows than the query returned.
+      const note = forAgent.truncated
+        ? `${forAgent.rowCount} rows (agent received ${forAgent.rows.length})`
+        : `${forAgent.rowCount} rows`;
       this.finish(
         id,
         "approved",
-        `${rows.length} rows`,
+        note,
         capResult(rows, fields, resultBudgetBytes(this.settingsStore.get())),
       );
     } catch (err) {
@@ -2050,11 +2073,12 @@ export class Gatekeeper {
     }
   }
 
-  private async postResult(card: Card, body: Record<string, unknown>): Promise<void> {
+  private async postResult(card: Card, body: Record<string, unknown>): Promise<boolean> {
     try {
-      await this.broker.result(card.id, card.leaseId, body);
+      return await this.broker.result(card.id, card.leaseId, body);
     } catch (err) {
       log.error(err instanceof Error ? err : String(err));
+      return false;
     }
   }
 

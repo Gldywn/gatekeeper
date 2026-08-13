@@ -114,12 +114,15 @@ export class BrokerClient {
     return res.ok;
   }
 
-  async result(id: string, leaseId: string, body: Record<string, unknown>): Promise<void> {
-    await this.request("/result", {
+  // Returns false when the broker did not accept the outcome (a refused lease, or a body
+  // the broker dropped), so the caller never reports success on an undelivered result.
+  async result(id: string, leaseId: string, body: Record<string, unknown>): Promise<boolean> {
+    const res = await this.request("/result", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, leaseId, ...body }),
     });
+    return res.ok;
   }
 
   async postConnection(conn: ConnectionSnapshot): Promise<void> {
