@@ -124,6 +124,32 @@ describe("render/activity", () => {
     ]);
   });
 
+  it("uses a Markdown fence longer than any backtick run in the SQL", () => {
+    const withBackticks: ActivityEntry = {
+      ...approved,
+      id: "q_bt",
+      sql: "SELECT `a```b` FROM t",
+    };
+    const md = activityMarkdown("2026-01-01", "s1", [withBackticks], "prod", new Map());
+    // Longest inner run is 3 backticks, so the opening fence must be at least 4.
+    expect(md).toContain("````sql\nSELECT `a```b` FROM t\n````");
+  });
+
+  it("surfaces bidi controls as visible markers in the Markdown and JSON exports", () => {
+    const rlo = String.fromCodePoint(0x202e);
+    const trojan: ActivityEntry = {
+      ...approved,
+      id: "q_bidi",
+      sql: `SELECT 1 -- ${rlo}evil`,
+    };
+    const md = activityMarkdown("2026-01-01", "s1", [trojan], "prod", new Map());
+    expect(md).not.toContain(rlo);
+    expect(md).toContain("[U+202E]");
+    const json = JSON.parse(activityJson([trojan]));
+    expect(json[0].sql).not.toContain(rlo);
+    expect(json[0].sql).toContain("[U+202E]");
+  });
+
   it("quotes and neutralises CSV fields that could break a spreadsheet", () => {
     const tricky: ActivityEntry = {
       ...approved,

@@ -150,14 +150,31 @@ export function classifyQuery(sql: string, dialect = "postgresql"): RiskVerdict 
   if (cls === "read" && LOCKING_READ.test(sql)) {
     cls = "write";
   }
+  // MySQL executable comments (/*! ... */) run their body on MySQL/MariaDB, but the parser
+  // may drop them; never let a modify keyword hidden inside one ride under a read verdict.
+  if (rank(cls) < rank("destructive") && executableCommentModifies(sql)) {
+    cls = "destructive";
+  }
   return { class: cls, parseOk: true, blocked: false };
+}
+
+// True when the SQL carries a MySQL executable comment whose body (kept, unlike ordinary
+// comments) contains a data-modifying keyword.
+function executableCommentModifies(sql: string): boolean {
+  if (!/\/\*!/.test(sql)) {
+    return false;
+  }
+  const bare = sql.replace(/\/\*(?!!)[\s\S]*?\*\//g, " ").replace(/--[^\n]*/g, " ");
+  return MODIFY_KEYWORDS.test(bare);
 }
 
 // Parser gaps fall back to text: reject empty/multi, a leading SELECT/WITH with no
 // modifying keyword reads, everything else is destructive (fail safe).
 function fallback(sql: string): RiskVerdict {
   const stripped = sql
-    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    // Keep MySQL executable comments (/*! ... */): their body runs, so stripping it would
+    // let a hidden write pass as a read; MODIFY_KEYWORDS then catches it below.
+    .replace(/\/\*(?!!)[\s\S]*?\*\//g, " ")
     .replace(/--[^\n]*/g, " ")
     .trim();
   const single = stripped.replace(/;\s*$/, "");

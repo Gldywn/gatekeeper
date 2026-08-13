@@ -5,7 +5,8 @@ export function csvQuote(value: string): string {
 }
 
 // A leading =, +, -, or @ is neutralised with a ' so a spreadsheet imports the cell as
-// text, not a formula. Only ever for string-sourced cells: a number like -5 must stay -5.
+// text, not a formula. Leading whitespace/tab/CR is stripped by spreadsheets first, so a
+// trigger hidden behind it still counts. Only for string cells: a number like -5 stays -5.
 export function csvFormulaGuard(value: string): string {
-  return /^[=+\-@]/.test(value) ? `'${value}` : value;
+  return /^\s*[=+\-@]/.test(value) || /^[\t\r]/.test(value) ? `'${value}` : value;
 }

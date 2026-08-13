@@ -44,6 +44,22 @@ describe("classifyQuery", () => {
     ).toBeGreaterThanOrEqual(rank("write"));
   });
 
+  it("never reads a write hidden in a MySQL executable comment", () => {
+    for (const sql of [
+      "SELECT 1 /*!40000 DROP TABLE t */",
+      "SELECT 1 /*!, DELETE FROM t */",
+      "SELECT * FROM t /*!40000 INTO OUTFILE '/tmp/x' */",
+    ]) {
+      expect(classifyQuery(sql, "mysql").class, sql).toBe("destructive");
+    }
+  });
+
+  it("leaves a benign MySQL optimizer hint as a read", () => {
+    const v = classifyQuery("SELECT /*!40001 SQL_NO_CACHE */ * FROM t", "mysql");
+    expect(v.class).toBe("read");
+    expect(v.blocked).toBe(false);
+  });
+
   it("never reads a locking read (FOR SHARE / LOCK IN SHARE MODE)", () => {
     for (const [sql, dialect] of [
       ["SELECT * FROM t FOR SHARE", "postgresql"],

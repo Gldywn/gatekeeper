@@ -15,6 +15,7 @@ import { classifyQuery, type RiskClass, rank } from "../sql/classify";
 import { formatSql } from "../sql/format";
 import { highlight } from "../sql/highlight";
 import { modeRank, type RiskMode } from "../sql/mode";
+import { visibleControls } from "../sql/sanitize";
 import { analyzeTableOps, type SchemaContext } from "../sql/schema";
 import type { Card, CardState, SessionMeta } from "../types";
 
@@ -162,7 +163,7 @@ export function cardHtml(
           <span class="${remaining <= 45_000 ? "lease low" : "lease"}">${clock(remaining)}</span>
         </div>
         <div class="meta">${escapeHtml(card.id)} &middot; ${relAge(card.createdAt)}</div>
-        <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(card.sql)}" aria-label="Copy SQL">${copyIcon}</button><code class="sql-body" id="sqlbody-${card.id}">${highlight(formatSql(card.sql), card.schema?.pii, card.schema?.client, card.schema?.literals)}</code></pre>
+        <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(visibleControls(card.sql))}" aria-label="Copy SQL">${copyIcon}</button><code class="sql-body" id="sqlbody-${card.id}">${highlight(formatSql(card.sql), card.schema?.pii, card.schema?.client, card.schema?.literals)}</code></pre>
         ${riskAnno}<div class="card-schema" id="cs-${card.id}">${schemaInner(card.schema, gate.cls !== "read")}</div>
         ${actions}
       </div>`;
@@ -244,8 +245,7 @@ export function readyActions(id: string, gate: CardGate, denyDrafts: Map<string,
   const revise = denyDrafts.has(id)
     ? denyField(id, denyDrafts.get(id) ?? "")
     : `<button class="deny-open" type="button" data-deny-open="${id}" title="Reject and ask the agent to change something">${messageIcon}Request changes</button>`;
-  const tone =
-    gate.cls === "destructive" ? " destructive" : gate.cls === "write" ? " write" : "";
+  const tone = gate.cls === "destructive" ? " destructive" : gate.cls === "write" ? " write" : "";
   const approveBtn = `<button class="btn approve${tone}" type="button" data-approve="${id}" ${gate.approveEnabled ? "" : "disabled"}>${gate.approveLabel}</button>`;
   // When blocked, the reason rides in a hover popover above the disabled Approve,
   // not as a loose line in the card body.

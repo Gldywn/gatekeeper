@@ -24,6 +24,7 @@ import {
 import { classifyQuery } from "../sql/classify";
 import { formatSql } from "../sql/format";
 import { highlight } from "../sql/highlight";
+import { visibleControls } from "../sql/sanitize";
 import type { SchemaContext } from "../sql/schema";
 import type { ActivityEntry } from "../types";
 import { flyoutMenu } from "./controls";
@@ -202,7 +203,7 @@ export function activityEntryHtml(
             <div class="act-detail"${isExpanded ? "" : " hidden"}>
               <div class="act-meta">${escapeHtml(e.id)} &middot; ${escapeHtml(new Date(ts).toLocaleString())}${rows}</div>
               ${note ? `<div class="act-enote ${escapeHtml(state)}">${escapeHtml(note)}</div>` : ""}
-              <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(e.sql)}" aria-label="Copy SQL">${copyIcon}</button><code data-act-sqlbody="${escapeHtml(e.id)}">${highlight(formatSql(e.sql))}</code></pre>
+              <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(visibleControls(e.sql))}" aria-label="Copy SQL">${copyIcon}</button><code data-act-sqlbody="${escapeHtml(e.id)}">${highlight(formatSql(e.sql))}</code></pre>
             </div>
           </div>`;
 }
@@ -243,6 +244,13 @@ export function activityFlagLabels(schema: SchemaContext): string[] {
 // Per-entry sensitivity labels, resolved host-side by the caller (schema is cached per
 // table) and keyed by entry id. Both exports read this map so markdown and CSV agree.
 export type ActivityFlagMap = ReadonlyMap<string, string[]>;
+
+// CommonMark: a fenced block ends at the first line with at least as many backticks as
+// its opening fence, so SQL containing ``` needs an opening fence longer than any run in it.
+function codeFence(sql: string): string {
+  const longest = Math.max(0, ...(sql.match(/`+/g) ?? []).map((run) => run.length));
+  return "`".repeat(Math.max(3, longest + 1));
+}
 
 export function activityMarkdown(
   day: string,
@@ -299,7 +307,9 @@ export function activityMarkdown(
     if (e.error?.trim()) {
       lines.push(`- Error: ${e.error.trim()}`);
     }
-    lines.push("", "```sql", e.sql.trim(), "```", "");
+    const sqlBody = visibleControls(e.sql.trim());
+    const fence = codeFence(sqlBody);
+    lines.push("", `${fence}sql`, sqlBody, fence, "");
   }
   return lines.join("\n");
 }
@@ -341,7 +351,7 @@ export function activityCsv(entries: ActivityEntry[], flags: ActivityFlagMap = n
       e.rowCount != null ? `${e.rowCount}` : "",
       e.reason?.trim() ?? "",
       e.error?.trim() ?? "",
-      e.sql.replace(/\s+/g, " ").trim(),
+      visibleControls(e.sql).replace(/\s+/g, " ").trim(),
     ]
       .map(csvField)
       .join(",");
@@ -369,7 +379,7 @@ export function activityJson(entries: ActivityEntry[], flags: ActivityFlagMap = 
       rows: e.rowCount,
       reason: e.reason?.trim() || null,
       error: e.error?.trim() || null,
-      sql: e.sql.trim(),
+      sql: visibleControls(e.sql.trim()),
     };
   });
   return `${JSON.stringify(rows, null, 2)}\n`;

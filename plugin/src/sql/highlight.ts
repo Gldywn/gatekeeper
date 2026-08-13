@@ -1,5 +1,6 @@
 import { escapeHtml } from "../html";
 import { type Tok, tokenize } from "./format";
+import { visibleControls } from "./sanitize";
 
 // Case-sensitive by design: the previous regex pass matched only the uppercase
 // spellings, so INTERVAL etc. read as keywords only when written that way.
@@ -60,7 +61,7 @@ export function highlight(
   const piiSet = new Set((pii ?? []).map((c) => c.toLowerCase()));
   const clientSet = new Set((client ?? []).map((c) => c.toLowerCase()));
   const sensitive = new Set(literals ?? []);
-  const toks: Tok[] = tokenize(sql);
+  const toks: Tok[] = tokenize(visibleControls(sql));
   let out = "";
 
   for (let i = 0; i < toks.length; i++) {
