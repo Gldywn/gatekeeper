@@ -18,3 +18,13 @@ skills-lock.json
 .mcp.json
 .codex/config.toml
 opencode.jsonc
+
+# Pre-release cleanup backup (local, not part of the product)
+.precleanup-backup/
+
+# design/ is a local working folder for asset generation, not shipped
+design/
+
+# Local scratchpad for throwaway experiments (contents ignored, README kept)
+scratch/*
+!scratch/README.md
