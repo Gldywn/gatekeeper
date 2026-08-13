@@ -1,56 +1,8 @@
-/* Gatekeeper owns its palette (pinned, no longer deferring to the host's --theme-*
-   vars) so this dark-committed UI reads the same on any Beekeeper theme. */
-:root {
-  --ground: oklch(18.5% 0.006 250);
-  --surface: oklch(22% 0.007 250);
-  --sunken: oklch(14.5% 0.005 250);
-  --text: oklch(93% 0.006 250);
-  --muted: oklch(70% 0.009 250);
-  --faint: oklch(53% 0.01 250);
-  --edge: color-mix(in oklch, var(--text) 8%, transparent);
-  --hi: color-mix(in oklch, var(--text) 6%, transparent);
-
-  --amber: oklch(82% 0.145 88);
-  --amber-ink: oklch(26% 0.05 88);
-  --ok: oklch(75% 0.13 155);
-  --danger: oklch(68% 0.16 25);
-  /* Dark ink for text seated on a solid --danger fill (badges, the destructive button). */
-  --danger-ink: oklch(22% 0.05 25);
-  --exec: oklch(74% 0.1 235);
-  /* Client-confidentiality accent: a violet distinct from the red PII danger. */
-  --client: oklch(70% 0.15 300);
-
-  --s1: 4px;
-  --s2: 8px;
-  --s3: 12px;
-  --s4: 16px;
-  --s5: 22px;
-  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
-  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
-  --dur: 190ms;
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
-  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
-  --dur-micro: 120ms;
-  --dur-short: 220ms;
-  --dur-long: 420ms;
-  --r: 7px;
-
-  /* Quiet depth: one honest elevation step for surfaces, a deeper one for the
-     header/rail and for anything floating (popovers), plus a top-lit ground.
-     Additive only, nothing above is overwritten. */
-  --elev-1: 0 1px 1px oklch(0% 0 0 / 0.34), 0 4px 10px oklch(0% 0 0 / 0.2);
-  --elev-2: 0 2px 4px oklch(0% 0 0 / 0.42), 0 10px 26px oklch(0% 0 0 / 0.28);
-  /* The existing popover shadow, named so every popover references one value. */
-  --elev-pop: 0 12px 34px oklch(0% 0 0 / 0.5);
-  --edge-strong: color-mix(in oklch, var(--text) 13%, transparent);
-  --ground-lit: radial-gradient(135% 100% at 50% -8%, oklch(21% 0.008 250), var(--ground) 58%);
-  /* A hairline that fades at both ends, for section rhythm. */
-  --rule: linear-gradient(90deg, transparent, var(--edge) 12%, var(--edge) 88%, transparent);
-  --fs-eyebrow: 10px;
-  --track-eyebrow: 0.08em;
-}
+/* Design tokens (the palette, spacing, type, easings, elevation) live in the
+   repo-root shared/ single source, imported by both this plugin and the landing
+   site so the two can never drift. Kept at the very top: @import must precede all
+   other rules, and the tokens must resolve before anything references them. */
+@import "../../shared/tokens.css";
 
 * {
   box-sizing: border-box;
@@ -176,14 +128,14 @@ body {
   z-index: 1;
 }
 .mark {
-  width: 30px;
-  height: 30px;
+  width: 36px;
+  height: 36px;
   flex: none;
   align-self: center;
-  /* Crop past the cutout's pale edge, re-round the corners, and lift it off the bar
-     with a soft shadow instead of a hard outline that never traced the squircle. */
-  background: url("./assets/gatekeeper-logo.webp") center / 150% no-repeat;
-  border-radius: 7px;
+  /* Shield alone here, not the full tile: at this size the honeycomb ground turns to noise
+     and the gold square fights the bar's own surface. Dropping it buys the glyph more room
+     at the same footprint, and the drop-shadow traces the shield itself. */
+  background: url("./assets/gatekeeper-shield.svg") center / contain no-repeat;
   filter: drop-shadow(0 1px 1.5px oklch(0% 0 0 / 0.5));
 }
 .wordmark {
@@ -1701,10 +1653,9 @@ label.qs-row {
   font-size: 12px;
 }
 .waiting-mark {
-  width: 56px;
-  height: 56px;
-  background: url("./assets/gatekeeper-logo.webp") center / 150% no-repeat;
-  border-radius: 13px;
+  width: 76px;
+  height: 76px;
+  background: url("./assets/gatekeeper-logo.svg") center / contain no-repeat;
   filter: drop-shadow(0 2px 5px oklch(0% 0 0 / 0.4));
 }
 @media (prefers-reduced-motion: no-preference) {

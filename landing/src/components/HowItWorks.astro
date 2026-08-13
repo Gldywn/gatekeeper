@@ -1,0 +1,58 @@
+<section id="how" class="section-pad">
+  <div class="wrap">
+    <div class="sec-top">
+      <div class="section-head">
+        <span class="eyebrow amber">How it works</span>
+        <h2>Your agents never touch the database. <span class="h-hl">You do.</span></h2>
+        <p class="lead">Submit and read are separate calls, so an agent can keep several proposals in flight and collect each result as its human decision lands. Approval is pre-execution, on the SQL text.</p>
+      </div>
+      <div class="sec-art" aria-hidden="true">
+        <img src="/sections/how-it-works.png" alt="" width="400" height="400" loading="lazy" decoding="async" />
+      </div>
+    </div>
+    <div class="steps">
+      <div class="step">
+        <span class="step-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg></span>
+        <span class="step-n">01</span>
+        <h3>Agent proposes</h3>
+        <p>The agent calls <span class="tool">submit_query(sql, intent)</span> over MCP. The server enqueues it and returns a ticket immediately. It never blocks.</p>
+      </div>
+      <div class="step">
+        <span class="step-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></span>
+        <span class="step-n">02</span>
+        <h3>You review</h3>
+        <p>The Beekeeper plugin surfaces the SQL with its intent, the tables it reads, and any PII, client-data or write flags.</p>
+      </div>
+      <div class="step">
+        <span class="step-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg></span>
+        <span class="step-n">03</span>
+        <h3>You approve</h3>
+        <p>On approval the plugin runs the query on the connection Beekeeper already holds. The agent never holds database credentials.</p>
+      </div>
+      <div class="step">
+        <span class="step-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M12 3v18"/></svg></span>
+        <span class="step-n">04</span>
+        <h3>Rows return</h3>
+        <p>The result flows back to the agent through <span class="tool">get_query_result</span>. Reject with a note instead, and the agent revises.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  /* A concept icon in each card's top-right corner (number stays top-left). */
+  .step-ico {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    width: 34px;
+    height: 34px;
+    display: grid;
+    place-items: center;
+    border-radius: 9px;
+    color: var(--amber);
+    background: color-mix(in oklch, var(--amber) 10%, transparent);
+    border: 1px solid color-mix(in oklch, var(--amber) 24%, transparent);
+  }
+  .step-ico svg { width: 18px; height: 18px; display: block; }
+</style>

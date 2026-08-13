@@ -1,6 +1,7 @@
 packages:
   - plugin
   - server
+  - landing
 
 # Supply chain: refuse any dependency version published less than 7 days ago.
 minimumReleaseAge: 10080
@@ -18,3 +19,8 @@ overrides:
 allowBuilds:
   esbuild: true
   better-sqlite3: true
+  # sharp ships with the landing's Astro dep but is never invoked: the landing sets
+  # its image service to passthrough, so no native libvips build is needed. Refused
+  # deliberately (not merely un-listed) to record the decision and stop the re-prompt.
+  # Flip to true only if the landing ever enables build-time image optimization.
+  sharp: false

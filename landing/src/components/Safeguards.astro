@@ -1,0 +1,618 @@
+<section id="safeguards" class="section-pad">
+  <div class="wrap">
+    <div class="sec-top">
+      <div class="section-head">
+        <span class="eyebrow amber">Oversight</span>
+        <h2>Everything you need to <span class="h-hl"><span class="say-yes">Say Yes</span> to your agent.</span></h2>
+        <p class="lead">Gatekeeper reads each proposal and annotates it: what it changes, what it touches, and what is sensitive. The dangerous parts are impossible to miss, and the risky ones cannot run unless you have armed them.</p>
+      </div>
+      <div class="sec-art" aria-hidden="true">
+        <img src="/sections/safeguards.png" alt="" width="400" height="400" loading="lazy" decoding="async" />
+      </div>
+    </div>
+
+    <div class="sg-cols">
+      <!-- LEFT column: the interactive gate, then the audit trail (each column flows on its
+           own, so the second block sits a fixed gap below the first and the columns stagger). -->
+      <div class="sg-left">
+        <h3 class="sg-title">See everything before you approve</h3>
+        <div class="gate-demo" id="gate-demo">
+          <div class="gd-menu" role="tablist" aria-label="Safeguards">
+            <button class="gd-item is-active" type="button" role="tab" aria-selected="true" data-ex="read" data-desc="A single SELECT, enforced by a dialect-aware parser. This one runs as-is once you approve.">
+              <span class="gd-item-ico ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></span><span class="gd-item-title">Read-only by default</span>
+            </button>
+            <button class="gd-item" type="button" role="tab" aria-selected="false" data-ex="write" data-desc="INSERT and UPDATE are off by default. You arm write mode and it stays on until you disarm it, but every query still needs its own one-click approval.">
+              <span class="gd-item-ico amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg></span><span class="gd-item-title">Writes must be armed</span>
+            </button>
+            <button class="gd-item" type="button" role="tab" aria-selected="false" data-ex="destructive" data-desc="DELETE, DROP and TRUNCATE stay locked until you arm destructive mode by typing the database name. Even then, every statement needs its own approval.">
+              <span class="gd-item-ico danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M10 11v6"/><path d="M14 11v6"/></svg></span><span class="gd-item-title">Destructive stays locked</span>
+            </button>
+            <button class="gd-item" type="button" role="tab" aria-selected="false" data-ex="request" data-desc="Not just yes or no. Send the agent a note to revise, straight back over MCP.">
+              <span class="gd-item-ico blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span><span class="gd-item-title">Request changes</span>
+            </button>
+            <button class="gd-item" type="button" role="tab" aria-selected="false" data-ex="client" data-desc="Client-confidential columns are flagged violet before you decide.">
+              <span class="gd-item-ico violet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/></svg></span><span class="gd-item-title">Client data</span>
+            </button>
+            <button class="gd-item" type="button" role="tab" aria-selected="false" data-ex="pii" data-desc="Personal columns read red, so you never approve them by accident.">
+              <span class="gd-item-ico danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg></span><span class="gd-item-title">PII</span>
+            </button>
+            <button class="gd-item" type="button" role="tab" aria-selected="false" data-ex="sensitive" data-desc="A sensitive value written into the query itself is highlighted in place.">
+              <span class="gd-item-ico amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg></span><span class="gd-item-title">Sensitive value</span>
+            </button>
+          </div>
+          <p class="sg-desc" id="gd-desc">A single SELECT, enforced by a dialect-aware parser. This one runs as-is once you approve.</p>
+
+          <div class="gd-preview">
+            <div class="card" data-ex="read" data-ok="Approved &middot; 100 rows returned to the agent.">
+              <div class="top">
+                <span class="intent">List active enterprise accounts</span>
+                <span class="lease">2:00</span>
+              </div>
+              <div class="meta">analytics-nb &middot; req_5c1a08 &middot; 2s ago</div>
+              <pre class="sql"><button class="copy-sql" type="button" aria-label="Copy SQL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg></button><code><span class="kw">SELECT</span> id, name, plan
+<span class="kw">FROM</span> accounts
+<span class="kw">WHERE</span> status = <span class="st">'active'</span>
+<span class="kw">LIMIT</span> 100;</code></pre>
+              <div class="actions">
+                <button class="btn approve" type="button">Approve</button>
+                <button class="btn reject" type="button">Reject</button>
+              </div>
+              <div class="gd-verdict" hidden></div>
+            </div>
+
+            <div class="card write" data-ex="write" hidden>
+              <div class="top">
+                <span class="risk-badge write">Write</span>
+                <span class="intent">Update the renewal date on an account</span>
+                <span class="lease">1:44</span>
+              </div>
+              <div class="meta">crm-sync &middot; req_7f3c2a &middot; 4s ago</div>
+              <pre class="sql"><button class="copy-sql" type="button" aria-label="Copy SQL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg></button><code><span class="kw">UPDATE</span> accounts
+<span class="kw">SET</span> renews_at = <span class="st">'2027-01-01'</span>
+<span class="kw">WHERE</span> id = <span class="st">4821</span>;</code></pre>
+              <div class="card-risk">
+                <div class="cs-writes write"><span class="cs-writes-k"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>Write</span><span class="tbl-chip">accounts</span></div>
+              </div>
+              <div class="actions">
+                <span class="approve-slot">
+                  <button class="btn approve write" type="button" disabled>Approve write</button>
+                  <span class="approve-pop" role="tooltip"><svg viewBox="0 0 16 16" fill="none"><path d="M8 1.7 1 14h14L8 1.7Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 6.3v3.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.7" r=".8" fill="currentColor"/></svg>Write mode required to approve this query.</span>
+                </span>
+                <button class="btn reject" type="button">Reject</button>
+              </div>
+              <div class="gd-verdict" hidden></div>
+            </div>
+
+            <div class="card destructive" data-ex="destructive" hidden>
+              <div class="top">
+                <span class="risk-badge destructive">Destructive</span>
+                <span class="intent">Purge the abandoned import batch</span>
+                <span class="lease low">0:37</span>
+              </div>
+              <div class="meta">cleanup-job &middot; req_b91e04 &middot; 11s ago</div>
+              <pre class="sql"><button class="copy-sql" type="button" aria-label="Copy SQL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg></button><code><span class="kw">DELETE FROM</span> import_batches
+<span class="kw">WHERE</span> state = <span class="st">'abandoned'</span>;</code></pre>
+              <div class="card-risk">
+                <div class="cs-writes destructive"><span class="cs-writes-k"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>Delete</span><span class="tbl-chip">import_batches</span></div>
+              </div>
+              <div class="actions">
+                <span class="approve-slot">
+                  <button class="btn approve destructive" type="button" disabled>Approve destructive</button>
+                  <span class="approve-pop" role="tooltip"><svg viewBox="0 0 16 16" fill="none"><path d="M8 1.7 1 14h14L8 1.7Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 6.3v3.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.7" r=".8" fill="currentColor"/></svg>Destructive mode required to approve this query.</span>
+                </span>
+                <button class="btn reject" type="button">Reject</button>
+              </div>
+              <div class="gd-verdict" hidden></div>
+            </div>
+
+            <div class="card" data-ex="request" hidden>
+              <div class="top">
+                <span class="intent">List enterprise contacts for the quarterly review</span>
+                <span class="lease">1:52</span>
+              </div>
+              <div class="meta">reporting-agent &middot; req_3a9f21 &middot; 5s ago</div>
+              <pre class="sql"><button class="copy-sql" type="button" aria-label="Copy SQL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg></button><code><span class="kw">SELECT</span> id, <span class="pii-col">email</span>, <span class="pii-col">phone</span>
+<span class="kw">FROM</span> customers
+<span class="kw">WHERE</span> plan = <span class="st">'enterprise'</span>
+<span class="kw">LIMIT</span> 200;</code></pre>
+              <div class="card-schema">
+                <div class="cs-line cs-pii"><span class="cs-warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>possible PII</span><span class="cs-list">email &middot; phone</span></div>
+              </div>
+              <div class="deny-box">
+                <label class="deny-label">Request changes &middot; your note goes back to the agent</label>
+                <textarea class="deny-input" rows="2" aria-label="Note to the agent">Drop email and phone, and scope this to a single account.</textarea>
+                <div class="deny-actions">
+                  <button class="btn reject" type="button">Cancel</button>
+                  <button class="gd-send" type="button">Send request</button>
+                </div>
+              </div>
+              <div class="gd-verdict" hidden></div>
+            </div>
+
+            <div class="card" data-ex="client" hidden data-ok="Approved &middot; client-confidential rows returned to the agent.">
+              <div class="top">
+                <span class="intent">Pull contract terms for a key account</span>
+                <span class="lease">1:58</span>
+              </div>
+              <div class="meta">reporting-agent &middot; req_9d02f4 &middot; 3s ago</div>
+              <pre class="sql"><button class="copy-sql" type="button" aria-label="Copy SQL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg></button><code><span class="kw">SELECT</span> <span class="client-col">account_name</span>, <span class="client-col">contract_value</span>, renewal_terms
+<span class="kw">FROM</span> contracts
+<span class="kw">WHERE</span> <span class="client-col">account_name</span> = <span class="st">'Northwind Traders'</span>;</code></pre>
+              <div class="card-schema">
+                <div class="cs-line cs-client"><span class="cs-warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/></svg>client data</span><span class="cs-list">account_name &middot; contract_value</span></div>
+              </div>
+              <div class="actions">
+                <button class="btn approve" type="button">Approve</button>
+                <button class="btn reject" type="button">Reject</button>
+              </div>
+              <div class="gd-verdict" hidden></div>
+            </div>
+
+            <div class="card" data-ex="pii" hidden data-ok="Approved &middot; 200 rows returned to the agent.">
+              <div class="top">
+                <span class="intent">List enterprise contacts for the quarterly review</span>
+                <span class="lease">2:00</span>
+              </div>
+              <div class="meta">reporting-agent &middot; req_3a9f21 &middot; 2s ago</div>
+              <pre class="sql"><button class="copy-sql" type="button" aria-label="Copy SQL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg></button><code><span class="kw">SELECT</span> id, <span class="pii-col">email</span>, <span class="pii-col">phone</span>
+<span class="kw">FROM</span> customers
+<span class="kw">WHERE</span> plan = <span class="st">'enterprise'</span>
+<span class="kw">LIMIT</span> 200;</code></pre>
+              <div class="card-schema">
+                <div class="cs-line cs-pii"><span class="cs-warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>possible PII</span><span class="cs-list">email &middot; phone</span></div>
+              </div>
+              <div class="actions">
+                <button class="btn approve" type="button">Approve</button>
+                <button class="btn reject" type="button">Reject</button>
+              </div>
+              <div class="gd-verdict" hidden></div>
+            </div>
+
+            <div class="card" data-ex="sensitive" hidden data-ok="Approved &middot; 1 row returned to the agent.">
+              <div class="top">
+                <span class="intent">Find the session behind a leaked token</span>
+                <span class="lease">1:40</span>
+              </div>
+              <div class="meta">ops-oncall &middot; req_c47a19 &middot; 7s ago</div>
+              <pre class="sql"><button class="copy-sql" type="button" aria-label="Copy SQL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg></button><code><span class="kw">SELECT</span> user_id, created_at
+<span class="kw">FROM</span> sessions
+<span class="kw">WHERE</span> token = <span class="sensitive-val">'tok_demo_9f2c8a41b7e0'</span>
+<span class="kw">LIMIT</span> 1;</code></pre>
+              <div class="card-schema">
+                <div class="cs-line cs-pii"><span class="cs-warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>sensitive value</span><span class="cs-list">'tok_demo_9f2c8a41b7e0'</span></div>
+              </div>
+              <div class="actions">
+                <button class="btn approve" type="button">Approve</button>
+                <button class="btn reject" type="button">Reject</button>
+              </div>
+              <div class="gd-verdict" hidden></div>
+            </div>
+          </div>
+        </div>
+
+        <h3 class="sg-title sg-title2">An audit trail you can take with you</h3>
+        <div class="act-shell">
+          <div class="act-day-head2">
+            <span class="act-day-chev" aria-hidden="true"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--faint)"><path d="m6 9 6 6 6-6"/></svg></span>
+            <span class="act-day-label">Today</span>
+            <span class="act-day-count">&middot; 3 queries &middot; 1 session</span>
+          </div>
+          <div class="act-group">
+            <div class="act-group-head">
+              <span class="act-avatar"><svg viewBox="0 0 24 24"><path clip-rule="evenodd" fill-rule="evenodd" d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z"/></svg></span>
+              <span class="act-sess-idblock">
+                <span class="act-sess-meta"><span class="act-proj">billing-service</span> &middot; claude-code &middot; s_4a91b2c…7c02</span>
+                <span class="act-sess-title">Reconcile a duplicate-charge report</span>
+              </span>
+              <span class="act-sess-n">3</span>
+            </div>
+            <div class="act-entries">
+              <div class="act-entry">
+                <div class="act-row">
+                  <span class="act-time">14:11</span>
+                  <span class="act-state approved">Approved</span>
+                  <span class="act-risk write" title="Write"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg></span>
+                  <span class="act-intent">Flag the duplicated charge for refund</span>
+                  <span class="act-flags"><span class="act-flag val">Value</span></span>
+                  <span class="act-metric">1 affected</span>
+                </div>
+              </div>
+              <div class="act-entry">
+                <div class="act-row">
+                  <span class="act-time">14:09</span>
+                  <span class="act-state rejected">Declined</span>
+                  <span class="act-intent">Widen the scan to every customer</span>
+                  <span class="act-flags"><span class="act-flag pii">PII</span></span>
+                  <span class="act-metric"></span>
+                </div>
+              </div>
+              <div class="act-entry">
+                <div class="act-row">
+                  <span class="act-time">14:07</span>
+                  <span class="act-state approved">Approved</span>
+                  <span class="act-intent">Find charges for the disputed order</span>
+                  <span class="act-flags"><span class="act-flag pii">PII</span></span>
+                  <span class="act-metric">128 rows</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="sg-desc">Every decision is recorded: the outcome, timestamps, the SQL and the row count. Result rows are never retained, and approved result rows are cleared 10 minutes after the decision.</p>
+        <div class="export-note">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+          <span>Export any session as</span>
+          <span class="fmt">Markdown</span><span class="fmt">CSV</span><span class="fmt">JSON</span>
+        </div>
+      </div>
+
+      <!-- RIGHT column: always-on protections, then the connected-agents roster. -->
+      <div class="sg-right">
+        <h3 class="sg-title">Under the hood</h3>
+        <div class="tiles-2x2">
+          <div class="tile">
+            <span class="tile-ico blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3"/></svg></span>
+            <h3>Schema, never rows</h3>
+            <p>Turn on schema access and agents read your real structure through <code>get_schema</code> to write accurate SQL. Never exposes any row data.</p>
+          </div>
+          <div class="tile">
+            <span class="tile-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="8" rx="2"/><path d="M7 20h10"/><path d="M9 16v4"/><path d="M15 16v4"/></svg></span>
+            <h3>Single active-tab lock</h3>
+            <p>A proposal is leased to one plugin tab under a state machine, so a query is never silently approved or executed twice.</p>
+          </div>
+          <div class="tile">
+            <span class="tile-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/></svg></span>
+            <h3>Credentials stay put</h3>
+            <p>The broker binds loopback only and rejects unexpected hosts. Every request carries a capability token. The agent gets rows, never a connection.</p>
+          </div>
+          <div class="tile">
+            <span class="tile-ico blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg></span>
+            <h3>Agent-agnostic</h3>
+            <p>Any MCP client drives it: Claude Code, Codex CLI, OpenCode and the rest. A companion skill teaches them to use it well.</p>
+          </div>
+        </div>
+
+        <h3 class="sg-title sg-title2">Who's on the connection</h3>
+        <div class="roster-card">
+          <div class="roster-list">
+            <div class="roster-row" data-presence="active">
+              <span class="presence-dot"></span>
+              <span class="harness-badge"><svg viewBox="0 0 24 24"><path clip-rule="evenodd" fill-rule="evenodd" d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z"/></svg></span>
+              <span class="roster-label">billing-service</span>
+              <span class="roster-intent">Reconcile a duplicate-charge report</span>
+              <span class="roster-meta">active &middot; 1 pending</span>
+            </div>
+            <div class="roster-row" data-presence="active">
+              <span class="presence-dot"></span>
+              <span class="harness-badge"><svg viewBox="0 0 24 24" fill="none" fill-rule="evenodd"><path d="M8.086.457a6.105 6.105 0 013.046-.415c1.333.153 2.521.72 3.564 1.7a.117.117 0 00.107.029c1.408-.346 2.762-.224 4.061.366l.063.03.154.076c1.357.703 2.33 1.77 2.918 3.198.278.679.418 1.388.421 2.126a5.655 5.655 0 01-.18 1.631.167.167 0 00.04.155 5.982 5.982 0 011.578 2.891c.385 1.901-.01 3.615-1.183 5.14l-.182.22a6.063 6.063 0 01-2.934 1.851.162.162 0 00-.108.102c-.255.736-.511 1.364-.987 1.992-1.199 1.582-2.962 2.462-4.948 2.451-1.583-.008-2.986-.587-4.21-1.736a.145.145 0 00-.14-.032c-.518.167-1.04.191-1.604.185a5.924 5.924 0 01-2.595-.622 6.058 6.058 0 01-2.146-1.781c-.203-.269-.404-.522-.551-.821a7.74 7.74 0 01-.495-1.283 6.11 6.11 0 01-.017-3.064.166.166 0 00.008-.074.115.115 0 00-.037-.064 5.958 5.958 0 01-1.38-2.202 5.196 5.196 0 01-.333-1.589 6.915 6.915 0 01.188-2.132c.45-1.484 1.309-2.648 2.577-3.493.282-.188.55-.334.802-.438.286-.12.573-.22.861-.304a.129.129 0 00.087-.087A6.016 6.016 0 015.635 2.31C6.315 1.464 7.132.846 8.086.457zm-.804 7.85a.848.848 0 00-1.473.842l1.694 2.965-1.688 2.848a.849.849 0 001.46.864l1.94-3.272a.849.849 0 00.007-.854l-1.94-3.393zm5.446 6.24a.849.849 0 000 1.695h4.848a.849.849 0 000-1.696h-4.848z"/></svg></span>
+              <span class="roster-label">ops-oncall</span>
+              <span class="roster-intent">Investigate the checkout latency spike</span>
+              <span class="roster-meta">active</span>
+            </div>
+            <div class="roster-row" data-presence="idle">
+              <span class="presence-dot"></span>
+              <span class="harness-badge"><svg viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd"><path d="M16 6H8v12h8V6zm4 16H4V2h16v20z"/></svg></span>
+              <span class="roster-label">analytics-nb</span>
+              <span class="roster-intent">Draft the weekly retention query</span>
+              <span class="roster-meta">idle 3m ago</span>
+            </div>
+            <div class="roster-row" data-presence="gone">
+              <span class="presence-dot"></span>
+              <span class="harness-badge"><svg viewBox="0 0 20 22"><polygon points="10,1.2 18.7,6.1 18.7,15.9 10,20.8 1.3,15.9 1.3,6.1" opacity="0.55"/></svg></span>
+              <span class="roster-label">migration-bot</span>
+              <span class="roster-intent">Backfill the invoices table</span>
+              <span class="roster-meta">left 12m ago</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Open a past query and read the rows it returned. -->
+    <div class="qdetail">
+      <h3 class="sg-title">Read the results next to your agent</h3>
+      <div class="qd-card">
+        <div class="qd-head">
+          <span class="qd-badge"><svg viewBox="0 0 24 24"><path clip-rule="evenodd" fill-rule="evenodd" d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z"/></svg></span>
+          <span class="qd-who">billing-service</span>
+          <span class="qd-status ok" title="Approved" aria-label="Approved"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span>
+          <button class="qd-close" type="button" aria-label="Close detail"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+        </div>
+        <div class="qd-meta">on prod-replica &middot; claude-code &middot; s_4a91b2c…7c02 &middot; req_2c07f1 &middot; Aug 11, 14:07:22</div>
+        <p class="qd-intent">Find charges for the disputed order</p>
+        <pre class="sql"><button class="copy-sql" type="button" aria-label="Copy SQL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg></button><code><span class="kw">SELECT</span> charge_id, customer, amount, status, created_at
+<span class="kw">FROM</span> charges
+<span class="kw">WHERE</span> order_id = <span class="st">'ord_5512'</span>
+<span class="kw">ORDER BY</span> created_at <span class="kw">DESC</span>;</code></pre>
+        <div class="qd-oc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><b>Approved</b><span class="qd-oc-meta">128 rows</span></div>
+        <div class="qd-grid">
+          <div class="qd-scroll">
+            <table>
+              <thead><tr><th class="sortable">charge_id</th><th class="sortable">customer</th><th class="num sortable">amount</th><th class="sortable">status</th><th class="sortable">created_at</th></tr></thead>
+              <tbody>
+                <tr><td>ch_8f21</td><td>Northwind Traders</td><td class="num">4200</td><td>captured</td><td>2026-08-10 14:02</td></tr>
+                <tr><td>ch_8f22</td><td>Northwind Traders</td><td class="num">4200</td><td>captured</td><td>2026-08-10 14:02</td></tr>
+                <tr><td>ch_7a05</td><td>Contoso Ltd</td><td class="num">1180</td><td>refunded</td><td>2026-08-09 09:14</td></tr>
+                <tr><td>ch_69b0</td><td>Fabrikam Inc</td><td class="num">920</td><td>captured</td><td>2026-08-09 08:51</td></tr>
+                <tr><td>ch_5d3c</td><td>Adventure Works</td><td class="num">3050</td><td>captured</td><td>2026-08-08 17:20</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="qd-pager">
+            <button class="qp-nav" type="button" aria-label="Previous page" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg></button>
+            <button class="qp-pg is-on" type="button">1</button>
+            <button class="qp-pg" type="button">2</button>
+            <button class="qp-pg" type="button">3</button>
+            <button class="qp-nav" type="button" aria-label="Next page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg></button>
+            <span class="qp-size">50 / page</span>
+          </div>
+        </div>
+        <div class="qd-foot">
+          <span class="qd-rc"><b>128</b> rows</span>
+          <span class="qd-actions">
+            <span class="qd-menu">
+              <button class="qd-act" type="button" aria-haspopup="true" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>Copy<svg class="qd-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+              <div class="qd-flyout" hidden>
+                <button class="qd-fly-item" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>Markdown<span class="qd-ext">.md</span></button>
+              </div>
+            </span>
+            <span class="qd-menu">
+              <button class="qd-act" type="button" aria-haspopup="true" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>Export<svg class="qd-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+              <div class="qd-flyout" hidden>
+                <button class="qd-fly-item" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/></svg>CSV<span class="qd-ext">.csv</span></button>
+                <button class="qd-fly-item" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/></svg>JSON<span class="qd-ext">.json</span></button>
+              </div>
+            </span>
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  /* Two staggered columns: the interactive gate + audit on the left, always-on
+     protections + roster on the right. Each column flows on its own, so the second
+     block sits a fixed gap below the first and the two sides offset naturally. */
+  .sg-cols {
+    display: grid;
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+    gap: clamp(22px, 4vw, 44px);
+    align-items: start;
+  }
+  @media (max-width: 900px) { .sg-cols { grid-template-columns: 1fr; } }
+  .sg-title { display: flex; align-items: center; gap: 13px; font-size: clamp(1.12rem, 1.5vw, 1.25rem); font-weight: 680; letter-spacing: -0.015em; color: var(--text); margin: 0 0 16px; }
+  .sg-title::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, var(--edge-strong), transparent); }
+  /* The second sub-section in each column: a consistent gap creates the staggered rhythm. */
+  .sg-title2 { margin-top: clamp(30px, 3.6vw, 44px); }
+
+  /* "Say Yes" gets a playful highlighter swipe, on top of the amber-italic accent. */
+  .say-yes { position: relative; white-space: nowrap; text-shadow: 0 1px 2px oklch(0% 0 0 / 0.5), 0 4px 16px oklch(0% 0 0 / 0.32); }
+  .say-yes::before {
+    content: ""; position: absolute; z-index: -1;
+    left: -0.1em; right: -0.1em; top: 0.44em; bottom: 0.03em;
+    background: color-mix(in oklch, var(--amber) 34%, transparent);
+    border-radius: 2px; transform: rotate(-1.5deg);
+  }
+
+  /* A prominent description, emphasised with type only (brighter + a touch larger) so it
+     reads as a description in the landing's voice, not a boxed callout. */
+  .sg-desc {
+    margin: 13px 0 16px;
+    font-size: 15.5px; line-height: 1.6;
+    color: color-mix(in oklch, var(--muted) 12%, var(--text));
+    max-width: 62ch;
+  }
+
+  .gd-menu { display: flex; flex-wrap: wrap; gap: 8px; }
+  .gd-item {
+    display: inline-flex; align-items: center; gap: 8px;
+    cursor: pointer; font: inherit;
+    padding: 7px 12px; border-radius: 10px;
+    border: 1px solid var(--edge);
+    background: color-mix(in oklch, var(--surface) 55%, transparent);
+    transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+  }
+  .gd-item:hover { border-color: var(--edge-strong); }
+  .gd-item.is-active {
+    border-color: color-mix(in oklch, var(--amber) 45%, var(--edge));
+    background: color-mix(in oklch, var(--amber) 9%, var(--surface));
+  }
+  .gd-item-ico {
+    flex: none; width: 24px; height: 24px; border-radius: 6px;
+    display: grid; place-items: center; color: var(--amber);
+    background: color-mix(in oklch, currentColor 12%, transparent);
+    border: 1px solid color-mix(in oklch, currentColor 24%, transparent);
+  }
+  .gd-item-ico svg { width: 14px; height: 14px; }
+  .gd-item-ico.ok { color: var(--ok); }
+  .gd-item-ico.danger { color: var(--danger); }
+  .gd-item-ico.blue { color: var(--exec); }
+  .gd-item-ico.violet { color: var(--client); }
+  .gd-item-title { font-size: 12.5px; font-weight: 560; color: var(--text); }
+
+  .gd-preview { position: relative; min-width: 0; }
+  .gd-preview .card[hidden] { display: none; }
+
+  .gd-verdict {
+    display: flex; align-items: center; gap: 8px;
+    margin-top: var(--s3); padding: 10px 12px; border-radius: 7px;
+    font-size: 13px; font-weight: 560;
+  }
+  .gd-verdict[hidden] { display: none; }
+  .gd-verdict.ok { color: var(--ok); background: color-mix(in oklch, var(--ok) 12%, transparent); border: 1px solid color-mix(in oklch, var(--ok) 30%, transparent); }
+  .gd-verdict.no { color: var(--muted); background: color-mix(in oklch, var(--text) 6%, transparent); border: 1px solid var(--edge); }
+  .gd-verdict.sent { color: var(--exec); background: color-mix(in oklch, var(--exec) 12%, transparent); border: 1px solid color-mix(in oklch, var(--exec) 30%, transparent); }
+
+  .deny-box { margin-top: var(--s3); padding-top: var(--s3); border-top: 1px solid var(--edge); display: flex; flex-direction: column; gap: 8px; }
+  .deny-label { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); }
+  .deny-input {
+    font: inherit; font-size: 13px; line-height: 1.5; color: var(--text);
+    width: 100%; box-sizing: border-box; resize: vertical;
+    background: var(--sunken); border: 1px solid var(--edge-strong); border-radius: 7px; padding: 9px 11px;
+  }
+  .deny-input:focus { outline: none; border-color: color-mix(in oklch, var(--amber) 55%, var(--edge-strong)); }
+  .deny-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+  .gd-send { font: inherit; font-size: 12.5px; font-weight: 570; padding: 7px 15px; border-radius: 6px; border: none; cursor: pointer; background: var(--amber); color: var(--amber-ink); }
+  .gd-send:hover { filter: brightness(1.06); }
+
+  .tiles-2x2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 520px) { .tiles-2x2 { grid-template-columns: 1fr; } }
+
+  /* Audit export affordance. */
+  .export-note { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 14px; padding: 10px 13px; font-size: 12.5px; color: var(--muted); background: color-mix(in oklch, var(--surface) 45%, transparent); border: 1px solid var(--edge); border-radius: 9px; }
+  .export-note svg { width: 15px; height: 15px; color: var(--faint); flex: none; }
+  .export-note .fmt { font-family: var(--font-mono); font-size: 11px; color: var(--text); background: color-mix(in oklch, var(--text) 8%, transparent); border: 1px solid var(--edge); border-radius: 5px; padding: 2px 7px; }
+
+  /* Detailed query view: open a past query and read the rows it returned. */
+  .qdetail { margin-top: clamp(30px, 4vw, 48px); }
+  .qd-card { border-radius: var(--r); background: var(--surface); border: 1px solid var(--edge); box-shadow: inset 0 1px 0 var(--hi), var(--elev-1); padding: var(--s3); }
+  .qd-head { display: flex; align-items: center; gap: 9px; }
+  .qd-badge { flex: none; display: inline-grid; place-items: center; width: 22px; height: 22px; color: var(--amber); }
+  .qd-badge svg { width: 17px; height: 17px; fill: currentColor; }
+  .qd-who { font-weight: 620; font-size: 13.5px; color: var(--text); }
+  /* Status stays inline, right after the name (a bare glyph, no box); only the close pushes right. */
+  .qd-status { display: inline-flex; align-items: center; }
+  .qd-status.ok { color: var(--ok); }
+  .qd-status svg { width: 15px; height: 15px; }
+  .qd-close { flex: none; display: inline-grid; place-items: center; width: 24px; height: 24px; margin-left: auto; border-radius: 6px; border: none; cursor: pointer; color: var(--faint); background: transparent; transition: color var(--dur) var(--ease), background var(--dur) var(--ease); }
+  .qd-close:hover { color: var(--text); background: color-mix(in oklch, var(--text) 6%, transparent); }
+  .qd-close svg { width: 15px; height: 15px; }
+  .qd-meta { font-family: var(--font-mono); font-size: 11px; color: var(--faint); margin: 7px 0 10px; }
+  .qd-intent { font-weight: 600; font-size: 14px; color: var(--text); margin: 0 0 10px; }
+  .qd-oc { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ok); margin: 13px 0 9px; }
+  .qd-oc svg { width: 15px; height: 15px; flex: none; }
+  .qd-oc b { color: var(--text); font-weight: 620; }
+  .qd-oc-meta { color: var(--muted); font-weight: 500; }
+
+  /* Result grid: a framed, paginated data grid standing in for the plugin's Tabulator. */
+  .qd-grid { border: 1px solid var(--edge); border-radius: 8px; overflow: hidden; }
+  .qd-scroll { overflow-x: auto; }
+  .qd-grid table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .qd-grid th, .qd-grid td { text-align: left; padding: 7px 13px; white-space: nowrap; border-bottom: 1px solid var(--edge); border-right: 1px solid color-mix(in oklch, var(--edge) 60%, transparent); }
+  .qd-grid th:last-child, .qd-grid td:last-child { border-right: none; }
+  .qd-grid thead th { font-size: 10.5px; font-weight: 650; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); background: var(--sunken); cursor: pointer; }
+  .qd-grid thead th.sortable { position: relative; padding-right: 24px; }
+  .qd-grid thead th.sortable::after { content: ""; position: absolute; right: 11px; top: 50%; width: 0; height: 0; margin-top: -2px; border-left: 3.5px solid transparent; border-right: 3.5px solid transparent; border-top: 4px solid var(--faint); opacity: 0.45; }
+  .qd-grid tbody td { font-family: var(--font-mono); color: var(--muted); }
+  .qd-grid tbody tr:nth-child(even) td { background: color-mix(in oklch, var(--text) 3.5%, transparent); }
+  .qd-grid tbody tr:hover td { background: color-mix(in oklch, var(--amber) 9%, transparent); }
+  .qd-grid tbody tr:last-child td { border-bottom: none; }
+  .qd-grid th.num, .qd-grid td.num { text-align: right; }
+  .qd-grid td.num { color: var(--text); font-variant-numeric: tabular-nums; }
+
+  /* Grid pager, seated on the grid's bottom edge like the real one. */
+  .qd-pager { display: flex; align-items: center; gap: 4px; padding: 7px 10px; border-top: 1px solid var(--edge); background: var(--sunken); }
+  .qp-nav, .qp-pg { display: inline-grid; place-items: center; min-width: 24px; height: 24px; padding: 0 6px; font: inherit; font-size: 11.5px; color: var(--muted); background: transparent; border: 1px solid transparent; border-radius: 6px; cursor: pointer; }
+  .qp-nav svg { width: 14px; height: 14px; }
+  .qp-nav:disabled { color: var(--faint); opacity: 0.5; cursor: default; }
+  .qp-pg:hover, .qp-nav:not(:disabled):hover { border-color: var(--edge-strong); color: var(--text); }
+  .qp-pg.is-on { background: color-mix(in oklch, var(--amber) 16%, transparent); border-color: color-mix(in oklch, var(--amber) 40%, var(--edge)); color: var(--text); font-weight: 600; }
+  .qp-size { margin-left: auto; font-size: 10.5px; font-family: var(--font-mono); color: var(--faint); }
+
+  .qd-foot { display: flex; align-items: center; gap: 12px; margin-top: 11px; flex-wrap: wrap; }
+  .qd-rc { font-size: 12.5px; color: var(--muted); }
+  .qd-rc b { color: var(--text); }
+  .qd-actions { margin-left: auto; display: flex; gap: 8px; }
+  .qd-menu { position: relative; }
+  .qd-act { display: inline-flex; align-items: center; gap: 6px; font: inherit; font-size: 12px; font-weight: 550; color: var(--muted); cursor: pointer; padding: 5px 10px; border-radius: 6px; border: 1px solid var(--edge); background: color-mix(in oklch, var(--text) 3%, transparent); transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease); }
+  .qd-act:hover { color: var(--text); border-color: var(--edge-strong); }
+  .qd-act svg { width: 14px; height: 14px; }
+  .qd-chev { width: 12px; height: 12px; color: var(--faint); transition: transform var(--dur) var(--ease); }
+  .qd-act[aria-expanded="true"] .qd-chev { transform: rotate(180deg); }
+  .qd-flyout { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 5; min-width: 152px; display: flex; flex-direction: column; gap: 2px; padding: 5px; border-radius: 9px; border: 1px solid var(--edge-strong); background: var(--surface); box-shadow: var(--elev-2); }
+  .qd-flyout[hidden] { display: none; }
+  .qd-fly-item { display: flex; align-items: center; gap: 8px; font: inherit; font-size: 12.5px; color: var(--text); cursor: pointer; padding: 7px 9px; border: none; border-radius: 6px; background: transparent; text-align: left; }
+  .qd-fly-item svg { width: 14px; height: 14px; color: var(--faint); flex: none; }
+  .qd-fly-item:hover { background: color-mix(in oklch, var(--text) 6%, transparent); }
+  .qd-ext { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; color: var(--faint); }
+</style>
+
+<script>
+  const demo = document.getElementById("gate-demo");
+  if (demo) {
+    const items = Array.from(demo.querySelectorAll(".gd-item"));
+    const cards = Array.from(demo.querySelectorAll(".gd-preview .card"));
+
+    const resetCard = (card) => {
+      const verdict = card.querySelector(".gd-verdict");
+      const actions = card.querySelector(".actions");
+      const box = card.querySelector(".deny-box");
+      if (verdict) { verdict.hidden = true; verdict.textContent = ""; verdict.className = "gd-verdict"; }
+      if (actions) actions.style.display = "";
+      if (box) box.style.display = "";
+    };
+
+    const descEl = document.getElementById("gd-desc");
+    const show = (ex) => {
+      items.forEach((i) => {
+        const on = i.dataset.ex === ex;
+        i.classList.toggle("is-active", on);
+        i.setAttribute("aria-selected", on ? "true" : "false");
+        if (on && descEl) descEl.textContent = i.dataset.desc || "";
+      });
+      cards.forEach((c) => {
+        c.hidden = c.dataset.ex !== ex;
+        resetCard(c);
+      });
+    };
+    items.forEach((i) => i.addEventListener("click", () => show(i.dataset.ex)));
+
+    const settle = (card, cls, text) => {
+      const actions = card.querySelector(".actions");
+      const box = card.querySelector(".deny-box");
+      const verdict = card.querySelector(".gd-verdict");
+      if (actions) actions.style.display = "none";
+      if (box) box.style.display = "none";
+      if (verdict) { verdict.className = "gd-verdict " + cls; verdict.textContent = text; verdict.hidden = false; }
+    };
+    cards.forEach((card) => {
+      const approve = card.querySelector(".btn.approve");
+      const reject = card.querySelector(".btn.reject");
+      const send = card.querySelector(".gd-send");
+      if (approve && !approve.disabled) approve.addEventListener("click", () => settle(card, "ok", card.dataset.ok || "Approved."));
+      if (reject) reject.addEventListener("click", () => settle(card, "no", "Declined. Nothing ran against the database."));
+      if (send) send.addEventListener("click", () => settle(card, "sent", "Change request sent — the agent will revise and resubmit."));
+    });
+  }
+
+  // Result view: dropdown flyouts (Copy / Export) and the pager, mirroring the plugin's controls.
+  const qd = document.querySelector(".qd-card");
+  if (qd) {
+    const menus = Array.from(qd.querySelectorAll(".qd-menu"));
+    const closeAll = (except) => menus.forEach((m) => {
+      if (m === except) return;
+      const b = m.querySelector(".qd-act");
+      const f = m.querySelector(".qd-flyout");
+      if (b) b.setAttribute("aria-expanded", "false");
+      if (f) f.hidden = true;
+    });
+    menus.forEach((m) => {
+      const btn = m.querySelector(".qd-act");
+      const fly = m.querySelector(".qd-flyout");
+      if (!btn || !fly) return;
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const open = btn.getAttribute("aria-expanded") === "true";
+        closeAll(m);
+        btn.setAttribute("aria-expanded", open ? "false" : "true");
+        fly.hidden = open;
+      });
+      fly.querySelectorAll(".qd-fly-item").forEach((it) =>
+        it.addEventListener("click", () => { btn.setAttribute("aria-expanded", "false"); fly.hidden = true; })
+      );
+    });
+    document.addEventListener("click", () => closeAll(null));
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeAll(null); });
+
+    const pages = Array.from(qd.querySelectorAll(".qp-pg"));
+    const prev = qd.querySelector('.qp-nav[aria-label="Previous page"]');
+    const next = qd.querySelector('.qp-nav[aria-label="Next page"]');
+    pages.forEach((p, i) => p.addEventListener("click", () => {
+      pages.forEach((q) => q.classList.remove("is-on"));
+      p.classList.add("is-on");
+      if (prev) prev.disabled = i === 0;
+      if (next) next.disabled = i === pages.length - 1;
+    }));
+  }
+</script>

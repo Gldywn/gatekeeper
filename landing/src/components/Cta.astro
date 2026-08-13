@@ -1,0 +1,75 @@
+<section class="section-pad" style="padding-top:clamp(20px,3vw,40px)">
+  <div class="wrap">
+    <div class="cta-final">
+      <div class="inner">
+        <h2>Install Gatekeeper <span class="h-hl">in a minute.</span></h2>
+        <div class="install">
+          <div class="cta-mark" aria-hidden="true">
+            <span class="cm-aura"></span>
+            <img class="cm-icon" src="/gatekeeper-icon.svg" alt="" width="160" height="160" />
+          </div>
+          <div class="term-bar" aria-hidden="true"><span class="tb-dot r"></span><span class="tb-dot y"></span><span class="tb-dot g"></span></div>
+<pre><span class="cm"># Build the server and the plugin</span>
+<span class="pr">$</span> pnpm install <span class="kw">&amp;&amp;</span> pnpm build
+
+<span class="cm"># Teach your agents to use it (Claude Code, Codex, Cursor, ...)</span>
+<span class="pr">$</span> npx skills add Gldywn/gatekeeper</pre>
+        </div>
+        <div class="hero-cta">
+          <a class="btn-lg btn-primary" href="https://github.com/Gldywn/gatekeeper">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.42c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.34-1.3-1.7-1.3-1.7-1.06-.72.08-.71.08-.71 1.17.08 1.78 1.2 1.78 1.2 1.04 1.78 2.73 1.27 3.4.97.1-.75.4-1.27.73-1.56-2.56-.29-5.26-1.28-5.26-5.7 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11 11 0 0 1 5.8 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.43-2.7 5.4-5.28 5.69.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
+            View on GitHub
+          </a>
+          <a class="btn-lg btn-star" href="https://github.com/Gldywn/gatekeeper" aria-label="Star Gatekeeper on GitHub"><svg class="star" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2.4l2.95 5.98 6.6.96-4.77 4.65 1.12 6.57L12 17.4l-5.9 3.16 1.12-6.57L2.45 9.34l6.6-.96z"/></svg>Help us with a star</a>
+        </div>
+        <p class="cta-note">Gatekeeper is free and open source. Issues and pull requests are welcome.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  /* An electric close: a brighter amber border, a warm radial wash with a cool counter-glow,
+     an amber top rail, and the floating Gatekeeper mark echoing the Why section. */
+  .cta-final {
+    position: relative;
+    max-width: 760px;
+    margin-inline: auto;
+    padding: clamp(18px, 2.2vw, 28px) clamp(18px, 2.4vw, 30px) clamp(20px, 2.6vw, 32px);
+    border-radius: 16px;
+    border: 1px solid color-mix(in oklch, var(--amber) 40%, var(--edge));
+    background:
+      radial-gradient(130% 150% at 100% -12%, color-mix(in oklch, var(--amber) 20%, transparent), transparent 52%),
+      radial-gradient(120% 130% at -10% 115%, color-mix(in oklch, var(--exec) 11%, transparent), transparent 55%),
+      var(--surface);
+    box-shadow: inset 0 1px 0 var(--hi), var(--elev-2), 0 26px 70px color-mix(in oklch, var(--amber) 14%, transparent);
+  }
+  .cta-final::before {
+    content: ""; position: absolute; top: 0; left: 28px; right: 28px; height: 2px; z-index: 3;
+    background: linear-gradient(90deg, transparent, color-mix(in oklch, var(--amber) 85%, transparent), transparent);
+    opacity: 0.75;
+  }
+  .cta-final .inner { position: relative; z-index: 2; display: flex; flex-direction: column; gap: 16px; }
+  .cta-final h2 { font-size: clamp(1.9rem, 3.6vw, 2.4rem); line-height: 1.05; white-space: nowrap; }
+  @media (max-width: 620px) { .cta-final h2 { white-space: normal; font-size: clamp(1.7rem, 8vw, 2.1rem); } }
+  /* "Gatekeeper" gets the "Say Yes" treatment: amber marker swipe behind + a lifting shadow. */
+  .cta-final h2 .gk-hl { position: relative; white-space: nowrap; text-shadow: 0 1px 2px oklch(0% 0 0 / 0.5), 0 4px 16px oklch(0% 0 0 / 0.32); }
+  .cta-final h2 .gk-hl::before { content: ""; position: absolute; z-index: -1; left: -0.08em; right: -0.08em; top: 0.42em; bottom: 0.04em; background: color-mix(in oklch, var(--amber) 34%, transparent); border-radius: 2px; transform: rotate(-1.5deg); }
+
+  /* Floating Gatekeeper mark, top-right, same drift as the Why section. */
+  .cta-mark { position: absolute; top: -26px; right: -18px; width: clamp(92px, 13vw, 128px); aspect-ratio: 1; z-index: 4; display: grid; place-items: center; pointer-events: none; }
+  .cm-icon { position: relative; z-index: 2; width: 80%; height: 80%; filter: drop-shadow(0 16px 40px oklch(0% 0 0 / 0.5)); animation: cm-float 5s var(--ease-in-out) infinite; }
+  .cm-aura { position: absolute; inset: -14%; z-index: 1; background: radial-gradient(closest-side, color-mix(in oklch, var(--amber) 26%, transparent), transparent 62%); }
+  @keyframes cm-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-15px); } }
+  @media (prefers-reduced-motion: reduce) { .cm-icon { animation: none; } }
+  @media (max-width: 680px) { .cta-mark { display: none; } }
+
+  /* Mac terminal chrome: three traffic-light dots, no label. */
+  .term-bar { display: flex; align-items: center; gap: 8px; padding: 11px 14px; border-bottom: 1px solid var(--edge); }
+  .tb-dot { width: 11px; height: 11px; border-radius: 50%; }
+  .tb-dot.r { background: #ff5f57; }
+  .tb-dot.y { background: #febc2e; }
+  .tb-dot.g { background: #28c840; }
+  .cta-final .install { position: relative; overflow: visible; margin-top: clamp(10px, 1.6vw, 20px); }
+  .cta-note { margin: 0; font-size: 13px; color: var(--muted); }
+</style>

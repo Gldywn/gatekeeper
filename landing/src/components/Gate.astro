@@ -1,0 +1,106 @@
+<section id="gate" class="section-pad">
+  <div class="wrap">
+    <div class="gate-top">
+      <div class="section-head">
+        <span class="eyebrow amber">Why Gatekeeper</span>
+        <h2>Wire agents to production <span class="h-hl">like an engineer</span>, not a gambler.</h2>
+        <p class="lead">Connecting an agent to a database over MCP already exists. Most connectors hand the agent a raw pipe: direct, ungated SQL it can run against your data whenever it decides to. Gatekeeper is an MCP server too, but it speaks that protocol with the opposite intent: a human gate in front of every statement.</p>
+      </div>
+      <div class="gate-mark" aria-hidden="true">
+        <span class="gm-aura"></span>
+        <svg class="gm-hive"><rect width="100%" height="100%" fill="url(#hexpat)"/></svg>
+        <img class="gm-icon" src="/gatekeeper-icon.svg" alt="" width="340" height="340" />
+      </div>
+    </div>
+    <div class="compare">
+      <span class="vs-badge" aria-hidden="true">VS</span>
+      <div class="cmp bad">
+        <div class="cmp-head">
+          <span class="cmp-kicker">A direct database MCP</span>
+          <h3>A raw pipe to your data</h3>
+        </div>
+        <ul>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg><span>The agent runs <b>whatever SQL it wants</b>, the moment it decides to. No pause, no review.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg><span>Reads and <b>writes and deletes</b> travel the same channel, ungated.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg><span>Database <b>credentials sit in the agent's context</b>, one prompt injection from exfiltration.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg><span>No flags on PII, no trail of what ran. You <b>find out after</b>.</span></li>
+        </ul>
+      </div>
+      <div class="cmp good">
+        <div class="cmp-head">
+          <span class="cmp-kicker">Gatekeeper</span>
+          <h3>A human-in-the-loop safety layer</h3>
+        </div>
+        <ul>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Nothing an agent proposes runs until <b>a human approves it</b>, on the exact SQL text.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>Read-only by default.</b> A single SELECT, enforced by a dialect-aware parser. Writes only when you arm them.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>Queries run on <b>Beekeeper's connection</b>, so the agent never touches credentials.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span>PII, client data and writes are <b>flagged before you decide</b>, and every decision is recorded.</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  /* The difference section leads with the text; the mark floats, centred in the space on
+     the right, over a soft amber glow with a few drifting hexagons behind it. */
+  .gate-top {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: clamp(24px, 5vw, 64px);
+    align-items: center;
+    margin-bottom: clamp(12px, 1.6vw, 20px);
+  }
+  .gate-mark {
+    position: relative;
+    justify-self: center;
+    width: clamp(240px, 34vw, 380px);
+    aspect-ratio: 1;
+    display: grid;
+    place-items: center;
+  }
+  .gm-icon {
+    position: relative;
+    z-index: 2;
+    width: 82%;
+    height: 82%;
+    filter: drop-shadow(0 20px 48px oklch(0% 0 0 / 0.5));
+    animation: gm-float 5s var(--ease-in-out) infinite;
+  }
+  /* One coherent backdrop: a soft centred warm glow plus a faint honeycomb (the brand
+     motif, same screen-blend treatment as the plugin header), radially faded so it never
+     reads as a hard box. No scattered blobs. */
+  .gm-aura {
+    position: absolute;
+    inset: -10%;
+    z-index: 0;
+    background:
+      radial-gradient(closest-side, color-mix(in oklch, var(--amber) 26%, transparent), transparent 60%),
+      radial-gradient(closest-side, color-mix(in oklch, var(--amber) 11%, transparent), transparent 80%);
+  }
+  .gm-hive {
+    position: absolute;
+    inset: -8%;
+    z-index: 1;
+    width: 116%;
+    height: 116%;
+    color: var(--amber);
+    opacity: 0.16;
+    mix-blend-mode: screen;
+    pointer-events: none;
+    -webkit-mask-image: radial-gradient(closest-side, #000 26%, transparent 70%);
+    mask-image: radial-gradient(closest-side, #000 26%, transparent 70%);
+  }
+  @keyframes gm-float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-20px); }
+  }
+  @media (max-width: 900px) {
+    .gate-top { grid-template-columns: 1fr; }
+    .gate-mark { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .gm-icon { animation: none; }
+  }
+</style>

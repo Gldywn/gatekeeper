@@ -1,0 +1,37 @@
+---
+import Base from "../layouts/Base.astro";
+import Nav from "../components/Nav.astro";
+import Hero from "../components/Hero.astro";
+import Gate from "../components/Gate.astro";
+import HowItWorks from "../components/HowItWorks.astro";
+import Safeguards from "../components/Safeguards.astro";
+import UseCases from "../components/UseCases.astro";
+import Cta from "../components/Cta.astro";
+import Footer from "../components/Footer.astro";
+import Divider from "../components/Divider.astro";
+---
+<Base>
+  <Nav />
+  <span id="top"></span>
+  <Hero />
+  <Gate />
+  <Divider />
+  <HowItWorks />
+  <Divider />
+  <Safeguards />
+  <Divider />
+  <UseCases />
+  <Cta />
+  <Footer />
+  <!-- Shared inline honeycomb pattern (Hero Patterns "Hexagons" tile). -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <pattern id="hexpat" width="56" height="100" patternUnits="userSpaceOnUse" patternTransform="scale(0.62)">
+        <g fill="none" stroke="currentColor" stroke-width="2.4">
+          <path d="M28 66L0 50L0 16L28 0L56 16L56 50L28 66L28 100"/>
+          <path d="M28 0L28 34L0 50L0 84L28 100L56 84L56 50L28 34"/>
+        </g>
+      </pattern>
+    </defs>
+  </svg>
+</Base>
