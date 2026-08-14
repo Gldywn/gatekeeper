@@ -2,7 +2,12 @@ import { randomBytes } from "node:crypto";
 import { basename } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { MAX_WAIT_MS, SESSION_HEARTBEAT_MS } from "./config.js";
+import {
+  MAX_PENDING_PER_SESSION,
+  MAX_WAIT_MS,
+  RESULT_TTL_MS,
+  SESSION_HEARTBEAT_MS,
+} from "./config.js";
 import { type ConnectionSnapshot, connectionScopeKey } from "./connection.js";
 import type { SchemaSnapshot } from "./schema.js";
 import {
@@ -58,10 +63,24 @@ export function schemaPayload(
   };
 }
 
+// Server-wide guidance sent at initialization. Codex reads the MCP `instructions` field as
+// server-level guidance and only guarantees the first ~512 characters, so the whole waiting
+// contract is stated before that mark and the run_query caveat trails it.
+export const SERVER_INSTRUCTIONS =
+  "You propose SQL; a human approves and runs it in Beekeeper Studio; rows come back to you. " +
+  "Call set_session_label first. submit_query is non-blocking: keep working, then collect with " +
+  `poll_results/get_query_result. Waits are bounded: wait_ms is ${MAX_WAIT_MS} ms at most, and a ` +
+  "wait that runs out returns your queries still pending. That is a checkpoint, not a refusal: " +
+  "call again. Never end your turn while a query is pending, leased or executing; wait for approved, " +
+  "rejected, failed, expired or cancelled. run_query can return still-pending too; keep waiting.";
+
 export function createMcpServer(store: RequestStore): { server: McpServer; sessionId: string } {
   // One stdio client per process; this identifies its request ownership.
   const sessionId = `sess_${randomBytes(9).toString("hex")}`;
-  const server = new McpServer({ name: "gatekeeper", version: "0.0.1" });
+  const server = new McpServer(
+    { name: "gatekeeper", version: "0.0.1" },
+    { instructions: SERVER_INSTRUCTIONS },
+  );
 
   // Identify the connected harness (claude-code, codex, opencode, ...) and the
   // project it runs in, so the plugin can group pending proposals by session.
@@ -84,8 +103,7 @@ export function createMcpServer(store: RequestStore): { server: McpServer; sessi
     "submit_query",
     {
       title: "Propose a SQL query for human approval",
-      description:
-        "Enqueue a SQL statement for a human to approve in Beekeeper Studio. Reads (SELECT) are always allowed; an INSERT/UPDATE runs only if a human has armed Write mode, and DELETE/DROP/TRUNCATE only under Destructive mode. Those modes are ephemeral, off by default, and armed by the human in the plugin, not by you. The statement never runs until a human approves it, and is rejected if the mode it needs is not armed. Returns immediately with a request_id. Requires a session label: call set_session_label first, or this is rejected. Non-blocking: submit several, keep working (investigate, read, propose more) while they await approval, then use poll_results to see which resolved and get_query_result to read one. Do not end your turn with a query still pending; poll or wait for it first.",
+      description: `Enqueue a SQL statement for a human to approve in Beekeeper Studio. Returns immediately with a request_id and never blocks: submit several (up to ${MAX_PENDING_PER_SESSION} in flight), keep doing other useful work while they await approval, then use poll_results to see which resolved and get_query_result to read one. IMPORTANT: never end your turn while a query you submitted is still pending, leased or executing; keep polling or waiting until it reaches a terminal state (approved, rejected, failed, expired, cancelled). Approval is manual and can take minutes; slowness is not a refusal. Reads (SELECT) are always allowed; an INSERT/UPDATE runs only if a human has armed Write mode, and DELETE/DROP/TRUNCATE only under Destructive mode. Those modes are ephemeral, off by default, and armed by the human in the plugin, not by you. The statement never runs until a human approves it, and is rejected if the mode it needs is not armed. Requires a session label: call set_session_label first, or this is rejected.`,
       inputSchema: {
         sql: z
           .string()
@@ -128,11 +146,18 @@ export function createMcpServer(store: RequestStore): { server: McpServer; sessi
     "get_query_result",
     {
       title: "Get the result of a proposed query",
-      description:
-        "Read a submitted query by request_id. Optionally waits up to wait_ms (bounded) for a terminal state; the wait returns the instant the human decides. States: pending, leased, executing, approved, rejected, failed, expired, cancelled. To check many proposals in one call, use poll_results.",
+      description: `Read a submitted query by request_id. With wait_ms it waits up to that many milliseconds (${MAX_WAIT_MS} at most) and returns the instant the human decides; if the wait runs out first it returns the query still in its non-terminal state (pending, leased, executing), which is a timed checkpoint and not an answer: call again to keep waiting, as many times as it takes. Only approved, rejected, failed, expired and cancelled are terminal. IMPORTANT: never end your turn while a query you submitted is non-terminal. Approved rows are stripped about ${RESULT_TTL_MS / 60_000} minutes after the decision (purged: true), so read them promptly rather than after a long detour. To check many proposals in one call, use poll_results.`,
       inputSchema: {
         request_id: z.string(),
-        wait_ms: z.number().int().min(0).max(MAX_WAIT_MS).optional(),
+        wait_ms: z
+          .number()
+          .int()
+          .min(0)
+          .max(MAX_WAIT_MS)
+          .optional()
+          .describe(
+            `Milliseconds to wait for the human's decision, ${MAX_WAIT_MS} at most (a larger value is rejected, not clamped). If the query is still non-terminal when the wait runs out, call again to keep waiting; omit or pass 0 for an instant status check.`,
+          ),
       },
     },
     async ({ request_id, wait_ms }) => {
@@ -149,10 +174,17 @@ export function createMcpServer(store: RequestStore): { server: McpServer; sessi
     "poll_results",
     {
       title: "Check all your proposed queries at once",
-      description:
-        "Return the current state of every query this session proposed recently (pending, leased, executing, approved, rejected, failed, expired, cancelled) in one call. Use it to keep working while queries await approval and collect them as they land: submit_query (non-blocking), do other work, then poll_results to see which resolved, and get_query_result to read a resolved one's rows. Optionally wait up to wait_ms (bounded) to return the instant any still-pending one resolves. It returns states only, not rows. Do not end your turn while a query is still pending: poll or wait for it first.",
+      description: `Return the current state of every query this session proposed recently (pending, leased, executing, approved, rejected, failed, expired, cancelled) plus a pending count, in one call. States only, not rows; read a resolved one's rows with get_query_result. Typical loop: submit_query (non-blocking), do other work, then poll_results to see which resolved. With wait_ms it waits up to that many milliseconds (${MAX_WAIT_MS} at most) and returns the instant any still-open query resolves; if the wait runs out first it simply returns the states again with pending above 0, which is a timed checkpoint and not an answer: call again to keep waiting. IMPORTANT: never end your turn while any query is still pending, leased or executing.`,
       inputSchema: {
-        wait_ms: z.number().int().min(0).max(MAX_WAIT_MS).optional(),
+        wait_ms: z
+          .number()
+          .int()
+          .min(0)
+          .max(MAX_WAIT_MS)
+          .optional()
+          .describe(
+            `Milliseconds to wait for a human decision on any open query, ${MAX_WAIT_MS} at most (a larger value is rejected, not clamped). If it returns with queries still pending, call again to keep waiting; omit or pass 0 for an instant status check.`,
+          ),
       },
     },
     async ({ wait_ms }) => {
@@ -190,7 +222,7 @@ export function createMcpServer(store: RequestStore): { server: McpServer; sessi
     {
       title: "Get non-sensitive context about the connected database",
       description:
-        "Return informational context about the database the plugin is connected to: dialect, database name, default schema, read-only mode, the human's armed access mode (read/write/destructive), and when it was captured. Never contains host, user, or credentials. Informational only; do not treat it as an authorization boundary.",
+        "Return informational context about the database the plugin is connected to: dialect, database name, default schema, read-only mode, the human's armed access mode (read/write/destructive), and when it was captured. A connected: false, or a capture more than a few minutes old, means the plugin is closed and no approval can arrive, which is the one reason to stop waiting and tell your user. Never contains host, user, or credentials. Informational only; do not treat it as an authorization boundary.",
       inputSchema: {},
     },
     async () => {
@@ -220,8 +252,7 @@ export function createMcpServer(store: RequestStore): { server: McpServer; sessi
     "run_query",
     {
       title: "Run a query and wait for the human decision",
-      description:
-        "Convenience wrapper that submits a query and waits (bounded) for the terminal result. Reads are always allowed; a write/destructive statement runs only if a human has armed the matching mode (Write or Destructive), else it is rejected. It serializes one query at a time; prefer submit_query + get_query_result when you want concurrency.",
+      description: `Convenience wrapper for a quick one-off: submits one query and waits up to ${MAX_WAIT_MS / 1000} seconds for the human's decision. IMPORTANT: if the human has not decided within that bound, this returns the query still in a non-terminal state (pending, leased, executing). That is neither the result nor a refusal: keep waiting with get_query_result(request_id, wait_ms) or poll_results(wait_ms) until a terminal state (approved, rejected, failed, expired, cancelled), and never end your turn before that. Reads are always allowed; a write/destructive statement runs only if a human has armed the matching mode (Write or Destructive), else it is rejected. Requires a session label: call set_session_label first, or this is rejected. It serializes one query at a time; prefer submit_query + poll_results/get_query_result for anything but a single quick query, and for concurrency.`,
       inputSchema: {
         sql: z.string().max(100_000),
         intent: z

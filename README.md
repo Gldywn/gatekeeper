@@ -96,15 +96,17 @@ a volatile function, so the human approval on the visible SQL is the real backst
   `set_session_label`), otherwise it is rejected. Reusing an `idempotency_key` with
   different SQL is rejected rather than silently returning the first statement's result.
 - `get_query_result({ request_id, wait_ms? })` -> ticket. Reads a proposal, optionally
-  waiting (bounded) for a terminal state: `approved`, `rejected`, `failed`, `expired`,
-  `cancelled`.
+  waiting for a terminal state: `approved`, `rejected`, `failed`, `expired`, `cancelled`.
+  Every wait is bounded by `MAX_WAIT_MS` (25s), so a wait that runs out returns the
+  proposal in whatever non-terminal state it is in; the agent calls again to keep waiting.
 - `poll_results({ wait_ms? })` -> `{ results, pending }`. The state of every query the
-  session proposed recently, in one call, optionally waiting (bounded) until any pending
-  one resolves. States only; fetch a resolved one's rows with `get_query_result`.
+  session proposed recently, in one call, optionally waiting (same 25s bound) until any
+  pending one resolves. States only; fetch a resolved one's rows with `get_query_result`.
 - `cancel_query({ request_id })` -> ticket. Withdraws a pending or leased proposal.
 - `run_query({ sql, intent? })` -> ticket. Convenience wrapper that submits and waits
-  for the terminal result. It serializes one query at a time; prefer
-  `submit_query` + `get_query_result` for concurrency.
+  once, under the same 25s bound, so it can return a still-pending proposal rather than
+  the result. It serializes one query at a time; prefer `submit_query` +
+  `poll_results`/`get_query_result` for concurrency.
 - `set_session_label({ label })` -> ok. Names the session with a short, human-readable
   label shown in the plugin's connected-agents roster. Required before any query: the
   server rejects `submit_query` until a session label is set.

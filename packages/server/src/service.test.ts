@@ -1,6 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { cancelQuery, getQueryResult, submitQuery } from "./service.js";
+import { MAX_WAIT_MS } from "./config.js";
+import { cancelQuery, getQueryResult, pollResults, submitQuery } from "./service.js";
 import { RequestStore } from "./store.js";
+
+// A wait driven by a fake clock: every sleep jumps the deadline clock forward, so a
+// bounded wait reaches its deadline without any real time passing.
+function fakeWait() {
+  const clock = { t: 0 };
+  return {
+    now: () => clock.t,
+    sleep: async (ms: number) => {
+      clock.t += ms;
+    },
+    elapsed: () => clock.t,
+  };
+}
 
 // Every submit path is gated on a session label, so seed one for s1; tests that
 // need a label-less session make their own bare store.
@@ -93,12 +107,65 @@ describe("getQueryResult", () => {
     expect(read.terminal?.reason).toBe("no");
   });
 
+  // The contract every tool description and the skill promise: a wait that runs out is a
+  // checkpoint, not an answer. If this ever became a throw or an error ticket, every one of
+  // those surfaces would be lying.
+  it("hands back the still-pending ticket when the wait runs out", async () => {
+    const store = fresh();
+    const ticket = submitQuery(store, { sessionId: "s1", sql: "SELECT 1" });
+    const wait = fakeWait();
+    const read = await getQueryResult(store, "s1", ticket.requestId, 5_000, wait.sleep, wait.now);
+    expect(read.state).toBe("pending");
+    expect(read.terminal).toBeUndefined();
+    expect(wait.elapsed()).toBeGreaterThanOrEqual(5_000);
+  });
+
+  it("clamps a wait longer than the cap", async () => {
+    const store = fresh();
+    const ticket = submitQuery(store, { sessionId: "s1", sql: "SELECT 1" });
+    const wait = fakeWait();
+    await getQueryResult(store, "s1", ticket.requestId, MAX_WAIT_MS * 4, wait.sleep, wait.now);
+    expect(wait.elapsed()).toBeLessThan(MAX_WAIT_MS * 2);
+  });
+
   it("enforces ownership", async () => {
     const store = fresh();
     const ticket = submitQuery(store, { sessionId: "s1", sql: "SELECT 1" });
     await expect(getQueryResult(store, "s2", ticket.requestId, 0)).rejects.toThrowError(
       /NOT_OWNER/,
     );
+  });
+});
+
+describe("pollResults", () => {
+  it("returns the states with a pending count when the wait runs out", async () => {
+    const store = fresh();
+    submitQuery(store, { sessionId: "s1", sql: "SELECT 1" });
+    submitQuery(store, { sessionId: "s1", sql: "SELECT 2" });
+    const wait = fakeWait();
+    const snap = await pollResults(store, "s1", 5_000, wait.sleep, wait.now);
+    expect(snap.pending).toBe(2);
+    expect(snap.results.every((r) => r.state === "pending")).toBe(true);
+    expect(wait.elapsed()).toBeGreaterThanOrEqual(5_000);
+  });
+
+  it("returns as soon as one of several open proposals resolves", async () => {
+    const store = fresh();
+    submitQuery(store, { sessionId: "s1", sql: "SELECT 1" });
+    submitQuery(store, { sessionId: "s1", sql: "SELECT 2" });
+    const wait = fakeWait();
+    let resolved = false;
+    const sleep = async (ms: number) => {
+      await wait.sleep(ms);
+      if (!resolved) {
+        const claimed = store.claimNext("plugin", 1000)!;
+        store.resolve(claimed.id, claimed.leaseId!, { status: "rejected", reason: "no" });
+        resolved = true;
+      }
+    };
+    const snap = await pollResults(store, "s1", MAX_WAIT_MS, sleep, wait.now);
+    expect(snap.pending).toBe(1);
+    expect(wait.elapsed()).toBeLessThan(MAX_WAIT_MS);
   });
 });
 
