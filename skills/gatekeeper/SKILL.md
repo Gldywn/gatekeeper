@@ -47,6 +47,21 @@ Before anything else, call `set_session_label` once with a short, human-readable
 
 Examples: `Analytics: weekly active users by plan`, `Verify migration 0142 backfilled order_totals`, `Debug: orders stuck in pending since 09:00`, `Support SUP-1042: login/identity check`.
 
+## Confirm which database you are on
+
+`get_connection_info` tells you where the plugin is pointed right now: connection name, engine, database name, default schema, read-only, and the human's armed mode. The human can switch that connection in Beekeeper at any moment without telling you, because from their side they are simply doing other work.
+
+Call it once before your first query and keep the three fields that identify the target: `connectionName`, `databaseType`, `databaseName`. Together they are the connection's identity; two connections sharing a display name but sitting on different engines or databases are not the same target.
+
+Compare that to what your task implies, and only to that. If your task is about staging and the database reads like staging, say nothing and get to work. If your task is clearly about one environment and the connection points at another, ask the human plainly whether they are on the intended database before you propose anything. When your task says nothing about an environment, you have nothing to compare against: do not invent an expectation, and do not ask.
+
+Read it again, on your own initiative, at the two moments where a switch is both likely and expensive:
+
+- When you pick the task back up after a long gap, roughly ten minutes or more without a query, or any time you resume a session. That is exactly the window in which the human went and did something else, possibly against another database.
+- Before proposing a write or a destructive statement, where being on the wrong database costs the most.
+
+If any of those three identifying fields changed since you started, do not carry on quietly. Tell the human what the target was, what it is now, and ask whether to continue against the new one. If nothing changed, say nothing: this check earns its place by being silent almost every time.
+
 ## Write the intent for a human, not a parser
 
 The `intent` is the one line a reviewer approves on. Say what you're trying to accomplish and why (the task or business goal), in plain language someone who doesn't know the schema can judge. Anchor it to a ticket or incident id when you have one. For a write or destructive query, state what changes and whether it's scoped or irreversible, that is what the human is gating. Keep it to one or two sentences. Don't restate the SQL, don't lean on table or column names, never paste raw PII, secrets, or values (reference a ticket or an id instead), and don't invent context you haven't verified (row counts, approvals).
