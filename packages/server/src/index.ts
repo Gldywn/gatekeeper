@@ -1,3 +1,6 @@
+#!/usr/bin/env node
+// The npm `bin` entry points at the compiled dist/index.js; tsc preserves this
+// shebang, so `npx @gldywn/gatekeeper-mcp-server` execs it directly.
 import { randomBytes } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";

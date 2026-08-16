@@ -1,0 +1,67 @@
+name: publish-server
+
+# Publishes @gldywn/gatekeeper-mcp-server to npm, which is what makes the one-line
+# `npx -y @gldywn/gatekeeper-mcp-server` install work.
+#
+# Triggered by a human publishing the draft release (release-please drafts it, a human
+# reviews the attached plugin assets and clicks Publish). That human-attributed event does
+# trigger workflows, unlike anything release-please creates with the default GITHUB_TOKEN.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish from (e.g. v0.1.0).
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  # Required for npm provenance, and for npm trusted publishing if it is configured.
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      # Both halves live under the always-available `github` context: the `inputs`
+      # context is only populated for workflow_dispatch and workflow_call, and this
+      # workflow also runs on `release`.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Check the package version matches the release tag
+        env:
+          TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+        run: |
+          version="${TAG#v}"
+          package_version="$(jq -r '.version' packages/server/package.json)"
+          if [ "$package_version" != "$version" ]; then
+            echo "::error::packages/server is at $package_version but the release tag is $TAG."
+            exit 1
+          fi
+
+      - name: Typecheck, build and test
+        run: pnpm run ci
+
+      # --no-git-checks: this runs on a detached tag checkout, not the publish branch.
+      # NODE_AUTH_TOKEN carries the NPM_TOKEN secret, which is the known-good path. If npm
+      # trusted publishing is configured for the package instead, leave the secret unset:
+      # pnpm 11 ships OIDC support and mints a short-lived token from id-token above.
+      - name: Publish to npm
+        working-directory: packages/server
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: pnpm publish --access public --provenance --no-git-checks

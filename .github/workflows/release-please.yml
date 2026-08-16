@@ -1,8 +1,15 @@
 name: release-please
 
-# Conventional-commit-driven releases: this maintains a "Release PR" that bumps versions
-# and updates CHANGELOGs per package; merging it tags the release. Versioning/tagging only,
-# the build+publish of artifacts is a separate workflow triggered by the tag.
+# Conventional-commit-driven releases. release-please maintains a "Release PR" that bumps the
+# single repo-wide version (root package.json, both package manifests, and the plugin's
+# manifest.json) and updates the CHANGELOG. Merging that PR creates a *draft* GitHub release,
+# which this workflow then fills with the plugin assets. A human publishes the draft, and that
+# publish event is what triggers the npm publication of the server.
+#
+# One version for the whole repo on purpose: the plugin and the server speak the wire contract
+# in packages/shared, and Beekeeper Studio installs a plugin by reading this repo's single
+# /releases/latest. Independent per-package releases would let a server-only release become
+# "latest" and hide the plugin's assets from the Beekeeper plugin manager.
 on:
   push:
     branches:
@@ -16,8 +23,24 @@ permissions:
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@v5
+        id: release
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  # Releases created with the default GITHUB_TOKEN do not trigger `on: push: tags` or
+  # `on: release` workflows, so the plugin build is chained here rather than tag-triggered.
+  plugin-assets:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release-plugin.yml
+    with:
+      tag: ${{ needs.release-please.outputs.tag_name }}
+      ref: ${{ github.sha }}

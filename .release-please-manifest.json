@@ -1,4 +1,3 @@
 {
-  "packages/plugin": "0.0.1",
-  "packages/server": "0.0.1"
+  ".": "0.0.1"
 }

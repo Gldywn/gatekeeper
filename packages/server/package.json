@@ -1,15 +1,45 @@
 {
-  "name": "@gatekeeper/server",
-  "private": true,
+  "name": "@gldywn/gatekeeper-mcp-server",
   "version": "0.0.1",
   "type": "module",
+  "description": "MCP server for Gatekeeper: proposes SQL to a human in Beekeeper Studio and returns the approved result to the agent.",
+  "keywords": [
+    "mcp",
+    "modelcontextprotocol",
+    "beekeeper-studio",
+    "sql",
+    "database",
+    "human-in-the-loop"
+  ],
+  "license": "MIT",
+  "author": "Gldywn (https://github.com/Gldywn)",
+  "homepage": "https://github.com/Gldywn/gatekeeper#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Gldywn/gatekeeper.git",
+    "directory": "packages/server"
+  },
+  "bugs": "https://github.com/Gldywn/gatekeeper/issues",
+  "bin": {
+    "gatekeeper-mcp-server": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",

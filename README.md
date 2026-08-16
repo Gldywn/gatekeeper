@@ -178,30 +178,96 @@ the lease expires and the proposal is re-offered; if it dies mid-execution the p
 is failed as `execution_unknown` and never re-run, so a query is never silently executed
 twice.
 
-## Getting started
+## Install
 
-Prerequisites: Node >= 20.19, pnpm, Beekeeper Studio >= 5.4.
+Prerequisites: Beekeeper Studio >= 5.4 and Node >= 22. If you run Claude Code or Codex
+CLI you already have Node. There is nothing else to install up front, and **no background
+service**: your agent starts the server when its session opens and it exits when that
+session ends.
 
-1. Install and build:
-   ```
-   pnpm install
-   pnpm build
-   ```
-2. **Register the MCP server** with your client. Copy `.mcp.json.example` and point
-   `args` at the absolute path of `packages/server/dist/index.js`. The client launches the
-   server over stdio.
-3. **Install the plugin** into Beekeeper Studio. Symlink the `packages/plugin/` directory
-   into Beekeeper's plugins folder (see Beekeeper's plugin development docs) under the name
-   `gatekeeper`; the folder name must match the manifest `id`.
-4. **Pair the plugin.** Open Gatekeeper from Beekeeper's Tools menu, read the token with
-   `cat ~/.gatekeeper/broker-token`, and paste it into the pairing screen.
-5. **Use it.** The agent calls `submit_query`; the plugin shows the SQL; approve it; the
-   rows return to the agent.
+The npm package and the plugin registry listing land with the first tagged release. Until
+then, follow [Build from source](#build-from-source) instead of steps 1 and 2.
 
-Environment variables:
+**1. Install the plugin in Beekeeper Studio.** Tools -> Manage Plugins, find Gatekeeper,
+Install. Until the registry entry is merged, download `gatekeeper-<version>.zip` from the
+[latest release](https://github.com/Gldywn/gatekeeper/releases/latest), extract it into
+Beekeeper's plugins folder as a directory named `gatekeeper` (the folder name must match
+the manifest `id`), and restart Beekeeper:
+
+| OS | Plugins folder |
+|---|---|
+| macOS | `~/Library/Application Support/beekeeper-studio/plugins/` |
+| Linux | `~/.config/beekeeper-studio/plugins/` |
+| Windows | `%APPDATA%\beekeeper-studio\plugins\` |
+
+**2. Register the MCP server with your agent.** This is also the server install: `npx`
+downloads and caches it on first launch.
+
+```bash
+# Claude Code
+claude mcp add gatekeeper --scope user -- npx -y @gldywn/gatekeeper-mcp-server
+```
+
+```toml
+# Codex CLI, in ~/.codex/config.toml
+[mcp_servers.gatekeeper]
+command = "npx"
+args = ["-y", "@gldywn/gatekeeper-mcp-server"]
+```
+
+Any client that reads `.mcp.json` can use [`.mcp.json.example`](./.mcp.json.example) as-is.
+
+Pin the version if you would rather audit upgrades than receive them:
+`npx -y @gldywn/gatekeeper-mcp-server@0.1.0`. Unpinned, `npx` re-resolves the latest release
+on every agent launch, which keeps you current but means a process with a path to your
+database changes under you. Pinning also skips a registry round-trip at each start.
+
+**3. Start your agent once.** This launches the server, which starts the local broker on
+`127.0.0.1:9999` and creates the pairing token at `~/.gatekeeper/broker-token`. Do this
+before step 4: the token does not exist until the server has run once, so pairing has
+nothing to read if you open the plugin first.
+
+**4. Pair the plugin.** Open Gatekeeper from Beekeeper's Tools menu and paste the token
+into the pairing screen. It is stored in Beekeeper's encrypted storage, once per machine.
+
+```bash
+cat ~/.gatekeeper/broker-token          # Windows: type %USERPROFILE%\.gatekeeper\broker-token
+```
+
+**5. Install the agent skill** so your agent knows how to drive the tools well:
+
+```bash
+npx skills add Gldywn/gatekeeper
+```
+
+**6. Use it.** Ask your agent for something that needs the database. It proposes SQL, the
+query appears in the plugin, you approve it, and the rows return to the agent. Reads work
+by default; a write runs only once you arm Write or Destructive mode in the plugin.
+
+### Build from source
+
+For contributors, and the fallback until the first release is published:
+
+```bash
+pnpm install
+pnpm build
+```
+
+Then register the built entrypoint instead of the npm package, by absolute path:
+
+```bash
+claude mcp add gatekeeper -- node /absolute/path/to/gatekeeper/packages/server/dist/index.js
+```
+
+For the plugin, symlink `packages/plugin/` into Beekeeper's plugins folder (see the table
+above) under the name `gatekeeper`, so a rebuild is picked up without reinstalling.
+
+### Environment variables
 
 - `GATEKEEPER_TOKEN`: use a fixed token instead of the generated file.
-- `GATEKEEPER_BROKER_PORT`: broker port (default `9999`).
+- `GATEKEEPER_BROKER_PORT`: broker port (default `9999`). The plugin always talks to
+  `9999`, so changing this breaks pairing with no clear error. Leave it alone unless you
+  are developing against a second instance.
 - `GATEKEEPER_DB`: SQLite path (default `~/.gatekeeper/requests.db`).
 
 ## Repo layout
@@ -232,6 +298,9 @@ packages/
     src/index.ts     wire-contract types shared by server + plugin
     tokens.css       design tokens shared by plugin + landing
 landing/             marketing site (not part of the shipped product)
+skills/gatekeeper/   the agent skill, installed with `npx skills add`
+docs/RELEASING.md    release runbook + plugin registry submission
+.github/workflows/   release-please, plugin release assets, npm publish
 .mcp.json.example    MCP client stub
 biome.json           lint + format
 SECURITY.md          supply-chain policy + DB boundary
@@ -244,14 +313,19 @@ pnpm build     # build both packages
 pnpm test      # server + plugin test suites (vitest)
 pnpm lint      # biome check
 pnpm format    # biome format --write
+pnpm ci        # typecheck + build + test
 ```
+
+Releases are conventional-commit driven; see [`docs/RELEASING.md`](./docs/RELEASING.md)
+for how a version reaches the Beekeeper plugin manager and npm.
 
 ## Tech stack
 
 - **Plugin:** TypeScript, Vite, `@beekeeperstudio/plugin`, `node-sql-parser`. Requires
   Beekeeper Studio >= 5.4.
 - **Server:** TypeScript, `@modelcontextprotocol/sdk`, `better-sqlite3`, Node's built-in
-  `http`. Requires Node >= 20.19.
+  `http`. Published to npm as `@gldywn/gatekeeper-mcp-server`. Requires Node >= 22, the floor
+  at which `better-sqlite3` ships a prebuilt binary so `npx` needs no C++ toolchain.
 - **Tooling:** Biome (lint + format), Vitest, pnpm workspaces with an exact-pin,
   quarantined supply-chain policy.
 

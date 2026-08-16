@@ -1,0 +1,92 @@
+name: release-plugin
+
+# Builds the Beekeeper Studio plugin bundle and attaches the two assets its plugin manager
+# requires to a release: a loose `manifest.json` and `gatekeeper-<version>.zip` with
+# `manifest.json` at the zip root. Beekeeper reads GET /releases/latest, finds the manifest
+# asset, then downloads the zip named `<manifest.id>-<manifest.version>.zip`.
+#
+# Normally called by release-please.yml right after it drafts a release. The dispatch entry
+# point is for re-attaching assets to an existing release by hand.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag to attach the assets to (e.g. v0.1.0).
+        required: true
+        type: string
+      ref:
+        description: Git ref to build. Defaults to the ref that triggered the workflow.
+        required: false
+        type: string
+        default: ""
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to attach the assets to (e.g. v0.1.0).
+        required: true
+        type: string
+      ref:
+        description: Git ref to build. Defaults to the branch selected above.
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-attach:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Empty ref means "whatever triggered this run". The caller passes the release
+          # commit SHA rather than the tag, so the bundle is built from the exact commit
+          # release-please released, whatever main has moved on to since.
+          ref: ${{ inputs.ref }}
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Check the manifest version matches the release tag
+        id: version
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          version="${TAG#v}"
+          manifest_version="$(jq -r '.version' packages/plugin/manifest.json)"
+          if [ "$manifest_version" != "$version" ]; then
+            echo "::error::manifest.json is at $manifest_version but the release tag is $TAG."
+            echo "The build would ship a bundle Beekeeper Studio cannot match to the release."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Typecheck, build and test
+        run: pnpm run ci
+
+      - name: Create the plugin zip
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          cp LICENSE README.md packages/plugin/
+          cd packages/plugin
+          zip -r "$GITHUB_WORKSPACE/gatekeeper-$VERSION.zip" dist/ manifest.json LICENSE README.md
+          unzip -l "$GITHUB_WORKSPACE/gatekeeper-$VERSION.zip"
+
+      - name: Attach the assets to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh release upload "$TAG" \
+            "gatekeeper-$VERSION.zip" \
+            packages/plugin/manifest.json \
+            --clobber

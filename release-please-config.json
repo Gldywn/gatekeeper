@@ -3,11 +3,18 @@
   "bootstrap-sha": "902a487d298fd1c245bce91ec8707ccf6a4beb5e",
   "bump-minor-pre-major": true,
   "packages": {
-    "packages/plugin": {
-      "release-type": "node"
-    },
-    "packages/server": {
-      "release-type": "node"
+    ".": {
+      "release-type": "node",
+      "package-name": "gatekeeper",
+      "include-component-in-tag": false,
+      "draft": true,
+      "force-tag-creation": true,
+      "extra-files": [
+        { "type": "json", "path": "packages/plugin/package.json", "jsonpath": "$.version" },
+        { "type": "json", "path": "packages/plugin/manifest.json", "jsonpath": "$.version" },
+        { "type": "json", "path": "packages/server/package.json", "jsonpath": "$.version" },
+        { "type": "json", "path": "packages/shared/package.json", "jsonpath": "$.version" }
+      ]
     }
   }
 }
