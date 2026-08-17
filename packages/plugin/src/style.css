@@ -2718,7 +2718,11 @@ label.qs-row {
   color: var(--amber);
   /* A neutral plate, not an amber wash: the amber wash bled a fuzzy edge; keep the mascot
      the only amber so it stays crisp. */
-  background: linear-gradient(155deg, color-mix(in oklch, var(--text) 7%, var(--surface)), var(--sunken));
+  background: linear-gradient(
+    155deg,
+    color-mix(in oklch, var(--text) 7%, var(--surface)),
+    var(--sunken)
+  );
   border: 1px solid var(--edge);
 }
 .act-avatar svg {
@@ -3221,54 +3225,53 @@ label.qs-row {
   font-size: 13px;
   line-height: 1.5;
 }
-.standby-card .btn.approve {
+/* Direct child only: the pairing screen's button sits inside .pair-row, which
+   already carries the spacing. */
+.standby-card > .btn.approve {
   margin-top: var(--s2);
-}
-.pair {
-  max-width: 460px;
-  margin: 0 auto;
-  padding: var(--s5) var(--s4);
-}
-.pair h1 {
-  font-size: 16px;
-  margin: 0 0 var(--s2);
-  font-weight: 660;
-}
-.pair p {
-  color: var(--muted);
-  font-size: 13px;
-  margin: 0 0 var(--s4);
-}
-.pair code {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--amber);
 }
 .pair-row {
   display: flex;
   gap: var(--s2);
+  margin-top: var(--s2);
 }
-.pair input {
-  flex: 1;
-  min-width: 0;
+.pair-row input {
   font: inherit;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 16px;
+  /* The trailing letter-space would push the digits off-centre without it. */
+  letter-spacing: 0.18em;
+  text-indent: 0.18em;
+  text-align: center;
+  width: 8.5ch;
   color: var(--text);
   background: var(--sunken);
   border: 1px solid var(--edge);
   border-radius: 5px;
-  padding: 8px 10px;
+  padding: 7px 10px;
 }
-.pair input:focus-visible {
+.pair-row input:focus-visible {
   outline: 2px solid var(--amber);
   outline-offset: 1px;
 }
-.pair .err {
+.standby-card .err {
   color: var(--danger);
   font-size: 12px;
-  margin-top: var(--s2);
   min-height: 1em;
+}
+.pair-link {
+  font: inherit;
+  font-size: 12px;
+  color: var(--muted);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.pair-link:hover {
+  color: var(--text);
 }
 
 /* Container queries are the source of truth for every tier above. Where a

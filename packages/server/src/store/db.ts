@@ -90,6 +90,16 @@ export function migrate(db: Database.Database): void {
         schema_json TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS pairing (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        code TEXT,
+        expires_at INTEGER,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        paired_at INTEGER,
+        budget REAL NOT NULL DEFAULT 0,
+        budget_at INTEGER NOT NULL DEFAULT 0
+      );
+
       CREATE TABLE IF NOT EXISTS sessions (
         session_id TEXT PRIMARY KEY,
         harness TEXT,

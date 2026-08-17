@@ -21,6 +21,7 @@ import {
   tokenPath,
 } from "./config.js";
 import { createMcpServer } from "./mcp.js";
+import { pairingUrl } from "./pairing.js";
 import { RequestStore } from "./store.js";
 
 // ~/.gatekeeper holds the capability token and the results DB (with WAL side
@@ -105,9 +106,7 @@ async function main(): Promise<void> {
   if (brokerOwner) {
     // stdout is the MCP stdio channel, so all logs go to stderr.
     console.error(`[gatekeeper] broker on http://${BROKER_HOST}:${port} (db: ${path})`);
-    if (!process.env.GATEKEEPER_TOKEN) {
-      console.error(`[gatekeeper] pair the plugin with the token at ${tokenPath()}`);
-    }
+    console.error(`[gatekeeper] pair the plugin with the code at ${pairingUrl()}`);
   } else {
     console.error(
       `[gatekeeper] ${BROKER_HOST}:${port} is owned by another instance; running MCP-only, will take over if it exits`,

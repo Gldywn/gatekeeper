@@ -22,9 +22,11 @@ import {
   externalLinkIcon,
   gearIcon,
   historyIcon,
+  keyIcon,
   pencilIcon,
   shieldCheckIcon,
   shieldQuestionIcon,
+  terminalIcon,
   warnIcon,
   xIcon,
 } from "./icons";
@@ -79,6 +81,9 @@ const SCHEMA_HEARTBEAT_MS = 60_000;
 const SCHEMA_DEBOUNCE_MS = 2000;
 const TOKEN_KEY = "gatekeeper.token";
 const ROSTER_POLL_MS = 2000;
+// The human starts their agent while looking at the no-broker screen, so re-probe
+// on this cadence and move them on to pairing by themselves.
+const PROBE_MS = 3000;
 
 // The read-only layer help sentences, revealed by each row's "?" affordance. The
 // Gatekeeper one tracks the armed mode: read-only by default, wider once armed.
@@ -238,6 +243,7 @@ export class Gatekeeper {
   private schemaTimer?: number;
   private schemaReportTimer?: number;
   private pollTimer?: number;
+  private probeTimer?: number;
   private pollFailures = 0;
   private pollGeneration = 0;
   private single?: SingleInstance;
@@ -383,7 +389,7 @@ export class Gatekeeper {
       return;
     }
     if (!this.token) {
-      this.renderPairing();
+      await this.renderUnpaired();
       return;
     }
     await this.settingsStore.load(this.connectionName);
@@ -444,6 +450,7 @@ export class Gatekeeper {
     this.breatheLoop = undefined;
     this.rosterSig = "";
     this.rosterLive = -1;
+    this.stopProbe();
     this.renderStandby();
   }
 
@@ -460,6 +467,47 @@ export class Gatekeeper {
     this.root
       .querySelector<HTMLButtonElement>("#takeover")
       ?.addEventListener("click", () => this.single?.takeOver());
+  }
+
+  // Which unpaired screen to show depends on whether a broker answers at all: with
+  // none, a pairing field is a dead end, since the code it wants only exists once
+  // the server has run.
+  private async renderUnpaired(errorMessage = ""): Promise<void> {
+    const gen = this.activeGen;
+    const alive = await this.broker.probe();
+    if (gen !== this.activeGen) {
+      return;
+    }
+    if (alive) {
+      this.renderPairing(errorMessage);
+    } else {
+      this.renderNoBroker();
+    }
+  }
+
+  private renderNoBroker(): void {
+    this.stopProbe();
+    this.root.innerHTML = `
+      <div class="standby">
+        <div class="standby-card">
+          <span class="standby-ico">${terminalIcon}</span>
+          <h1>Start your agent once</h1>
+          <p>Gatekeeper needs its MCP server running before this tab can pair with it.
+            Start the agent you configured it in (Claude Code, Codex, ...) and this screen moves on by itself.</p>
+          <button class="btn approve" id="recheck" type="button">Check again</button>
+        </div>
+      </div>`;
+    this.root
+      .querySelector<HTMLButtonElement>("#recheck")
+      ?.addEventListener("click", () => void this.renderUnpaired());
+    this.probeTimer = window.setTimeout(() => void this.renderUnpaired(), PROBE_MS);
+  }
+
+  private stopProbe(): void {
+    if (this.probeTimer !== undefined) {
+      window.clearTimeout(this.probeTimer);
+      this.probeTimer = undefined;
+    }
   }
 
   // Once the human has starred (from anywhere), the home star stops twinkling for good.
@@ -825,28 +873,40 @@ export class Gatekeeper {
   }
 
   private renderPairing(errorMessage = ""): void {
+    this.stopProbe();
     this.root.innerHTML = `
-      <div class="pair">
-        <h1>Pair with the broker</h1>
-        <p>Paste the token printed by the Gatekeeper server. It is stored in
-          <code>~/.gatekeeper/broker-token</code>.</p>
-        <div class="pair-row">
-          <input id="token" type="password" placeholder="broker token" autocomplete="off" spellcheck="false" />
-          <button class="btn approve" id="pair-btn" type="button">Pair</button>
+      <div class="standby">
+        <div class="standby-card">
+          <span class="standby-ico">${keyIcon}</span>
+          <h1>Enter the pairing code</h1>
+          <p>Your agent shows a 6-digit code the first time it reaches for Gatekeeper. Type it here to
+            connect this tab to it.</p>
+          <div class="pair-row">
+            <input id="code" type="text" inputmode="numeric" maxlength="6" placeholder="000000"
+              autocomplete="one-time-code" spellcheck="false" aria-label="Pairing code" />
+            <button class="btn approve" id="pair-btn" type="button">Pair</button>
+          </div>
+          <div class="err">${escapeHtml(errorMessage)}</div>
+          <button class="pair-link" id="pair-page" type="button">No code yet? Show me one</button>
         </div>
-        <div class="err">${escapeHtml(errorMessage)}</div>
       </div>`;
-    const input = this.root.querySelector<HTMLInputElement>("#token")!;
+    const input = this.root.querySelector<HTMLInputElement>("#code")!;
+    const err = this.root.querySelector<HTMLElement>(".err")!;
     const save = async () => {
       const value = input.value.trim();
       if (!value) {
         return;
       }
+      const outcome = await this.broker.exchange(value);
+      if (!outcome.ok) {
+        err.textContent = outcome.error;
+        input.select();
+        return;
+      }
       const gen = this.activeGen;
       // Re-pairing is a fresh session; the armed mode never survives it.
       this.mode = "read";
-      await this.broker.setToken(value);
-      this.token = value;
+      this.token = await this.broker.loadToken();
       await this.settingsStore.load(this.connectionName);
       // Demoted while pairing (another tab took the slot): never start polling.
       if (gen !== this.activeGen) {
@@ -865,11 +925,17 @@ export class Gatekeeper {
     this.root
       .querySelector<HTMLButtonElement>("#pair-btn")!
       .addEventListener("click", () => void save());
+    // The page is served by the broker itself and deliberately carries no CORS headers,
+    // so it has to open in a real browser window rather than be fetched from here.
+    this.root
+      .querySelector<HTMLButtonElement>("#pair-page")!
+      .addEventListener("click", () => void openExternal(`${BROKER_URL}/pair`));
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         void save();
       }
     });
+    input.focus();
   }
 
   // The header quick menu ("Guards") reflects the live per-connection settings, so it
@@ -1555,7 +1621,7 @@ export class Gatekeeper {
         this.polling = false;
         this.token = null;
         await this.broker.clearToken();
-        this.renderPairing("Token rejected. Paste the current one.");
+        this.renderPairing("This tab was unpaired. Enter a fresh code to reconnect.");
         return;
       }
       if (res.status === 200) {

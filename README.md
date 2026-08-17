@@ -154,6 +154,12 @@ with `npx skills update`.
   `~/.gatekeeper/broker-token` (`0600`); the plugin keeps it in Beekeeper's encrypted
   storage. Any process running as the same OS user can read that token; see `SECURITY.md`
   for the same-user trust boundary.
+- **Pairing by code.** The broker cannot tell the plugin apart from any web page the human
+  visits: both are browser contexts issuing the same loopback requests. So the token
+  crosses over on a channel a page cannot observe, the human's eyes: a single-use 6-digit
+  code, valid five minutes, killed after five wrong guesses and paced by a guess budget.
+  The page that displays it deliberately carries no CORS headers, so no site can read it;
+  the exchange route keeps them (the plugin must read its answer) and rests on the code.
 - **Loopback only, DNS-rebinding defense.** The broker binds `127.0.0.1` and rejects
   unexpected `Host` headers (`421`).
 - **Owner-only state.** `~/.gatekeeper` is created `0700`, covering the token, the
@@ -223,16 +229,16 @@ on every agent launch, which keeps you current but means a process with a path t
 database changes under you. Pinning also skips a registry round-trip at each start.
 
 **3. Start your agent once.** This launches the server, which starts the local broker on
-`127.0.0.1:9999` and creates the pairing token at `~/.gatekeeper/broker-token`. Do this
-before step 4: the token does not exist until the server has run once, so pairing has
-nothing to read if you open the plugin first.
+`127.0.0.1:9999`. Nothing answers on that port until the server has run once; open the
+plugin before that and it tells you so rather than showing a pairing field it cannot
+honour.
 
-**4. Pair the plugin.** Open Gatekeeper from Beekeeper's Tools menu and paste the token
-into the pairing screen. It is stored in Beekeeper's encrypted storage, once per machine.
-
-```bash
-cat ~/.gatekeeper/broker-token          # Windows: type %USERPROFILE%\.gatekeeper\broker-token
-```
+**4. Pair the plugin.** Open Gatekeeper from Beekeeper's Tools menu, then ask your agent
+for anything that needs the database. Until the plugin is paired every Gatekeeper tool
+fails with a 6-digit code: type that code into the plugin. It is single-use, lasts about
+five minutes, and `http://127.0.0.1:9999/pair` always shows the current one (the plugin
+can open that page for you). The capability token it hands over is stored in Beekeeper's
+encrypted storage, once per machine, so this is a one-off.
 
 **5. Install the agent skill** so your agent knows how to drive the tools well:
 
@@ -279,6 +285,8 @@ packages/
       index.ts       broker + MCP wiring, token, shutdown
       broker.ts      loopback HTTP endpoints
       mcp.ts         MCP tools
+      pairing.ts     pairing gate on every tool, agent-facing notice
+      pairing-page.ts  the CORS-free page that shows the code
       service.ts     submit / get / cancel, ticket shaping, read-only preflight
       store.ts       durable SQLite lease queue + audit trail
       connection.ts  non-sensitive connection snapshot

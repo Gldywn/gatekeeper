@@ -4,6 +4,15 @@ import { listActivity, readAudit } from "./store/audit.js";
 import { getConnection, setConnection } from "./store/connection.js";
 import { createContext, migrate, type StoreContext } from "./store/db.js";
 import {
+  issuePairingCode,
+  markPaired,
+  type PairingCode,
+  type PairingLimits,
+  pairedAt,
+  type RedeemResult,
+  redeemPairingCode,
+} from "./store/pairing.js";
+import {
   cancel,
   claimNext,
   get,
@@ -36,6 +45,7 @@ import type {
   StoreOptions,
 } from "./store/types.js";
 
+export type { PairingCode, PairingLimits, RedeemResult } from "./store/pairing.js";
 export type {
   ActivityEntry,
   AuditEntry,
@@ -166,6 +176,22 @@ export class RequestStore {
 
   listInflight(pluginId: string, connection: string | null): GatekeeperRequest[] {
     return listInflight(this.ctx, pluginId, connection);
+  }
+
+  issuePairingCode(ttlMs: number, idleMs: number): PairingCode | null {
+    return issuePairingCode(this.ctx, ttlMs, idleMs);
+  }
+
+  redeemPairingCode(submitted: string, limits: PairingLimits): RedeemResult {
+    return redeemPairingCode(this.ctx, submitted, limits);
+  }
+
+  pairedAt(): number | null {
+    return pairedAt(this.ctx);
+  }
+
+  markPaired(): void {
+    markPaired(this.ctx);
   }
 
   getSession(sessionId: string): SessionMeta | null {

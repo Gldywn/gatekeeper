@@ -83,6 +83,29 @@ because only the plugin, driven by a human click, runs queries. If you need the 
 the gate isolated, run them under different OS users. Hardening this into a separate
 plugin-side secret is planned for a later release.
 
+## Pairing
+
+The broker cannot distinguish its plugin from any web page the human happens to have open:
+both are browser contexts issuing the same loopback requests. A route that handed out the
+capability token without proof would hand it to every page too, so the token crosses over
+on the one channel a page cannot observe, the human's eyes.
+
+- **A 6-digit code**, single-use, valid five minutes, invalidated after five wrong guesses,
+  and metered by a guess budget so a page cannot grind through the space by forcing fresh
+  codes. No code exists at all while a plugin is actively authenticating.
+- **The page that displays it carries no CORS headers**, so a cross-origin caller never
+  gets to read the body. A top-level navigation needs none.
+- **The exchange route keeps CORS**, because the plugin's iframe has to read its answer.
+  Its defence is the code, the attempt cap and the budget; it is deliberately the only
+  unauthenticated route that returns anything secret, and it returns it once.
+
+The code reaches the human through the tool result of any Gatekeeper call made while
+unpaired: harnesses funnel MCP stderr into logs nobody reads, and a tool result is the one
+channel that surfaces everywhere. On clients that advertise elicitation, the server also
+opens the pairing page through an MCP URL-mode elicitation, which the spec added for
+exactly this (an out-of-band exchange that must not pass through the client); the code
+itself is in neither the URL nor the prompt.
+
 ## Network
 
 - **Loopback only.** The broker binds `127.0.0.1`.

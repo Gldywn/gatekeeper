@@ -61,6 +61,64 @@ describe("token storage", () => {
   });
 });
 
+describe("probe", () => {
+  it("reports a live broker without sending the bearer header", async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 200 });
+    expect(await client().probe()).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(`${URL}/pair/status`);
+  });
+
+  it("reports no broker when nothing answers", async () => {
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    expect(await client().probe()).toBe(false);
+  });
+});
+
+describe("exchanging a pairing code", () => {
+  it("stores the token it gets back, encrypted, like a pasted one", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ token: "cap-tok" }),
+    });
+    expect(await client().exchange("418302")).toEqual({ ok: true });
+    expect(encStore.get(KEY)).toBe("cap-tok");
+    expect(fetchMock).toHaveBeenCalledWith(`${URL}/pair/exchange`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: "418302" }),
+    });
+  });
+
+  it("surfaces the broker's refusal and keeps no token", async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: "wrong code" }),
+    });
+    expect(await client().exchange("000000")).toEqual({ ok: false, error: "wrong code" });
+    expect(encStore.get(KEY)).toBeUndefined();
+  });
+
+  it("turns a throttled attempt into a wait the human can act on", async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 429,
+      json: async () => ({ error: "too many attempts, wait a moment", retryAfterMs: 24_000 }),
+    });
+    expect(await client().exchange("000000")).toEqual({
+      ok: false,
+      error: "Too many attempts. Try again in 24s.",
+    });
+  });
+
+  it("reports a broker that stopped answering rather than throwing", async () => {
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    const outcome = await client().exchange("418302");
+    expect(outcome.ok).toBe(false);
+  });
+});
+
 describe("endpoint requests", () => {
   it("renew posts the lease id with the bearer header and returns the new expiry", async () => {
     const c = client();

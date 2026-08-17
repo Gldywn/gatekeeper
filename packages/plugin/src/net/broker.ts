@@ -57,6 +57,46 @@ export class BrokerClient {
     this.token = null;
   }
 
+  // Is a broker listening at all? No Authorization header: this runs before pairing,
+  // and a rejected fetch is the only way to see "nothing is listening" (a CORS-blocked
+  // response is indistinguishable from a refused connection, so the route sends CORS).
+  async probe(): Promise<boolean> {
+    try {
+      return (await fetch(`${this.baseUrl}/pair/status`)).ok;
+    } catch {
+      return false;
+    }
+  }
+
+  // Trades the code the human read for the capability token, and stores it exactly as
+  // a token was stored before. Unauthenticated by nature, so it skips request().
+  async exchange(code: string): Promise<{ ok: true } | { ok: false; error: string }> {
+    let res: Response;
+    try {
+      res = await fetch(`${this.baseUrl}/pair/exchange`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+    } catch {
+      return { ok: false, error: "The broker stopped answering. Is your agent still running?" };
+    }
+    const body = (await res.json().catch(() => ({}))) as {
+      token?: string;
+      error?: string;
+      retryAfterMs?: number;
+    };
+    if (res.status === 200 && body.token) {
+      await this.setToken(body.token);
+      return { ok: true };
+    }
+    if (res.status === 429) {
+      const seconds = Math.ceil((body.retryAfterMs ?? 60_000) / 1000);
+      return { ok: false, error: `Too many attempts. Try again in ${seconds}s.` };
+    }
+    return { ok: false, error: body.error ?? "Pairing failed." };
+  }
+
   // Returns the raw Response so poll() keeps the 401-vs-200 auth-failure policy.
   pending(connectionName?: string): Promise<Response> {
     return this.request("/pending", { headers: this.connHeader(connectionName) });

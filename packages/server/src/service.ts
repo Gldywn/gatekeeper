@@ -66,7 +66,7 @@ function terminalOf(req: GatekeeperRequest): TerminalResult {
         rows: result.rows ?? [],
         fields: result.fields ?? [],
         truncated: result.truncated ?? false,
-        rowCount: result.rowCount ?? (result.rows?.length ?? 0),
+        rowCount: result.rowCount ?? result.rows?.length ?? 0,
       };
     case "rejected":
       return { status: "rejected", reason: result.reason ?? undefined };

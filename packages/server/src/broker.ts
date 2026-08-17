@@ -1,7 +1,17 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AccessMode, ActivityEntry, Proposal, SessionRoster } from "@gatekeeper/shared";
-import { BROKER_HOST, brokerPort, LEASE_MS } from "./config.js";
+import {
+  BROKER_HOST,
+  brokerPort,
+  LEASE_MS,
+  PAIRING_ATTEMPT_BURST,
+  PAIRING_ATTEMPT_REFILL_MS,
+  PAIRING_CODE_TTL_MS,
+  PAIRING_IDLE_MS,
+  PAIRING_MAX_ATTEMPTS,
+} from "./config.js";
 import { connectionScopeKey } from "./connection.js";
+import { pairingPage } from "./pairing-page.js";
 import { type Outcome, type RequestStore, StoreError } from "./store.js";
 
 const CORS: Record<string, string> = {
@@ -13,28 +23,40 @@ const CORS: Record<string, string> = {
   "Access-Control-Allow-Private-Network": "true",
 };
 const MAX_BODY_BYTES = 32 * 1024 * 1024;
+const PAIRING_BODY_BYTES = 1024;
+// The plugin polls at 1 Hz; coalesce its presence writes to this cadence.
+const PRESENCE_STAMP_MS = 15_000;
+
+interface Broker {
+  store: RequestStore;
+  pluginId: string;
+  allowedHosts: Set<string>;
+  token: string;
+  /** Last presence stamp, so the plugin's 1 Hz poll does not write on every request. */
+  stampedAt: number;
+}
 
 export function createBroker(store: RequestStore, pluginId: string, token: string): Server {
   const port = brokerPort();
-  const allowedHosts = new Set([`${BROKER_HOST}:${port}`, `localhost:${port}`]);
+  const broker: Broker = {
+    store,
+    pluginId,
+    token,
+    allowedHosts: new Set([`${BROKER_HOST}:${port}`, `localhost:${port}`]),
+    stampedAt: 0,
+  };
   return createServer((req, res) => {
-    handle(store, pluginId, allowedHosts, token, req, res).catch((err) => {
+    handle(broker, req, res).catch((err) => {
       send(res, 500, { error: err instanceof Error ? err.message : String(err) });
     });
   });
 }
 
-async function handle(
-  store: RequestStore,
-  pluginId: string,
-  allowedHosts: Set<string>,
-  token: string,
-  req: IncomingMessage,
-  res: ServerResponse,
-): Promise<void> {
+async function handle(broker: Broker, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const { store, pluginId, token } = broker;
   // DNS-rebinding defense: only serve loopback Host headers.
   const host = req.headers.host;
-  if (!host || !allowedHosts.has(host)) {
+  if (!host || !broker.allowedHosts.has(host)) {
     send(res, 421, { error: "unexpected Host header" });
     return;
   }
@@ -45,6 +67,35 @@ async function handle(
     return;
   }
 
+  const url = new URL(req.url ?? "/", `http://${BROKER_HOST}`);
+
+  // A plugin holding no token has to tell "no broker running" apart from "broker
+  // up, not paired". Deliberately empty: every other route already discloses the
+  // broker's existence through a CORS-readable 401.
+  if (req.method === "GET" && url.pathname === "/pair/status") {
+    send(res, 200, { ok: true });
+    return;
+  }
+
+  // This page carries the code in the clear, so it must NOT get the CORS headers below:
+  // without them a cross-origin caller never sees the body, and a top-level navigation
+  // needs no CORS. Triggering it blindly gains nothing: mint-or-reuse keeps a live code.
+  if (req.method === "GET" && url.pathname === "/pair") {
+    const code = store.issuePairingCode(PAIRING_CODE_TTL_MS, PAIRING_IDLE_MS);
+    sendPage(res, pairingPage(code, Date.now()));
+    return;
+  }
+
+  // The plugin's iframe reads this answer, so it keeps CORS and with it the reach of any
+  // web page. The code, its attempt cap and its guess budget are the whole defence.
+  if (req.method === "POST" && url.pathname === "/pair/exchange") {
+    // Unauthenticated, so it gets a body cap of its own rather than the 32MB one the
+    // result payloads need.
+    const body = await readJson(req, PAIRING_BODY_BYTES);
+    exchange(store, token, typeof body.code === "string" ? body.code : "", res);
+    return;
+  }
+
   // Any local process can reach loopback, so require the shared capability
   // token on every non-preflight request.
   if (req.headers.authorization !== `Bearer ${token}`) {
@@ -52,7 +103,13 @@ async function handle(
     return;
   }
 
-  const url = new URL(req.url ?? "/", `http://${BROKER_HOST}`);
+  // A live token holder is a paired plugin: that presence is what stops the agent-facing
+  // tools asking for a code, and what stops a fresh code being handed out.
+  const now = Date.now();
+  if (now - broker.stampedAt > PRESENCE_STAMP_MS) {
+    broker.stampedAt = now;
+    store.markPaired();
+  }
 
   if (req.method === "GET" && url.pathname === "/sessions") {
     const sessions: SessionRoster[] = store.listSessions(resolveConnection(store, req));
@@ -163,6 +220,49 @@ async function handle(
   send(res, 404, { error: "not found" });
 }
 
+function exchange(
+  store: RequestStore,
+  token: string,
+  submitted: string,
+  res: ServerResponse,
+): void {
+  // A typo of the wrong shape costs nothing: only a well-formed guess spends the budget.
+  if (!/^\d{6}$/.test(submitted)) {
+    send(res, 400, { error: "the pairing code is six digits" });
+    return;
+  }
+  const outcome = store.redeemPairingCode(submitted, {
+    maxAttempts: PAIRING_MAX_ATTEMPTS,
+    burst: PAIRING_ATTEMPT_BURST,
+    refillMs: PAIRING_ATTEMPT_REFILL_MS,
+  });
+  if (outcome.ok) {
+    send(res, 200, { token });
+    return;
+  }
+  if (outcome.reason === "throttled") {
+    res.writeHead(429, {
+      ...baseHeaders(),
+      "Content-Type": "application/json",
+      "Retry-After": String(Math.ceil(outcome.retryAfterMs / 1000)),
+    });
+    res.end(
+      JSON.stringify({
+        error: "too many attempts, wait a moment",
+        retryAfterMs: outcome.retryAfterMs,
+      }),
+    );
+    return;
+  }
+  send(
+    res,
+    401,
+    outcome.reason === "expired"
+      ? { error: "no pairing code is active; ask your agent for a new one" }
+      : { error: "wrong code" },
+  );
+}
+
 // The plugin's header carries the composite scope key for the tab making the
 // request; only when it is absent do we fall back to the last-posted snapshot
 // (shared, so it can lag behind a multi-tab caller's real connection).
@@ -233,18 +333,36 @@ function baseHeaders(): Record<string, string> {
   return { ...CORS, "Cache-Control": "no-store" };
 }
 
+// Deliberately not baseHeaders(): no Access-Control-Allow-Origin, so a cross-origin
+// caller never gets to read the code out of this body.
+function sendPage(res: ServerResponse, html: string): void {
+  res.writeHead(200, {
+    "Content-Type": "text/html; charset=utf-8",
+    "Cache-Control": "no-store",
+    "Content-Security-Policy":
+      "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+  });
+  res.end(html);
+}
+
 function send(res: ServerResponse, status: number, payload: unknown): void {
   res.writeHead(status, { ...baseHeaders(), "Content-Type": "application/json" });
   res.end(JSON.stringify(payload));
 }
 
-function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
+function readJson(
+  req: IncomingMessage,
+  maxBytes = MAX_BODY_BYTES,
+): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
     req.on("data", (chunk: Buffer) => {
       size += chunk.length;
-      if (size > MAX_BODY_BYTES) {
+      if (size > maxBytes) {
         req.destroy();
         reject(new Error("request body too large"));
         return;

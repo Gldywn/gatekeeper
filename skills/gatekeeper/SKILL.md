@@ -1,7 +1,7 @@
 ---
 name: gatekeeper
 description: Read and change a database safely through Gatekeeper. You propose SQL, a human approves and runs it in Beekeeper Studio, and the rows come back to you; you never connect to the DB or run SQL yourself. Reads are the default; a write runs only if a human arms write mode. Use this whenever you need to read data, run a SELECT, inspect a schema, verify a migration, debug against real data, change data through an approved write, or answer anything that needs the database, and whenever the user mentions Gatekeeper, approving a query, or looking something up in the database.
-version: 1.2.0
+version: 1.3.0
 ---
 
 # Gatekeeper
@@ -61,6 +61,10 @@ Read it again, on your own initiative, at the two moments where a switch is both
 - Before proposing a write or a destructive statement, where being on the wrong database costs the most.
 
 If any of those three identifying fields changed since you started, do not carry on quietly. Tell the human what the target was, what it is now, and ask whether to continue against the new one. If nothing changed, say nothing: this check earns its place by being silent almost every time.
+
+## If a call comes back NOT_PAIRED
+
+The human's plugin is not connected to Gatekeeper yet. Reply with the 6-digit code from the error, ask them to type it into the Gatekeeper tab in Beekeeper Studio, then stop and wait for their confirmation. This is a one-off setup on their machine, not a fault in your query and nothing you can fix: do not investigate it, do not retry the call, and do not open the pairing page yourself.
 
 ## Write the intent for a human, not a parser
 

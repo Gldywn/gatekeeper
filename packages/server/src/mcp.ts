@@ -9,6 +9,7 @@ import {
   SESSION_HEARTBEAT_MS,
 } from "./config.js";
 import { type ConnectionSnapshot, connectionScopeKey } from "./connection.js";
+import { createPairingGuard } from "./pairing.js";
 import type { SchemaSnapshot } from "./schema.js";
 import {
   cancelQuery,
@@ -81,6 +82,7 @@ export function createMcpServer(store: RequestStore): { server: McpServer; sessi
     { name: "gatekeeper", version: "0.0.1" },
     { instructions: SERVER_INSTRUCTIONS },
   );
+  const pairing = createPairingGuard(store, server.server);
 
   // Identify the connected harness (claude-code, codex, opencode, ...) and the
   // project it runs in, so the plugin can group pending proposals by session.
@@ -126,6 +128,10 @@ export function createMcpServer(store: RequestStore): { server: McpServer; sessi
       },
     },
     async ({ sql, intent, idempotency_key }) => {
+      const unpaired = await pairing.check();
+      if (unpaired) {
+        return unpaired;
+      }
       try {
         return ok(
           submitQuery(store, {
@@ -161,6 +167,10 @@ export function createMcpServer(store: RequestStore): { server: McpServer; sessi
       },
     },
     async ({ request_id, wait_ms }) => {
+      const unpaired = await pairing.check();
+      if (unpaired) {
+        return unpaired;
+      }
       try {
         store.upsertSession({ sessionId, ...identity() });
         return ok(await getQueryResult(store, sessionId, request_id, wait_ms ?? 0));
@@ -188,6 +198,10 @@ export function createMcpServer(store: RequestStore): { server: McpServer; sessi
       },
     },
     async ({ wait_ms }) => {
+      const unpaired = await pairing.check();
+      if (unpaired) {
+        return unpaired;
+      }
       try {
         store.upsertSession({ sessionId, ...identity() });
         const snapshot = await pollResults(store, sessionId, wait_ms ?? 0);
@@ -208,6 +222,10 @@ export function createMcpServer(store: RequestStore): { server: McpServer; sessi
       inputSchema: { request_id: z.string() },
     },
     async ({ request_id }) => {
+      const unpaired = await pairing.check();
+      if (unpaired) {
+        return unpaired;
+      }
       try {
         store.upsertSession({ sessionId, ...identity() });
         return ok(cancelQuery(store, sessionId, request_id));
@@ -226,6 +244,10 @@ export function createMcpServer(store: RequestStore): { server: McpServer; sessi
       inputSchema: {},
     },
     async () => {
+      const unpaired = await pairing.check();
+      if (unpaired) {
+        return unpaired;
+      }
       store.upsertSession({ sessionId, ...identity() });
       const info = store.getConnection();
       const payload = info ?? { connected: false };
@@ -242,6 +264,10 @@ export function createMcpServer(store: RequestStore): { server: McpServer; sessi
       inputSchema: {},
     },
     async () => {
+      const unpaired = await pairing.check();
+      if (unpaired) {
+        return unpaired;
+      }
       store.upsertSession({ sessionId, ...identity() });
       const payload = schemaPayload(store.getSchema(), store.getConnection(), Date.now());
       return { content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }] };
@@ -265,6 +291,10 @@ export function createMcpServer(store: RequestStore): { server: McpServer; sessi
       },
     },
     async ({ sql, intent }) => {
+      const unpaired = await pairing.check();
+      if (unpaired) {
+        return unpaired;
+      }
       try {
         const submitted = submitQuery(store, { sessionId, sql, intent, ...identity() });
         return ok(await getQueryResult(store, sessionId, submitted.requestId, MAX_WAIT_MS));
@@ -290,6 +320,10 @@ export function createMcpServer(store: RequestStore): { server: McpServer; sessi
       },
     },
     async ({ label }) => {
+      const unpaired = await pairing.check();
+      if (unpaired) {
+        return unpaired;
+      }
       try {
         store.upsertSession({ sessionId, ...identity() });
         store.setSessionLabel(sessionId, label);
