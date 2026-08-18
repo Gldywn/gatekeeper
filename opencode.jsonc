@@ -1,0 +1,11 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "gatekeeper": {
+      "type": "local",
+      "command": ["node", "scripts/dev-server.mjs"],
+      "cwd": ".",
+      "enabled": true
+    }
+  }
+}

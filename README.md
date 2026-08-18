@@ -259,14 +259,23 @@ pnpm install
 pnpm build
 ```
 
-Then register the built entrypoint instead of the npm package, by absolute path:
+The repo ships its dev wiring, so a clone is ready without hand-editing config:
 
-```bash
-claude mcp add gatekeeper -- node /absolute/path/to/gatekeeper/packages/server/dist/index.js
-```
-
-For the plugin, symlink `packages/plugin/` into Beekeeper's plugins folder (see the table
-above) under the name `gatekeeper`, so a rebuild is picked up without reinstalling.
+- **Claude Code and OpenCode** read the committed `.mcp.json` / `opencode.jsonc` when you run
+  the agent inside the repo, spawning your local build automatically (Claude Code prompts once
+  to trust the workspace). Both launch `scripts/dev-server.mjs`, which first kills any other
+  running Gatekeeper server, so your build is the sole broker and the only writer of the shared
+  `~/.gatekeeper/requests.db` (mixed builds corrupt it), then execs the local server. A
+  reconnect re-runs it.
+- **Codex** has no project-local config; add the server by hand to `~/.codex/config.toml`
+  under `[mcp_servers.gatekeeper]` with `command = "node"` and an absolute `args` path to
+  `packages/server/dist/index.js`.
+- **Plugin:** `pnpm dev:link` symlinks `packages/plugin/` into Beekeeper's plugins folder, so a
+  rebuild is picked up without reinstalling. Run it from any checkout or worktree; it targets
+  that one. To also symlink the skill for live editing, list agent skills dirs in a
+  gitignored `.dev-skills` at the repo root (one path per line), or set `GATEKEEPER_SKILLS_DIRS`
+  to override; a real folder at a target is moved aside to `gatekeeper.pre-dev` and restored on
+  `dev:unlink`. With neither, `dev:link` leaves skills alone.
 
 ### Environment variables
 
@@ -317,11 +326,15 @@ SECURITY.md          supply-chain policy + DB boundary
 ## Development
 
 ```
-pnpm build     # build both packages
-pnpm test      # server + plugin test suites (vitest)
-pnpm lint      # biome check
-pnpm format    # biome format --write
-pnpm ci        # typecheck + build + test
+pnpm build       # build both packages
+pnpm test        # server + plugin test suites (vitest)
+pnpm lint        # biome check
+pnpm format      # biome format --write
+pnpm ci          # typecheck + build + test
+pnpm dev:link    # symlink Beekeeper's plugin + the agent skill at this checkout (builds first)
+pnpm dev:unlink  # remove those dev symlinks
+pnpm dev:status  # show what points where (plugin, skill, broker, token)
+pnpm dev:reset   # clear the pairing token (add -- --all to also wipe the results DB)
 ```
 
 Releases are conventional-commit driven; see [`docs/RELEASING.md`](./docs/RELEASING.md)

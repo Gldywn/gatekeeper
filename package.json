@@ -9,7 +9,11 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "lint": "biome check .",
     "format": "biome format --write .",
-    "ci": "pnpm typecheck && pnpm build && pnpm test"
+    "ci": "pnpm typecheck && pnpm build && pnpm test",
+    "dev:link": "node scripts/dev.mjs link",
+    "dev:unlink": "node scripts/dev.mjs unlink",
+    "dev:status": "node scripts/dev.mjs status",
+    "dev:reset": "node scripts/dev.mjs reset"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.4"

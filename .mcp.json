@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "gatekeeper": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${CLAUDE_PROJECT_DIR:-.}/scripts/dev-server.mjs"]
+    }
+  }
+}
