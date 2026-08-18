@@ -191,6 +191,13 @@ CLI you already have Node. There is nothing else to install up front, and **no b
 service**: your agent starts the server when its session opens and it exits when that
 session ends.
 
+**Platform support.** Gatekeeper is developed and tested on **macOS**. **Windows and Linux
+are not yet tested.** The shipped code carries no macOS-only dependency (the server shells
+out to nothing and resolves its paths from your home directory, the plugin is a standard
+Beekeeper webview), so it is expected to work on both, but that is unverified. On Windows,
+`npx` installs a prebuilt `better-sqlite3` on common targets (x64); an uncommon one such as
+Windows on ARM may need a build toolchain. Reports from Windows and Linux users are welcome.
+
 The npm package and the plugin registry listing land with the first tagged release. Until
 then, follow [Build from source](#build-from-source) instead of steps 1 and 2.
 
