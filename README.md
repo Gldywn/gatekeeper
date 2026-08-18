@@ -257,6 +257,22 @@ npx skills add Gldywn/gatekeeper
 query appears in the plugin, you approve it, and the rows return to the agent. Reads work
 by default; a write runs only once you arm Write or Destructive mode in the plugin.
 
+### Desktop notifications (macOS)
+
+A pending query nobody notices is a query nobody approves, so on macOS the server raises a
+notification and plays a sound the moment a proposal arrives, wherever you are on your
+desktop. A burst is collapsed into a single alert, and a retried submission raises none.
+
+**The first proposal asks for permission.** macOS shows "Gatekeeper would like to send you
+notifications" the first time, in the middle of an agent session. Allow it, and you never
+see it again. Decline it and banners stop for good, silently: the sound still plays, so the
+symptom is a chime with nothing on screen. To change your mind, open System Settings,
+Notifications, find **Gatekeeper**, and turn it back on. The server also logs a line to
+stderr on every start where the permission is missing.
+
+Set `GATEKEEPER_NOTIFY` to choose what you get: `both` (the default), `banner`, `sound`, or
+`off`. On Linux and Windows the feature is a no-op, and nothing else changes.
+
 ### Build from source
 
 For contributors, and the fallback until the first release is published:

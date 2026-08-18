@@ -147,6 +147,10 @@ itself is in neither the URL nor the prompt.
   a short, audited allowlist of native builds (`esbuild`, `better-sqlite3`) may run.
 - **Pinned toolchain.** `pnpm` is version-pinned via `packageManager`, and the lockfile is
   committed, so every install resolves the same audited tree.
+- **The macOS notification helper.** The package ships one executable, a small signed
+  `.app` built from `packages/server/notifier/main.swift` in CI. It is ad-hoc signed, which
+  carries no Team ID, so another ad-hoc binary claiming the same bundle identifier could
+  post notifications under this name once you have granted the permission.
 
 ## Reporting a vulnerability
 
