@@ -30,6 +30,14 @@ export const PAIRING_ATTEMPT_REFILL_MS = 60_000;
 // No code is issued while a plugin still authenticates on this cadence: nothing is
 // waiting to be paired, and a live code is only something for a guesser to aim at.
 export const PAIRING_IDLE_MS = 2 * 60_000;
+// One desktop alert per window, claimed atomically in the shared database. A burst
+// of proposals, from one agent or several processes, is one banner, not N.
+export const NOTIFY_COOLDOWN_MS = 10_000;
+// Enough for the helper to answer, short enough never to be felt on a submit.
+export const NOTIFY_TIMEOUT_MS = 5_000;
+// The first proposal on a machine raises the macOS permission dialog and waits for a
+// human to click. Killing it there loses the prompt, and nothing awaits the notifier.
+export const NOTIFY_PROMPT_TIMEOUT_MS = 120_000;
 export const BROKER_HOST = "127.0.0.1";
 // A process that loses the race for the broker port retries on this cadence, so
 // the broker role fails over to a live process if the current owner exits.

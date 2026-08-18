@@ -9,6 +9,7 @@ import {
   SESSION_HEARTBEAT_MS,
 } from "./config.js";
 import { type ConnectionSnapshot, connectionScopeKey } from "./connection.js";
+import type { Notifier } from "./notify.js";
 import { createPairingGuard } from "./pairing.js";
 import type { SchemaSnapshot } from "./schema.js";
 import {
@@ -75,7 +76,12 @@ export const SERVER_INSTRUCTIONS =
   "call again. Never end your turn while a query is pending, leased or executing; wait for approved, " +
   "rejected, failed, expired or cancelled. run_query can return still-pending too; keep waiting.";
 
-export function createMcpServer(store: RequestStore): { server: McpServer; sessionId: string } {
+// Omitting the notifier raises no desktop alert, so the test suite never spawns one;
+// index.ts, the real entry point, passes the process's instance.
+export function createMcpServer(
+  store: RequestStore,
+  notifier?: Notifier,
+): { server: McpServer; sessionId: string } {
   // One stdio client per process; this identifies its request ownership.
   const sessionId = `sess_${randomBytes(9).toString("hex")}`;
   const server = new McpServer(
@@ -134,13 +140,17 @@ export function createMcpServer(store: RequestStore): { server: McpServer; sessi
       }
       try {
         return ok(
-          submitQuery(store, {
-            sessionId,
-            sql,
-            intent,
-            idempotencyKey: idempotency_key,
-            ...identity(),
-          }),
+          submitQuery(
+            store,
+            {
+              sessionId,
+              sql,
+              intent,
+              idempotencyKey: idempotency_key,
+              ...identity(),
+            },
+            notifier,
+          ),
         );
       } catch (err) {
         return fail(err);
@@ -296,7 +306,7 @@ export function createMcpServer(store: RequestStore): { server: McpServer; sessi
         return unpaired;
       }
       try {
-        const submitted = submitQuery(store, { sessionId, sql, intent, ...identity() });
+        const submitted = submitQuery(store, { sessionId, sql, intent, ...identity() }, notifier);
         return ok(await getQueryResult(store, sessionId, submitted.requestId, MAX_WAIT_MS));
       } catch (err) {
         return fail(err);

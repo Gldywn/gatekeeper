@@ -1,5 +1,6 @@
 import type { ConnectionSnapshot } from "./connection.js";
 import type { SchemaSnapshot } from "./schema.js";
+import { claimAlert } from "./store/alerts.js";
 import { listActivity, readAudit } from "./store/audit.js";
 import { getConnection, setConnection } from "./store/connection.js";
 import { createContext, migrate, type StoreContext } from "./store/db.js";
@@ -22,6 +23,7 @@ import {
   markExecuting,
   renewLease,
   resolve,
+  type SubmitOutcome,
   submit,
   sweep,
 } from "./store/requests.js";
@@ -46,6 +48,7 @@ import type {
 } from "./store/types.js";
 
 export type { PairingCode, PairingLimits, RedeemResult } from "./store/pairing.js";
+export type { SubmitOutcome } from "./store/requests.js";
 export type {
   ActivityEntry,
   AuditEntry,
@@ -69,6 +72,7 @@ export class RequestStore {
     migrate(this.ctx.db);
   }
 
+  /** Enqueue a proposal. Callers that raise a desktop alert want `submitNew` instead. */
   submit(input: {
     sessionId: string;
     sql: string;
@@ -76,7 +80,23 @@ export class RequestStore {
     idempotencyKey?: string;
     policy?: unknown;
   }): GatekeeperRequest {
+    return submit(this.ctx, input).request;
+  }
+
+  /** Like `submit`, for the caller that needs to tell a new proposal from a replay. */
+  submitNew(input: {
+    sessionId: string;
+    sql: string;
+    intent?: string;
+    idempotencyKey?: string;
+    policy?: unknown;
+  }): SubmitOutcome {
     return submit(this.ctx, input);
+  }
+
+  /** True for the one process allowed to raise a desktop alert in this window. */
+  claimAlert(cooldownMs: number): boolean {
+    return claimAlert(this.ctx, cooldownMs);
   }
 
   claimNext(

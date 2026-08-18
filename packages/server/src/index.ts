@@ -21,6 +21,7 @@ import {
   tokenPath,
 } from "./config.js";
 import { createMcpServer } from "./mcp.js";
+import { createNotifier } from "./notify.js";
 import { pairingUrl } from "./pairing.js";
 import { RequestStore } from "./store.js";
 
@@ -78,7 +79,11 @@ async function main(): Promise<void> {
   });
   const pluginId = `plugin_${randomBytes(6).toString("hex")}`;
   const token = loadOrCreateToken();
-  const { server: mcp, sessionId } = createMcpServer(store);
+  const notifier = createNotifier();
+  // Say at boot whether banners will actually appear, so a grant that was declined once
+  // is not discovered as silence weeks later.
+  notifier.probe();
+  const { server: mcp, sessionId } = createMcpServer(store, notifier);
 
   const broker = createBroker(store, pluginId, token);
   const port = brokerPort();

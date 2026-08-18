@@ -100,6 +100,11 @@ export function migrate(db: Database.Database): void {
         budget_at INTEGER NOT NULL DEFAULT 0
       );
 
+      CREATE TABLE IF NOT EXISTS alerts (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        last_alert_at INTEGER NOT NULL DEFAULT 0
+      );
+
       CREATE TABLE IF NOT EXISTS sessions (
         session_id TEXT PRIMARY KEY,
         harness TEXT,

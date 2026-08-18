@@ -1,4 +1,5 @@
-import { MAX_WAIT_MS, POLL_MS } from "./config.js";
+import { MAX_WAIT_MS, NOTIFY_COOLDOWN_MS, POLL_MS } from "./config.js";
+import type { Notifier } from "./notify.js";
 import { classifyRisk } from "./policy.js";
 import type { GatekeeperRequest, RequestState, RequestStore } from "./store.js";
 
@@ -102,8 +103,9 @@ export interface SubmitInput {
   project?: string | null;
 }
 
-/** Preflight the advisory policy and enqueue a proposal, returning a ticket. */
-export function submitQuery(store: RequestStore, input: SubmitInput): Ticket {
+// Omitting the notifier raises no alert, which is what keeps the test suite silent;
+// mcp.ts owns the one real instance.
+export function submitQuery(store: RequestStore, input: SubmitInput, notifier?: Notifier): Ticket {
   // Advisory now: only empty/multi-statement are refused here. A write/destructive is
   // forwarded and shown to the human, who arms the matching mode and approves it.
   const risk = classifyRisk(input.sql);
@@ -128,7 +130,7 @@ export function submitQuery(store: RequestStore, input: SubmitInput): Ticket {
     harnessVersion: input.harnessVersion,
     project: input.project,
   });
-  const req = store.submit({
+  const { request, created } = store.submitNew({
     sessionId: input.sessionId,
     sql: input.sql,
     intent: input.intent,
@@ -136,7 +138,18 @@ export function submitQuery(store: RequestStore, input: SubmitInput): Ticket {
     // Stamp the risk class into the persisted policy for the audit trail.
     policy: { class: risk.class, ok: risk.ok },
   });
-  return toTicket(req);
+  // Guarded because the claim is a synchronous write on an already-accepted proposal:
+  // losing an alert is acceptable, losing the agent's request id is not.
+  if (created && notifier?.active) {
+    try {
+      if (store.claimAlert(NOTIFY_COOLDOWN_MS)) {
+        notifier.notify(label);
+      }
+    } catch {
+      // deliberately ignored
+    }
+  }
+  return toTicket(request);
 }
 
 const defaultSleep = (ms: number): Promise<void> =>

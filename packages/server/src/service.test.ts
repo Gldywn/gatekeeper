@@ -176,3 +176,71 @@ describe("cancelQuery", () => {
     expect(cancelQuery(store, "s1", ticket.requestId).state).toBe("cancelled");
   });
 });
+
+describe("submitQuery desktop alert", () => {
+  function fakeNotifier(active = true) {
+    const labels: (string | null | undefined)[] = [];
+    return {
+      notifier: {
+        active,
+        probe: () => {},
+        notify: (l: string | null | undefined) => labels.push(l),
+      },
+      labels,
+    };
+  }
+
+  it("alerts once for a fresh proposal, carrying the session label", () => {
+    const store = fresh();
+    const { notifier, labels } = fakeNotifier();
+    submitQuery(store, { sessionId: "s1", sql: "SELECT 1" }, notifier);
+    expect(labels).toEqual(["audit"]);
+  });
+
+  it("raises nothing when no notifier is passed, which is what keeps the suite silent", () => {
+    const store = fresh();
+    expect(() => submitQuery(store, { sessionId: "s1", sql: "SELECT 1" })).not.toThrow();
+  });
+
+  it("raises nothing on an idempotency replay", () => {
+    const store = fresh();
+    const { notifier, labels } = fakeNotifier();
+    const input = { sessionId: "s1", sql: "SELECT 1", idempotencyKey: "k1" };
+    submitQuery(store, input, notifier);
+    submitQuery(store, input, notifier);
+    expect(labels).toHaveLength(1);
+  });
+
+  it("collapses a burst of fresh proposals into one alert", () => {
+    const store = fresh();
+    const { notifier, labels } = fakeNotifier();
+    submitQuery(store, { sessionId: "s1", sql: "SELECT 1" }, notifier);
+    submitQuery(store, { sessionId: "s1", sql: "SELECT 2" }, notifier);
+    submitQuery(store, { sessionId: "s1", sql: "SELECT 3" }, notifier);
+    expect(labels).toHaveLength(1);
+  });
+
+  // Off macOS the notifier reports itself inactive, and the cooldown row must not be
+  // spent either, since the feature documents itself as absent there.
+  it("does not even claim the cooldown when the notifier is inactive", () => {
+    const store = fresh();
+    const { notifier, labels } = fakeNotifier(false);
+    submitQuery(store, { sessionId: "s1", sql: "SELECT 1" }, notifier);
+    expect(labels).toEqual([]);
+    expect(store.claimAlert(10_000)).toBe(true);
+  });
+
+  it("never lets a failing alert path break an accepted submit", () => {
+    const store = fresh();
+    const exploding = {
+      active: true,
+      probe: () => {},
+      notify: () => {
+        throw new Error("boom");
+      },
+    };
+    const ticket = submitQuery(store, { sessionId: "s1", sql: "SELECT 1" }, exploding);
+    expect(ticket.state).toBe("pending");
+    expect(ticket.requestId).toMatch(/^req_/);
+  });
+});

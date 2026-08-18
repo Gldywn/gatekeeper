@@ -786,3 +786,60 @@ describe("composite connection scope", () => {
     expect(store.claimNext("p", LEASE, appKey)?.id).toBe(appReq.id);
   });
 });
+
+describe("alert cooldown", () => {
+  it("grants the first claim", () => {
+    const { store } = makeStore();
+    expect(store.claimAlert(10_000)).toBe(true);
+  });
+
+  it("refuses a second claim inside the window, so a burst is one banner", () => {
+    const { store } = makeStore();
+    expect(store.claimAlert(10_000)).toBe(true);
+    expect(store.claimAlert(10_000)).toBe(false);
+    expect(store.claimAlert(10_000)).toBe(false);
+  });
+
+  it("grants again once the window has passed", () => {
+    const { store, clock } = makeStore();
+    expect(store.claimAlert(10_000)).toBe(true);
+    clock.t += 9_999;
+    expect(store.claimAlert(10_000)).toBe(false);
+    clock.t += 1;
+    expect(store.claimAlert(10_000)).toBe(true);
+  });
+
+  // Two gatekeeper processes share one database file, which is what the conditional
+  // UPDATE coalesces; two stores over the same path stand in for them.
+  it("lets only one of two processes on the same database win", () => {
+    const path = join(tmpdir(), `gk-alerts-${Date.now()}-${Math.random()}.db`);
+    const a = new RequestStore({ path });
+    const b = new RequestStore({ path });
+    try {
+      expect(a.claimAlert(10_000)).toBe(true);
+      expect(b.claimAlert(10_000)).toBe(false);
+    } finally {
+      a.close();
+      b.close();
+      rmSync(path, { force: true });
+      rmSync(`${path}-wal`, { force: true });
+      rmSync(`${path}-shm`, { force: true });
+    }
+  });
+});
+
+describe("submitNew", () => {
+  it("reports a fresh proposal as created, so it can raise an alert", () => {
+    const { store } = makeStore();
+    expect(store.submitNew({ sessionId: "s1", sql: "SELECT 1" }).created).toBe(true);
+  });
+
+  it("reports an idempotency replay as not created, so a retry raises none", () => {
+    const { store } = makeStore();
+    const first = store.submitNew({ sessionId: "s1", sql: "SELECT 1", idempotencyKey: "k1" });
+    const again = store.submitNew({ sessionId: "s1", sql: "SELECT 1", idempotencyKey: "k1" });
+    expect(first.created).toBe(true);
+    expect(again.created).toBe(false);
+    expect(again.request.id).toBe(first.request.id);
+  });
+});

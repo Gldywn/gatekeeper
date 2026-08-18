@@ -5,6 +5,13 @@ import { digest, isUniqueViolation, OPEN_STATES, type StoreContext, token } from
 import { type RawRow, toRequest } from "./rows.js";
 import { type GatekeeperRequest, type Outcome, type RequestState, StoreError } from "./types.js";
 
+// `created` is false when an idempotency key replayed an existing proposal. The
+// desktop alert keys off it, so a retry never raises a second banner.
+export interface SubmitOutcome {
+  request: GatekeeperRequest;
+  created: boolean;
+}
+
 /** Enqueue a proposal, or return the existing one for a repeated idempotency key. */
 export function submit(
   ctx: StoreContext,
@@ -15,11 +22,11 @@ export function submit(
     idempotencyKey?: string;
     policy?: unknown;
   },
-): GatekeeperRequest {
+): SubmitOutcome {
   // IMMEDIATE so the idempotency check, the backpressure count, and the insert
   // are one atomic unit across processes; a lost idempotency race falls back to
   // the row the other process inserted.
-  const run = ctx.db.transaction((): GatekeeperRequest => {
+  const run = ctx.db.transaction((): SubmitOutcome => {
     sweep(ctx);
 
     if (input.idempotencyKey) {
@@ -36,7 +43,7 @@ export function submit(
             "This idempotency_key was already used for a different statement.",
           );
         }
-        return toRequest(existing);
+        return { request: toRequest(existing), created: false };
       }
     }
 
@@ -94,7 +101,7 @@ export function submit(
               "This idempotency_key was already used for a different statement.",
             );
           }
-          return toRequest(existing);
+          return { request: toRequest(existing), created: false };
         }
       }
       throw err;
@@ -106,7 +113,7 @@ export function submit(
       sessionId: row.session_id,
       sqlDigest: digest(row.sql),
     });
-    return toRequest(row);
+    return { request: toRequest(row), created: true };
   });
   return run.immediate();
 }
