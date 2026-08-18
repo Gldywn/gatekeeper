@@ -32,3 +32,6 @@ design/
 
 # Local planning notes, never shipped
 /TODO.md
+
+# Built macOS notification helper (produced by packages/server/notifier/build.sh)
+packages/server/notifier.noindex/

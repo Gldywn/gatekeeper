@@ -1,0 +1,4 @@
+# The icon is binary and the plist is covered by the bundle's code signature, so
+# neither may be touched by end-of-line normalisation.
+*.icns binary
+packages/server/notifier/Info.plist -text
