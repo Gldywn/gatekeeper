@@ -22,7 +22,40 @@ permissions:
   id-token: write
 
 jobs:
+  # The notification helper is a signed macOS .app, so it cannot be produced on the
+  # ubuntu publish runner. It is built here and handed over as an artifact. Ad-hoc
+  # signing needs no certificate and no secret.
+  notifier:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+
+      - name: Build the notification helper
+        run: bash packages/server/notifier/build.sh
+
+      # Each of these has already shipped a silently broken notifier in some project:
+      # a missing slice, a lost execute bit, a stale signature, an embedded symlink.
+      - name: Check the bundle
+        working-directory: packages/server
+        run: |
+          bundle="notifier.noindex/Gatekeeper.app"
+          binary="$bundle/Contents/MacOS/gatekeeper-notify"
+          lipo -info "$binary" | grep -q 'x86_64' || { echo "::error::missing x86_64 slice"; exit 1; }
+          lipo -info "$binary" | grep -q 'arm64' || { echo "::error::missing arm64 slice"; exit 1; }
+          codesign --verify --deep --strict "$bundle"
+          [ -x "$binary" ] || { echo "::error::helper is not executable"; exit 1; }
+          [ -z "$(find "$bundle" -type l)" ] || { echo "::error::bundle contains a symlink"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: notifier
+          path: packages/server/notifier.noindex
+          retention-days: 1
+
   publish:
+    needs: notifier
     runs-on: ubuntu-latest
     steps:
       # Both halves live under the always-available `github` context: the `inputs`
@@ -42,6 +75,17 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: notifier
+          path: packages/server/notifier.noindex
+
+      # Artifact upload does not carry file modes, so the helper arrives non-executable.
+      # publishConfig.executableFiles is what actually fixes the mode in the tarball;
+      # this keeps the working tree honest and lets the assertion below mean something.
+      - name: Restore the helper's execute bit
+        run: chmod +x packages/server/notifier.noindex/Gatekeeper.app/Contents/MacOS/gatekeeper-notify
+
       - name: Check the package version matches the release tag
         env:
           TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
@@ -55,6 +99,17 @@ jobs:
 
       - name: Typecheck, build and test
         run: pnpm run ci
+
+      # pnpm strips the execute bit from anything outside `bin` unless publishConfig names
+      # it, and npm's installer honours the stored mode, so a mistake here would ship a
+      # helper that can never run. After the build, so this packs the same tree as publish.
+      - name: Check the packed tarball keeps the execute bit
+        working-directory: packages/server
+        run: |
+          tarball="$(pnpm pack --pack-destination "$RUNNER_TEMP" | tail -n 1)"
+          mode="$(tar -tvf "$tarball" | grep 'MacOS/gatekeeper-notify' | awk '{print $1}')"
+          echo "packed as $mode"
+          case "$mode" in *x*) ;; *) echo "::error::execute bit stripped by pack"; exit 1 ;; esac
 
       # --no-git-checks: this runs on a detached tag checkout, not the publish branch.
       # NODE_AUTH_TOKEN carries the NPM_TOKEN secret, which is the known-good path. If npm

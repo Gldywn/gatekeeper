@@ -24,13 +24,17 @@
     "gatekeeper-mcp-server": "dist/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "notifier.noindex"
   ],
+  "publishConfig": {
+    "access": "public",
+    "executableFiles": [
+      "notifier.noindex/Gatekeeper.app/Contents/MacOS/gatekeeper-notify"
+    ]
+  },
   "engines": {
     "node": ">=22"
-  },
-  "publishConfig": {
-    "access": "public"
   },
   "scripts": {
     "build": "tsc",
