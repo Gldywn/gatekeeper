@@ -282,6 +282,11 @@ pnpm install
 pnpm build
 ```
 
+On macOS `pnpm build` also builds and signs the notification helper, which needs the Xcode
+command line tools; it is skipped with a printed reason when they are absent or when you
+are on another platform, and rebuilt only when its sources change. If the helper is missing
+the server says so at startup rather than staying quiet.
+
 The repo ships its dev wiring, so a clone is ready without hand-editing config:
 
 - **Claude Code and OpenCode** read the committed `.mcp.json` / `opencode.jsonc` when you run

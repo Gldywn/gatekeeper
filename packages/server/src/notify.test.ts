@@ -32,6 +32,7 @@ function harness(
     mode: "both" as NotifyMode,
     bundle: "/pkg/notifier.noindex/Gatekeeper.app",
     helper: "/pkg/notifier.noindex/Gatekeeper.app/Contents/MacOS/gatekeeper-notify",
+    exists: () => true,
     log: (message) => logs.push(message),
     ...overrides,
   };
@@ -193,6 +194,7 @@ describe("notify", () => {
       mode: "banner",
       bundle: "/pkg/Gatekeeper.app",
       helper: "/pkg/Gatekeeper.app/Contents/MacOS/gatekeeper-notify",
+      exists: () => true,
       log: () => {},
     });
     notifier.notify("one");
@@ -237,6 +239,7 @@ describe("notify", () => {
       mode: "both",
       bundle: "/pkg/Gatekeeper.app",
       helper: "/pkg/Gatekeeper.app/Contents/MacOS/gatekeeper-notify",
+      exists: () => true,
       log: () => {},
     });
     notifier.notify("label");
@@ -278,6 +281,7 @@ describe("notify", () => {
       mode: "banner",
       bundle: "/pkg/Gatekeeper.app",
       helper: "/pkg/Gatekeeper.app/Contents/MacOS/gatekeeper-notify",
+      exists: () => true,
       log: (m) => logs.push(m),
     });
     notifier.notify("label");
@@ -310,6 +314,7 @@ describe("notify", () => {
       mode: "both",
       bundle: "/pkg/Gatekeeper.app",
       helper: "/pkg/Gatekeeper.app/Contents/MacOS/gatekeeper-notify",
+      exists: () => true,
       log: () => {},
     });
     expect(() => notifier.notify("label")).not.toThrow();
@@ -352,9 +357,64 @@ describe("probe", () => {
       mode: "both",
       bundle: "/pkg/Gatekeeper.app",
       helper: "/pkg/Gatekeeper.app/Contents/MacOS/gatekeeper-notify",
+      exists: () => true,
       log: () => {},
     });
     expect(() => notifier.probe()).not.toThrow();
     await settle();
+  });
+});
+
+describe("a missing helper bundle", () => {
+  // lsregister exits 0 on a path that does not exist and the helper then fails into the
+  // catch-all, so without an explicit check this case is silent everywhere.
+  function withoutBundle() {
+    const calls: Call[] = [];
+    const logs: string[] = [];
+    const notifier = createNotifier({
+      run: async (cmd, args, timeoutMs) => {
+        calls.push({ cmd, args, timeoutMs });
+        return { stdout: "" };
+      },
+      exists: () => false,
+      platform: "darwin",
+      mode: "both",
+      bundle: "/pkg/notifier.noindex/Gatekeeper.app",
+      helper: "/pkg/notifier.noindex/Gatekeeper.app/Contents/MacOS/gatekeeper-notify",
+      log: (m) => logs.push(m),
+    });
+    return { calls, logs, notifier };
+  }
+
+  it("says so at startup instead of failing silently", async () => {
+    const { logs, notifier } = withoutBundle();
+    notifier.probe();
+    await settle();
+    expect(logs.join(" ")).toContain("notification helper is missing");
+    expect(logs.join(" ")).toContain("pnpm build");
+  });
+
+  it("does not try to register or run a helper that is not there", async () => {
+    const { calls, notifier } = withoutBundle();
+    notifier.notify("label");
+    await settle();
+    expect(calls.filter(isRegister)).toEqual([]);
+    expect(calls.filter(isHelper)).toEqual([]);
+  });
+
+  it("still plays the sound, which needs no bundle", async () => {
+    const { calls, notifier } = withoutBundle();
+    notifier.notify("label");
+    await settle();
+    expect(calls.map((c) => c.cmd)).toEqual(["afplay"]);
+  });
+
+  it("says it once, not on every proposal", async () => {
+    const { logs, notifier } = withoutBundle();
+    notifier.notify("one");
+    await settle();
+    notifier.notify("two");
+    await settle();
+    expect(logs).toHaveLength(1);
   });
 });

@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { NOTIFY_PROMPT_TIMEOUT_MS, NOTIFY_TIMEOUT_MS } from "./config.js";
 
@@ -18,6 +19,7 @@ export interface RunResult {
 
 export interface NotifyDeps {
   run: (cmd: string, args: string[], timeoutMs: number) => Promise<RunResult>;
+  exists: (path: string) => boolean;
   platform: string;
   mode: NotifyMode;
   bundle: string;
@@ -85,6 +87,7 @@ export function defaultDeps(): NotifyDeps {
   const bundle = bundlePath();
   return {
     run: defaultRun,
+    exists: existsSync,
     platform: process.platform,
     mode: parseMode(process.env.GATEKEEPER_NOTIFY),
     bundle,
@@ -98,6 +101,23 @@ export function createNotifier(deps: NotifyDeps = defaultDeps()) {
   const active = deps.platform === "darwin" && deps.mode !== "off";
   let registered = false;
   let warned = false;
+  let warnedMissing = false;
+
+  // `lsregister -f` on a path that does not exist still exits 0, and the helper then
+  // fails with ENOENT into the catch-all, so without this check a package built without
+  // its bundle is indistinguishable from one working in silence.
+  function bundleMissing(): boolean {
+    if (deps.exists(deps.bundle)) {
+      return false;
+    }
+    if (!warnedMissing) {
+      warnedMissing = true;
+      deps.log(
+        `the notification helper is missing at ${deps.bundle}; run \`pnpm build\` in packages/server`,
+      );
+    }
+    return true;
+  }
 
   async function register(): Promise<void> {
     if (registered) {
@@ -121,6 +141,9 @@ export function createNotifier(deps: NotifyDeps = defaultDeps()) {
   }
 
   async function banner(body: string, subtitle: string): Promise<void> {
+    if (bundleMissing()) {
+      return;
+    }
     await register();
     // Generous: the first proposal on a machine raises the macOS permission dialog and
     // waits for a human. Killing it there would lose the prompt, and nothing awaits us.
@@ -145,7 +168,7 @@ export function createNotifier(deps: NotifyDeps = defaultDeps()) {
 
     /** Report at startup whether banners will actually appear. Never throws. */
     probe(): void {
-      if (!active || deps.mode === "sound") {
+      if (!active || deps.mode === "sound" || bundleMissing()) {
         return;
       }
       swallow(
