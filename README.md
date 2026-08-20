@@ -69,6 +69,12 @@ polls the broker instead. That single constraint explains the whole shape. Full 
 CLI you already have Node. There is no background service to install: your agent starts the
 server when its session opens, and it exits when that session ends.
 
+> **macOS only, for now.** Gatekeeper is developed and tested on macOS. **Windows and Linux
+> are not yet tested**, so treat them as unsupported until someone reports back. Nothing in
+> the shipped code is macOS-specific (the server resolves paths from your home directory, the
+> plugin is a standard Beekeeper webview), so both are expected to work, but expected is not
+> verified. Reports from either platform are very welcome.
+
 > **Not in Beekeeper's plugin registry yet.** A submission is in progress with the Beekeeper
 > maintainers. Until it is merged, Manage Plugins will not list Gatekeeper and the one-click
 > install is unavailable, so step 1 below is the manual route. Nothing else differs.
@@ -104,6 +110,11 @@ command = "npx"
 args = ["-y", "@gldywn/gatekeeper-mcp-server"]
 ```
 
+**Prefer pnpm?** `pnpm dlx @gldywn/gatekeeper-mcp-server` is the direct equivalent of the
+`npx` line. To resolve the package once rather than at every agent launch, install it with
+`pnpm add -g @gldywn/gatekeeper-mcp-server` and point your client at the
+`gatekeeper-mcp-server` binary it puts on your `PATH`.
+
 Any client that reads `.mcp.json` can use
 [`.mcp.json.example`](https://github.com/Gldywn/gatekeeper/blob/main/.mcp.json.example) as-is.
 Pin the version (`@gldywn/gatekeeper-mcp-server@<version>`) if you would rather audit upgrades
@@ -132,9 +143,7 @@ plugin before that and it tells you so, rather than showing a pairing field it c
 query appears in the plugin, you approve, and the rows return to the agent. Reads work
 straight away; a write runs only once you arm Write or Destructive mode.
 
-**Platform support.** Gatekeeper is developed and tested on **macOS**. **Windows and Linux
-are not yet tested.** The shipped code carries no macOS-only dependency, so both are expected
-to work, but that is unverified. Reports are welcome. Building from source is documented in
+Building from source is documented in
 [Development](https://github.com/Gldywn/gatekeeper/blob/main/docs/DEVELOPMENT.md).
 
 ### If the plugin never shows up
