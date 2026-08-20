@@ -28,7 +28,7 @@ jobs:
   notifier:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.event.release.tag_name || github.event.inputs.tag }}
 
@@ -48,7 +48,7 @@ jobs:
           [ -x "$binary" ] || { echo "::error::helper is not executable"; exit 1; }
           [ -z "$(find "$bundle" -type l)" ] || { echo "::error::bundle contains a symlink"; exit 1; }
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: notifier
           path: packages/server/notifier.noindex
@@ -61,13 +61,13 @@ jobs:
       # Both halves live under the always-available `github` context: the `inputs`
       # context is only populated for workflow_dispatch and workflow_call, and this
       # workflow also runs on `release`.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.event.release.tag_name || github.event.inputs.tag }}
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 24
           cache: pnpm
@@ -75,7 +75,7 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: notifier
           path: packages/server/notifier.noindex
