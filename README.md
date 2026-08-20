@@ -69,17 +69,25 @@ polls the broker instead. That single constraint explains the whole shape. Full 
 CLI you already have Node. There is no background service to install: your agent starts the
 server when its session opens, and it exits when that session ends.
 
-**1. Install the plugin in Beekeeper Studio.** Tools -> Manage Plugins, find Gatekeeper,
-Install. While the registry entry is pending, download `gatekeeper-<version>.zip` from the
+> **Not in Beekeeper's plugin registry yet.** A submission is in progress with the Beekeeper
+> maintainers. Until it is merged, Manage Plugins will not list Gatekeeper and the one-click
+> install is unavailable, so step 1 below is the manual route. Nothing else differs.
+
+**1. Install the plugin in Beekeeper Studio.** Download `gatekeeper-<version>.zip` from the
 [latest release](https://github.com/Gldywn/gatekeeper/releases/latest), extract it into
-Beekeeper's plugins folder as a directory named `gatekeeper` (the folder name must match the
-manifest `id`), and restart Beekeeper:
+Beekeeper's plugins folder, and restart Beekeeper:
 
 | OS | Plugins folder |
 |---|---|
 | macOS | `~/Library/Application Support/beekeeper-studio/plugins/` |
 | Linux | `~/.config/beekeeper-studio/plugins/` |
 | Windows | `%APPDATA%\beekeeper-studio\plugins\` |
+
+> **The extracted folder must be named exactly `gatekeeper`.** The zip expands to
+> `gatekeeper-<version>/`, so rename it after extracting. Beekeeper matches the folder name
+> against the plugin id and **skips any folder that disagrees without saying a word**: no
+> error, no entry in Manage Plugins, nothing to click. This is the single most common reason
+> a manual install appears to do nothing.
 
 **2. Register the MCP server with your agent.** This is also the server install: `npx`
 downloads and caches it on first launch.
@@ -98,7 +106,7 @@ args = ["-y", "@gldywn/gatekeeper-mcp-server"]
 
 Any client that reads `.mcp.json` can use
 [`.mcp.json.example`](https://github.com/Gldywn/gatekeeper/blob/main/.mcp.json.example) as-is.
-Pin the version (`@gldywn/gatekeeper-mcp-server@0.1.0`) if you would rather audit upgrades
+Pin the version (`@gldywn/gatekeeper-mcp-server@<version>`) if you would rather audit upgrades
 than receive them: unpinned, `npx` re-resolves the latest release on every agent launch,
 which keeps you current but means a process with a path to your database changes under you.
 
@@ -128,6 +136,34 @@ straight away; a write runs only once you arm Write or Destructive mode.
 are not yet tested.** The shipped code carries no macOS-only dependency, so both are expected
 to work, but that is unverified. Reports are welcome. Building from source is documented in
 [Development](https://github.com/Gldywn/gatekeeper/blob/main/docs/DEVELOPMENT.md).
+
+### If the plugin never shows up
+
+Beekeeper ships with its plugin system locked down, so a fresh install can ignore a
+third-party plugin entirely. Three things to check, in order:
+
+**1. The folder name.** Exactly `gatekeeper`, not `gatekeeper-0.1.1`. A mismatch is skipped
+silently, as above.
+
+**2. The plugin system is enabled.** Beekeeper's shipped defaults set
+`pluginSystem.disabled = true`, with an allowlist that contains only its own two plugins.
+Add this to your user config, then restart:
+
+```ini
+[pluginSystem]
+disabled = false
+```
+
+**3. Community plugins are enabled.** `communityDisabled = true` is a shipped default too,
+and it disables any plugin Beekeeper lists as community. If the plugin manager shows
+"Community plugins are disabled via configuration", add `communityDisabled = false` in the
+same block.
+
+| OS | User config file |
+|---|---|
+| macOS | `~/Library/Application Support/beekeeper-studio/user.config.ini` |
+| Linux | `~/.config/beekeeper-studio/user.config.ini` |
+| Windows | `%APPDATA%\beekeeper-studio\user.config.ini` |
 
 ## Access modes
 
