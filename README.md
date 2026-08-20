@@ -304,6 +304,19 @@ The repo ships its dev wiring, so a clone is ready without hand-editing config:
   gitignored `.dev-skills` at the repo root (one path per line), or set `GATEKEEPER_SKILLS_DIRS`
   to override; a real folder at a target is moved aside to `gatekeeper.pre-dev` and restored on
   `dev:unlink`. With neither, `dev:link` leaves skills alone.
+- **Plugin UI, live:** `pnpm dev` brings up the test databases, then starts Vite with hot
+  reload inside Beekeeper Studio, so UI work needs no `pnpm build` at all. The manifest keeps
+  pointing at `dist/index.html`; in dev the Vite plugin rewrites that file into a shim whose
+  assets resolve to `http://localhost:<port>`, with the HMR client injected. A CSS edit lands
+  without even reloading the tab. Caveat: that shim stays on disk when the dev server stops,
+  and it is inert without it, so run `pnpm build` before packaging or testing a real install.
+- **Test databases:** `pnpm db:up` starts the Postgres and MySQL containers in
+  `test-db/compose.yaml` (synthetic data, never a real target) and waits for both to pass
+  their healthcheck, so nothing connects to a half-initialised server. Host ports are
+  deliberately unusual (`54329`, `33069`) to avoid colliding with a real local install; both
+  use `gatekeeper_test` as database, user, and password. `pnpm db:down` stops them, keeping
+  the volumes; add `-- -v` to wipe the data too. `pnpm dev` runs `db:up` first, so use
+  `pnpm --filter @gatekeeper/plugin dev` to start Vite alone when Docker is not running.
 
 ### Environment variables
 
