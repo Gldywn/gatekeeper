@@ -1,7 +1,7 @@
 {
   "id": "gatekeeper",
   "name": "Gatekeeper",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "minAppVersion": "5.4.0",
   "manifestVersion": 1,
   "description": "Human-approved SQL bridge between AI agents and Beekeeper Studio: read-only by default, with ephemeral human-armed write modes.",
@@ -24,7 +24,10 @@
         "command": "open-gatekeeper",
         "name": "Gatekeeper",
         "view": "main",
-        "placement": ["menubar.tools", "newTabDropdown"]
+        "placement": [
+          "menubar.tools",
+          "newTabDropdown"
+        ]
       }
     ]
   }
