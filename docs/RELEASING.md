@@ -106,6 +106,25 @@ If a step needs a retry, both workflows have a `workflow_dispatch` entry point t
 the release tag. Re-running the publish is the way back from a failed or rejected staging,
 since the `release: published` event fires only once.
 
+### Forcing a version when nothing bumped
+
+release-please only bumps on `feat:` and `fix:`. A `docs:`, `ci:` or `chore:` commit lands on
+`main` and opens nothing, which is usually what you want.
+
+Sometimes you need a release anyway. The npm package page renders the `README.md` **inside
+the published tarball**, not the one on `main`, so a fix to `packages/server/README.md` only
+reaches npm through a new version. Same for anything shipped in the plugin zip.
+
+To force one, put `Release-As: x.y.z` in the **body** of a commit that lands on `main`:
+
+```bash
+git commit --allow-empty -m "chore: release 0.1.1" -m "Release-As: 0.1.1"
+```
+
+`main` takes squash merges only, and this repo builds the squash message from the branch's
+commit messages, so the footer travels with the commit. Keep it in the commit body rather
+than the PR description, which is not what lands.
+
 ## Verifying a release
 
 ```bash
