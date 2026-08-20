@@ -1,6 +1,6 @@
 {
   "name": "@gldywn/gatekeeper-mcp-server",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "type": "module",
   "description": "MCP server for Gatekeeper: proposes SQL to a human in Beekeeper Studio and returns the approved result to the agent.",
   "keywords": [
