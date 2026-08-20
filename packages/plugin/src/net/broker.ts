@@ -1,5 +1,5 @@
 import { appStorage } from "@beekeeperstudio/plugin";
-import type { ConnectionInput } from "@gatekeeper/shared";
+import type { ConnectionInput, RequestState } from "@gatekeeper/shared";
 import type { ActivityEntry, Proposal, SessionRoster } from "../types";
 
 export interface BrokerConfig {
@@ -11,8 +11,12 @@ export interface BrokerConfig {
 // capturedAt on its side). Never host/user/credentials.
 export type ConnectionSnapshot = ConnectionInput;
 
-// A refused renewal (cancelled or lost lease) tells the caller to drop the card.
-export type RenewResult = { ok: false } | { ok: true; leaseExpiresAt: number };
+// A refused renewal carries the request's settled state when the broker reports one, so
+// the caller can tell a proposal that died from one merely re-offered. Absent (an older
+// broker, a 401, a truncated body) means undefined, and the caller stays conservative.
+export type RenewResult =
+  | { ok: false; state?: RequestState }
+  | { ok: true; leaseExpiresAt: number };
 
 // Owns the broker transport (base URL, bearer token, wire request shape). The
 // caller keeps the policy: when to re-pair on a 401, and the approval sequencing.
@@ -133,7 +137,12 @@ export class BrokerClient {
       body: JSON.stringify({ id, leaseId }),
     });
     if (!res.ok) {
-      return { ok: false };
+      try {
+        const { state } = (await res.json()) as { state?: RequestState | null };
+        return { ok: false, state: state ?? undefined };
+      } catch {
+        return { ok: false };
+      }
     }
     const { leaseExpiresAt } = (await res.json()) as { leaseExpiresAt: number };
     return { ok: true, leaseExpiresAt };

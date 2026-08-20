@@ -9,6 +9,7 @@ import {
   markdownIcon,
   tableIcon,
   xCircleIcon,
+  xIcon,
 } from "../icons";
 import type { HistResult } from "../result";
 import { formatSql } from "../sql/format";
@@ -34,7 +35,7 @@ export function detailHtml(item: HistItem): string {
           <span class="detail-who">${escapeHtml(who)}</span>
           ${item.session?.sessionLabel ? `<span class="detail-scope" title="${escapeHtml(capitalize(item.session.sessionLabel))}">${escapeHtml(capitalize(item.session.sessionLabel))}</span>` : ""}
           ${statusIcon(item.status)}
-          <button class="detail-close" type="button" data-close aria-label="Close detail">&times;</button>
+          <button class="detail-close" type="button" data-close aria-label="Close detail">${xIcon}</button>
         </div>
         <div class="detail-meta">${audit.join(" &middot; ")}</div>
         ${item.intent ? `<p class="detail-intent">${escapeHtml(capitalize(item.intent))}</p>` : ""}

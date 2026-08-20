@@ -196,5 +196,8 @@ function fallback(sql: string): RiskVerdict {
     }
     return { class: "read", parseOk: false, blocked: false };
   }
-  return { class: "destructive", parseOk: false, blocked: true };
+  // Strictest class but approvable: blocking every statement the parser cannot read made
+  // DROP DATABASE unapprovable in the very mode built to gate it. The `;` check above
+  // already blocked genuinely multi-statement input.
+  return { class: "destructive", parseOk: false, blocked: false };
 }

@@ -20,6 +20,7 @@ import {
   pencilIcon,
   tableIcon,
   trashIcon,
+  xIcon,
 } from "../icons";
 import { classifyQuery } from "../sql/classify";
 import { formatSql } from "../sql/format";
@@ -36,7 +37,7 @@ export function activityShell(body: string, connChip: string): string {
           <span class="panel-head-ico">${historyIcon}</span>
           <span class="panel-title">Audit Trail</span>
           ${connChip}
-          <button class="detail-close" type="button" data-close aria-label="Close audit trail">&times;</button>
+          <button class="detail-close" type="button" data-close aria-label="Close audit trail">${xIcon}</button>
         </div>
         <div class="act-body">${body}</div>
       </div>`;

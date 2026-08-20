@@ -121,34 +121,10 @@ body {
   -webkit-mask-image: linear-gradient(105deg, transparent 6%, #000 30%, #000 70%, transparent 94%);
   mask-image: linear-gradient(105deg, transparent 6%, #000 30%, #000 70%, transparent 94%);
 }
-.brand,
 .conn-chip,
 .bar-right {
   position: relative;
   z-index: 1;
-}
-.mark {
-  width: 36px;
-  height: 36px;
-  flex: none;
-  align-self: center;
-  /* Shield alone here, not the full tile: at this size the honeycomb ground turns to noise
-     and the gold square fights the bar's own surface. Dropping it buys the glyph more room
-     at the same footprint, and the drop-shadow traces the shield itself. */
-  background: url("./assets/gatekeeper-shield.svg") center / contain no-repeat;
-  filter: drop-shadow(0 1px 1.5px oklch(0% 0 0 / 0.5));
-}
-.wordmark {
-  font-weight: 660;
-  letter-spacing: -0.01em;
-  font-size: 15px;
-}
-/* Brand cluster: the hexagon mark and wordmark held together at the bar's left. */
-.brand {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s2);
-  flex: none;
 }
 
 /* The connection identity wrapped as one bordered object: db glyph, name,
@@ -1415,6 +1391,28 @@ label.qs-row {
 .card-risk:empty {
   display: none;
 }
+/* The parser could not read the statement, so the class below it is a guess. Stated in
+   full sentences, unlike the terse annotations: it asks the human to take the call. */
+.cs-unparsed {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin-bottom: var(--s2);
+  padding: 8px 10px;
+  border: 1px solid color-mix(in oklch, var(--danger) 32%, transparent);
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--danger) 8%, transparent);
+  color: var(--text);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+.cs-unparsed svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-top: 1px;
+  color: var(--danger);
+}
 .cs-writes {
   display: flex;
   align-items: center;
@@ -1703,6 +1701,13 @@ label.qs-row {
   color: var(--amber);
   flex: none;
 }
+/* Detail head only. Several brand marks are wide and short (Claude Code inks 5..20 of a
+   24 grid, 62% of its height), so the shared 15px box left them near 9px tall beside a
+   15px name. The dense rows (roster, queue group, history) keep the 15px box. */
+.detail-head > .harness-badge {
+  width: 19px;
+  height: 19px;
+}
 .harness-badge svg {
   width: 100%;
   height: 100%;
@@ -1779,6 +1784,11 @@ label.qs-row {
 .roster-fold-inner {
   overflow: hidden;
   min-height: 0;
+  /* The active dot's glow is a 3px ring on a row that starts flush left, so it reached
+     outside this box and the fold's clip sliced it. Overflow clips to the padding box:
+     widen that by the ring, and pull the same amount back so no row moves. */
+  padding-left: 4px;
+  margin-left: -4px;
 }
 @keyframes roster-row-in {
   from {
@@ -2130,6 +2140,21 @@ label.qs-row {
   border-bottom: 1px solid var(--edge);
   border-radius: var(--r) var(--r) 0 0;
 }
+/* The leading icon only. Everything else on the line stays plainly centred in the bar;
+   this one reads high because flexbox centres it on the title's cap height while a
+   title-case word reads from its x-height, measured 1.5px lower at 15px. Transform, so
+   the nudge never touches layout. */
+.panel-head-ico {
+  transform: translateY(1.5px);
+}
+/* Centring boxes is not centring baselines: a smaller font gets a shorter box, so once
+   centred its baseline lands above the title's. Measured, then put back on the line. */
+.panel-head > .conn-chip {
+  transform: translateY(1.9px);
+}
+.detail-head > .detail-scope {
+  transform: translateY(1.75px);
+}
 .panel-head-ico {
   display: inline-flex;
   flex: none;
@@ -2144,17 +2169,18 @@ label.qs-row {
   font-weight: 650;
   letter-spacing: -0.01em;
   color: var(--text);
-  /* Tight box so the glyph centres on the head icon and chip; a 1.5 line-height dropped
-     the title a hair low against them. Same fix serves the settings head. */
+  /* Tight box: measured against the head icon, line-height:1 lands the cap centre
+     within 0.2px of it, where matching the icon's 16px box drifts to 0.7px. */
   line-height: 1;
 }
 /* The detail head is the same seated title bar as settings and activity, only its
    background is the outcome tint (below) instead of the neutral seated fill. */
-/* Text baseline-aligned so who, label, and status sit on one line; the amber agent
-   icon and the close ride align-self: center. Status stays right after the label. */
+/* Everything centres on one axis, like the settings and audit heads. Baseline
+   alignment tied the row to the text, so any taller item (the close button) slid the
+   icons against it; centring holds whatever gets added to the line later. */
 .detail-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--s2);
   margin: calc(-1 * var(--s3)) calc(-1 * var(--s3)) var(--s3);
   padding: var(--s3);
@@ -2324,21 +2350,26 @@ label.qs-row {
 }
 /* A ~24px rounded hover target with a ~15px glyph, harmonized across all three
    overlay heads (settings, activity, detail). */
+/* A stroke glyph, not the &times; character: that one rides its own font metrics and
+   landed 5px above the head's centre line, tilting the whole row. An svg box centres
+   exactly on the icon and the title. */
 .detail-close {
   align-self: center;
   margin-left: auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   border: none;
-  border-radius: 6px;
+  border-radius: 7px;
   background: none;
   color: var(--muted);
-  font-size: 15px;
-  line-height: 1;
   cursor: pointer;
+}
+.detail-close svg {
+  width: 18px;
+  height: 18px;
 }
 .detail-close:hover {
   background: var(--hi);
@@ -2623,6 +2654,38 @@ label.qs-row {
 /* The overlay reuses the .detail backdrop; its card is a scrollable audit log. */
 .activity-card {
   max-width: min(96vw, 1100px);
+}
+/* Optical size, not box size: this clock is drawn on a circle of radius 9 in a 24 grid,
+   so it inks 75% of its box where the settings gear reaches 92% and read visibly smaller.
+   Scaled rather than given a wider box, which would have pushed it away from the title:
+   the box stays 16px, so the gap does not move. */
+.activity-card .panel-head-ico svg {
+  transform: scale(1.1);
+}
+/* Flat connection here, unlike the header's bordered chip: the seated title bar already
+   frames it, so a second bordered object beside the title only stacked edge on edge.
+   Same parts, no container, separated by middots and demoted under the title. Scoped to
+   this head so the main header chip and the settings overlay are untouched. */
+.activity-card .panel-head .conn-chip {
+  gap: 7px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--faint);
+}
+.activity-card .panel-head .chip-name {
+  font-weight: 500;
+  color: var(--muted);
+}
+.activity-card .panel-head .badge {
+  padding: 0;
+  border-radius: 0;
+  color: var(--faint);
+  background: none;
+}
+.activity-card .panel-head .badge::before,
+.activity-card .panel-head .chip-path::before {
+  content: "· ";
 }
 .act-status {
   font-family: var(--font-mono);
@@ -3302,40 +3365,7 @@ label.qs-row {
   }
 }
 
-/* ---- Developer mode (backlog idea #11) ----
-   Every dev surface is blue (--exec, never amber/green/red which already carry
-   meaning), recessed, and dashed so it reads as a separate technical area. All of
-   it is gated behind the developerMode toggle and absent from the DOM when off. */
-
-/* The stroke flask, sized per context; unlike .harness-badge it is not fill-forced. */
-.dev-flask {
-  display: inline-flex;
-  align-self: center;
-  flex: none;
-  color: var(--exec);
-}
-.dev-flask svg {
-  width: 14px;
-  height: 14px;
-}
-/* One blue tag shared by every dev surface. Perfectly centered so the mono label
-   never drifts off the baseline of the pill. */
-.dev-tag {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  font-family: var(--font-mono);
-  font-size: 9px;
-  line-height: 1;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--exec);
-  border: 1px solid color-mix(in oklch, var(--exec) 40%, transparent);
-  border-radius: 4px;
-  padding: 3px 5px;
-}
-
+/* ---- Settings danger zone ---- */
 .danger-zone .set-group-name {
   color: var(--danger);
 }
@@ -3361,178 +3391,8 @@ label.qs-row {
   background: var(--danger);
   border-color: transparent;
 }
-/* A dotted rule setting the dev block apart from the danger zone above it. */
-.settings-sep {
-  height: 0;
-  margin: var(--s4) 0 0;
-  border-top: 1px dotted var(--edge-strong);
-}
 
-/* Recessed block at the bottom of Settings, dimmer than the real rows. */
-.dev-zone {
-  margin-top: var(--s5);
-  padding: 13px 14px;
-  border: 1px dashed var(--edge-strong);
-  border-radius: 9px;
-  background: color-mix(in oklch, var(--sunken) 40%, transparent);
-}
-.dev-row {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-.dev-main {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.dev-name {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s2);
-  font-size: 13px;
-  font-weight: 560;
-  color: var(--muted);
-}
-.dev-desc {
-  font-size: 11.5px;
-  color: var(--faint);
-  overflow-wrap: anywhere;
-}
-/* The developer toggle is blue when on, not the settings green. */
-.dev-zone .switch:checked {
-  background: color-mix(in oklch, var(--exec) 55%, transparent);
-  border-color: color-mix(in oklch, var(--exec) 45%, transparent);
-}
-.dev-zone .switch:checked::before {
-  background: var(--exec);
-}
-
-/* The generator panel above the pending queue. */
-.dev-panel {
-  border: 1px dashed color-mix(in oklch, var(--exec) 34%, var(--edge));
-  border-radius: 8px;
-  background: color-mix(in oklch, var(--exec) 6%, transparent);
-  padding: 11px 13px;
-  margin-bottom: var(--s4);
-}
-.dp-head {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin-bottom: 10px;
-}
-.dp-title {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-weight: 600;
-  color: var(--exec);
-}
-.dp-note {
-  margin-left: auto;
-  font-size: 11px;
-  color: var(--faint);
-}
-.dp-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--s2);
-  align-items: center;
-}
-.dp-primary {
-  font: inherit;
-  font-size: 12px;
-  font-weight: 570;
-  cursor: pointer;
-  border: none;
-  border-radius: 6px;
-  padding: 6px 13px;
-  color: oklch(18% 0.03 235);
-  background: var(--exec);
-}
-.dp-primary:focus-visible {
-  outline: 2px solid var(--exec);
-  outline-offset: 2px;
-}
-.dp-sep {
-  width: 1px;
-  height: 18px;
-  background: color-mix(in oklch, var(--exec) 30%, transparent);
-}
-.dp-chip {
-  font: inherit;
-  font-size: 11.5px;
-  cursor: pointer;
-  border: 1px solid color-mix(in oklch, var(--exec) 30%, transparent);
-  border-radius: 999px;
-  padding: 4px 11px;
-  color: var(--muted);
-  background: none;
-}
-.dp-chip:hover {
-  color: var(--text);
-  border-color: color-mix(in oklch, var(--exec) 55%, transparent);
-}
-.dp-chip:focus-visible {
-  outline: 2px solid var(--exec);
-  outline-offset: 2px;
-}
-/* Each dev section (synthetic proposals, quick tools, …) is an eyebrow-labelled group;
-   a dashed divider only between groups keeps future tools clean to slot in. */
-.dp-group + .dp-group {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px dashed color-mix(in oklch, var(--exec) 22%, var(--edge));
-}
-.dp-group-label {
-  display: block;
-  margin-bottom: 8px;
-  font-size: var(--fs-eyebrow);
-  letter-spacing: var(--track-eyebrow);
-  text-transform: uppercase;
-  font-weight: 600;
-  color: var(--faint);
-}
-
-/* The fake connected agent, pinned first in the roster. */
-.roster-row.dev .dev-flask svg {
-  width: 15px;
-  height: 15px;
-}
-.roster-row.dev .presence-dot {
-  background: var(--exec);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--exec) 20%, transparent);
-}
-.roster-row.dev .roster-label {
-  color: color-mix(in oklch, var(--text) 82%, var(--exec));
-}
-.roster-row.dev .dev-tag {
-  margin-left: auto;
-}
-
-/* A synthetic dev card and its queue group. */
-.group.dev .dev-flask,
-.group.dev .dev-tag {
-  align-self: center;
-}
-.group.dev .dev-flask svg {
-  width: 15px;
-  height: 15px;
-}
-.card.dev {
-  border-color: color-mix(in oklch, var(--exec) 28%, var(--edge));
-}
-.card.dev .top {
-  align-items: center;
-}
-.card.dev .dev-flask svg {
-  width: 15px;
-  height: 15px;
-}
-
-/* ---- Shared confirm modal (arm write/destructive, enable developer mode) ----
+/* ---- Shared confirm modal (arm write/destructive) ----
    Neutral border, no coloured top accent: the tone lives in the heading + button. */
 .confirm-card {
   max-width: min(94vw, 440px);
@@ -3543,9 +3403,6 @@ label.qs-row {
   font-size: 16px;
   font-weight: 660;
   letter-spacing: -0.01em;
-}
-.confirm-title.exec {
-  color: var(--exec);
 }
 .confirm-title.write {
   color: var(--amber);

@@ -1,5 +1,5 @@
 import { escapeHtml } from "../html";
-import { flaskIcon, gearIcon } from "../icons";
+import { gearIcon, xIcon } from "../icons";
 import { modeDropdown, switchInput } from "../render/controls";
 import { RECENTLY_RESOLVED_OPTIONS, RESULT_CACHE_OPTIONS, type Settings } from "../settings";
 import type { RiskMode } from "../sql/mode";
@@ -86,7 +86,7 @@ export class SettingsView {
         <div class="panel-head">
           <span class="panel-head-ico">${gearIcon}</span>
           <span class="panel-title">Settings</span>
-          <button class="detail-close" type="button" data-close aria-label="Close settings">&times;</button>
+          <button class="detail-close" type="button" data-close aria-label="Close settings">${xIcon}</button>
         </div>
         <div class="starbar">
           <span class="ghtile"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg></span>
@@ -152,26 +152,8 @@ export class SettingsView {
             <button class="dz-reset" type="button" data-reset-settings>Reset to defaults</button>
           </div>
         </section>
-        <div class="settings-sep"></div>
-        ${devZone(s)}
       </div>`;
   }
-}
-
-// A recessed, dashed, dimmer block set apart from the real settings: one blue
-// toggle for the whole developer suite. Blue (never amber/green/red) so it reads
-// as technical, not a warning.
-function devZone(s: Settings): string {
-  return `
-        <div class="dev-zone">
-          <div class="dev-row">
-            <div class="dev-main">
-              <span class="dev-name"><span class="dev-flask">${flaskIcon}</span>Developer mode <span class="dev-tag">dev</span></span>
-              <span class="dev-desc">Turn on developer mode and its utilities. Only ever runs neutral read-only queries, never touches your data.</span>
-            </div>
-            <span class="set-control">${switchInput("developerMode", "Developer mode", s.developerMode)}</span>
-          </div>
-        </div>`;
 }
 
 function groupHead(name: string): string {

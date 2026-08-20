@@ -33,8 +33,8 @@ generic highlight.
 
 ## Type: two roles
 
-- **Sans (system-ui)** carries all prose: the wordmark, intents, section labels,
-  buttons, the blocked note.
+- **Sans (system-ui)** carries all prose: intents, section labels, buttons, the
+  blocked note.
 - **Monospace carries data only**: SQL, the expiry clock, request ids, row
   counts, the connection identifier. Mono is never the voice for labels; that is
   the "monospace as house voice" slop tell.
@@ -46,18 +46,36 @@ Headings are always roman (no italic display).
 1. **Amber corner-frame** on every SQL block: two 12px amber brackets at the
    top-left and bottom-right corners (`.sql::before/::after`). It turns red on a
    blocked (non-SELECT) card. This is a bespoke bracket, not an accent bar.
-2. **Honeycomb-cell mark**: a hexagon with a smaller filled hexagon inside, plus
-   a faint honeycomb cluster in the header. Beekeeper's motif, kept subtle
-   (~10% opacity).
+2. **Honeycomb cluster**: a faint hexagon cluster behind the header content,
+   Beekeeper's motif kept subtle (~10% opacity). It carries the brand alone: the
+   header shows no logo and no wordmark, because inside Beekeeper the plugin is
+   already named by its tab, and the row is more useful starting on the
+   connection.
 3. **Tonal edges**: containers get a self-colored 1px edge at low opacity plus a
    faint top highlight (`inset 0 1px 0`), never a hard contrasting hairline.
+
+## Connection identity
+
+One chip, built once (`connChipInner`) and used by both surfaces that need it:
+the header and the audit-trail head. It reads database glyph, connection name,
+dialect, database. Two rules hold it:
+
+- **The database is always spelled out**, even when it repeats the connection
+  name. Where a query is about to run is stated, never inferred.
+- **No schema.** A proposal can target any schema, so the session's current one
+  would describe the connection rather than the queries the queue governs.
+
+The header wraps it as a bordered object. The audit-trail head renders the same
+chip flat (no border, no fill, middot-separated, no amber on the dialect): its
+seated title bar already frames it, and a bordered chip beside the title only
+stacked edge on edge.
 
 ## Responsive
 
 The shell is fluid, not a fixed 560px column: `.gk` caps at `min(94vw, 1180px)`
 and centres, with fluid `padding-inline`. It stacks in one column: the header
-(which carries the sole connection context: name, dialect, database, schema,
-read-only), then a full-width **band** (`.rail`, the connected-agents roster),
+(which carries the sole connection context: name, dialect, database, read-only),
+then a full-width **band** (`.rail`, the connected-agents roster),
 then the queue and history. The band is reference context read at a glance; the
 queue owns the width, because the SQL blocks and result tables benefit from it.
 
@@ -127,7 +145,7 @@ communicates. If you cannot, cut it.
 
 ## Extending the panel
 
-Add new state through the existing tokens and the two signatures. If something
+Add new state through the existing tokens and the three signatures. If something
 needs emphasis, use weight, tone, or the amber accent (sparingly), not a new
 colour, a chip, a glow, or a hairline. When in doubt, run the change through
 `pols.dev/slop.md` before shipping.

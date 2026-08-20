@@ -35,8 +35,16 @@ describe("isApprovable", () => {
     expect(isApprovable("SELECT 1; DROP TABLE t", pg, "destructive")).toBe(false);
   });
 
-  it("never approves an unparseable/blocked statement, even in destructive mode", () => {
-    expect(isApprovable("VACUUM", pg, "destructive")).toBe(false);
+  // An unreadable statement takes the strictest class, so destructive is the only mode
+  // that can approve it; the card warns that the class is a guess.
+  it("lets only destructive mode approve an unparseable statement", () => {
+    expect(isApprovable("VACUUM", pg, "read")).toBe(false);
+    expect(isApprovable("VACUUM", pg, "write")).toBe(false);
+    expect(isApprovable("VACUUM", pg, "destructive")).toBe(true);
+  });
+
+  it("never approves a multi-statement input, even in destructive mode", () => {
+    expect(isApprovable("VACUUM users; DROP TABLE users", pg, "destructive")).toBe(false);
   });
 
   it("treats a write hidden in a read shape by its true class", () => {

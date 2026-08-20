@@ -85,16 +85,9 @@ export const gearIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentCol
 // External-link glyph: the popover footer's hook to the full-settings overlay.
 export const externalLinkIcon = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3h4v4"/><path d="M13 3l-6 6"/><path d="M11 9v3.5H3.5V4.5H7"/></svg>`;
 
-// Lucide "flask-conical" (lucide.dev, ISC License), the developer-mode mark. A
-// stroke icon (not filled), so it renders outside the fill-forcing .harness-badge.
-export const flaskIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2"/><path d="M6.453 15h11.094"/><path d="M8.5 2h7"/></svg>`;
-
-// The left agent icon: the flask for the synthetic dev-mode session (stroke, so it rides
-// .dev-flask not the fill-forcing badge), else the harness mark in .harness-badge.
+// The left agent icon: the harness mark, wrapped in the fill-forcing badge.
 export function agentBadge(harness: string | null): string {
-  return (harness ?? "").toLowerCase().includes("dev-mode")
-    ? `<span class="dev-flask">${flaskIcon}</span>`
-    : `<span class="harness-badge">${harnessIcon(harness)}</span>`;
+  return `<span class="harness-badge">${harnessIcon(harness)}</span>`;
 }
 
 // The connection target: a database cylinder leading the header chip.

@@ -36,17 +36,10 @@ import { SingleInstance, type SingleInstanceWire } from "./net/singleinstance";
 import { ConfirmModal } from "./render/confirm";
 import { connChipInner } from "./render/connchip";
 import { modeDropdown, switchInput } from "./render/controls";
-import {
-  buildDevCard,
-  type DevCardType,
-  devBundle,
-  devCardSpec,
-  devPanelHtml,
-} from "./render/devcards";
 import { historyRow } from "./render/history";
 import { type CardGate, cardGate, queueHtml, readyActions, schemaInner } from "./render/queue";
 import { type LayerState, readOnlyView } from "./render/readonly";
-import { devRosterRow, presence, rosterRow } from "./render/roster";
+import { presence, rosterRow } from "./render/roster";
 import { capResult, type Field, type HistResult } from "./result";
 import { collectSchema } from "./schema-collect";
 import { filterSchema, resultBudgetBytes, type Settings, SettingsStore } from "./settings";
@@ -54,7 +47,7 @@ import { classifyQuery, type RiskClass, rank } from "./sql/classify";
 import { formatSql } from "./sql/format";
 import { highlight } from "./sql/highlight";
 import { modeRank, type RiskMode } from "./sql/mode";
-import { isReadOnlyQuery, mapDialect } from "./sql/readonly";
+import { mapDialect } from "./sql/readonly";
 import { type EndpointReadOnly, probeReadOnly } from "./sql/readonly-probe";
 import type {
   Card,
@@ -63,6 +56,7 @@ import type {
   HistItem,
   Presence,
   Proposal,
+  RequestState,
   SessionRoster,
 } from "./types";
 import { ActivityView } from "./views/activity";
@@ -183,6 +177,8 @@ function dbNoticeKey(type: string): string {
 
 const githubMark =
   '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>';
+const starGlyph =
+  '<svg class="star" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg>';
 const feedbackGlyph =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22z"/><path d="M9.5 9h5M9.5 13h3"/></svg>';
 
@@ -217,9 +213,6 @@ export class Gatekeeper {
   // Open deny forms and their in-progress reason text, keyed by card id, so a
   // half-typed reason survives a queue rebuild from a concurrent proposal.
   private readonly denyDrafts = new Map<string, string>();
-  // Monotonic counter for synthetic dev-card ids, so a bundle injected in one tick
-  // never collides on id.
-  private devSeq = 0;
   private readonly history: HistItem[] = [];
   private roster: SessionRoster[] = [];
   private rosterSig = "";
@@ -719,13 +712,12 @@ export class Gatekeeper {
     if (!c) {
       return null;
     }
-    const path = [c.databaseName?.trim(), c.schema?.trim()]
-      .filter((part): part is string => Boolean(part))
-      .join(" / ");
+    // No schema: a proposal can target any of them, so the session's current schema
+    // would describe the connection, not the queries this queue governs.
     return {
       name: c.connectionName || this.connectionName,
       dialect: mapDialect(c.databaseType),
-      path,
+      path: c.databaseName?.trim() ?? "",
     };
   }
 
@@ -945,10 +937,6 @@ export class Gatekeeper {
     return `
   <header class="bar">
     <span class="hive-wrap" aria-hidden="true"><span class="hive"></span></span>
-    <span class="brand">
-      <span class="mark" aria-hidden="true"></span>
-      <span class="wordmark">Gatekeeper</span>
-    </span>
     <span class="conn-chip" id="conn"></span>
     <span class="armed" id="armed"></span>
     <span class="bar-right">
@@ -1004,7 +992,6 @@ export class Gatekeeper {
           <section class="roster" id="roster"></section>
         </div>
         <div class="main" id="main">
-          <div id="devPanel"></div>
           <p class="label">Pending approval <span class="count-badge" id="pendingCount" aria-live="polite"></span></p>
           <div class="queue" id="queue"></div>
           <section class="history">
@@ -1021,7 +1008,7 @@ export class Gatekeeper {
         <div class="detail confirm-overlay" id="confirm" hidden></div>
         <div class="detail db-notice-overlay" id="notice" hidden></div>
         <div class="cta-cluster" id="ctaCluster">
-          <button class="cta-fab star${this.starred ? "" : " twinkle"}" type="button" data-gh-star aria-label="Star Gatekeeper on GitHub">${githubMark}<span class="cta-lbl">Star on GitHub</span></button>
+          <button class="cta-fab star${this.starred ? "" : " twinkle"}" type="button" data-gh-star aria-label="Star Gatekeeper on GitHub">${starGlyph}<span class="cta-lbl">Star on GitHub</span></button>
           <button class="cta-fab fb" type="button" data-gh-feedback aria-label="Request a feature">${feedbackGlyph}<span class="cta-lbl">Request a feature</span></button>
         </div>
       </div>`;
@@ -1088,27 +1075,6 @@ export class Gatekeeper {
         e.preventDefault();
         e.stopPropagation();
         this.closeDeny(id);
-      }
-    });
-    // Developer-only generator panel; the whole subtree is empty (and inert) unless
-    // dev mode is on, so this handler never fires for a real user.
-    this.root.querySelector<HTMLElement>("#devPanel")!.addEventListener("click", (e) => {
-      const target = e.target as HTMLElement;
-      if (target.closest("[data-dev-bundle]")) {
-        this.injectDevBundle();
-        return;
-      }
-      if (target.closest("[data-dev-reload]")) {
-        // Re-fetches the iframe's plugin:// URL from disk so a rebuild shows without a
-        // tab close/reopen; resets state like a reopen, the host bridge is stateless.
-        if (this.settingsStore.get().developerMode) {
-          window.location.reload();
-        }
-        return;
-      }
-      const chip = target.closest<HTMLElement>("[data-dev-chip]");
-      if (chip) {
-        this.injectDevCard(chip.getAttribute("data-dev-chip") as DevCardType);
       }
     });
     hist.addEventListener("click", (e) => {
@@ -1194,7 +1160,7 @@ export class Gatekeeper {
     this.root.querySelector<HTMLElement>("#settingsPop")!.addEventListener("change", (e) => {
       const input = (e.target as HTMLElement).closest<HTMLInputElement>("input[data-setting]");
       if (input) {
-        this.onSettingInput(input.dataset.setting!, input.checked, input);
+        void this.updateSetting(input.dataset.setting!, input.checked);
       }
     });
     const settings = this.root.querySelector<HTMLDivElement>("#settings")!;
@@ -1247,7 +1213,7 @@ export class Gatekeeper {
       if (el instanceof HTMLSelectElement) {
         void this.updateSetting(el.dataset.setting!, Number(el.value));
       } else if (el instanceof HTMLInputElement) {
-        this.onSettingInput(el.dataset.setting!, el.checked, el);
+        void this.updateSetting(el.dataset.setting!, el.checked);
       }
     });
     const activity = this.root.querySelector<HTMLDivElement>("#activity")!;
@@ -1290,7 +1256,6 @@ export class Gatekeeper {
         this.activityView.close();
       }
     });
-    this.renderDevPanel();
     this.renderQueue();
     this.renderHistory();
     this.renderRoster(); // Rebuilt DOM has a blank pill; force it back to the initial state (the
@@ -1407,27 +1372,6 @@ export class Gatekeeper {
     void this.reportSchema();
   }
 
-  // A toggle from either settings surface. Enabling developer mode confirms through the
-  // shared modal (a raise); disabling, and every other toggle, applies immediately.
-  private onSettingInput(key: string, value: boolean, inputEl?: HTMLInputElement): void {
-    if (key === "developerMode" && value === true) {
-      this.confirmModal.open({
-        tone: "exec",
-        heading: "Enable Developer Mode",
-        body: "Developer mode adds synthetic proposals and a fake agent for local testing. It only ever runs neutral read-only queries and never touches your data.",
-        confirmLabel: "Enable Developer Mode",
-        onConfirm: () => void this.updateSetting(key, true),
-        onCancel: () => {
-          if (inputEl) {
-            inputEl.checked = false;
-          }
-        },
-      });
-      return;
-    }
-    void this.updateSetting(key, value);
-  }
-
   // Selecting a mode: a drop (or read) applies at once; a raise opens the confirm modal,
   // which applies it only once the human confirms (destructive also types the db name).
   private requestMode(next: RiskMode): void {
@@ -1532,59 +1476,6 @@ export class Gatekeeper {
     for (const card of [...this.cards]) {
       void this.analyzeSchema(card);
     }
-    this.syncDevMode();
-  }
-
-  // Dev mode gates every dev surface; when it goes off, drop any synthetic cards so
-  // nothing dev survives the toggle, then re-render the panel, queue, and roster so
-  // the panel and fake agent appear or disappear together.
-  private syncDevMode(): void {
-    if (!this.settingsStore.get().developerMode) {
-      for (let i = this.cards.length - 1; i >= 0; i--) {
-        if (this.cards[i].dev) {
-          this.denyDrafts.delete(this.cards[i].id);
-          this.cards.splice(i, 1);
-        }
-      }
-    }
-    this.renderDevPanel();
-    this.renderQueue();
-    this.renderRoster();
-  }
-
-  private renderDevPanel(): void {
-    const el = this.root.querySelector<HTMLElement>("#devPanel");
-    if (el) {
-      el.innerHTML = this.settingsStore.get().developerMode ? devPanelHtml() : "";
-    }
-  }
-
-  private nextDevId(): string {
-    return `dev_${(this.devSeq++).toString(36).padStart(4, "0")}`;
-  }
-
-  private injectDevBundle(): void {
-    if (!this.settingsStore.get().developerMode) {
-      return;
-    }
-    for (const spec of devBundle()) {
-      this.addDevCard(buildDevCard(spec, this.nextDevId(), Date.now()));
-    }
-  }
-
-  private injectDevCard(type: DevCardType): void {
-    if (!this.settingsStore.get().developerMode) {
-      return;
-    }
-    this.addDevCard(buildDevCard(devCardSpec(type), this.nextDevId(), Date.now()));
-  }
-
-  // A synthetic card joins the same queue and schema annotation as a real one, so it
-  // renders identically; only its resolve path (approve/reject) diverges, staying local.
-  private addDevCard(card: Card): void {
-    this.cards.push(card);
-    this.renderQueue();
-    void this.analyzeSchema(card);
   }
 
   // Mirror the live settings into every rendered control (quick menu and overlay)
@@ -1692,28 +1583,23 @@ export class Gatekeeper {
       // human might act on; otherwise drop it so the roster stays current.
       .filter((r) => r.p !== "gone" || r.s.pendingCount > 0)
       .sort((a, b) => PRESENCE_ORDER[a.p] - PRESENCE_ORDER[b.p] || b.s.lastActive - a.s.lastActive);
-    // The fake agent is pinned first and counted; fold dev mode into the signature
-    // so toggling it forces a rebuild.
-    const dev = this.settingsStore.get().developerMode;
     // Skip the rebuild (and the pulse restart) when only the relative ages moved;
     // tick() keeps those fresh in place.
-    const sig = JSON.stringify([
-      dev,
+    const sig = JSON.stringify(
       rows.map((r) => [r.s.sessionId, r.p, r.s.pendingCount, r.s.sessionLabel, r.s.lastIntent]),
-    ]);
+    );
     if (sig === this.rosterSig) {
       return;
     }
     this.rosterSig = sig;
-    const live = rows.filter((r) => r.p !== "gone").length + (dev ? 1 : 0);
+    const live = rows.filter((r) => r.p !== "gone").length;
     // Cascade only when the roster grew (an agent joined) or first populated, never on a
     // minor in-place update, so the list does not re-animate on every pending tick.
     const grew = live > this.rosterLive;
     this.rosterLive = live;
-    const realList = rows.map(({ s, p }) => rosterRow(s, p)).join("");
-    const list = dev
-      ? devRosterRow() + realList
-      : realList || '<div class="empty">No agents connected.</div>';
+    const list =
+      rows.map(({ s, p }) => rosterRow(s, p)).join("") ||
+      '<div class="empty">No agents connected.</div>';
     el.innerHTML = `<button class="disclosure roster-toggle" type="button" data-roster-toggle aria-expanded="${this.rosterOpen}"><span class="chev">${chevronDown}</span>Connected agents<span class="roster-count count-badge">${live}</span></button><div class="roster-fold"><div class="roster-fold-inner"><div class="roster-list">${list}</div></div></div>`;
     // Stagger index for the unfold cascade, set here so the row markup (and its test)
     // stays free of presentation state.
@@ -1779,27 +1665,48 @@ export class Gatekeeper {
 
   private async renew(): Promise<void> {
     for (const card of [...this.cards]) {
-      // Dev cards hold no broker lease; their countdown is purely local.
-      if (card.dev) {
-        continue;
-      }
       // Renew while a human deliberates (ready) and while the approved query
       // runs (executing). An unrenewed executing card would expire mid-query
       // and be failed as execution_unknown even though it actually succeeded.
       if (card.state !== "ready" && card.state !== "executing") {
         continue;
       }
+      const leaseId = card.leaseId;
       try {
-        const res = await this.broker.renew(card.id, card.leaseId);
+        const res = await this.broker.renew(card.id, leaseId);
         if (res.ok) {
           card.leaseExpiresAt = res.leaseExpiresAt;
-        } else {
-          this.drop(card.id);
+          continue;
         }
+        // Re-claimed under a fresh lease while this call was in flight: it lives on.
+        if (card.leaseId !== leaseId) {
+          continue;
+        }
+        this.resolveLostLease(card, res.state);
       } catch {
         // Transient broker error; keep the card and retry next cycle.
       }
     }
+  }
+
+  // An executing card is never dropped here: approve() owns it and writes a history row
+  // down every one of its paths, and finish() is a no-op once the card is gone, so
+  // dropping it lost the record of a query that really ran.
+  private resolveLostLease(card: Card, state?: RequestState): void {
+    if (card.state !== "ready") {
+      return;
+    }
+    if (state === "expired") {
+      this.finish(card.id, "expired", "expired");
+      return;
+    }
+    // No word of its own: the row would read as a timeout, so the note carries the truth.
+    if (state === "cancelled") {
+      this.finish(card.id, "expired", "cancelled by the agent");
+      return;
+    }
+    // Back in the pool (or the broker said nothing): the next poll re-offers it.
+    this.drop(card.id);
   }
 
   private tick(): void {
@@ -1901,7 +1808,7 @@ export class Gatekeeper {
     if (el) {
       // A write/destructive card lists its tables in the risk annotation, so drop the
       // duplicate reads line here; the sensitive-column flags still render.
-      const cls = card.dev ? "read" : classifyQuery(card.sql, this.dialect).class;
+      const cls = classifyQuery(card.sql, this.dialect).class;
       el.innerHTML = schemaInner(card.schema, cls !== "read");
     }
     // Re-highlight the SQL now that the sensitive columns are known, so they light
@@ -1926,13 +1833,6 @@ export class Gatekeeper {
   }
 
   private async approve(id: string, confirmed = false): Promise<void> {
-    // Developer-mode cards resolve locally and never reach the broker safety core;
-    // branch before any connection/lease work so the two paths cannot entangle.
-    const devCard = this.cards.find((c) => c.id === id && c.dev);
-    if (devCard) {
-      await this.approveDev(devCard);
-      return;
-    }
     // Catch a switch since the last throttled poll before touching the database.
     await this.checkConnection();
     const card = this.cards.find((c) => c.id === id);
@@ -1941,7 +1841,7 @@ export class Gatekeeper {
     }
     const gen = this.connGeneration;
     // SAFETY-CRITICAL: the real gate. Never run a statement the armed mode cannot
-    // approve, nor a blocked (multi-statement, unparseable) one.
+    // approve, nor a blocked (empty or multi-statement) one.
     const verdict = classifyQuery(card.sql, this.dialect);
     if (verdict.blocked || rank(verdict.class) > modeRank(this.mode)) {
       await this.postResult(card, {
@@ -2023,12 +1923,6 @@ export class Gatekeeper {
   }
 
   private async reject(id: string, reason?: string): Promise<void> {
-    // Dev cards (plain reject or request-changes) resolve locally, no broker.
-    const devCard = this.cards.find((c) => c.id === id && c.dev);
-    if (devCard) {
-      this.rejectDev(devCard, reason);
-      return;
-    }
     const card = this.cards.find((c) => c.id === id);
     if (card?.state !== "ready") {
       return;
@@ -2039,41 +1933,6 @@ export class Gatekeeper {
     this.setCardState(id, "rejecting");
     await this.postResult(card, { status: "rejected", reason: custom || "Rejected by user." });
     this.finish(id, "rejected", "declined", undefined, custom || undefined);
-  }
-
-  // Local dev resolve: run the neutral SELECT once through the host runQuery, then
-  // commit to history via finish() (broker-free). No executing/result/renew ever
-  // fires, so a dev card leaves no trace on the server, roster, or audit trail.
-  private async approveDev(card: Card): Promise<void> {
-    if (card.state !== "ready") {
-      return;
-    }
-    // The read-only guarantee holds even for synthetic cards: never run a non-SELECT.
-    if (!isReadOnlyQuery(card.sql, this.dialect)) {
-      this.finish(card.id, "failed", "blocked");
-      return;
-    }
-    this.setCardState(card.id, "executing");
-    try {
-      const { rows, fields } = await runApprovedQuery(card.sql);
-      this.finish(
-        card.id,
-        "approved",
-        `${rows.length} rows`,
-        capResult(rows, fields, resultBudgetBytes(this.settingsStore.get())),
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.finish(card.id, "failed", "query failed", undefined, message);
-    }
-  }
-
-  private rejectDev(card: Card, reason?: string): void {
-    if (card.state !== "ready") {
-      return;
-    }
-    const custom = reason?.trim();
-    this.finish(card.id, "rejected", "declined", undefined, custom || undefined);
   }
 
   // Swap only this card's action row in place (no renderQueue) so the lease
@@ -2113,17 +1972,14 @@ export class Gatekeeper {
     this.root.querySelector<HTMLButtonElement>(`[data-card="${id}"] .deny-open`)?.focus();
   }
 
-  // The armed-mode verdict for one card, matching what the queue renders; dev cards
-  // stay on the plain read path.
+  // The armed-mode verdict for one card, matching what the queue renders.
   private gateFor(card: Card): CardGate {
-    return card.dev
-      ? { cls: "read", approveEnabled: true, approveLabel: "Approve", note: "" }
-      : cardGate(card.sql, this.dialect, this.mode, this.connectionReadOnly());
+    return cardGate(card.sql, this.dialect, this.mode, this.connectionReadOnly());
   }
 
   private modeBlockReason(blocked: boolean, cls: RiskClass): string {
     if (blocked) {
-      return "Blocked: only a single, parseable statement can be approved.";
+      return "Blocked: only a single statement can be approved.";
     }
     return cls === "destructive"
       ? "Blocked: destructive mode is not armed."

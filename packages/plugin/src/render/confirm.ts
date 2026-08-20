@@ -2,7 +2,7 @@ import { escapeHtml } from "../html";
 
 // The tone tints only the heading and the confirm button; the modal border stays
 // neutral (no coloured top accent), so blue/amber/red reads as intent, not chrome.
-export type ConfirmTone = "exec" | "write" | "destructive";
+export type ConfirmTone = "write" | "destructive";
 
 export interface ConfirmChallenge {
   label: string;
@@ -58,7 +58,7 @@ export function confirmHtml(spec: ConfirmSpec): string {
       </div>`;
 }
 
-// The shared #confirm overlay (arm write, arm destructive, enable developer mode).
+// The shared #confirm overlay (arm write, arm destructive).
 // Events delegate off the persistent root: the overlay node is rebuilt on re-pair.
 export class ConfirmModal {
   private readonly root: HTMLElement;

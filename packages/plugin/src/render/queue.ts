@@ -3,7 +3,6 @@ import {
   buildingIcon,
   copyIcon,
   dbReadsIcon,
-  flaskIcon,
   harnessIcon,
   messageIcon,
   pencilIcon,
@@ -34,6 +33,9 @@ export interface CardGate {
   approveEnabled: boolean;
   approveLabel: string;
   note: string;
+  // False when the statement defeated the parser: it rode the text fallback, so the class
+  // is a guess and the card must say so rather than let the verdict look authoritative.
+  parseOk: boolean;
 }
 
 function approveLabelFor(cls: RiskClass): string {
@@ -71,13 +73,17 @@ export function cardGate(
     approveEnabled: approvable && !connBlocked,
     approveLabel: approveLabelFor(cls),
     note,
+    parseOk: v.parseOk,
   };
 }
 
-// Dev cards are synthetic read-only SELECTs resolved on a local path, so they never
-// pass the mode gate; give them the plain read verdict.
-function devGate(): CardGate {
-  return { cls: "read", approveEnabled: true, approveLabel: "Approve", note: "" };
+// Shown standing, not on hover: an unreadable statement is exactly the one the human must
+// read for themselves, so it cannot hide behind the Approve tooltip.
+function unparsedNote(gate: CardGate): string {
+  if (gate.parseOk) {
+    return "";
+  }
+  return `<div class="cs-unparsed">${warnIcon}Gatekeeper could not read this statement, so it is treated as destructive. Check it yourself before approving.</div>`;
 }
 
 export function queueHtml(
@@ -123,14 +129,11 @@ export function groupHtml(
       ? escapeHtml(harness)
       : escapeHtml(cards[0].sessionId ?? "session");
   const intent = session?.sessionLabel?.trim();
-  // A synthetic session: swap the fill-forced harness badge for the stroke flask
-  // and tag the group so it reads as dev, matching the blue cards inside it.
-  const dev = cards.some((c) => c.dev);
   return `
-      <section class="group${dev ? " dev" : ""}">
+      <section class="group">
         <div class="group-head">
-          <span class="${dev ? "dev-flask" : "harness-badge"}">${dev ? flaskIcon : harnessIcon(harness)}</span>
-          <span class="group-label">${label}</span>${dev ? `<span class="dev-tag">dev</span>` : ""}
+          <span class="harness-badge">${harnessIcon(harness)}</span>
+          <span class="group-label">${label}</span>
           ${intent ? `<span class="group-intent" title="${escapeHtml(capitalize(intent))}">${escapeHtml(capitalize(intent))}</span>` : ""}
           <span class="group-count count-badge">${cards.length}</span>
         </div>
@@ -145,7 +148,7 @@ export function cardHtml(
   mode: RiskMode = "read",
   connReadOnly = false,
 ): string {
-  const gate = card.dev ? devGate() : cardGate(card.sql, dialect, mode, connReadOnly);
+  const gate = cardGate(card.sql, dialect, mode, connReadOnly);
   const remaining = card.expiresAt - Date.now();
   let actions: string;
   if (card.state !== "ready") {
@@ -153,18 +156,17 @@ export function cardHtml(
   } else {
     actions = readyActions(card.id, gate, denyDrafts);
   }
-  const badge = card.dev ? "" : riskBadge(gate.cls);
-  const riskAnno = card.dev ? "" : riskAnnotation(card.sql, dialect, gate.cls);
-  const cardClass = card.dev ? "dev" : cardClassFor(gate);
+  const badge = riskBadge(gate.cls);
+  const riskAnno = riskAnnotation(card.sql, dialect, gate.cls);
   return `
-      <div class="card ${cardClass}" data-card="${card.id}">
+      <div class="card ${cardClassFor(gate)}" data-card="${card.id}">
         <div class="top">
-          ${badge}${card.dev ? `<span class="dev-flask">${flaskIcon}</span>` : ""}${card.intent ? `<span class="intent">${escapeHtml(capitalize(card.intent))}</span>` : `<span class="intent">${escapeHtml(card.id)}</span>`}${card.dev ? `<span class="dev-tag">dev</span>` : ""}
+          ${badge}${card.intent ? `<span class="intent">${escapeHtml(capitalize(card.intent))}</span>` : `<span class="intent">${escapeHtml(card.id)}</span>`}
           <span class="${remaining <= 45_000 ? "lease low" : "lease"}">${clock(remaining)}</span>
         </div>
         <div class="meta">${escapeHtml(card.id)} &middot; ${relAge(card.createdAt)}</div>
         <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(visibleControls(card.sql))}" aria-label="Copy SQL">${copyIcon}</button><code class="sql-body" id="sqlbody-${card.id}">${highlight(formatSql(card.sql), card.schema?.pii, card.schema?.client, card.schema?.literals)}</code></pre>
-        ${riskAnno}<div class="card-schema" id="cs-${card.id}">${schemaInner(card.schema, gate.cls !== "read")}</div>
+        ${unparsedNote(gate)}${riskAnno}<div class="card-schema" id="cs-${card.id}">${schemaInner(card.schema, gate.cls !== "read")}</div>
         ${actions}
       </div>`;
 }

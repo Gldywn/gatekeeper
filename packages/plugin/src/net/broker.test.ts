@@ -142,6 +142,29 @@ describe("endpoint requests", () => {
     expect(await c.renew("req-1", "lease-9")).toEqual({ ok: false });
   });
 
+  it("renew carries the settled state, so a dead proposal is told apart from a re-offered one", async () => {
+    const c = client();
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ error: "gone", code: "LEASE_CONFLICT", state: "cancelled" }),
+    });
+    expect(await c.renew("req-1", "lease-9")).toEqual({ ok: false, state: "cancelled" });
+  });
+
+  // An older broker, a 401, a truncated body: no state, and the caller stays conservative.
+  it("renew survives a refusal whose body cannot be read", async () => {
+    const c = client();
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: async () => {
+        throw new Error("not json");
+      },
+    });
+    expect(await c.renew("req-1", "lease-9")).toEqual({ ok: false });
+  });
+
   it("sessions sends the connection header and unwraps the payload", async () => {
     const c = client();
     await c.setToken("secret");

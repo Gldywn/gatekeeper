@@ -18,9 +18,6 @@ export interface Settings {
   // Approximate RAM ceiling (MB) for held result rows across history; a bigger value
   // keeps more of a large result reviewable before the "held" cap kicks in.
   resultCacheMb: number;
-  // Client-side developer utilities (synthetic proposals, a fake agent). Off by
-  // default; every dev surface is invisible and inert until this is on.
-  developerMode: boolean;
 }
 
 export const RECENTLY_RESOLVED_OPTIONS = [10, 20, 50] as const;
@@ -46,7 +43,6 @@ export function defaultSettings(): Settings {
     schemaAccess: false,
     recentlyResolved: RECENTLY_RESOLVED_DEFAULT,
     resultCacheMb: RESULT_CACHE_DEFAULT,
-    developerMode: false,
   };
 }
 
@@ -73,7 +69,6 @@ export function normalizeSettings(raw: unknown): Settings {
     resultCacheMb: (RESULT_CACHE_OPTIONS as readonly number[]).includes(cacheMb)
       ? cacheMb
       : RESULT_CACHE_DEFAULT,
-    developerMode: asBool(r.developerMode, false),
   };
 }
 

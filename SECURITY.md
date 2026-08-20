@@ -51,8 +51,15 @@ Two classifiers agree on the read / write / destructive classes:
 - The **plugin** classifier is authoritative, because the plugin is the only component
   that runs SQL. It parses each query in the connection's dialect with `node-sql-parser`,
   escalates the class on any embedded modifying node (a CTE, a subquery, `SELECT ... INTO`,
-  `EXPLAIN ANALYZE` of a write, a locking read), and fails closed to destructive/blocked
-  when a parse fails or a statement is unrecognized.
+  `EXPLAIN ANALYZE` of a write, a locking read), and fails closed to **destructive** when a
+  parse fails or a statement is unrecognized.
+- **A failed parse raises the class; it does not block the query.** `node-sql-parser` knows
+  no `DROP DATABASE`, `VACUUM`, or `ALTER SYSTEM`, and blocking them outright made the
+  archetypal destructive statement unapprovable in the very mode built to gate it. Such a
+  statement is classed destructive, so it still needs Destructive mode armed plus the
+  confirmation where the human types the database name, and its card carries a standing
+  warning that Gatekeeper could not read it and the judgement is theirs. What no mode can
+  approve is unchanged: empty input, and anything holding more than one statement.
 - The **server** classifier is advisory. It stamps the audit trail and refuses the two
   cases no mode may approve: empty and multi-statement input.
 

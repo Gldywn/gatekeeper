@@ -141,10 +141,8 @@ describe("classifyQuery", () => {
     }
   });
 
-  it("still blocks a multi-statement or empty EXPLAIN", () => {
-    for (const sql of ["EXPLAIN SELECT 1; DROP TABLE users", "EXPLAIN"]) {
-      expect(classifyQuery(sql, pg).blocked, sql).toBe(true);
-    }
+  it("still blocks a multi-statement EXPLAIN", () => {
+    expect(classifyQuery("EXPLAIN SELECT 1; DROP TABLE users", pg).blocked).toBe(true);
   });
 
   // Nested EXPLAIN is invalid SQL; it must never downgrade an inner ANALYZE modify to read.
@@ -159,10 +157,10 @@ describe("classifyQuery", () => {
     }
   });
 
-  it("treats an unrecognized statement as destructive and blocked (fail safe)", () => {
+  it("treats an unrecognized statement as destructive (fail safe on the class)", () => {
     const v = classifyQuery("VACUUM", pg);
     expect(v.class).toBe("destructive");
-    expect(v.blocked).toBe(true);
+    expect(v.parseOk).toBe(false);
   });
 
   it("classifies a MySQL REPLACE as destructive", () => {
@@ -171,6 +169,32 @@ describe("classifyQuery", () => {
 
   it("blocks empty or comment-only input", () => {
     for (const sql of ["", "   ", "-- just a comment"]) {
+      expect(classifyQuery(sql, pg).blocked, sql).toBe(true);
+    }
+  });
+
+  // node-sql-parser knows none of these. Blocking them made the archetypal destructive
+  // statement unapprovable in the very mode built to gate it.
+  it("leaves a single unparseable statement approvable, at the strictest class", () => {
+    for (const sql of [
+      'DROP DATABASE IF EXISTS "hpal__6590549bf90d4356a1f3196bd3bcf0a7"',
+      'DROP DATABASE IF EXISTS "hpal__6590549bf90d4356a1f3196bd3bcf0a7" WITH (FORCE)',
+      "DROP DATABASE gatekeeper_test",
+      "VACUUM FULL users",
+    ]) {
+      const v = classifyQuery(sql, pg);
+      expect(v.class, sql).toBe("destructive");
+      expect(v.blocked, sql).toBe(false);
+      // The card leans on this to warn that the class is a guess.
+      expect(v.parseOk, sql).toBe(false);
+    }
+  });
+
+  it("still blocks multiple statements even when they do not parse", () => {
+    for (const sql of [
+      'DROP DATABASE "a"; DROP DATABASE "b"',
+      "VACUUM FULL users; DROP TABLE users",
+    ]) {
       expect(classifyQuery(sql, pg).blocked, sql).toBe(true);
     }
   });
