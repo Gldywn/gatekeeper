@@ -111,12 +111,8 @@ jobs:
           echo "packed as $mode"
           case "$mode" in *x*) ;; *) echo "::error::execute bit stripped by pack"; exit 1 ;; esac
 
-      # --no-git-checks: this runs on a detached tag checkout, not the publish branch.
-      # NODE_AUTH_TOKEN carries the NPM_TOKEN secret, which is the known-good path. If npm
-      # trusted publishing is configured for the package instead, leave the secret unset:
-      # pnpm 11 ships OIDC support and mints a short-lived token from id-token above.
+      # Trusted publishing via OIDC (id-token: write above): no token. npm, not pnpm,
+      # because pnpm 11's OIDC token exchange 404s (pnpm/pnpm#11513); npm's is reliable.
       - name: Publish to npm
         working-directory: packages/server
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: pnpm publish --access public --provenance --no-git-checks
+        run: npm publish --access public --provenance
