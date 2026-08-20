@@ -210,10 +210,20 @@ async function handle(broker: Broker, req: IncomingMessage, res: ServerResponse)
 
   if (req.method === "POST" && url.pathname === "/lease/renew") {
     const body = await readJson(req);
-    guarded(res, () => {
-      const renewed = store.renewLease(String(body.id), String(body.leaseId), LEASE_MS);
-      send(res, 200, { leaseExpiresAt: renewed.leaseExpiresAt });
-    });
+    guarded(
+      res,
+      () => {
+        const renewed = store.renewLease(String(body.id), String(body.leaseId), LEASE_MS);
+        send(res, 200, { leaseExpiresAt: renewed.leaseExpiresAt });
+      },
+      // A refusal alone cannot tell the plugin whether the proposal died or simply went
+      // back in the pool. Settle the row first, so a lapsed lease has already become
+      // pending (or expired) rather than reading as still leased.
+      () => {
+        store.sweep();
+        return { state: store.get(String(body.id))?.state ?? null };
+      },
+    );
     return;
   }
 
@@ -279,7 +289,13 @@ function resolveConnection(store: RequestStore, req: IncomingMessage): string | 
   return conn ? connectionScopeKey(conn) : null;
 }
 
-function guarded(res: ServerResponse, fn: () => void): void {
+// detail() adds fields to a StoreError body. It runs inside the catch, so it must not
+// throw; anything it raises is swallowed and the plain error is sent.
+function guarded(
+  res: ServerResponse,
+  fn: () => void,
+  detail?: () => Record<string, unknown>,
+): void {
   try {
     fn();
   } catch (err) {
@@ -292,7 +308,13 @@ function guarded(res: ServerResponse, fn: () => void): void {
             : err.code === "LEASE_CONFLICT" || err.code === "INVALID_STATE"
               ? 409
               : 400;
-      send(res, status, { error: err.message, code: err.code });
+      let extra: Record<string, unknown> = {};
+      try {
+        extra = detail?.() ?? {};
+      } catch {
+        // deliberately ignored
+      }
+      send(res, status, { error: err.message, code: err.code, ...extra });
       return;
     }
     send(res, 500, { error: err instanceof Error ? err.message : String(err) });

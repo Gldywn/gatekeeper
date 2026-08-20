@@ -83,6 +83,41 @@ function mint(): string {
   return code.code;
 }
 
+// A refused renewal used to say only "no". The plugin cannot act on that: a proposal put
+// back in the pool and one killed for good both refuse, and only the second deserves a
+// line in the human's resolved list.
+describe("a refused renewal reports where the request landed", () => {
+  it("names the terminal state when the agent cancelled underneath the plugin", async () => {
+    const { request: proposal } = store.submitNew({ sessionId: "s1", sql: "SELECT 1" });
+    const leased = store.claimNext("plug_test", 30_000);
+    expect(leased?.id).toBe(proposal.id);
+    store.cancel(proposal.id, "s1");
+
+    const res = await call("POST", "/lease/renew", {
+      token: TOKEN,
+      body: { id: proposal.id, leaseId: leased?.leaseId },
+    });
+
+    expect(res.status).toBe(409);
+    expect(JSON.parse(res.body).state).toBe("cancelled");
+  });
+
+  it("names pending when the proposal is merely back in the pool", async () => {
+    const { request: proposal } = store.submitNew({ sessionId: "s1", sql: "SELECT 1" });
+    const leased = store.claimNext("plug_test", 30_000);
+
+    // A stale lease id is the shape a re-offered proposal takes: the row lives on, the
+    // plugin's hold on it does not.
+    const res = await call("POST", "/lease/renew", {
+      token: TOKEN,
+      body: { id: proposal.id, leaseId: `${leased?.leaseId}-stale` },
+    });
+
+    expect(res.status).not.toBe(200);
+    expect(JSON.parse(res.body).state).toBe("leased");
+  });
+});
+
 // The split this whole design rests on: the page must not be readable cross-origin,
 // the exchange must be. Re-unifying the two header sets would leak the token to any
 // site the human visits.
