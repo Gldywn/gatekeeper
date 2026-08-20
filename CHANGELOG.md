@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/Gldywn/gatekeeper/compare/v0.1.0...v0.1.1) (2026-08-20)
+
+
+### Documentation
+
+* explain how to force a release version ([#5](https://github.com/Gldywn/gatekeeper/issues/5)) ([0245310](https://github.com/Gldywn/gatekeeper/commit/0245310e14fb74700d66812e518b3a932273577a))
+
 ## [0.1.0](https://github.com/Gldywn/gatekeeper/compare/v0.0.1...v0.1.0) (2026-08-20)
 
 
