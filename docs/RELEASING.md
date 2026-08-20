@@ -43,11 +43,15 @@ from one source of truth.
                                                              │ human clicks Publish
                                               ┌──────────────▼───────────────────┐
                                               │ published release ──► Beekeeper  │
-                                              │ publish-server.yml ──► npm       │
+                                              │ publish-server.yml ──► npm stage │
+                                              └──────────────┬───────────────────┘
+                                                             │ human approves with 2FA
+                                              ┌──────────────▼───────────────────┐
+                                              │ npm stage approve ──► public     │
                                               └──────────────────────────────────┘
 ```
 
-Two things about that shape are deliberate, not accidental:
+Three things about that shape are deliberate, not accidental:
 
 - **The draft.** Assets are attached before a human ever sees the release, so an incomplete
   or failed build can never be served as "latest" to the plugin manager. This mirrors what
@@ -57,23 +61,26 @@ Two things about that shape are deliberate, not accidental:
   against recursive runs, documented in the release-please-action README. So the plugin
   build is chained inside `release-please.yml` rather than tag-triggered, and the npm
   publish hangs off the `release: published` event, which is attributed to you.
+- **The npm publish is staged, not direct.** CI never makes a version public on its own: it
+  uploads a staged version that stays invisible until a maintainer approves it with 2FA.
+  A compromised workflow run can therefore waste a version number, not ship code to every
+  `npx` user.
 
 ## One-time setup
 
 These need a human with account access. None of them are in the repo.
 
-- [ ] **Make the repository public.** `npx skills add Gldywn/gatekeeper` and Beekeeper's
+- [x] **Make the repository public.** `npx skills add Gldywn/gatekeeper` and Beekeeper's
       registry both require it.
-- [ ] **npm authentication.** Either:
-      - a granular access token with publish rights on `@gldywn/gatekeeper-mcp-server`,
-        stored as the repository secret `NPM_TOKEN`; or
-      - npm **trusted publishing**, configured on the package page to trust
-        `Gldywn/gatekeeper` and the `publish-server.yml` workflow, which needs no secret.
-        pnpm 11 ships the OIDC support for this (`releasing/commands/src/publish/oidc/`),
-        but we have not exercised it end to end, so treat the token as the known-good path
-        and trusted publishing as the upgrade. Either way npm can only be configured
-        *after* the package exists, so the first publish needs the token regardless.
-- [ ] **Allow GitHub Actions to create pull requests** (Settings -> Actions -> General), or
+- [ ] **npm trusted publishing, stage-only.** Configured on npmjs.com to trust
+      `Gldywn/gatekeeper` and the `publish-server.yml` workflow, with `npm stage publish`
+      allowed and `npm publish` disallowed, so a workflow run can never make a version
+      public by itself. No repository secret is involved: the workflow authenticates with
+      the OIDC token granted by `id-token: write`. The publish step uses npm rather than
+      pnpm because pnpm 11's OIDC token exchange 404s (pnpm/pnpm#11513), and npm is pinned
+      to 11.15.0, the floor for staged publishing. `NPM_TOKEN` is read by nothing anymore
+      and can be deleted once a release has validated this path end to end.
+- [x] **Allow GitHub Actions to create pull requests** (Settings -> Actions -> General), or
       release-please cannot open its Release PR.
 
 ## Cutting a release
@@ -88,12 +95,16 @@ These need a human with account access. None of them are in the repo.
      with `manifest.json` at the zip root
 4. Open the draft release, check both assets are there, click **Publish release**. Publish
    it as the latest release, not a prerelease.
-5. `publish-server.yml` fires on that publish and pushes
-   `@gldywn/gatekeeper-mcp-server` to npm with provenance.
-6. Verify (below).
+5. `publish-server.yml` fires on that publish, builds the signed macOS notifier, and
+   **stages** `@gldywn/gatekeeper-mcp-server` on npm with provenance. Staged means uploaded
+   and invisible: nobody can install it yet, and the version number is now taken.
+6. Approve the staged version with 2FA (`npm stage approve`, or the package page on
+   npmjs.com). That approval is what makes it installable.
+7. Verify (below).
 
 If a step needs a retry, both workflows have a `workflow_dispatch` entry point that takes
-the release tag.
+the release tag. Re-running the publish is the way back from a failed or rejected staging,
+since the `release: published` event fires only once.
 
 ## Verifying a release
 
@@ -106,7 +117,8 @@ gh release view v0.1.0 --json assets --jq '.assets[].name'
 # registry entry id, or the plugin manager refuses to install.
 gh release download v0.1.0 --pattern manifest.json --output - | jq '{id, version, manifestVersion}'
 
-# The one-line install path, from a clean cache.
+# The one-line install path, from a clean cache. Only meaningful once the staged version
+# has been approved: before that, npm has nothing to resolve.
 npx -y @gldywn/gatekeeper-mcp-server@0.1.0 < /dev/null
 #   expect: "[gatekeeper] broker on http://127.0.0.1:9999" then a clean exit
 ```
