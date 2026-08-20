@@ -111,8 +111,14 @@ jobs:
           echo "packed as $mode"
           case "$mode" in *x*) ;; *) echo "::error::execute bit stripped by pack"; exit 1 ;; esac
 
-      # Trusted publishing via OIDC (id-token: write above): no token. npm, not pnpm,
-      # because pnpm 11's OIDC token exchange 404s (pnpm/pnpm#11513); npm's is reliable.
-      - name: Publish to npm
+      # Staged publishing needs npm 11.15.0+; Node 24's bundled npm can be older. Pinned
+      # exact, like every other dependency; bump it deliberately.
+      - name: Ensure npm supports staged publishing
+        run: npm install -g npm@11.15.0
+
+      # Stage over OIDC trusted publishing (id-token above), no token: nothing goes public
+      # until a maintainer runs `npm stage approve` (or npmjs.com) with 2FA. pnpm 11's OIDC
+      # exchange 404s (pnpm/pnpm#11513), so npm.
+      - name: Stage the npm publish (awaits human 2FA approval)
         working-directory: packages/server
-        run: npm publish --access public --provenance
+        run: npm stage publish --access public --provenance
