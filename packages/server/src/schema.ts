@@ -30,10 +30,14 @@ export interface SchemaSnapshot {
   // MCP tool reports it as unavailable rather than serving a stale structure.
   access: boolean;
   tables: SchemaTable[];
+  // Engine catalogs the plugin left out, named so the agent reads an omission rather than
+  // an absence.
+  excludedSchemas: string[];
   capturedAt: number;
 }
 
 const MAX_TABLES = 5000;
+const MAX_EXCLUDED = 100;
 const MAX_COLUMNS = 1000;
 const MAX_FKS = 1000;
 const MAX_STR = 512;
@@ -77,6 +81,12 @@ export function sanitizeSchema(input: Record<string, unknown>, capturedAt: numbe
     scope: str(input.scope),
     access,
     tables: access ? arr(input.tables).slice(0, MAX_TABLES).map(table) : [],
+    excludedSchemas: access
+      ? arr(input.excludedSchemas)
+          .slice(0, MAX_EXCLUDED)
+          .map(str)
+          .filter((s) => s.length > 0)
+      : [],
     capturedAt,
   };
 }
