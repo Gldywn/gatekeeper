@@ -12,6 +12,12 @@
   <a href="https://github.com/Gldywn/gatekeeper/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Gldywn/gatekeeper" alt="License"></a>
 </p>
 
+<p align="center">
+  <a href="#getting-started"><img src="https://img.shields.io/badge/Claude_Code-D97757?logo=claudecode&logoColor=white" alt="Works with Claude Code"></a>
+  <a href="#getting-started"><img src="https://img.shields.io/badge/Codex_CLI-555555" alt="Works with Codex CLI"></a>
+  <a href="#getting-started"><img src="https://img.shields.io/badge/OpenCode-000000?logo=opencode&logoColor=white" alt="Works with OpenCode"></a>
+</p>
+
 Gatekeeper is a human-approved bridge between AI agents and your database. An agent proposes
 a query over MCP; nothing runs until you approve it in
 [Beekeeper Studio](https://www.beekeeperstudio.io), on the SQL text, before execution. The
@@ -188,6 +194,24 @@ classes that click is allowed to approve.
 The armed mode is in-memory only, never persisted, and resets to read-only on a connection
 switch or a re-pair. The plugin re-classifies and re-checks at the moment of execution, so
 arming and disarming take effect immediately.
+
+**The card reads the query for you**, so deciding takes a glance instead of a careful parse.
+The SQL arrives formatted and highlighted, with invisible and direction-flipping characters
+shown as explicit markers, so what you read is what runs. A write or destructive statement
+carries a coloured class badge and names its verb and its target tables, and a statement the
+parser cannot read says so in standing text and is treated as destructive.
+
+Under the SQL, an annotation names the tables the query reads and the sensitive columns among
+them: person data in one accent, company and commercial data in another, a sensitive value
+flagged even when it only appears in a `WHERE` filter, and a `SELECT *` expanded against the
+real columns so nothing hides behind the star. A header badge stacks the three read-only
+layers, the armed mode, the Beekeeper connection and the database endpoint, and warns you
+when not one of them would block a write.
+
+Each detector is a toggle in the plugin settings, they all run on your machine, and none of
+what they surface is ever sent to the agent. They match column names and value shapes, so
+treat them as a fast pointer at what deserves a second look, not as proof that a query is
+clean. No flags can also mean the annotation never resolved.
 
 ## Security
 
