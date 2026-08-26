@@ -61,6 +61,7 @@ export function schemaPayload(
     connectionName: snap.connectionName,
     capturedAt: snap.capturedAt,
     tableCount: snap.tables.length,
+    excludedSchemas: snap.excludedSchemas ?? [],
     tables: snap.tables,
   };
 }
@@ -270,7 +271,7 @@ export function createMcpServer(
     {
       title: "Read the connected database's table and column structure",
       description:
-        "Return the structure of the database the plugin is connected to (schemas, tables, columns with types, primary and foreign keys) so you can write correct, valid SQL and refresh your understanding before proposing a query. Never returns any row data, default values, view/function bodies, or comments. Available only when the human has turned on Schema access for this connection; otherwise it reports unavailable. The structure can be large, so read it once and reuse it.",
+        "Return the structure of the database the plugin is connected to (schemas, tables, columns with types, primary and foreign keys) so you can write correct, valid SQL and refresh your understanding before proposing a query. Never returns any row data, default values, view/function bodies, or comments. Engine catalogs (information_schema, pg_*, mysql, performance_schema, sys) are left out because they dwarf the database's own tables, the ones skipped are listed in excludedSchemas, and you can still read any of them by proposing a normal query against it. Available only when the human has turned on Schema access for this connection; otherwise it reports unavailable. The structure can be large, so read it once and reuse it.",
       inputSchema: {},
     },
     async () => {

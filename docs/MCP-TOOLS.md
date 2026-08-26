@@ -29,8 +29,10 @@ instead of running.
   host, user, or credentials; informational only.
 - `get_schema()` -> structure. The connected database's schemas, tables, and columns (with
   types and keys) so the agent can write valid SQL. Never returns row data, default values,
-  view/function bodies, or comments. Available only while the human has Schema access on for
-  the connection; otherwise it reports unavailable.
+  view/function bodies, or comments. Engine catalogs are left out, since they dwarf the
+  database's own tables, and the ones skipped come back in `excludedSchemas`. An agent that
+  needs one reads it by proposing a normal query against it. Available only while the human
+  has Schema access on for the connection; otherwise it reports unavailable.
 
 ## The ticket shape
 

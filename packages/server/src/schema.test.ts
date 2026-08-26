@@ -42,6 +42,19 @@ describe("sanitizeSchema", () => {
     expect(snap.tables[0].foreignKeys[0].refTable).toBe("public.companies");
   });
 
+  it("carries the excluded catalog names and drops the empty ones", () => {
+    const snap = sanitizeSchema(
+      {
+        connectionName: "prod",
+        access: true,
+        tables: [],
+        excludedSchemas: ["information_schema", "", "pg_catalog", 7],
+      },
+      1,
+    );
+    expect(snap.excludedSchemas).toEqual(["information_schema", "pg_catalog"]);
+  });
+
   it("empties the tables when access is off", () => {
     const snap = sanitizeSchema(
       { connectionName: "prod", access: false, tables: [{ name: "users", columns: [] }] },
@@ -64,6 +77,7 @@ describe("schemaPayload", () => {
     scope: connectionScopeKey(conn("prod")),
     access: true,
     tables: [{ schema: "public", name: "users", columns: [], foreignKeys: [] }],
+    excludedSchemas: ["information_schema", "pg_catalog"],
     capturedAt: 5,
   };
 
@@ -100,6 +114,16 @@ describe("schemaPayload", () => {
       available: true,
       connectionName: "prod",
       tableCount: 1,
+      excludedSchemas: ["information_schema", "pg_catalog"],
+    });
+  });
+
+  // An older plugin posts no such field; the agent must still get an array to read.
+  it("serves an empty exclusion list for a snapshot that predates the field", () => {
+    const legacy = { ...snap } as SchemaSnapshot & { excludedSchemas?: string[] };
+    legacy.excludedSchemas = undefined;
+    expect(schemaPayload(legacy as SchemaSnapshot, conn("prod"), fresh)).toMatchObject({
+      excludedSchemas: [],
     });
   });
 });

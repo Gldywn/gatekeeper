@@ -804,8 +804,8 @@ export class Gatekeeper {
     const on = this.settingsStore.get().schemaAccess;
     try {
       const payload = on
-        ? await collectSchema(name, scope)
-        : { connectionName: name, scope, access: false, tables: [] };
+        ? await collectSchema(name, scope, this.conn.databaseType)
+        : { connectionName: name, scope, access: false, tables: [], excludedSchemas: [] };
       // Re-validate after the (possibly slow) collect: a connection switch or a toggle flip
       // in between must never post a schema for the wrong database, or one without consent.
       if ((this.connScopeKey() ?? "") !== scope || this.settingsStore.get().schemaAccess !== on) {
