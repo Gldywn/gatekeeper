@@ -39,6 +39,10 @@ the `rows` and `fields` of an approved query. The plugin caps the forwarded rows
 read never floods the agent context: `terminal.truncated` says it capped and
 `terminal.rowCount` is the true pre-cap total.
 
+An approved write returns no rows, so `terminal.affectedRows` carries what it changed
+instead. The field is omitted when the host reported no count, and an absent count means
+unknown rather than zero.
+
 ## The waiting contract
 
 No call blocks for longer than `MAX_WAIT_MS` (25s). A wait that runs out is not a failure and

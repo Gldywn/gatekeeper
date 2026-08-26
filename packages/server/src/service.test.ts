@@ -91,6 +91,27 @@ describe("getQueryResult", () => {
     });
   });
 
+  it("carries the changed-row count of an approved write", async () => {
+    const store = fresh();
+    const ticket = submitQuery(store, { sessionId: "s1", sql: "UPDATE t SET a = 1" });
+    const claimed = store.claimNext("plugin", 1000)!;
+    store.resolve(claimed.id, claimed.leaseId!, {
+      status: "approved",
+      rows: [],
+      fields: [],
+      affectedRows: 3,
+    });
+    const read = await getQueryResult(store, "s1", ticket.requestId, 0);
+    expect(read.terminal).toEqual({
+      status: "approved",
+      rows: [],
+      fields: [],
+      truncated: false,
+      rowCount: 0,
+      affectedRows: 3,
+    });
+  });
+
   it("waits and returns once the request resolves during the wait", async () => {
     const store = fresh();
     const ticket = submitQuery(store, { sessionId: "s1", sql: "SELECT 1" });

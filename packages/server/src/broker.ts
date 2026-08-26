@@ -343,6 +343,9 @@ function toOutcome(body: Record<string, unknown>): Outcome {
       fields: Array.isArray(body.fields) ? body.fields : [],
       truncated: body.truncated === true,
       rowCount: typeof body.rowCount === "number" ? body.rowCount : rows.length,
+      // No default: a plugin that cannot report it must leave the agent without an
+      // answer rather than with a zero it would trust.
+      ...(typeof body.affectedRows === "number" ? { affectedRows: body.affectedRows } : {}),
     };
   }
   return {

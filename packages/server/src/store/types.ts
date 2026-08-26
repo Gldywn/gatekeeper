@@ -61,6 +61,9 @@ export type Outcome =
       // context; `truncated` says it capped, `rowCount` is the true pre-cap total.
       truncated?: boolean;
       rowCount?: number;
+      // How many rows the statement changed, on a write only. Absent means the plugin had
+      // no count to give, which is not the same as zero.
+      affectedRows?: number;
     }
   | { status: "rejected"; reason?: string }
   | { status: "failed"; error: string };

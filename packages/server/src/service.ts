@@ -37,6 +37,8 @@ export interface TerminalResult {
   truncated?: boolean;
   /** The true number of rows the query returned, even if `rows` was capped below it. */
   rowCount?: number;
+  /** Rows changed by an approved write. Absent means unknown, never zero. */
+  affectedRows?: number;
 }
 
 export interface Ticket {
@@ -56,6 +58,7 @@ function terminalOf(req: GatekeeperRequest): TerminalResult {
     purged?: boolean;
     truncated?: boolean;
     rowCount?: number;
+    affectedRows?: number;
   };
   switch (req.state) {
     case "approved":
@@ -68,6 +71,7 @@ function terminalOf(req: GatekeeperRequest): TerminalResult {
         fields: result.fields ?? [],
         truncated: result.truncated ?? false,
         rowCount: result.rowCount ?? result.rows?.length ?? 0,
+        ...(result.affectedRows !== undefined ? { affectedRows: result.affectedRows } : {}),
       };
     case "rejected":
       return { status: "rejected", reason: result.reason ?? undefined };

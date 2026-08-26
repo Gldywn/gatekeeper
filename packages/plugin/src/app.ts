@@ -104,9 +104,17 @@ const CONNECTION_LABEL: Record<ConnectionState, string> = {
 
 const PRESENCE_ORDER: Record<Presence, number> = { active: 0, idle: 1, gone: 2 };
 
+// The host sends affectedRows on every result (Beekeeper >= 5.4) but the SDK type does not
+// declare it, so read it defensively: an absent count must stay absent rather than become a
+// fabricated zero the agent would read as "changed nothing".
+function affectedRowsOf(result: unknown): number | undefined {
+  const value = (result as { affectedRows?: unknown } | undefined)?.affectedRows;
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
 async function runApprovedQuery(
   sql: string,
-): Promise<{ rows: Record<string, unknown>[]; fields: Field[] }> {
+): Promise<{ rows: Record<string, unknown>[]; fields: Field[]; affectedRows?: number }> {
   const result: RunQueryResult = await runQuery(sql);
   // runQuery resolves (never throws) with an `error` field when the engine
   // rejects the query or the connection is down; surface it as a failure so the
@@ -118,6 +126,7 @@ async function runApprovedQuery(
   return {
     rows: first?.rows ?? [],
     fields: (first?.fields ?? []).map((f) => ({ name: f.name })),
+    affectedRows: affectedRowsOf(first),
   };
 }
 
@@ -1883,7 +1892,7 @@ export class Gatekeeper {
       return;
     }
     try {
-      const { rows, fields } = await runApprovedQuery(card.sql);
+      const { rows, fields, affectedRows } = await runApprovedQuery(card.sql);
       // The query may have hit the new database after a switch; never deliver its
       // rows against the old proposal.
       if (gen !== this.connGeneration) {
@@ -1898,6 +1907,9 @@ export class Gatekeeper {
         fields: forAgent.fields,
         truncated: forAgent.truncated,
         rowCount: forAgent.rowCount,
+        // Only a write answers "how many rows did this change". On a read most drivers
+        // report 0, which would read as an answer instead of a non-answer.
+        ...(verdict.class !== "read" && affectedRows !== undefined ? { affectedRows } : {}),
       });
       // The rows already ran on the live database; if the outcome never reached the
       // broker the agent cannot see them, so record a failure rather than a false approve.
