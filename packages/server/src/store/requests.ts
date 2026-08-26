@@ -244,6 +244,7 @@ export function resolve(
           fields: outcome.fields,
           truncated: outcome.truncated ?? false,
           rowCount: outcome.rowCount ?? outcome.rows.length,
+          ...(outcome.affectedRows !== undefined ? { affectedRows: outcome.affectedRows } : {}),
         }
       : outcome.status === "rejected"
         ? { reason: outcome.reason ?? null }

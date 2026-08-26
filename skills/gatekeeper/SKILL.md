@@ -96,6 +96,8 @@ The `intent` is the one line a reviewer approves on. Say what you're trying to a
 
 Approved rows are held for about 10 minutes and then stripped. If you poll, see `approved`, and only read the rows after a long detour, you get `purged: true` with an empty row set and have to propose the query again. Read a query's rows when it resolves.
 
+An approved write returns no rows: read `affectedRows` for how many it changed. Treat a missing `affectedRows` as unknown, not as zero, and when you need certainty there, propose a read that checks the change.
+
 ## When to keep waiting, and the one time to stop
 
 Keep rolling waits going for as long as the proposal can live. Slowness is never a no, and the one thing that justifies pausing to tell the user is a dead channel, not a slow human. If `get_connection_info` reports `connected: false`, or a `capturedAt` more than a few minutes old, the Beekeeper plugin is probably closed or disconnected and no approval can arrive. Say that plainly and let the user reconnect, instead of spinning. Do not confuse it with a human who is merely taking their time; for that one, you keep waiting.
