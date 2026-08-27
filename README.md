@@ -80,6 +80,13 @@ polls the broker instead. That single constraint explains the whole shape. Full 
 
 ## Getting started
 
+**Fastest path: let your agent install it.** Run `npx skills add Gldywn/gatekeeper` and pick
+the `install-gatekeeper` skill, then ask your agent to install Gatekeeper (in Claude Code,
+`/install-gatekeeper`). It puts the plugin, the MCP server, the skill and the pairing in place
+as far as your environment allows, then hands you a short checklist for the rest (like
+restarting Beekeeper). Prefer to do it yourself, or want to see exactly what happens? The
+manual steps are below.
+
 **Prerequisites:** Beekeeper Studio >= 5.4 and Node >= 22. If you run Claude Code or Codex
 CLI you already have Node. There is no background service to install: your agent starts the
 server when its session opens, and it exits when that session ends.
@@ -159,6 +166,13 @@ plugin before that and it tells you so, rather than showing a pairing field it c
 **5. Use it.** Ask your agent for something that needs the database. It proposes SQL, the
 query appears in the plugin, you approve, and the rows return to the agent. Reads work
 straight away; a write runs only once you arm Write or Destructive mode.
+
+### Updating
+
+Run `/update-gatekeeper`, or just ask your agent to update Gatekeeper. It checks all three
+pieces (the plugin, the MCP server and the skills), reports the state of each, and updates
+only what is behind. Pairing survives an update. The skill ships alongside the others through
+`npx skills add Gldywn/gatekeeper`.
 
 Building from source is documented in
 [Development](https://github.com/Gldywn/gatekeeper/blob/main/docs/DEVELOPMENT.md).
