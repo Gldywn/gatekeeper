@@ -7,6 +7,9 @@ dist/
 .cache/
 .pnpm-store/
 
+# Vercel CLI local project link (holds org/project ids), created by `vercel`
+.vercel/
+
 # Local agent/skill tooling, not part of the product
 .claude/
 .agents/
