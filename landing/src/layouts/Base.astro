@@ -1,6 +1,9 @@
 ---
 // Single global stylesheet: imports @gatekeeper/shared/tokens.css first, then all ported CSS.
 import "../styles/global.css";
+// Vercel Web Analytics + Speed Insights: cookieless and anonymous, so no consent banner.
+import Analytics from "@vercel/analytics/astro";
+import SpeedInsights from "@vercel/speed-insights/astro";
 
 // Meta title + description mirror the hero headline and lead so search and social
 // previews say exactly what the page says.
@@ -38,6 +41,9 @@ const ogImage = `${site}/og.png`;
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="icon" href="/icon-32.png" sizes="32x32" type="image/png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon-256.png" />
+
+    <Analytics />
+    <SpeedInsights />
   </head>
   <body>
     <slot />
