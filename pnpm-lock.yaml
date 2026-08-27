@@ -21,13 +21,13 @@ importers:
   landing:
     dependencies:
       '@vercel/analytics':
-        specifier: ^2.0.1
+        specifier: 2.0.1
         version: 2.0.1
       '@vercel/speed-insights':
-        specifier: ^2.0.0
+        specifier: 2.0.0
         version: 2.0.0
       astro:
-        specifier: ^5.0.0
+        specifier: 5.18.2
         version: 5.18.2(@types/node@22.20.1)(rollup@4.62.2)(tsx@4.23.1)(typescript@5.8.3)
     devDependencies:
       '@gatekeeper/shared':
