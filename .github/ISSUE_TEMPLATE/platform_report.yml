@@ -1,0 +1,40 @@
+name: Platform report (Windows / Linux)
+description: Gatekeeper is only verified on macOS. Tell us how it went on your platform, working or not.
+labels: ["platform"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Nothing in the shipped code is macOS-specific, but expected is not verified. Reports like this one, success or failure, are what move a platform to supported.
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      placeholder: Ubuntu 24.04, or Windows 11 24H2
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Gatekeeper, Beekeeper Studio, Node.
+      placeholder: Gatekeeper 0.1.1, Beekeeper Studio 5.4.2, Node 22.17
+    validations:
+      required: true
+  - type: checkboxes
+    id: milestones
+    attributes:
+      label: How far it got
+      description: Tick everything that worked. Where the ticks stop tells us where to look.
+      options:
+        - label: The plugin shows up in Beekeeper Studio after install
+        - label: Pairing completed (the 6-digit code was accepted)
+        - label: A full read round-trip (agent proposes, you approve, rows return)
+        - label: A write ran under an armed Write or Destructive mode
+  - type: textarea
+    id: details
+    attributes:
+      label: What broke or surprised you
+      description: Exact errors, where it stalled, and anything you had to do differently from the README (paths, config). "Everything worked as documented" is a valid and valuable report.
+    validations:
+      required: true
