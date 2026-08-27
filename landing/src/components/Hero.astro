@@ -1,10 +1,10 @@
 ---
-// Preview-only reworked hero (rendered on /preview): the demo video is promoted to
-// the main visual, and below it a live "pending approval" queue shows ONE card fully
-// at a time (readable). The queue is pre-populated (no empty 0 state); each new card
-// collapses the current one first, then arrives on top pushing it down; the lease
-// timer counts down live. Three approval types cycle (read+PII, write+client,
-// destructive+PII/blocked). No animation library; styles scoped; live Hero untouched.
+// Hero: the demo video is the main visual, a poster-thumbnail that opens a cinema
+// lightbox. Below it, a live "pending approval" queue shows one card fully at a time.
+// It starts pre-populated (no empty 0 state), each new card collapses the current one
+// then arrives on top pushing it down, and the lease timer counts down live. Three
+// approval types cycle: read + PII, write + client, and destructive + PII (blocked).
+// No animation library, styles are scoped.
 ---
 <section class="hero">
   <div class="wrap">
@@ -18,7 +18,7 @@
           <span class="h-tag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="8" x="2" y="2" rx="2"/><rect width="20" height="8" x="2" y="14" rx="2"/><path d="M6 6h.01"/><path d="M6 18h.01"/></svg>MCP Server</span>
         </div>
         <h1><span class="hl-machine">Your agents <span class="hl-propose">propose</span> the SQL.</span> <span class="hl-human">You <span class="hl-approve">approve</span> what runs.</span></h1>
-        <p class="lead">Gatekeeper is a human-approved, read-only-by-default bridge between AI agents and your database. An agent proposes a query over MCP; nothing runs until a human approves it in <a class="bk-link" href="https://www.beekeeperstudio.io" target="_blank" rel="noopener">Beekeeper Studio</a>. The agent never holds your credentials.</p>
+        <p class="lead">Gatekeeper is a human-approved, read-only-by-default bridge between AI agents and your database. An agent proposes a query over MCP. Nothing runs until a human approves it in <a class="bk-link" href="https://www.beekeeperstudio.io" target="_blank" rel="noopener">Beekeeper Studio</a>. The agent never holds your credentials.</p>
         <div class="hero-cta">
           <a class="btn-lg btn-primary cta-go" href="https://github.com/Gldywn/gatekeeper#getting-started">
             <svg class="gh-mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.42c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.34-1.3-1.7-1.3-1.7-1.06-.72.08-.71.08-.71 1.17.08 1.78 1.2 1.78 1.2 1.04 1.78 2.73 1.27 3.4.97.1-.75.4-1.27.73-1.56-2.56-.29-5.26-1.28-5.26-5.7 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11 11 0 0 1 5.8 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.43-2.7 5.4-5.28 5.69.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
@@ -37,13 +37,13 @@
       </div>
 
       <div class="hero-visual">
-        <!-- Demo video, promoted and opaque: no blended honeycomb inside. -->
-        <div class="demo2" id="hero-demo">
-          <span class="demo2-badge">Demo</span>
-          <div class="demo2-center">
-            <button class="demo2-play" type="button" aria-label="Play demo (coming soon)"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4v16l13-8z"/></svg></button>
-            <span class="demo2-cap">A short approval walkthrough drops in here</span>
-          </div>
+        <!-- Demo video: a poster-thumbnail button that opens a cinema lightbox. -->
+        <div class="demo2-wrap">
+          <button class="demo2" id="hero-demo" type="button" aria-haspopup="dialog" aria-controls="demo-modal" aria-label="Play the Gatekeeper demo">
+            <img class="demo2-poster" src="/gatekeeper-demo-poster.jpg" alt="A proposed SQL query in Beekeeper Studio, flagged for client data and a sensitive value, awaiting human approval" width="2010" height="1012" />
+            <span class="demo2-play" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v16l13-8z"/></svg></span>
+          </button>
+          <a class="demo2-credit" href="https://uppbeat.io/t/swoop/shine" target="_blank" rel="noopener" title="Music: Shine by Swoop, free via Uppbeat" aria-label="Music credit: Shine by Swoop, free via Uppbeat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></a>
         </div>
 
         <!-- Live pending-approval queue: one full card on top, older ones collapsed below. -->
@@ -132,6 +132,15 @@
       </div>
     </div>
   </div>
+
+  <dialog class="demo-modal" id="demo-modal" aria-label="Gatekeeper demo">
+    <div class="demo-modal-inner">
+      <button class="demo-modal-close" type="button" aria-label="Close demo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+      <video class="demo-modal-video" id="demo-video" controls playsinline preload="none" poster="/gatekeeper-demo-poster.jpg">
+        <source src="/gatekeeper-demo.mp4" type="video/mp4" />
+      </video>
+    </div>
+  </dialog>
 </section>
 
 <style>
@@ -213,35 +222,54 @@
 
   .hero-visual { display: flex; flex-direction: column; gap: var(--s4); min-width: 0; }
 
-  /* Video: promoted, opaque, plugin-solid. No blended honeycomb inside. */
+  /* Demo: a poster-thumbnail button that opens a cinema lightbox. */
   .demo2 {
-    position: relative;
-    aspect-ratio: 16 / 9;
-    border-radius: 12px;
-    background: var(--sunken);
-    border: 1px solid var(--edge-strong);
+    position: relative; display: block; width: 100%; padding: 0;
+    aspect-ratio: 16 / 9; border-radius: 12px;
+    background: var(--sunken); border: 1px solid var(--edge-strong);
     box-shadow: var(--elev-pop), inset 0 1px 0 var(--hi);
-    display: grid;
-    place-items: center;
-    overflow: hidden;
+    overflow: hidden; cursor: pointer; appearance: none; -webkit-appearance: none;
+    transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
   }
-  .demo2-badge {
-    position: absolute; top: 10px; left: 10px;
-    font-family: var(--font-mono); font-size: 9px; font-weight: 700; letter-spacing: 0.12em;
-    text-transform: uppercase; color: var(--amber);
-    background: color-mix(in oklch, var(--amber) 12%, transparent);
-    border: 1px solid color-mix(in oklch, var(--amber) 34%, transparent);
-    border-radius: 4px; padding: 3px 7px;
-  }
-  .demo2-center { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  .demo2:hover { transform: translateY(-2px); box-shadow: var(--elev-pop), 0 14px 34px color-mix(in oklch, var(--amber) 22%, transparent); }
+  .demo2:focus-visible { outline: 2px solid var(--amber); outline-offset: 3px; }
+  .demo2-poster { width: 100%; height: 100%; object-fit: cover; display: block; }
   .demo2-play {
-    width: 58px; height: 58px; border-radius: 50%; border: 0; cursor: pointer;
-    display: grid; place-items: center;
-    background: var(--amber); color: var(--amber-ink);
-    box-shadow: 0 6px 18px oklch(0% 0 0 / 0.4), 0 0 0 9px color-mix(in oklch, var(--amber) 14%, transparent);
+    position: absolute; inset: 0; margin: auto; width: 66px; height: 66px; border-radius: 50%;
+    display: grid; place-items: center; background: var(--amber); color: var(--amber-ink);
+    box-shadow: 0 6px 18px oklch(0% 0 0 / 0.45), 0 0 0 10px color-mix(in oklch, var(--amber) 14%, transparent);
+    transition: transform var(--dur) var(--ease);
   }
-  .demo2-play svg { width: 22px; height: 22px; margin-left: 2px; }
-  .demo2-cap { font-family: var(--font-mono); font-size: 11px; color: var(--faint); text-align: center; }
+  .demo2:hover .demo2-play { transform: scale(1.08); }
+  .demo2-play svg { width: 24px; height: 24px; margin-left: 3px; }
+  .demo2-wrap { position: relative; display: block; }
+  /* Discreet music credit for the demo track (Uppbeat free tier requires attribution). */
+  .demo2-credit {
+    position: absolute; right: 10px; bottom: 10px; z-index: 4;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 8px;
+    background: color-mix(in oklch, var(--sunken) 68%, transparent);
+    border: 1px solid var(--edge); color: var(--muted);
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+    transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
+  }
+  .demo2-credit:hover { color: var(--amber); background: color-mix(in oklch, var(--sunken) 86%, transparent); }
+  .demo2-credit svg { width: 15px; height: 15px; }
+
+  /* Cinema lightbox for the demo video. */
+  .demo-modal { border: 0; padding: 0; margin: auto; width: 100vw; height: 100dvh; max-width: 100vw; max-height: 100dvh; background: transparent; overflow: hidden; }
+  .demo-modal::backdrop { background: oklch(0% 0 0 / 0.82); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+  .demo-modal-inner { width: 100%; height: 100%; display: grid; place-items: center; padding: clamp(16px, 4vw, 48px); box-sizing: border-box; }
+  .demo-modal-video { width: min(92vw, calc(86dvh * 2010 / 1012)); max-height: 86dvh; border-radius: 12px; box-shadow: 0 30px 80px oklch(0% 0 0 / 0.6); background: #000; display: block; }
+  .demo-modal-close {
+    position: fixed; top: 18px; right: 20px; width: 42px; height: 42px; border-radius: 50%;
+    border: 1px solid var(--edge-strong); background: color-mix(in oklch, var(--surface) 82%, transparent);
+    color: var(--text); display: grid; place-items: center; cursor: pointer;
+    transition: background var(--dur) var(--ease);
+  }
+  .demo-modal-close:hover { background: var(--surface); }
+  .demo-modal-close svg { width: 20px; height: 20px; }
+  @media (prefers-reduced-motion: reduce) { .demo2, .demo2 .demo2-play { transition: none !important; } }
 
   /* The pending panel as an opaque slice of the plugin body. */
   .pending-taste {
@@ -309,6 +337,7 @@
     // fires setTimeout but pauses rAF and transitionend, which let the queue prepend cards
     // forever without ever draining. Pausing here (plus a hard depth cap in step) fixes it.
     const active = () => !document.hidden && document.hasFocus();
+    const narrow = () => window.matchMedia("(max-width: 960px)").matches;
 
     const setCount = (v) => {
       countEl.textContent = String(v);
@@ -345,6 +374,7 @@
     // height and never bounces. No per-step eviction, so nothing blinks out mid-cycle.
     const step = () => {
       if (!active()) { timer = window.setTimeout(step, DWELL_MS); return; }
+      if (narrow()) { timer = window.setTimeout(step, DWELL_MS); return; }
       // Hard cap: recover instantly if a background tab ever let cards pile up.
       while (stack.children.length > MAX_DEPTH) stack.lastElementChild.remove();
       const oldTop = stack.firstElementChild;
@@ -410,6 +440,7 @@
     const heroVisual = stack.closest(".hero-visual");
     const reserveHeight = () => {
       if (!heroVisual) return;
+      if (narrow()) { heroVisual.style.minHeight = ""; return; }
       const w = stack.clientWidth;
       if (!w) return;
       const probe = document.createElement("div");
@@ -450,6 +481,7 @@
       window.addEventListener("resize", () => { window.clearTimeout(resizeT); resizeT = window.setTimeout(reserveHeight, 200); });
       leaseTimer = window.setInterval(() => {
         if (!active()) return;
+        if (narrow()) return;
         const top = stack.firstElementChild;
         if (!top || top.classList.contains("pa-mini")) return;
         const lease = top.querySelector(".lease");
@@ -472,5 +504,24 @@
         clearInterval(leaseTimer);
       });
     }
+  }
+</script>
+
+<script>
+  // Cinema lightbox: poster button opens a modal <dialog> with the demo video.
+  const demoBtn = document.getElementById("hero-demo");
+  const modal = document.getElementById("demo-modal");
+  const video = document.getElementById("demo-video");
+  if (demoBtn && modal && video && typeof modal.showModal === "function") {
+    const closeBtn = modal.querySelector(".demo-modal-close");
+    const open = () => { modal.showModal(); try { video.currentTime = 0; } catch {} video.volume = 0.2; video.play().catch(() => {}); };
+    const close = () => { video.pause(); if (modal.open) modal.close(); };
+    demoBtn.addEventListener("click", open);
+    closeBtn?.addEventListener("click", close);
+    modal.addEventListener("click", (e) => {
+      const t = e.target;
+      if (t === modal || (t instanceof Element && t.classList.contains("demo-modal-inner"))) close();
+    });
+    modal.addEventListener("close", () => video.pause());
   }
 </script>
