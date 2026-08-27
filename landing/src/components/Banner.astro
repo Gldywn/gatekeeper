@@ -1,0 +1,61 @@
+---
+// Slim teaser strip under the header. Copy is a placeholder: the exact upcoming
+// features are settled later. One line, on-brand amber, with a subtle shimmer.
+---
+<div class="promo-banner">
+  <a class="promo-inner wrap" href="https://github.com/Gldywn/gatekeeper" target="_blank" rel="noopener">
+    <span class="promo-badge">Coming soon</span>
+    <span class="promo-text">An <b>auto mode</b> that scores each query's risk against your session intent, so safe ones can run without a click. And more on the way.</span>
+    <svg class="promo-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+  </a>
+</div>
+
+<style>
+  .promo-banner {
+    position: relative; z-index: 4; overflow: hidden;
+    border-bottom: 1px solid var(--edge);
+    /* Amber mixed with transparent keeps the yellow hue (mixing into surface
+       rotates it toward teal in oklch); a solid surface base keeps it opaque.
+       z-index lifts it above the hero-deco hexagons that reach up into it. */
+    background:
+      linear-gradient(90deg,
+        color-mix(in oklch, var(--amber) 34%, transparent),
+        color-mix(in oklch, var(--amber) 16%, transparent)),
+      var(--surface);
+  }
+  /* A soft highlight that sweeps across every few seconds to draw the eye. */
+  .promo-banner::before {
+    content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 42%;
+    background: linear-gradient(100deg, transparent, color-mix(in oklch, var(--amber) 20%, transparent) 50%, transparent);
+    transform: translateX(-160%); pointer-events: none; z-index: 0;
+  }
+  .promo-inner {
+    position: relative; z-index: 1;
+    display: flex; align-items: center; justify-content: center; gap: 12px;
+    padding-block: 9px;
+    color: color-mix(in oklch, var(--muted) 38%, var(--text));
+    font-size: 13.5px; line-height: 1.4;
+  }
+  .promo-badge {
+    flex: none; display: inline-flex; align-items: center; gap: 6px;
+    font-family: var(--font-mono); font-size: 10.5px; font-weight: 700;
+    letter-spacing: 0.09em; text-transform: uppercase; color: var(--amber);
+    /* Dark pill on the amber band: high contrast, no amber-on-amber wash. */
+    background: var(--amber-ink);
+    border: 1px solid color-mix(in oklch, var(--amber) 42%, transparent);
+    border-radius: 999px; padding: 3px 10px;
+  }
+  .promo-text { min-width: 0; }
+  .promo-text b { color: var(--text); font-weight: 620; }
+  .promo-arrow { flex: none; width: 15px; height: 15px; color: var(--amber); transition: transform var(--dur) var(--ease); }
+  .promo-inner:hover .promo-arrow { transform: translateX(3px); }
+  .promo-inner:hover .promo-text { color: color-mix(in oklch, var(--muted) 40%, var(--text)); }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .promo-banner::before { animation: promo-shimmer 6.5s ease-in-out infinite; }
+  }
+  @keyframes promo-shimmer { 0% { transform: translateX(-160%); } 55%, 100% { transform: translateX(420%); } }
+
+  @media (max-width: 700px) { .promo-arrow { display: none; } .promo-text { font-size: 12.5px; } }
+  @media (max-width: 480px) { .promo-badge { display: none; } }
+</style>
