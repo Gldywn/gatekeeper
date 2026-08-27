@@ -1,7 +1,7 @@
 ---
 name: gatekeeper
 description: Read and change a database safely through Gatekeeper. You propose SQL, a human approves and runs it in Beekeeper Studio, and the rows come back to you; you never connect to the DB or run SQL yourself. Reads are the default; a write runs only if a human arms write mode. Use this whenever you need to read data, run a SELECT, inspect a schema, verify a migration, debug against real data, change data through an approved write, or answer anything that needs the database, and whenever the user mentions Gatekeeper, approving a query, or looking something up in the database.
-version: 1.3.0
+version: 1.4.0
 ---
 
 # Gatekeeper
@@ -60,11 +60,11 @@ Read it again, on your own initiative, at the two moments where a switch is both
 - When you pick the task back up after a long gap, roughly ten minutes or more without a query, or any time you resume a session. That is exactly the window in which the human went and did something else, possibly against another database.
 - Before proposing a write or a destructive statement, where being on the wrong database costs the most.
 
-If any of those three identifying fields changed since you started, do not carry on quietly. Tell the human what the target was, what it is now, and ask whether to continue against the new one. If nothing changed, say nothing: this check earns its place by being silent almost every time.
+If any of those three identifying fields changed since you started, do not carry on quietly. Tell the human what the target was, what it is now, and ask whether to continue against the new one. Whatever they answer, the schema you read earlier describes the old database: call `get_schema` again before you write SQL against the new one. If nothing changed, say nothing: this check earns its place by being silent almost every time.
 
 ## If a call comes back NOT_PAIRED
 
-The human's plugin is not connected to Gatekeeper yet. Reply with the 6-digit code from the error, ask them to type it into the Gatekeeper tab in Beekeeper Studio, then stop and wait for their confirmation. This is a one-off setup on their machine, not a fault in your query and nothing you can fix: do not investigate it, do not retry the call, and do not open the pairing page yourself.
+The human's plugin is not connected to Gatekeeper yet. Reply with the 6-digit code from the error, ask them to type it into the Gatekeeper tab in Beekeeper Studio, then stop and wait for their confirmation. This is a one-off setup on their machine, not a fault in your query and nothing you can fix: do not investigate it, do not retry the call, and do not open the pairing page yourself. If they tell you the plugin was never installed, or the Gatekeeper tools are not there at all, that is an install rather than a query: hand it to the `install-gatekeeper` skill and stop, rather than improvising one yourself.
 
 ## Write the intent for a human, not a parser
 
@@ -88,13 +88,15 @@ The `intent` is the one line a reviewer approves on. Say what you're trying to a
 - `poll_results({ wait_ms? })`: one call returning the state of every query you proposed, plus a `pending` count. With `wait_ms` (25000 max) it returns the instant any pending one resolves, or at the cap; when it returns with `pending` above 0, call it again. States only, not rows.
 - `get_query_result({ request_id, wait_ms? })`: read one query's outcome (rows if approved). With `wait_ms` (25000 max) it waits, bounded, for a decision. If it comes back `pending`, `leased`, or `executing`, call it again. Never treat a non-terminal return as an answer.
 - `cancel_query({ request_id })`: withdraw a proposal you no longer need.
-- `get_schema()`: the connected database's structure (schemas, tables, columns with types, primary and foreign keys) so you can write valid SQL without a probing round trip. No row data, and no human approval needed. Available only when the human has turned on Schema access; it can be large, so read it once and reuse it.
+- `get_schema()`: the connected database's structure (schemas, tables, columns with types, primary and foreign keys) so you can write valid SQL without a probing round trip. No row data, and no human approval needed. Available only when the human has turned on Schema access; it can be large, so read it once and reuse it, and read it again when the connection changes under you.
 - `get_connection_info()`: non-sensitive context about the connected database (dialect, database name, default schema, read-only, the human's armed mode, and whether a plugin is connected at all). Never host, user, or credentials. Informational only.
 - `run_query({ sql, intent })`: submit plus a single bounded wait, for a quick one-off. It waits at most 25 seconds and then returns whatever state it is in, **which may still be `pending`**. Prefer `submit_query` plus the waiting patterns above, especially when you want more than one query in flight.
 
 ## Read results promptly
 
 Approved rows are held for about 10 minutes and then stripped. If you poll, see `approved`, and only read the rows after a long detour, you get `purged: true` with an empty row set and have to propose the query again. Read a query's rows when it resolves.
+
+The plugin also caps how many rows reach you, by count and by bytes, so a bulk read never floods your context. `truncated` says the cap fired and `rowCount` is the true total before it. A truncated result is a slice, not the answer: never conclude on it as if it were complete. Say what you actually got, then go back with something narrower, an aggregate, or an explicit `LIMIT`, so the shape of what you receive is your decision rather than the cap's.
 
 An approved write returns no rows: read `affectedRows` for how many it changed. Treat a missing `affectedRows` as unknown, not as zero, and when you need certainty there, propose a read that checks the change.
 
@@ -112,4 +114,5 @@ A query that fails on first run wastes a human round trip. Before proposing:
 
 - Verify table and column names and their types; do not infer them. Call `get_schema` first, it costs no approval. When Schema access is off, use `get_connection_info` for the dialect and default schema, and propose an `information_schema.columns` introspection (itself PII-free) as your first query.
 - Qualify tables by schema when the database uses several, and cast literals to the column's type when the dialect is strict.
+- Ask for the columns you need rather than `SELECT *`, and prefer a count or an aggregate when it answers the question just as well. Everything you pull back lands in your context and in front of the human who reads it before approving, and a wide read is also the one that trips the row cap.
 - Give a clear `intent` (see "Write the intent for a human") so the human can approve at a glance.

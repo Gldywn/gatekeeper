@@ -52,6 +52,6 @@ not a timeout error: it returns the proposal as it stands, and the agent decides
 wait again. This is what lets an agent keep working while a human takes minutes to approve,
 instead of holding a request open or ending its turn.
 
-The companion agent skill teaches that pattern (name the session up front, propose read-only
-PII-free SQL, work in parallel while a human approves, collect results as they land). It
+The companion agent skill teaches that pattern (name the session up front, confirm which
+database it is on, work in parallel while a human approves, collect results as they land). It
 lives in [`skills/gatekeeper/SKILL.md`](../skills/gatekeeper/SKILL.md).
