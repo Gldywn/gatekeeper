@@ -51,11 +51,11 @@
   @media (prefers-reduced-motion: no-preference) {
     .harness-strip .hb { will-change: transform; }
     .harness-strip .hb:nth-child(1) { animation: hb-hop 2.4s var(--ease-in-out) infinite; }
-    .harness-strip .hb:nth-child(2) { animation: hb-slide 2.9s var(--ease-in-out) infinite; }
+    .harness-strip .hb:nth-child(2) { animation: hb-tilt 2.9s var(--ease-in-out) infinite; }
     .harness-strip .hb:nth-child(3) { animation: hb-zoom 2.6s var(--ease-in-out) infinite; }
   }
   @keyframes hb-hop { 0%, 100% { transform: translateY(0); } 45% { transform: translateY(3px); } 72% { transform: translateY(-1px); } }
-  @keyframes hb-slide { 0%, 100% { transform: translateX(-2.5px); } 50% { transform: translateX(2.5px); } }
+  @keyframes hb-tilt { 0%, 100% { transform: rotate(-7deg); } 50% { transform: rotate(7deg); } }
   @keyframes hb-zoom { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.24); } }
 
   /* Legal line: an info glyph + a brighter, slightly larger, more readable sentence. */
