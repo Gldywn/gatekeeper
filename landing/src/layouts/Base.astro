@@ -1,6 +1,14 @@
 ---
 // Single global stylesheet: imports @gatekeeper/shared/tokens.css first, then all ported CSS.
 import "../styles/global.css";
+
+// Meta title + description mirror the hero headline and lead so search and social
+// previews say exactly what the page says.
+const title = "Gatekeeper: Your agents propose the SQL. You approve what runs.";
+const description =
+  "Gatekeeper is a human-approved, read-only-by-default bridge between AI agents and your database. Nothing runs until you approve it, and the agent never holds your credentials.";
+const site = "https://trygatekeeper.dev";
+const ogImage = `${site}/og.png`;
 ---
 <!doctype html>
 <html lang="en">
@@ -8,11 +16,25 @@ import "../styles/global.css";
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="dark" />
-    <title>Gatekeeper — human-approved SQL for AI agents</title>
-    <meta
-      name="description"
-      content="Gatekeeper is a human-approved, read-only-by-default bridge between AI agents and your database. An agent proposes SQL over MCP; nothing runs until a human approves it in Beekeeper Studio."
-    />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={`${site}/`} />
+
+    <!-- Open Graph / Twitter -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Gatekeeper" />
+    <meta property="og:url" content={`${site}/`} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:width" content="2560" />
+    <meta property="og:image:height" content="1280" />
+    <meta property="og:image:alt" content="A proposed SQL query in Beekeeper Studio, flagged for possible PII, awaiting human approval." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImage} />
+
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="icon" href="/icon-32.png" sizes="32x32" type="image/png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon-256.png" />
