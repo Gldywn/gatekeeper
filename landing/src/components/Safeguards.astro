@@ -251,24 +251,24 @@
         <h3 class="sg-title">Under the hood</h3>
         <div class="tiles-2x2">
           <div class="tile">
+            <span class="tile-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></span>
+            <h3>Desktop notification</h3>
+            <p>A native desktop notification fires the moment an agent proposes a query, so a pending approval never sits unseen.</p>
+          </div>
+          <div class="tile">
             <span class="tile-ico blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3"/></svg></span>
-            <h3>Schema, never rows</h3>
-            <p>Turn on schema access and agents read your real structure through <code>get_schema</code> to write accurate SQL. Never exposes any row data.</p>
-          </div>
-          <div class="tile">
-            <span class="tile-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="8" rx="2"/><path d="M7 20h10"/><path d="M9 16v4"/><path d="M15 16v4"/></svg></span>
-            <h3>Single active-tab lock</h3>
-            <p>A proposal is leased to one plugin tab under a state machine, so a query is never silently approved or executed twice.</p>
-          </div>
-          <div class="tile">
-            <span class="tile-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/></svg></span>
-            <h3>Credentials stay put</h3>
-            <p>The broker binds loopback only and rejects unexpected hosts. Every request carries a capability token. The agent gets rows, never a connection.</p>
+            <h3>Sharper queries</h3>
+            <p>Agents read your real tables, columns and keys through <code>get_schema</code> instead of guessing them, so the SQL they propose is accurate. It exposes structure, never row data.</p>
           </div>
           <div class="tile">
             <span class="tile-ico blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg></span>
             <h3>Agent-agnostic</h3>
             <p>Any MCP client drives it: Claude Code, Codex CLI, OpenCode and the rest. A companion skill teaches them to use it well.</p>
+          </div>
+          <div class="tile">
+            <span class="tile-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1"/><path d="M16 3h1a2 2 0 0 1 2 2v5a2 2 0 0 1 2 2 2 2 0 0 1-2 2v5a2 2 0 0 1-2 2h-1"/></svg></span>
+            <h3>Dialect-aware risk parser</h3>
+            <p>A dialect-aware parser classifies every query as read, write or destructive before you see it, so the matching mode has to be armed for it to run.</p>
           </div>
         </div>
 
@@ -380,7 +380,7 @@
     gap: clamp(22px, 4vw, 44px);
     align-items: start;
   }
-  @media (max-width: 900px) { .sg-cols { grid-template-columns: 1fr; } }
+  @media (max-width: 900px) { .sg-cols { grid-template-columns: 1fr; } .sg-left, .sg-right { min-width: 0; } }
   .sg-title { display: flex; align-items: center; gap: 13px; font-size: clamp(1.12rem, 1.5vw, 1.25rem); font-weight: 680; letter-spacing: -0.015em; color: var(--text); margin: 0 0 16px; }
   .sg-title::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, var(--edge-strong), transparent); }
   /* The second sub-section in each column: a consistent gap creates the staggered rhythm. */
@@ -415,7 +415,6 @@
   }
   .gd-item:hover { border-color: var(--edge-strong); }
   .gd-item.is-active {
-    border-color: color-mix(in oklch, var(--amber) 45%, var(--edge));
     background: color-mix(in oklch, var(--amber) 9%, var(--surface));
   }
   .gd-item-ico {
@@ -430,6 +429,29 @@
   .gd-item-ico.blue { color: var(--exec); }
   .gd-item-ico.violet { color: var(--client); }
   .gd-item-title { font-size: 12.5px; font-weight: 560; color: var(--text); }
+
+  /* Auto-advance: the active tab's border fills in its own accent colour, then the
+     carousel steps to the next tab. Manual clicks restart the cycle. */
+  @property --gd-p { syntax: "<number>"; initial-value: 0; inherits: false; }
+  .gd-item { position: relative; }
+  .gd-item[data-ex="read"] { --gd-accent: var(--ok); }
+  .gd-item[data-ex="write"] { --gd-accent: var(--amber); }
+  .gd-item[data-ex="destructive"] { --gd-accent: var(--danger); }
+  .gd-item[data-ex="request"] { --gd-accent: var(--exec); }
+  .gd-item[data-ex="client"] { --gd-accent: var(--client); }
+  .gd-item[data-ex="pii"] { --gd-accent: var(--danger); }
+  .gd-item[data-ex="sensitive"] { --gd-accent: var(--amber); }
+  .gd-item.is-active::after {
+    content: ""; position: absolute; inset: -1px; border-radius: 10px; padding: 1px;
+    background: conic-gradient(from -90deg, var(--gd-accent, var(--amber)) calc(var(--gd-p) * 1turn), transparent 0);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor; mask-composite: exclude;
+    pointer-events: none;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .gd-item.is-active::after { animation: gd-fill 5s linear; }
+  }
+  @keyframes gd-fill { from { --gd-p: 0; } to { --gd-p: 1; } }
 
   .gd-preview { position: relative; min-width: 0; }
   .gd-preview .card[hidden] { display: none; }
@@ -544,6 +566,19 @@
     };
 
     const descEl = document.getElementById("gd-desc");
+    const reduceGd = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const GD_DWELL = 5000;
+    let gdAuto = 0;
+    const scheduleNext = () => {
+      clearTimeout(gdAuto);
+      if (reduceGd) return;
+      gdAuto = setTimeout(() => {
+        if (document.hidden) { scheduleNext(); return; }
+        const idx = items.findIndex((i) => i.classList.contains("is-active"));
+        const next = items[(idx + 1) % items.length];
+        if (next) show(next.dataset.ex);
+      }, GD_DWELL);
+    };
     const show = (ex) => {
       items.forEach((i) => {
         const on = i.dataset.ex === ex;
@@ -555,8 +590,10 @@
         c.hidden = c.dataset.ex !== ex;
         resetCard(c);
       });
+      scheduleNext();
     };
     items.forEach((i) => i.addEventListener("click", () => show(i.dataset.ex)));
+    scheduleNext();
 
     const settle = (card, cls, text) => {
       const actions = card.querySelector(".actions");
@@ -572,8 +609,10 @@
       const send = card.querySelector(".gd-send");
       if (approve && !approve.disabled) approve.addEventListener("click", () => settle(card, "ok", card.dataset.ok || "Approved."));
       if (reject) reject.addEventListener("click", () => settle(card, "no", "Declined. Nothing ran against the database."));
-      if (send) send.addEventListener("click", () => settle(card, "sent", "Change request sent — the agent will revise and resubmit."));
+      if (send) send.addEventListener("click", () => settle(card, "sent", "Change request sent. The agent will revise and resubmit."));
     });
+
+    if (import.meta.hot) import.meta.hot.dispose(() => clearTimeout(gdAuto));
   }
 
   // Result view: dropdown flyouts (Copy / Export) and the pager, mirroring the plugin's controls.
