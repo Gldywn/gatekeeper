@@ -43,7 +43,10 @@
             <img class="demo2-poster" src="/gatekeeper-demo-poster.jpg" alt="A proposed SQL query in Beekeeper Studio, flagged for client data and a sensitive value, awaiting human approval" width="2010" height="1012" />
             <span class="demo2-play" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v16l13-8z"/></svg></span>
           </button>
-          <a class="demo2-credit" href="https://uppbeat.io/t/swoop/shine" target="_blank" rel="noopener" title="Music: Shine by Swoop, free via Uppbeat" aria-label="Music credit: Shine by Swoop, free via Uppbeat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></a>
+          <a class="demo2-credit" href="https://uppbeat.io/t/swoop/shine" target="_blank" rel="noopener" aria-label="Music: Shine by Swoop, free via Uppbeat">
+            <svg class="demo2-credit-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+            <span class="demo2-credit-pop" role="tooltip"><span class="cp-k">Music</span><span class="cp-t">Shine by Swoop</span><span class="cp-s">Free via Uppbeat</span></span>
+          </a>
         </div>
 
         <!-- Live pending-approval queue: one full card on top, older ones collapsed below. -->
@@ -243,18 +246,36 @@
   .demo2:hover .demo2-play { transform: scale(1.08); }
   .demo2-play svg { width: 24px; height: 24px; margin-left: 3px; }
   .demo2-wrap { position: relative; display: block; }
-  /* Discreet music credit for the demo track (Uppbeat free tier requires attribution). */
+  /* Small required-attribution badge (Uppbeat free tier). An info glyph, not a note
+     that reads as a mute button, with a designed popover on hover/focus. */
   .demo2-credit {
-    position: absolute; right: 10px; bottom: 10px; z-index: 4;
+    position: absolute; right: 9px; bottom: 9px; z-index: 4;
     display: inline-flex; align-items: center; justify-content: center;
-    width: 28px; height: 28px; border-radius: 8px;
-    background: color-mix(in oklch, var(--sunken) 68%, transparent);
+    width: 24px; height: 24px; border-radius: 7px;
+    background: color-mix(in oklch, var(--sunken) 58%, transparent);
     border: 1px solid var(--edge); color: var(--muted);
     -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
-    transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
+    transition: color var(--dur) var(--ease), background var(--dur) var(--ease), border-color var(--dur) var(--ease);
   }
-  .demo2-credit:hover { color: var(--amber); background: color-mix(in oklch, var(--sunken) 86%, transparent); }
-  .demo2-credit svg { width: 15px; height: 15px; }
+  .demo2-credit:hover, .demo2-credit:focus-visible {
+    color: var(--amber); background: color-mix(in oklch, var(--sunken) 84%, transparent);
+    border-color: color-mix(in oklch, var(--amber) 34%, transparent); outline: none;
+  }
+  .demo2-credit-ico { width: 14px; height: 14px; display: block; }
+  .demo2-credit-pop {
+    position: absolute; right: 0; bottom: calc(100% + 8px);
+    display: flex; flex-direction: column; gap: 2px;
+    padding: 9px 11px; white-space: nowrap; text-align: left;
+    background: var(--surface); border: 1px solid var(--edge-strong); border-radius: 9px;
+    box-shadow: var(--elev-pop);
+    opacity: 0; transform: translateY(4px); pointer-events: none;
+    transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
+  }
+  .demo2-credit:hover .demo2-credit-pop, .demo2-credit:focus-visible .demo2-credit-pop { opacity: 1; transform: translateY(0); }
+  .cp-k { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.11em; text-transform: uppercase; color: var(--faint); }
+  .cp-t { font-size: 12.5px; font-weight: 600; color: var(--text); line-height: 1.25; }
+  .cp-s { font-size: 11px; color: var(--muted); }
+  @media (prefers-reduced-motion: reduce) { .demo2-credit-pop { transition: none; } }
 
   /* Cinema lightbox for the demo video. */
   .demo-modal { border: 0; padding: 0; margin: auto; width: 100vw; height: 100dvh; max-width: 100vw; max-height: 100dvh; background: transparent; overflow: hidden; }
