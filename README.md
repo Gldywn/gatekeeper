@@ -85,12 +85,14 @@ polls the broker instead. That single constraint explains the whole shape. Full 
 CLI you already have Node. There is no background service to install: your agent starts the
 server when its session opens, and it exits when that session ends.
 
+> [!WARNING]
 > **macOS only, for now.** Gatekeeper is developed and tested on macOS. **Windows and Linux
 > are not yet tested**, so treat them as unsupported until someone reports back. Nothing in
 > the shipped code is macOS-specific (the server resolves paths from your home directory, the
 > plugin is a standard Beekeeper webview), so both are expected to work, but expected is not
 > verified. Reports from either platform are very welcome.
 
+> [!IMPORTANT]
 > **Not in Beekeeper's plugin registry yet.** A submission is in progress with the Beekeeper
 > maintainers. Until it is merged, Manage Plugins will not list Gatekeeper and the one-click
 > install is unavailable, so step 1 below is the manual route. Nothing else differs.
