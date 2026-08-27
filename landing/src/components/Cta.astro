@@ -9,14 +9,11 @@
             <img class="cm-icon" src="/gatekeeper-icon.svg" alt="" width="160" height="160" />
           </div>
           <div class="term-bar" aria-hidden="true"><span class="tb-dot r"></span><span class="tb-dot y"></span><span class="tb-dot g"></span></div>
-<pre><span class="cm"># 1. Install the plugin in Beekeeper Studio</span>
-<span class="pr">$</span> <a class="cta-link" href="https://github.com/Gldywn/gatekeeper/releases/latest" target="_blank" rel="noopener">Download the latest release</a>
+<pre><span class="cm"># 1. Add the skills to your agent</span>
+<span class="pr">$</span> npx skills add Gldywn/gatekeeper
 
-<span class="cm"># 2. Add the MCP server to any agent (Claude, Codex, Cursor, OpenCode, ...)</span>
-<span class="pr">$</span> claude mcp add gatekeeper --scope user -- npx -y @gldywn/gatekeeper-mcp-server
-
-<span class="cm"># 3. Install the agent skill</span>
-<span class="pr">$</span> npx skills add Gldywn/gatekeeper</pre>
+<span class="cm"># 2. Then, in your agent, let it do the rest</span>
+<span class="pr">&gt;</span> /install-gatekeeper</pre>
         </div>
         <div class="hero-cta">
           <a class="btn-lg btn-primary" href="https://github.com/Gldywn/gatekeeper">
@@ -75,6 +72,4 @@
   .tb-dot.g { background: #28c840; }
   .cta-final .install { position: relative; overflow: visible; margin-top: clamp(10px, 1.6vw, 20px); }
   .cta-note { margin: 0; font-size: 13px; color: var(--muted); }
-  .cta-final .install a.cta-link { color: var(--amber); text-decoration: underline; text-underline-offset: 2px; }
-  .cta-final .install a.cta-link:hover { color: color-mix(in oklch, var(--amber) 82%, var(--text)); }
 </style>
