@@ -26,11 +26,10 @@ query then runs on the connection Beekeeper already holds, and the rows return t
 **Read-only by default.** A write runs only under a mode you arm yourself in the plugin, and
 that mode is ephemeral. The agent never holds your database credentials.
 
+https://github.com/user-attachments/assets/b6dd8629-da87-4671-a3df-26507742b085
 <details>
-<summary>Music</summary>
-
-Music from #Uppbeat (free for Creators!): [Shine by Swoop](https://uppbeat.io/t/swoop/shine)
-
+<summary>Music from #Uppbeat</summary>
+Shine by Swoop: https://uppbeat.io/t/swoop/shine
 </details>
 
 > [!TIP]
