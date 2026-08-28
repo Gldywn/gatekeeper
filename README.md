@@ -91,6 +91,26 @@ server when its session opens, and it exits when that session ends.
 > plugin is a standard Beekeeper webview), so both are expected to work, but expected is not
 > verified. Reports from either platform are very welcome.
 
+### Fast install
+
+A dedicated skill sets everything up for you: the plugin, the MCP server, the companion skill and the pairing. Add the skills to your agent:
+
+```bash
+npx skills add Gldywn/gatekeeper
+```
+
+Then ask your agent to install Gatekeeper, or run the skill directly:
+
+```text
+/install-gatekeeper
+```
+
+It does every step your environment allows and hands you a short checklist for the rest, like restarting Beekeeper. Later, `/update-gatekeeper` checks all three pieces and updates only what is behind.
+
+### Manual install
+
+Prefer to do it by hand, or want to see exactly what happens?
+
 > [!IMPORTANT]
 > **Not in Beekeeper's plugin registry yet.** A submission is in progress with the Beekeeper
 > maintainers. Until it is merged, Manage Plugins will not list Gatekeeper and the one-click
