@@ -1,0 +1,29 @@
+name: Feature request
+description: A problem Gatekeeper should solve, or a better way to solve one it already does
+labels: ["enhancement"]
+body:
+  - type: dropdown
+    id: piece
+    attributes:
+      label: Piece
+      options:
+        - Beekeeper Studio plugin
+        - MCP server
+        - Agent skill
+        - Install / update skills
+        - Landing site
+        - New / cross-cutting
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do and what gets in the way today. A concrete session that went wrong beats an abstract capability.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would change
+      description: Optional, a well-stated problem is enough. If you have a design in mind, sketch it; if you rejected alternatives, say why they do not fit.

@@ -1,0 +1,55 @@
+name: Bug report
+description: Something in Gatekeeper is broken or behaves unexpectedly
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A suspected vulnerability goes through the [security policy](https://github.com/Gldywn/gatekeeper/security/policy), never a public issue.
+        First run on Windows or Linux? Those platforms are not verified yet, so a [platform report](https://github.com/Gldywn/gatekeeper/issues/new?template=platform_report.yml) fits better than a bug.
+  - type: dropdown
+    id: piece
+    attributes:
+      label: Piece
+      options:
+        - Beekeeper Studio plugin
+        - MCP server
+        - Agent skill
+        - Install / update skills
+        - Landing site
+        - Docs
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Shown in Beekeeper under Manage Plugins. Plugin and server ship under one version, but an unpinned `npx` server can be newer than your plugin. If they differ, give both.
+      placeholder: "0.1.1 (or: plugin 0.1.1, server 0.2.0)"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: "Whatever applies to the piece: OS, Beekeeper Studio version, Node version, agent or MCP client."
+      placeholder: macOS 15.5, Beekeeper Studio 5.4.2, Node 22.17, Claude Code
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what you got instead. Paste the exact error text, whether it surfaced in the plugin, the tool result, or the agent's log.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: Only if you can trigger it on demand. A reliable sequence is worth more than a long description.
+      placeholder: |
+        1.
+        2.
+        3.
