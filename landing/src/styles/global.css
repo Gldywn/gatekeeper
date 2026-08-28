@@ -134,9 +134,9 @@ h3 { font-size: 1.12rem; font-weight: 640; letter-spacing: -0.015em; }
   pointer-events: none;
 }
 /* Per-section illustration sizes: How it works largest, the others a step down. */
-#how .sec-art { width: clamp(330px, 36vw, 480px); }
-#safeguards .sec-art { width: clamp(275px, 30vw, 400px); }
-#use-cases .sec-art { width: clamp(275px, 30vw, 400px); }
+#how-it-works .sec-art { width: clamp(330px, 36vw, 480px); }
+#oversight .sec-art { width: clamp(275px, 30vw, 400px); }
+#where-it-fits .sec-art { width: clamp(275px, 30vw, 400px); }
 .sec-art::before {
   content: "";
   position: absolute;
