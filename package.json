@@ -1,7 +1,7 @@
 {
   "name": "gatekeeper",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Human-approved, LLM-agnostic bridge for running read-only SQL through Beekeeper Studio's connection.",
   "scripts": {
     "build": "pnpm -r build",
