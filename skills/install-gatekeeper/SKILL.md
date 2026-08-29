@@ -1,7 +1,7 @@
 ---
 name: install-gatekeeper
 description: Install Gatekeeper end to end and leave it working, meaning the Beekeeper Studio plugin, the MCP server registered with the agent, the companion gatekeeper skill, and the one-time pairing. Do every part the environment allows, then hand the human a precise checklist for the rest. Use when someone asks to install, set up, finish setting up, update, uninstall or repair Gatekeeper, when the Gatekeeper MCP tools are missing or the server will not connect, or when the plugin has never been installed or paired.
-version: 1.0.0
+version: 1.0.1
 ---
 
 # Install Gatekeeper
@@ -82,7 +82,7 @@ unzip -o "$tmp/gatekeeper-$version.zip" -d "$plugins/gatekeeper"
 
 Extracting with `-d .../plugins/gatekeeper` is the whole trick: the folder ends up named exactly `gatekeeper` and the manifest sits directly inside it, which is what Beekeeper requires. **Beekeeper matches the folder name against the plugin id and skips any folder that disagrees without a word**: no error, no entry in Manage Plugins, nothing to click. That silent skip is the single most common reason a manual install appears to do nothing. Double-clicking the zip in Finder is what produces the wrong shape, because macOS wraps a multi-file archive in a `gatekeeper-<version>/` folder; the command above avoids the rename entirely.
 
-**Upgrading over an existing install.** `unzip -o` overwrites in place and that is enough in practice. For a clean slot, delete the old one first, but only after you have confirmed with your own eyes that the path ends in `/plugins/gatekeeper` and holds a Gatekeeper `manifest.json`. Never delete a path you have not just listed.
+**Upgrading over an existing install.** `unzip -o` on its own leaves the old build behind: asset filenames carry a content hash, so a new bundle lands beside the previous one instead of replacing it, and `-o` only overwrites what the archive names. Clear `dist` first, with `rm -rf "$plugins/gatekeeper/dist"`, and let the archive restore it, but only after you have confirmed with your own eyes that the path ends in `/plugins/gatekeeper` and holds a Gatekeeper `manifest.json`. Never delete a path you have not just listed. `update-gatekeeper` carries the full sequence.
 
 **Check:**
 
