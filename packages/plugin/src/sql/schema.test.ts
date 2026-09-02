@@ -205,6 +205,33 @@ describe("analyzeSql", () => {
     expect(result?.star).toBe(false);
   });
 
+  it("keeps output aliases apart from the source columns they rename", () => {
+    const result = analyzeSql(
+      'SELECT p.name AS customer_name, p."updatedAt" changed_at, p.email "Contact" FROM crm.people p',
+      "postgresql",
+    );
+    expect(result?.columns).toEqual(["name", "updatedAt", "email"]);
+    expect(result?.aliases).toEqual(["customer_name", "changed_at", "Contact"]);
+  });
+
+  it("collects aliases from a subquery, a CTE, a UNION branch, and a function call", () => {
+    const cases: Array<[string, string[]]> = [
+      ["SELECT name AS customer_name FROM (SELECT name FROM crm.people) s", ["customer_name"]],
+      [
+        "WITH x AS (SELECT name AS company_name FROM billing.firms) SELECT * FROM x",
+        ["company_name"],
+      ],
+      ["SELECT name AS n FROM a UNION SELECT name AS company_name FROM b", ["n", "company_name"]],
+      [
+        "SELECT upper(name) AS company_name, count(*) AS total FROM billing.firms",
+        ["company_name", "total"],
+      ],
+    ];
+    for (const [sql, aliases] of cases) {
+      expect(analyzeSql(sql, "postgresql")?.aliases, sql).toEqual(aliases);
+    }
+  });
+
   it("returns null when the statement cannot be parsed", () => {
     expect(analyzeSql("this is not a query at all !@#", "postgresql")).toBeNull();
   });
@@ -224,6 +251,17 @@ describe("piiColumns", () => {
   it("returns nothing when no column looks sensitive", () => {
     const parsed = { columns: ["id", "status"], star: false };
     expect(piiColumns(parsed, ["id", "status", "amount"])).toEqual([]);
+  });
+
+  it("flags an output alias that reads as personal even when its source column does not", () => {
+    // "name" alone is deliberately not PII; the alias is what the result set exposes.
+    const parsed = { columns: ["name"], aliases: ["contact_email"], star: false };
+    expect(piiColumns(parsed, ["id", "name"])).toEqual(["contact_email"]);
+  });
+
+  it("keeps flagging the source column when its alias is innocuous", () => {
+    const parsed = { columns: ["email"], aliases: ["e"], star: false };
+    expect(piiColumns(parsed, ["id", "email"])).toEqual(["email"]);
   });
 });
 

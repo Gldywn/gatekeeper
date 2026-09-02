@@ -158,15 +158,55 @@ function dedupeRefs(refs: TableRef[]): TableRef[] {
   return out;
 }
 
-// Split a proposed query into the tables it reads (with their schema qualifier)
-// and the columns it names. Returns null when the parser cannot handle the
-// statement, so the caller can skip annotation rather than show something wrong.
-export function analyzeSql(
-  sql: string,
-  dialect: string,
-): { tables: TableRef[]; columns: string[]; star: boolean } | null {
+function isNode(x: unknown): x is Record<string, unknown> {
+  return typeof x === "object" && x !== null;
+}
+
+function walk(node: unknown, visit: (n: Record<string, unknown>) => void): void {
+  if (Array.isArray(node)) {
+    for (const child of node) walk(child, visit);
+    return;
+  }
+  if (!isNode(node)) return;
+  visit(node);
+  for (const key of Object.keys(node)) walk(node[key], visit);
+}
+
+// The parser's typings allow a value node as alias besides the usual plain string.
+function aliasName(as: unknown): string | null {
+  if (typeof as === "string") return as;
+  if (isNode(as) && typeof as.value === "string") return as.value;
+  return null;
+}
+
+// The parser's columnList carries only the source column, so "c.name AS company_name"
+// reaches the classifier as a bare "name" unless the alias is collected from the AST.
+function selectAliases(ast: unknown): string[] {
+  const aliases: string[] = [];
+  walk(ast, (n) => {
+    if (n.type !== "select" || !Array.isArray(n.columns)) return;
+    for (const item of n.columns) {
+      const alias = isNode(item) ? aliasName(item.as) : null;
+      if (alias) aliases.push(alias);
+    }
+  });
+  return unique(aliases);
+}
+
+export interface ParsedQuery {
+  tables: TableRef[];
+  // Source column names as the parser resolves them, never an output alias.
+  columns: string[];
+  // Output names assigned with AS: what the result set, and the agent, will see.
+  aliases: string[];
+  star: boolean;
+}
+
+// Returns null when the parser cannot handle the statement, so the caller can
+// skip annotation rather than show something wrong.
+export function analyzeSql(sql: string, dialect: string): ParsedQuery | null {
   try {
-    const { tableList, columnList } = parser.parse(sql, { database: dialect });
+    const { tableList, columnList, ast } = parser.parse(sql, { database: dialect });
     const refs = tableList.map(parseTableRef).filter((ref): ref is TableRef => ref !== null);
     let star = false;
     const columns: string[] = [];
@@ -180,7 +220,12 @@ export function analyzeSql(
         columns.push(name);
       }
     }
-    return { tables: dedupeRefs(refs), columns: unique(columns), star };
+    return {
+      tables: dedupeRefs(refs),
+      columns: unique(columns),
+      aliases: selectAliases(ast),
+      star,
+    };
   } catch {
     return null;
   }
@@ -226,13 +271,12 @@ export function analyzeTableOps(
   };
 }
 
-// The distinct column names a query would expose: the ones it names, plus (for
-// SELECT *) the real columns of the tables it reads.
-function exposedColumns(
-  parsed: { columns: string[]; star: boolean },
-  tableColumns: string[],
-): string[] {
-  const exposed = new Set<string>(parsed.columns);
+type ExposedInput = Pick<ParsedQuery, "columns" | "star"> & Partial<Pick<ParsedQuery, "aliases">>;
+
+// The distinct column names a query would expose: the ones it names, the output
+// aliases it assigns, plus (for SELECT *) the real columns of the tables it reads.
+function exposedColumns(parsed: ExposedInput, tableColumns: string[]): string[] {
+  const exposed = new Set<string>([...parsed.columns, ...(parsed.aliases ?? [])]);
   if (parsed.star) {
     for (const name of tableColumns) {
       exposed.add(name);
@@ -241,17 +285,11 @@ function exposedColumns(
   return [...exposed];
 }
 
-export function piiColumns(
-  parsed: { columns: string[]; star: boolean },
-  tableColumns: string[],
-): string[] {
+export function piiColumns(parsed: ExposedInput, tableColumns: string[]): string[] {
   return unique(exposedColumns(parsed, tableColumns).filter((c) => classifyColumn(c) === "pii"));
 }
 
-export function clientColumns(
-  parsed: { columns: string[]; star: boolean },
-  tableColumns: string[],
-): string[] {
+export function clientColumns(parsed: ExposedInput, tableColumns: string[]): string[] {
   return unique(exposedColumns(parsed, tableColumns).filter((c) => classifyColumn(c) === "client"));
 }
 
@@ -271,10 +309,6 @@ const COMPARISON_OPS = new Set([
 ]);
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const IBAN_RE = /^[A-Za-z]{2}\d{2}[A-Za-z0-9]{10,30}$/;
-
-function isNode(x: unknown): x is Record<string, unknown> {
-  return typeof x === "object" && x !== null;
-}
 
 function columnName(node: unknown): string | null {
   if (!isNode(node) || node.type !== "column_ref") return null;
@@ -297,16 +331,6 @@ function stringLiteral(node: unknown): string | null {
     return node.value;
   }
   return null;
-}
-
-function walk(node: unknown, visit: (n: Record<string, unknown>) => void): void {
-  if (Array.isArray(node)) {
-    for (const child of node) walk(child, visit);
-    return;
-  }
-  if (!isNode(node)) return;
-  visit(node);
-  for (const key of Object.keys(node)) walk(node[key], visit);
 }
 
 // String literals that expose a sensitive value in the query text itself: a value

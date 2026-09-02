@@ -26,6 +26,47 @@ describe("SchemaAnnotator.schemaFor", () => {
     expect(schema?.star).toBe(true);
   });
 
+  it("flags aliased name columns across a cross-schema join", async () => {
+    // Each table lives in its own schema; the two "name" columns are only sensitive
+    // under the output names the query gives them (customer_name, company_name).
+    const getColumns = vi.fn(async (table: string) =>
+      table === "wallet_holders"
+        ? columns("id", "holder_kind", "holder_ref")
+        : columns("id", "name", "status", "updatedAt"),
+    );
+    const annotator = new SchemaAnnotator({
+      getColumns,
+      dialect: () => "postgresql",
+      defaultSchema: () => "public",
+      generation: () => 0,
+    });
+
+    const schema = await annotator.schemaFor(
+      `SELECT w.id AS wallet_id, w.name AS customer_name, w.status, w."updatedAt" wallet_updated_at,
+              h.holder_kind, g.id AS company_id, g.name AS company_name
+         FROM ledger.wallets w
+         JOIN ledger.wallet_holders h ON h.id = w.holder_id
+         LEFT JOIN directory.organizations g ON g.id::text = h.holder_ref AND h.holder_kind = 'ORG'
+        WHERE w.status <> 'ACTIVE'
+        ORDER BY w.status, w."updatedAt"`,
+    );
+
+    expect(schema?.tables).toEqual([
+      "ledger.wallets",
+      "ledger.wallet_holders",
+      "directory.organizations",
+    ]);
+    expect(getColumns.mock.calls).toEqual([
+      ["wallets", "ledger"],
+      ["wallet_holders", "ledger"],
+      ["organizations", "directory"],
+    ]);
+    expect(schema?.client).toEqual(["customer_name", "company_name"]);
+    expect(schema?.pii).toEqual([]);
+    expect(schema?.literals).toEqual([]);
+    expect(schema?.star).toBe(false);
+  });
+
   it("returns null when the SQL will not parse", async () => {
     const getColumns = vi.fn(async () => columns());
     const annotator = new SchemaAnnotator({
