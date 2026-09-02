@@ -67,6 +67,23 @@ describe("SchemaAnnotator.schemaFor", () => {
     expect(schema?.star).toBe(false);
   });
 
+  it("flags the value of a filter that wraps its sensitive column", async () => {
+    const getColumns = vi.fn(async () => columns("id", "company_name", "status"));
+    const annotator = new SchemaAnnotator({
+      getColumns,
+      dialect: () => "postgresql",
+      defaultSchema: () => "public",
+      generation: () => 0,
+    });
+
+    const schema = await annotator.schemaFor(
+      "SELECT id FROM billing.firms WHERE lower(company_name) = 'acme'",
+    );
+
+    expect(schema?.client).toEqual(["company_name"]);
+    expect(schema?.literals).toEqual(["acme"]);
+  });
+
   it("returns null when the SQL will not parse", async () => {
     const getColumns = vi.fn(async () => columns());
     const annotator = new SchemaAnnotator({

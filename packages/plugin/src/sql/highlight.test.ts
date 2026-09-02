@@ -40,6 +40,32 @@ describe("highlight (pinned output for the Phase 2 rewrite)", () => {
     );
   });
 
+  it("flags a sensitive value written as an E-string, with the E prefix left outside", () => {
+    expect(
+      highlight(
+        "SELECT id FROM firms WHERE company_name = E'ACME'",
+        undefined,
+        ["company_name"],
+        ["ACME"],
+      ),
+    ).toBe(
+      '<span class="kw">SELECT</span> id <span class="kw">FROM</span> firms <span class="kw">WHERE</span> <span class="client-col">company_name</span> = E<span class="st sensitive-val">\'ACME\'</span>',
+    );
+  });
+
+  it("leaves a dollar-quoted value untinted: the tokenizer has no such string token", () => {
+    expect(
+      highlight(
+        "SELECT id FROM firms WHERE company_name = $$ACME$$",
+        undefined,
+        ["company_name"],
+        ["ACME"],
+      ),
+    ).toBe(
+      '<span class="kw">SELECT</span> id <span class="kw">FROM</span> firms <span class="kw">WHERE</span> <span class="client-col">company_name</span> = $$ACME$$',
+    );
+  });
+
   it("marks a client column that is table-qualified", () => {
     expect(highlight("SELECT u.company_name FROM users u", undefined, ["company_name"])).toBe(
       '<span class="kw">SELECT</span> u.<span class="client-col">company_name</span> <span class="kw">FROM</span> users u',
