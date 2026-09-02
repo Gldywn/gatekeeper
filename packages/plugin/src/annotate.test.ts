@@ -67,6 +67,45 @@ describe("SchemaAnnotator.schemaFor", () => {
     expect(schema?.star).toBe(false);
   });
 
+  it("flags a sensitive output name a RETURNING clause introduces", async () => {
+    // No table column is sensitive on its own: the write only exposes the value under
+    // the output name it assigns in RETURNING.
+    const getColumns = vi.fn(async () => columns("id", "name", "status"));
+    const annotator = new SchemaAnnotator({
+      getColumns,
+      dialect: () => "postgresql",
+      defaultSchema: () => undefined,
+      generation: () => 0,
+    });
+
+    const schema = await annotator.schemaFor(
+      "UPDATE billing.firms SET status = 'closed' RETURNING name AS contact_email",
+    );
+
+    expect(schema?.tables).toEqual(["billing.firms"]);
+    expect(schema?.pii).toEqual(["contact_email"]);
+    expect(schema?.client).toEqual([]);
+    expect(schema?.star).toBe(false);
+  });
+
+  it("flags a sensitive output name a derived table's column list introduces", async () => {
+    const getColumns = vi.fn(async () => columns("id", "name", "status"));
+    const annotator = new SchemaAnnotator({
+      getColumns,
+      dialect: () => "postgresql",
+      defaultSchema: () => undefined,
+      generation: () => 0,
+    });
+
+    const schema = await annotator.schemaFor(
+      "SELECT * FROM (SELECT name FROM billing.firms) f(company_name)",
+    );
+
+    expect(schema?.tables).toEqual(["billing.firms"]);
+    expect(schema?.client).toEqual(["company_name"]);
+    expect(schema?.pii).toEqual([]);
+  });
+
   it("returns null when the SQL will not parse", async () => {
     const getColumns = vi.fn(async () => columns());
     const annotator = new SchemaAnnotator({
