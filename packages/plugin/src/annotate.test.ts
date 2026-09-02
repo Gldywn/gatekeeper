@@ -67,6 +67,27 @@ describe("SchemaAnnotator.schemaFor", () => {
     expect(schema?.star).toBe(false);
   });
 
+  it("annotates the value a write assigns to a sensitive column", async () => {
+    // Writes reach the card too (once write mode is armed), and the value they carry
+    // sits in the statement itself, not in a WHERE comparison.
+    const getColumns = vi.fn(async () => columns("id", "company_name", "status"));
+    const annotator = new SchemaAnnotator({
+      getColumns,
+      dialect: () => "postgresql",
+      defaultSchema: () => "public",
+      generation: () => 0,
+    });
+
+    const schema = await annotator.schemaFor(
+      "UPDATE billing.firms SET company_name = 'ACME' WHERE id = 1",
+    );
+
+    expect(schema?.tables).toEqual(["billing.firms"]);
+    expect(schema?.client).toEqual(["company_name"]);
+    expect(schema?.literals).toEqual(["ACME"]);
+    expect(schema?.star).toBe(false);
+  });
+
   it("returns null when the SQL will not parse", async () => {
     const getColumns = vi.fn(async () => columns());
     const annotator = new SchemaAnnotator({
