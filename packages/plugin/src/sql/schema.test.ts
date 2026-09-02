@@ -378,4 +378,100 @@ describe("sensitiveLiterals", () => {
   it("returns nothing when the SQL will not parse", () => {
     expect(sensitiveLiterals("not a query", "postgresql")).toEqual([]);
   });
+
+  it("resolves the column through a function, cast, or COALESCE wrapper", () => {
+    const cases: Array<[string, string[]]> = [
+      ["SELECT id FROM billing.firms WHERE lower(company_name) = 'acme'", ["acme"]],
+      ["SELECT id FROM billing.firms WHERE company_name::text = 'ACME'", ["ACME"]],
+      ["SELECT id FROM billing.firms WHERE CAST(company_name AS text) = 'ACME'", ["ACME"]],
+      ["SELECT id FROM billing.firms WHERE COALESCE(company_name, '') = 'ACME'", ["ACME"]],
+      ["SELECT id FROM billing.firms WHERE lower(trim(company_name)) = 'acme'", ["acme"]],
+      ["SELECT id FROM billing.firms WHERE 'ACME' = upper(company_name)", ["ACME"]],
+      ["SELECT id FROM crm.people GROUP BY id HAVING max(salary) = '90000'", ["90000"]],
+    ];
+    for (const [sql, literals] of cases) {
+      expect(sensitiveLiterals(sql, "postgresql").sort(), sql).toEqual(literals);
+    }
+  });
+
+  it("flags the literals of an IN list, a BETWEEN range, and an ANY/ALL array", () => {
+    const cases: Array<[string, string[]]> = [
+      [
+        "SELECT id FROM billing.firms WHERE lower(company_name) IN ('acme', 'beta')",
+        ["acme", "beta"],
+      ],
+      [
+        "SELECT id FROM crm.people WHERE birth_date BETWEEN '1990-01-01' AND '1991-01-01'",
+        ["1990-01-01", "1991-01-01"],
+      ],
+      [
+        "SELECT id FROM crm.people WHERE birth_date NOT BETWEEN '1990-01-01' AND '1991-01-01'",
+        ["1990-01-01", "1991-01-01"],
+      ],
+      [
+        "SELECT id FROM billing.firms WHERE company_name = ANY(ARRAY['ACME', 'BETA'])",
+        ["ACME", "BETA"],
+      ],
+      ["SELECT id FROM billing.firms WHERE company_name <> ALL(ARRAY['ACME'])", ["ACME"]],
+    ];
+    for (const [sql, literals] of cases) {
+      expect(sensitiveLiterals(sql, "postgresql").sort(), sql).toEqual(literals);
+    }
+  });
+
+  it("flags a literal compared with a pattern or regex operator", () => {
+    for (const op of ["~", "~*", "!~", "!~*", "SIMILAR TO", "NOT SIMILAR TO", "NOT ILIKE"]) {
+      const sql = `SELECT id FROM billing.firms WHERE company_name ${op} 'acme'`;
+      expect(sensitiveLiterals(sql, "postgresql"), sql).toEqual(["acme"]);
+    }
+  });
+
+  it("reads the value forms the parser leaves as raw text", () => {
+    const cases: Array<[string, string[]]> = [
+      ["SELECT id FROM billing.firms WHERE company_name = E'ACME'", ["ACME"]],
+      ["SELECT id FROM billing.firms WHERE company_name = $$ACME$$", ["ACME"]],
+      ["SELECT id FROM billing.firms WHERE company_name = $tag$ACME$tag$", ["ACME"]],
+      ["SELECT id FROM billing.firms WHERE company_name IS DISTINCT FROM 'ACME'", ["ACME"]],
+      ["SELECT id FROM crm.people WHERE note = E'jane@example.test'", ["jane@example.test"]],
+    ];
+    for (const [sql, literals] of cases) {
+      expect(sensitiveLiterals(sql, "postgresql").sort(), sql).toEqual(literals);
+    }
+  });
+
+  it("leaves a bind parameter and an IS NULL check alone", () => {
+    expect(
+      sensitiveLiterals("SELECT id FROM billing.firms WHERE company_name = $1", "postgresql"),
+    ).toEqual([]);
+    expect(
+      sensitiveLiterals(
+        "SELECT id FROM billing.firms WHERE company_name IS NOT NULL",
+        "postgresql",
+      ),
+    ).toEqual([]);
+  });
+
+  it("flags a wrapped call only when one of its arguments is sensitive", () => {
+    expect(
+      sensitiveLiterals(
+        "SELECT id FROM billing.firms WHERE concat(city, status) = 'ACME'",
+        "postgresql",
+      ),
+    ).toEqual([]);
+    expect(
+      sensitiveLiterals(
+        "SELECT id FROM billing.firms WHERE concat(company_name, status) = 'ACME'",
+        "postgresql",
+      ),
+    ).toEqual(["ACME"]);
+  });
+
+  it("never reaches into a subquery for the literals of an outer comparison", () => {
+    expect(
+      sensitiveLiterals(
+        "SELECT id FROM billing.firms WHERE company_name IN (SELECT label FROM crm.tags WHERE status = 'active')",
+        "postgresql",
+      ),
+    ).toEqual([]);
+  });
 });
