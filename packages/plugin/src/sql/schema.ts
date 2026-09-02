@@ -179,15 +179,36 @@ function aliasName(as: unknown): string | null {
   return null;
 }
 
+// A derived table renames its columns inside the relation alias itself, which the
+// parser hands back unsplit as the raw string "f(company_name, ...)".
+const RELATION_COLUMN_LIST = /^[^()]+\(([^()]*)\)$/;
+
+function relationColumnAliases(as: unknown): string[] {
+  const alias = aliasName(as);
+  const columns = alias ? RELATION_COLUMN_LIST.exec(alias.trim())?.[1] : undefined;
+  if (columns === undefined) return [];
+  return columns
+    .split(",")
+    .map((c) => c.trim())
+    .filter(Boolean);
+}
+
 // The parser's columnList carries only the source column, so "c.name AS company_name"
 // reaches the classifier as a bare "name" unless the alias is collected from the AST.
-function selectAliases(ast: unknown): string[] {
+// RETURNING is a select list under its own node type, hence the second type here.
+function outputAliases(ast: unknown): string[] {
   const aliases: string[] = [];
   walk(ast, (n) => {
-    if (n.type !== "select" || !Array.isArray(n.columns)) return;
-    for (const item of n.columns) {
-      const alias = isNode(item) ? aliasName(item.as) : null;
-      if (alias) aliases.push(alias);
+    if ((n.type === "select" || n.type === "returning") && Array.isArray(n.columns)) {
+      for (const item of n.columns) {
+        const alias = isNode(item) ? aliasName(item.as) : null;
+        if (alias) aliases.push(alias);
+      }
+    }
+    if (Array.isArray(n.from)) {
+      for (const item of n.from) {
+        if (isNode(item)) aliases.push(...relationColumnAliases(item.as));
+      }
     }
   });
   return unique(aliases);
@@ -197,7 +218,8 @@ export interface ParsedQuery {
   tables: TableRef[];
   // Source column names as the parser resolves them, never an output alias.
   columns: string[];
-  // Output names assigned with AS: what the result set, and the agent, will see.
+  // Output names the query assigns (AS, RETURNING, a relation column list): what the
+  // result set, and the agent, will see.
   aliases: string[];
   star: boolean;
 }
@@ -223,7 +245,7 @@ export function analyzeSql(sql: string, dialect: string): ParsedQuery | null {
     return {
       tables: dedupeRefs(refs),
       columns: unique(columns),
-      aliases: selectAliases(ast),
+      aliases: outputAliases(ast),
       star,
     };
   } catch {
