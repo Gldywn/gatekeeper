@@ -9,7 +9,7 @@ export interface Tok {
 }
 
 // Longest first, so ">=" wins over ">" and "->>" over "->".
-const MULTI_OPS = ["->>", ">=", "<=", "<>", "!=", "||", "::", "->"];
+const MULTI_OPS = ["->>", "#>>", ">=", "<=", "<>", "!=", "||", "::", "->", "#>"];
 
 const WORD = /[A-Za-z0-9_$.]/;
 

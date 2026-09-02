@@ -232,6 +232,39 @@ describe("analyzeSql", () => {
     }
   });
 
+  it("reads the key of a JSON accessor as an exposed name", () => {
+    const cases: Array<[string, string, string[]]> = [
+      ["postgresql", "SELECT profile->>'email' FROM crm.people", ["email"]],
+      ["postgresql", "SELECT profile->'contact'->>'email' FROM crm.people", ["email", "contact"]],
+      ["postgresql", "SELECT profile#>>'{contact,email}' FROM crm.people", ["email"]],
+      ["postgresql", "SELECT profile#>'{contact}' FROM crm.people", ["contact"]],
+      ["postgresql", "SELECT jsonb_extract_path_text(profile, 'email') FROM crm.people", ["email"]],
+      [
+        "postgresql",
+        "SELECT jsonb_extract_path(profile, 'contact', 'email') FROM crm.people",
+        ["contact", "email"],
+      ],
+      ["postgresql", "SELECT id FROM crm.people WHERE profile->>'email' IS NOT NULL", ["email"]],
+      ["mysql", "SELECT profile->>'$.email' FROM people", ["email"]],
+      ["mysql", "SELECT profile->'$.contact.email' FROM people", ["email"]],
+      ["mysql", "SELECT JSON_EXTRACT(profile, '$.email') FROM people", ["email"]],
+      ["mariadb", "SELECT JSON_EXTRACT(profile, '$.email') FROM people", ["email"]],
+      ["sqlite", "SELECT json_extract(profile, '$.email') FROM people", ["email"]],
+      ["transactsql", "SELECT JSON_VALUE(profile, '$.email') FROM people", ["email"]],
+      ["bigquery", "SELECT JSON_EXTRACT_SCALAR(profile, '$.email') FROM people", ["email"]],
+    ];
+    for (const [dialect, sql, keys] of cases) {
+      expect(analyzeSql(sql, dialect)?.jsonKeys, sql).toEqual(keys);
+      expect(analyzeSql(sql, dialect)?.columns, sql).toEqual(expect.arrayContaining(["profile"]));
+    }
+  });
+
+  it("reports no key for an array index or a plain column", () => {
+    expect(analyzeSql("SELECT tags->0 FROM crm.people", "postgresql")?.jsonKeys).toEqual([]);
+    expect(analyzeSql("SELECT profile->>'$' FROM people", "mysql")?.jsonKeys).toEqual([]);
+    expect(analyzeSql("SELECT id, email FROM crm.people", "postgresql")?.jsonKeys).toEqual([]);
+  });
+
   it("returns null when the statement cannot be parsed", () => {
     expect(analyzeSql("this is not a query at all !@#", "postgresql")).toBeNull();
   });
@@ -262,6 +295,11 @@ describe("piiColumns", () => {
   it("keeps flagging the source column when its alias is innocuous", () => {
     const parsed = { columns: ["email"], aliases: ["e"], star: false };
     expect(piiColumns(parsed, ["id", "email"])).toEqual(["email"]);
+  });
+
+  it("flags a JSON key the containing column hides", () => {
+    const parsed = { columns: ["profile"], jsonKeys: ["email"], star: false };
+    expect(piiColumns(parsed, ["id", "profile"])).toEqual(["email"]);
   });
 });
 
@@ -337,6 +375,11 @@ describe("clientColumns", () => {
     ]);
   });
 
+  it("flags a JSON key the containing column hides", () => {
+    const parsed = { columns: ["profile"], jsonKeys: ["company_name"], star: false };
+    expect(clientColumns(parsed, ["id", "profile"])).toEqual(["company_name"]);
+  });
+
   it("is disjoint from piiColumns: a personal column never counts as client data", () => {
     const parsed = { columns: ["email", "company"], star: false };
     expect(piiColumns(parsed, [])).toEqual(["email"]);
@@ -373,6 +416,36 @@ describe("sensitiveLiterals", () => {
     expect(sensitiveLiterals("SELECT id FROM t WHERE status = 'active'", "postgresql")).toEqual([]);
     expect(sensitiveLiterals("SELECT id FROM t WHERE id = 5", "postgresql")).toEqual([]);
     expect(sensitiveLiterals("SELECT id FROM t WHERE company_id = 42", "postgresql")).toEqual([]);
+  });
+
+  it("flags a literal compared to a sensitive JSON key", () => {
+    expect(
+      sensitiveLiterals(
+        "SELECT id FROM crm.people WHERE profile->>'company_name' = 'ACME'",
+        "postgresql",
+      ),
+    ).toEqual(["ACME"]);
+    expect(
+      sensitiveLiterals(
+        "SELECT id FROM crm.people WHERE profile#>>'{contact,company_name}' IN ('ACME', 'BETA')",
+        "postgresql",
+      ).sort(),
+    ).toEqual(["ACME", "BETA"]);
+    expect(
+      sensitiveLiterals(
+        "SELECT id FROM people WHERE JSON_EXTRACT(profile, '$.company_name') = 'ACME'",
+        "mysql",
+      ),
+    ).toEqual(["ACME"]);
+  });
+
+  it("ignores a literal compared to a JSON key that is not sensitive", () => {
+    expect(
+      sensitiveLiterals(
+        "SELECT id FROM crm.people WHERE profile->>'status' = 'active'",
+        "postgresql",
+      ),
+    ).toEqual([]);
   });
 
   it("returns nothing when the SQL will not parse", () => {
