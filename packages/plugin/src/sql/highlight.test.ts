@@ -77,6 +77,31 @@ describe("highlight (pinned output for the Phase 2 rewrite)", () => {
     );
   });
 
+  it("marks the key of a JSON accessor as the column it exposes", () => {
+    expect(highlight("SELECT profile->>'email' FROM crm.people", ["email"])).toBe(
+      '<span class="kw">SELECT</span> profile-&gt;&gt;\'<span class="pii-col">email</span>\' <span class="kw">FROM</span> crm.people',
+    );
+  });
+
+  it("tints only the flagged segment of a JSON path", () => {
+    expect(highlight("SELECT profile ->> '$.contact.email' FROM people", ["email"])).toBe(
+      '<span class="kw">SELECT</span> profile -&gt;&gt; \'$.contact.<span class="pii-col">email</span>\' <span class="kw">FROM</span> people',
+    );
+    expect(
+      highlight("SELECT profile#>>'{contact,company_name}' FROM crm.people", undefined, [
+        "company_name",
+      ]),
+    ).toBe(
+      '<span class="kw">SELECT</span> profile#&gt;&gt;\'{contact,<span class="client-col">company_name</span>}\' <span class="kw">FROM</span> crm.people',
+    );
+  });
+
+  it("keeps a plain literal a value even when its text matches a flagged column", () => {
+    expect(highlight("SELECT id FROM t WHERE note = 'email'", ["email"])).toBe(
+      '<span class="kw">SELECT</span> id <span class="kw">FROM</span> t <span class="kw">WHERE</span> note = <span class="st">\'email\'</span>',
+    );
+  });
+
   it("leaves a quoted non-sensitive identifier untinted", () => {
     expect(highlight('SELECT "status" FROM t', ["email"], ["company_name"])).toBe(
       '<span class="kw">SELECT</span> &quot;status&quot; <span class="kw">FROM</span> t',

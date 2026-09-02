@@ -56,6 +56,15 @@ describe("formatSql", () => {
     expect(out).toContain("'hello world, foo'");
   });
 
+  it("keeps a JSON accessor operator in one piece", () => {
+    expect(formatSql("SELECT profile->>'email' FROM crm.people")).toBe(
+      ["SELECT", "  profile ->> 'email'", "FROM crm.people"].join("\n"),
+    );
+    expect(formatSql("SELECT profile#>>'{contact,email}' FROM crm.people")).toBe(
+      ["SELECT", "  profile #>> '{contact,email}'", "FROM crm.people"].join("\n"),
+    );
+  });
+
   it("is idempotent", () => {
     for (const sql of [
       "SELECT a, b FROM t WHERE a = 1",

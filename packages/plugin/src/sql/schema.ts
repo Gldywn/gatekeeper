@@ -193,12 +193,69 @@ function selectAliases(ast: unknown): string[] {
   return unique(aliases);
 }
 
+// Accessors that read one key out of a JSON document; the parser keeps the key in
+// the right operand and reports only the containing column.
+const JSON_OPERATORS = new Set(["->", "->>", "#>", "#>>"]);
+// Every dialect names its JSON functions with "json" in them (json_extract,
+// jsonb_extract_path_text, JSON_VALUE), so the match stays dialect-generic.
+const JSON_FUNCTION = /json/i;
+
+// The name a JSON path operand exposes: "email", "$.contact.email" and
+// "{contact,email}" all end on the same key. Array indexes and "$" name nothing.
+export function jsonKeyName(path: string): string | null {
+  const segments = path
+    .split(/[.,[\]{}]/)
+    .map((segment) => segment.replace(/[$"']/g, "").trim())
+    .filter((segment) => segment !== "" && !/^\d+$/.test(segment));
+  return segments[segments.length - 1] ?? null;
+}
+
+// The parser puts a function's name under name.name[], except in the bigquery
+// dialect where an unqualified name lands in name.schema; take the last either way.
+function functionName(node: Record<string, unknown>): string {
+  let name = "";
+  walk(node.name, (n) => {
+    if (typeof n.value === "string") name = n.value;
+  });
+  return name;
+}
+
+// The JSON keys one node reads, in path order: the string operand of an accessor
+// operator, or the string arguments of a JSON function.
+function accessorKeys(node: Record<string, unknown>): string[] {
+  if (node.type === "binary_expr" && JSON_OPERATORS.has(String(node.operator))) {
+    const path = stringLiteral(node.right);
+    const key = path === null ? null : jsonKeyName(path);
+    return key ? [key] : [];
+  }
+  if (node.type !== "function" || !JSON_FUNCTION.test(functionName(node))) {
+    return [];
+  }
+  const args = isNode(node.args) && Array.isArray(node.args.value) ? node.args.value : [];
+  return args.flatMap((arg) => {
+    const path = stringLiteral(arg);
+    const key = path === null ? null : jsonKeyName(path);
+    return key ? [key] : [];
+  });
+}
+
+function jsonKeys(ast: unknown): string[] {
+  const keys: string[] = [];
+  walk(ast, (n) => {
+    keys.push(...accessorKeys(n));
+  });
+  return unique(keys);
+}
+
 export interface ParsedQuery {
   tables: TableRef[];
   // Source column names as the parser resolves them, never an output alias.
   columns: string[];
   // Output names assigned with AS: what the result set, and the agent, will see.
   aliases: string[];
+  // Keys read out of a JSON document (profile->>'email'): the parser reports only
+  // the containing column, so the key is the sole trace of what is exposed.
+  jsonKeys: string[];
   star: boolean;
 }
 
@@ -224,6 +281,7 @@ export function analyzeSql(sql: string, dialect: string): ParsedQuery | null {
       tables: dedupeRefs(refs),
       columns: unique(columns),
       aliases: selectAliases(ast),
+      jsonKeys: jsonKeys(ast),
       star,
     };
   } catch {
@@ -271,12 +329,18 @@ export function analyzeTableOps(
   };
 }
 
-type ExposedInput = Pick<ParsedQuery, "columns" | "star"> & Partial<Pick<ParsedQuery, "aliases">>;
+type ExposedInput = Pick<ParsedQuery, "columns" | "star"> &
+  Partial<Pick<ParsedQuery, "aliases" | "jsonKeys">>;
 
 // The distinct column names a query would expose: the ones it names, the output
-// aliases it assigns, plus (for SELECT *) the real columns of the tables it reads.
+// aliases it assigns, the JSON keys it reads, plus (for SELECT *) the real columns
+// of the tables it reads.
 function exposedColumns(parsed: ExposedInput, tableColumns: string[]): string[] {
-  const exposed = new Set<string>([...parsed.columns, ...(parsed.aliases ?? [])]);
+  const exposed = new Set<string>([
+    ...parsed.columns,
+    ...(parsed.aliases ?? []),
+    ...(parsed.jsonKeys ?? []),
+  ]);
   if (parsed.star) {
     for (const name of tableColumns) {
       exposed.add(name);
@@ -311,7 +375,13 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const IBAN_RE = /^[A-Za-z]{2}\d{2}[A-Za-z0-9]{10,30}$/;
 
 function columnName(node: unknown): string | null {
-  if (!isNode(node) || node.type !== "column_ref") return null;
+  if (!isNode(node)) return null;
+  if (node.type !== "column_ref") {
+    // A JSON accessor carries the meaningful name in its key, so a literal compared
+    // to profile->>'company_name' is classified on the key, not on "profile".
+    const keys = accessorKeys(node);
+    return keys[keys.length - 1] ?? null;
+  }
   const c = node.column;
   if (typeof c === "string") return c;
   if (isNode(c)) {

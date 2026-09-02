@@ -1,6 +1,7 @@
 import { escapeHtml } from "../html";
 import { type Tok, tokenize } from "./format";
 import { visibleControls } from "./sanitize";
+import { jsonKeyName } from "./schema";
 
 // Case-sensitive by design: the previous regex pass matched only the uppercase
 // spellings, so INTERVAL etc. read as keywords only when written that way.
@@ -27,6 +28,36 @@ const FUNCTIONS = new Set(["count", "sum", "now", "avg", "max", "min"]);
 function lastSegment(word: string): string {
   const dot = word.lastIndexOf(".");
   return dot === -1 ? word : word.slice(dot + 1);
+}
+
+const JSON_OPERATORS = new Set(["->", "->>", "#>", "#>>"]);
+
+// A key read through a JSON accessor is quoted like a value but names a column, so
+// it is tinted like an identifier, and only on the path segment that was flagged.
+function jsonKeySpan(
+  inner: string,
+  piiSet: ReadonlySet<string>,
+  clientSet: ReadonlySet<string>,
+): string | null {
+  const seg = jsonKeyName(inner);
+  if (!seg) {
+    return null;
+  }
+  const key = seg.toLowerCase();
+  const cls = piiSet.has(key) ? "pii-col" : clientSet.has(key) ? "client-col" : "";
+  if (!cls) {
+    return null;
+  }
+  const at = inner.lastIndexOf(seg);
+  const head = escapeHtml(inner.slice(0, at));
+  const tail = escapeHtml(inner.slice(at + seg.length));
+  return `${head}<span class="${cls}">${escapeHtml(seg)}</span>${tail}`;
+}
+
+function prevSignificant(toks: Tok[], i: number): Tok | undefined {
+  let j = i - 1;
+  while (j >= 0 && (toks[j].t === "ws" || toks[j].t === "comment")) j--;
+  return toks[j];
 }
 
 function classifyWord(
@@ -88,6 +119,15 @@ export function highlight(
       const inner = closed ? tk.v.slice(1, -1) : tk.v.slice(1);
       // Single quotes are a value literal; a flagged value adds "sensitive-val".
       if (quote === "'") {
+        const prev = prevSignificant(toks, i);
+        const keySpan =
+          prev?.t === "op" && JSON_OPERATORS.has(prev.v)
+            ? jsonKeySpan(inner, piiSet, clientSet)
+            : null;
+        if (keySpan !== null) {
+          out += `${quote}${keySpan}${closed ? quote : ""}`;
+          continue;
+        }
         const cls = sensitive.has(inner) ? "st sensitive-val" : "st";
         out += `<span class="${cls}">${escapeHtml(tk.v)}</span>`;
         continue;
