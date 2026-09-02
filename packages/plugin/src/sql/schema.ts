@@ -310,15 +310,20 @@ const COMPARISON_OPS = new Set([
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const IBAN_RE = /^[A-Za-z]{2}\d{2}[A-Za-z0-9]{10,30}$/;
 
-function columnName(node: unknown): string | null {
-  if (!isNode(node) || node.type !== "column_ref") return null;
-  const c = node.column;
-  if (typeof c === "string") return c;
-  if (isNode(c)) {
-    if (typeof c.value === "string") return c.value;
-    if (isNode(c.expr) && typeof c.expr.value === "string") return c.expr.value;
+// A column name as the parser spells it: a plain string, a value node, or a nested
+// expr, depending on the dialect and on whether the identifier was quoted.
+function columnLabel(node: unknown): string | null {
+  if (typeof node === "string") return node;
+  if (isNode(node)) {
+    if (typeof node.value === "string") return node.value;
+    if (isNode(node.expr) && typeof node.expr.value === "string") return node.expr.value;
   }
   return null;
+}
+
+function columnName(node: unknown): string | null {
+  if (!isNode(node) || node.type !== "column_ref") return null;
+  return columnLabel(node.column);
 }
 
 function stringLiteral(node: unknown): string | null {
@@ -334,8 +339,9 @@ function stringLiteral(node: unknown): string | null {
 }
 
 // String literals that expose a sensitive value in the query text itself: a value
-// bound to a PII/client column (WHERE company_name = 'ACME'), or one whose shape is
-// itself PII (an email or IBAN). Render-only, like the column flags.
+// bound to a PII/client column (WHERE company_name = 'ACME', SET company_name = 'ACME',
+// an inserted row), or one whose shape is itself PII (an email or IBAN). Render-only,
+// like the column flags.
 export function sensitiveLiterals(sql: string, dialect: string): string[] {
   let ast: unknown;
   try {
@@ -352,6 +358,26 @@ export function sensitiveLiterals(sql: string, dialect: string): string[] {
     const s = stringLiteral(n);
     if (s !== null && (EMAIL_RE.test(s) || IBAN_RE.test(s))) {
       found.add(s);
+    }
+    // Assignments hang off `set` wherever they appear: UPDATE, MySQL INSERT ... SET,
+    // and the update branch of an upsert (ON CONFLICT / ON DUPLICATE KEY).
+    if (Array.isArray(n.set)) {
+      for (const item of n.set) {
+        if (!isNode(item)) continue;
+        const col = columnLabel(item.column);
+        if (col && classifyColumn(col)) addLiteral(item.value);
+      }
+    }
+    // INSERT/REPLACE ... VALUES: the column list lines up positionally with each row.
+    if (Array.isArray(n.columns) && isNode(n.values) && Array.isArray(n.values.values)) {
+      const columns = n.columns.map(columnLabel);
+      for (const row of n.values.values) {
+        if (!isNode(row) || !Array.isArray(row.value)) continue;
+        row.value.forEach((value, i) => {
+          const col = columns[i];
+          if (col && classifyColumn(col)) addLiteral(value);
+        });
+      }
     }
     if (n.type === "binary_expr" && COMPARISON_OPS.has(String(n.operator).toUpperCase())) {
       for (const [side, other] of [

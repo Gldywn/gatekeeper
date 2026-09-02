@@ -369,6 +369,63 @@ describe("sensitiveLiterals", () => {
     ).toEqual(["FR7630006000011234567890189"]);
   });
 
+  it("flags a literal assigned to a sensitive column by an UPDATE", () => {
+    expect(
+      sensitiveLiterals(
+        "UPDATE billing.firms SET company_name = 'ACME' WHERE id = 1",
+        "postgresql",
+      ),
+    ).toEqual(["ACME"]);
+    expect(
+      sensitiveLiterals("UPDATE billing.firms SET \"companyName\" = 'ACME'", "postgresql"),
+    ).toEqual(["ACME"]);
+  });
+
+  it("flags an inserted literal, on every VALUES row", () => {
+    expect(
+      sensitiveLiterals(
+        "INSERT INTO billing.firms (id, company_name) VALUES (1, 'ACME'), (2, 'BETA')",
+        "postgresql",
+      ).sort(),
+    ).toEqual(["ACME", "BETA"]);
+  });
+
+  it("flags the literals of an upsert, both inserted and updated", () => {
+    expect(
+      sensitiveLiterals(
+        `INSERT INTO billing.firms (id, company_name) VALUES (1, 'ACME')
+           ON CONFLICT (id) DO UPDATE SET company_name = 'BETA'`,
+        "postgresql",
+      ).sort(),
+    ).toEqual(["ACME", "BETA"]);
+  });
+
+  it("reads MySQL's INSERT ... SET and ON DUPLICATE KEY UPDATE assignments", () => {
+    expect(
+      sensitiveLiterals("INSERT INTO firms SET id = 1, company_name = 'ACME'", "mysql"),
+    ).toEqual(["ACME"]);
+    expect(
+      sensitiveLiterals(
+        `INSERT INTO firms (id, company_name) VALUES (1, 'ACME')
+           ON DUPLICATE KEY UPDATE company_name = 'BETA'`,
+        "mysql",
+      ).sort(),
+    ).toEqual(["ACME", "BETA"]);
+  });
+
+  it("ignores a write that carries no sensitive value", () => {
+    expect(
+      sensitiveLiterals("UPDATE billing.firms SET status = 'active' WHERE id = 1", "postgresql"),
+    ).toEqual([]);
+    // INSERT ... SELECT: the projection holds source columns, never values to zip.
+    expect(
+      sensitiveLiterals(
+        "INSERT INTO billing.firms (id, company_name) SELECT id, name FROM crm.people",
+        "postgresql",
+      ),
+    ).toEqual([]);
+  });
+
   it("ignores non-sensitive filters and identifier comparisons", () => {
     expect(sensitiveLiterals("SELECT id FROM t WHERE status = 'active'", "postgresql")).toEqual([]);
     expect(sensitiveLiterals("SELECT id FROM t WHERE id = 5", "postgresql")).toEqual([]);
