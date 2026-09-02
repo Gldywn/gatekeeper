@@ -67,6 +67,28 @@ describe("SchemaAnnotator.schemaFor", () => {
     expect(schema?.star).toBe(false);
   });
 
+  it("flags the keys read out of a JSON column, and a literal bound to one", async () => {
+    // The stored document is opaque to the schema: only the accessor keys say what
+    // the query actually reads out of it.
+    const getColumns = vi.fn(async () => columns("id", "profile"));
+    const annotator = new SchemaAnnotator({
+      getColumns,
+      dialect: () => "postgresql",
+      defaultSchema: () => undefined,
+      generation: () => 0,
+    });
+
+    const schema = await annotator.schemaFor(
+      "SELECT profile->>'email' FROM crm.people WHERE profile->>'company_name' = 'ACME'",
+    );
+
+    expect(schema?.tables).toEqual(["crm.people"]);
+    expect(schema?.pii).toEqual(["email"]);
+    expect(schema?.client).toEqual(["company_name"]);
+    expect(schema?.literals).toEqual(["ACME"]);
+    expect(schema?.star).toBe(false);
+  });
+
   it("returns null when the SQL will not parse", async () => {
     const getColumns = vi.fn(async () => columns());
     const annotator = new SchemaAnnotator({
