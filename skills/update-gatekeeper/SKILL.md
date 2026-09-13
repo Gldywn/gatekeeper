@@ -1,7 +1,7 @@
 ---
 name: update-gatekeeper
 description: Check whether an existing Gatekeeper install is current and bring it up to date across all three pieces (the Beekeeper Studio plugin, the MCP server, the skills), acting only on what is actually behind. Use when someone asks to update or upgrade Gatekeeper, asks whether they are running the latest version, mentions a new Gatekeeper release, or wants to know which version of Gatekeeper they have.
-version: 1.0.0
+version: 1.0.1
 ---
 
 # Update Gatekeeper
@@ -35,7 +35,11 @@ Read the installed version straight out of the manifest:
 
 No manifest there means the plugin was never installed manually. Check Beekeeper's Manage Plugins before concluding, since a registry install updates itself from there and is not yours to touch.
 
-If it is behind, replace it in place. The folder keeps its exact name, `unzip -o` overwrites the old files, and nothing else moves:
+If it is behind, replace it in place. The folder keeps its exact name and nothing moves outside it.
+
+`unzip -o` alone is not enough, though, and the reason is worth knowing. The build stamps a content hash into every asset filename, so a new version ships `dist/assets/index-<newhash>.js` rather than overwriting the old bundle: `-o` replaces what the archive names and never removes what it does not, which strands the previous version's bundle in place. It is dead weight, `dist/index.html` only ever references the current hash, but it is roughly 3 MB per release and it accumulates. Clear `dist` first and the whole directory comes back from the archive.
+
+Order matters here. Delete only after `unzip -l` has proved the archive is the right shape, so a bad download never costs a working plugin:
 
 ```bash
 tmp="${TMPDIR:-/tmp}"
@@ -43,9 +47,13 @@ plugins="$HOME/Library/Application Support/beekeeper-studio/plugins"   # macOS; 
 curl -sSL -o "$tmp/gatekeeper-$version.zip" \
   "https://github.com/Gldywn/gatekeeper/releases/download/v$version/gatekeeper-$version.zip"
 unzip -l "$tmp/gatekeeper-$version.zip"                                # manifest.json at the root, no wrapper folder
+rm -rf "$plugins/gatekeeper/dist"                                      # only once the listing above checks out
 unzip -o "$tmp/gatekeeper-$version.zip" -d "$plugins/gatekeeper"
 head -5 "$plugins/gatekeeper/manifest.json"                            # the new version
+ls "$plugins/gatekeeper/dist/assets/"                                  # only the new build's assets
 ```
+
+The root files (`manifest.json`, `LICENSE`, `README.md`) keep stable names across releases, so `-o` handles those on its own. `dist` is the only part that needs clearing.
 
 This one needs **a Beekeeper restart**, which is the human's. Beekeeper loads plugins at startup.
 
