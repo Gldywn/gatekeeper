@@ -235,16 +235,67 @@ function formatRef(ref: TableRef): string {
   return ref.schema ? `${ref.schema}.${ref.name}` : ref.name;
 }
 
-// The tables a modifying query writes to versus reads from, split by the parser's
-// per-entry operation prefix ("{op}::{schema}::{table}"): everything but a plain
-// select is a write/destructive target. Feeds the card's Writes/Deletes annotation.
+interface WriteTarget {
+  ref: TableRef;
+  op: string;
+}
+
+// Only the keyword separates a file from a table: a quoted Postgres identifier reaches
+// `expr` as a string literal exactly like an OUTFILE path, and MySQL accepts a path in
+// double quotes. Anything else is the table "SELECT ... INTO t" creates.
+function intoTarget(node: Record<string, unknown>): WriteTarget | null {
+  const keyword = typeof node.keyword === "string" ? node.keyword.toUpperCase() : null;
+  if (keyword === "OUTFILE" || keyword === "DUMPFILE") {
+    const path = stringLiteral(node.expr);
+    return path === null ? null : { ref: { schema: null, name: path }, op: "export" };
+  }
+  // "INTO @var" holds var nodes rather than a name, and binds nothing durable.
+  const name = typeof node.expr === "string" ? node.expr : stringLiteral(node.expr);
+  return name === null ? null : { ref: { schema: null, name }, op: "create" };
+}
+
+// CREATE VIEW keeps its target in the create node ("{db, view}"), never in tableList.
+function viewTarget(node: Record<string, unknown>): WriteTarget | null {
+  const view = node.view;
+  if (!isNode(view) || typeof view.view !== "string") {
+    return null;
+  }
+  return {
+    ref: { schema: typeof view.db === "string" ? view.db : null, name: view.view },
+    op: "create",
+  };
+}
+
+// The write destinations tableList does not carry, because the parser keeps them in the
+// statement node instead of the table list: a SELECT ... INTO target and a CREATE VIEW.
+function astWriteTargets(ast: unknown): WriteTarget[] {
+  const targets: WriteTarget[] = [];
+  walk(ast, (n) => {
+    // A select with no INTO still carries an `into` placeholder, without a type.
+    if (n.type === "into") {
+      const target = intoTarget(n);
+      if (target) targets.push(target);
+      return;
+    }
+    if (n.type === "create" && n.keyword === "view") {
+      const target = viewTarget(n);
+      if (target) targets.push(target);
+    }
+  });
+  return targets;
+}
+
+// The tables a modifying query writes to versus reads from: the table list split on its
+// per-entry operation prefix ("{op}::{schema}::{table}"), plus the destinations that live
+// in the AST alone. Feeds the card's Writes/Deletes annotation.
 export function analyzeTableOps(
   sql: string,
   dialect: string,
 ): { writes: string[]; reads: string[]; writeOp: string | null } | null {
   let tableList: string[];
+  let ast: unknown;
   try {
-    ({ tableList } = parser.parse(sql, { database: dialect }));
+    ({ tableList, ast } = parser.parse(sql, { database: dialect }));
   } catch {
     return null;
   }
@@ -263,6 +314,10 @@ export function analyzeTableOps(
       writes.push(ref);
       writeOp ??= op;
     }
+  }
+  for (const target of astWriteTargets(ast)) {
+    writes.push(target.ref);
+    writeOp ??= target.op;
   }
   return {
     writes: dedupeRefs(writes).map(formatRef),

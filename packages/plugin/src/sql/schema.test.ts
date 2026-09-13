@@ -42,6 +42,116 @@ describe("analyzeTableOps", () => {
     });
   });
 
+  it("names the target of a SELECT ... INTO, which the table list never carries", () => {
+    expect(analyzeTableOps("SELECT * INTO staging_copy FROM crm.people", pg)).toEqual({
+      writes: ["staging_copy"],
+      reads: ["crm.people"],
+      writeOp: "create",
+    });
+  });
+
+  it("names the SELECT ... INTO target when the read comes from a CTE", () => {
+    expect(
+      analyzeTableOps(
+        "WITH recent AS (SELECT * FROM crm.people) SELECT * INTO staging_copy FROM recent",
+        pg,
+      ),
+    ).toEqual({
+      writes: ["staging_copy"],
+      reads: ["crm.people", "recent"],
+      writeOp: "create",
+    });
+  });
+
+  it("names the target of a SELECT ... INTO in T-SQL, including a temporary table", () => {
+    expect(analyzeTableOps("SELECT * INTO staging_copy FROM crm.people", "transactsql")).toEqual({
+      writes: ["staging_copy"],
+      reads: ["crm.people"],
+      writeOp: "create",
+    });
+    expect(analyzeTableOps("SELECT * INTO #staging_copy FROM crm.people", "transactsql")).toEqual({
+      writes: ["#staging_copy"],
+      reads: ["crm.people"],
+      writeOp: "create",
+    });
+  });
+
+  it("names a SELECT ... INTO target carried by a later UNION branch", () => {
+    expect(
+      analyzeTableOps(
+        "SELECT id FROM crm.people UNION SELECT id INTO staging_copy FROM billing.firms",
+        pg,
+      ),
+    ).toEqual({
+      writes: ["staging_copy"],
+      reads: ["crm.people", "billing.firms"],
+      writeOp: "create",
+    });
+  });
+
+  it("reads a quoted SELECT ... INTO target as a table, not as a file path", () => {
+    expect(analyzeTableOps('SELECT * INTO "Staging Copy" FROM crm.people', pg)).toEqual({
+      writes: ["Staging Copy"],
+      reads: ["crm.people"],
+      writeOp: "create",
+    });
+  });
+
+  it("names the file a MySQL INTO OUTFILE/DUMPFILE writes to, whatever quotes it uses", () => {
+    expect(
+      analyzeTableOps("SELECT id, email INTO OUTFILE '/tmp/people.csv' FROM crm.people", "mysql"),
+    ).toEqual({
+      writes: ["/tmp/people.csv"],
+      reads: ["crm.people"],
+      writeOp: "export",
+    });
+    expect(
+      analyzeTableOps("SELECT id INTO DUMPFILE '/tmp/people.bin' FROM crm.people", "mysql"),
+    ).toEqual({
+      writes: ["/tmp/people.bin"],
+      reads: ["crm.people"],
+      writeOp: "export",
+    });
+    expect(
+      analyzeTableOps('SELECT id INTO OUTFILE "/tmp/people.tsv" FROM crm.people', "mysql"),
+    ).toEqual({
+      writes: ["/tmp/people.tsv"],
+      reads: ["crm.people"],
+      writeOp: "export",
+    });
+  });
+
+  it("does not report INTO @variable as a write target", () => {
+    expect(analyzeTableOps("SELECT id INTO @handle FROM crm.people", "mysql")).toEqual({
+      writes: [],
+      reads: ["crm.people"],
+      writeOp: null,
+    });
+  });
+
+  it("names the view a CREATE VIEW defines, qualified when the SQL qualifies it", () => {
+    expect(analyzeTableOps("CREATE VIEW people_v AS SELECT * FROM crm.people", pg)).toEqual({
+      writes: ["people_v"],
+      reads: ["crm.people"],
+      writeOp: "create",
+    });
+    expect(
+      analyzeTableOps("CREATE OR REPLACE VIEW billing.people_v AS SELECT * FROM crm.people", pg),
+    ).toEqual({
+      writes: ["billing.people_v"],
+      reads: ["crm.people"],
+      writeOp: "create",
+    });
+  });
+
+  it("still reports a CREATE TABLE ... AS SELECT target exactly once", () => {
+    expect(analyzeTableOps("CREATE TABLE staging_copy AS SELECT * FROM crm.people", pg)).toEqual({
+      writes: ["staging_copy"],
+      reads: ["crm.people"],
+      writeOp: "create",
+    });
+  });
+
   it("returns null when the statement will not parse", () => {
     expect(analyzeTableOps("VACUUM", pg)).toBeNull();
   });
