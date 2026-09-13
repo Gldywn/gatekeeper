@@ -311,13 +311,19 @@ const COMPARISON_OPS = new Set([
   "~*",
   "!~",
   "!~*",
+  // MySQL/MariaDB and SQLite spell the regex family their own way.
+  "REGEXP",
+  "NOT REGEXP",
+  "RLIKE",
+  "NOT RLIKE",
+  "GLOB",
   "IN",
   "NOT IN",
   "BETWEEN",
   "NOT BETWEEN",
-  // Also the operator of "IS DISTINCT FROM"; "IS NULL" lands here too and simply
-  // carries no literal.
+  // SQLite compares values with IS/IS NOT; on "IS NULL" they carry no literal anyway.
   "IS",
+  "IS NOT",
 ]);
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const IBAN_RE = /^[A-Za-z]{2}\d{2}[A-Za-z0-9]{10,30}$/;
@@ -333,27 +339,35 @@ function columnName(node: unknown): string | null {
   return null;
 }
 
-// Quoted spans of a raw SQL fragment the parser kept as text instead of modelling.
-const RAW_QUOTED = /'((?:[^']|'')*)'|"([^"]*)"/g;
+// The quoted spans of a raw SQL fragment the parser kept as text instead of modelling,
+// escapes included so the value still matches the query text. Single quotes only: the
+// parser re-quotes an unmodelled operand (IS DISTINCT FROM) with double quotes, where a
+// value and a bare column read alike.
+const RAW_QUOTED = /'((?:[^'\\]|''|\\.)*)'/g;
 
-// The literal values a node carries. Beyond the plain string nodes, the parser
-// leaves E'ACME' and the right side of IS DISTINCT FROM as raw text in a "default"
-// node, and dollar-quoted $$ACME$$ as a "var" whose prefix and suffix match (which
-// a $1 bind parameter, having no suffix, never does).
+// Node types holding a plain string literal, one per dialect family: "string" is
+// BigQuery's double-quoted form, "var_string" the T-SQL N'ACME' one.
+const STRING_NODES = new Set([
+  "single_quote_string",
+  "double_quote_string",
+  "string",
+  "var_string",
+]);
+
+// The literal values a node carries. Beyond the string nodes, the parser leaves E'ACME'
+// as raw text in a "default" node, and dollar-quoted $$ACME$$ as a "var" whose prefix and
+// suffix match (which a $1 bind parameter, having no suffix, never does).
 function literalValues(node: unknown): string[] {
   if (!isNode(node)) return [];
   const t = node.type;
-  if (
-    (t === "single_quote_string" || t === "double_quote_string") &&
-    typeof node.value === "string"
-  ) {
+  if (typeof t === "string" && STRING_NODES.has(t) && typeof node.value === "string") {
     return [node.value];
   }
   if (t === "var" && typeof node.name === "string" && typeof node.prefix === "string") {
     return node.prefix === node.suffix ? [node.name] : [];
   }
   if (t === "default" && typeof node.value === "string") {
-    return [...node.value.matchAll(RAW_QUOTED)].map((m) => m[1] ?? m[2]);
+    return [...node.value.matchAll(RAW_QUOTED)].map((m) => m[1]);
   }
   return [];
 }
@@ -391,10 +405,16 @@ export function sensitiveLiterals(sql: string, dialect: string): string[] {
     return [];
   }
   const found = new Set<string>();
+  // An empty value carries nothing and would tint every '' in the rendered query.
+  const add = (value: string) => {
+    if (value !== "") {
+      found.add(value);
+    }
+  };
   walk(ast, (n) => {
     for (const value of literalValues(n)) {
       if (EMAIL_RE.test(value) || IBAN_RE.test(value)) {
-        found.add(value);
+        add(value);
       }
     }
     if (n.type !== "binary_expr" || !COMPARISON_OPS.has(String(n.operator).toUpperCase())) {
@@ -409,7 +429,7 @@ export function sensitiveLiterals(sql: string, dialect: string): string[] {
       }
       for (const operand of operands(other)) {
         for (const value of literalValues(operand)) {
-          found.add(value);
+          add(value);
         }
       }
     }

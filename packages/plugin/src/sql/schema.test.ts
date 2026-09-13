@@ -429,13 +429,56 @@ describe("sensitiveLiterals", () => {
   it("reads the value forms the parser leaves as raw text", () => {
     const cases: Array<[string, string[]]> = [
       ["SELECT id FROM billing.firms WHERE company_name = E'ACME'", ["ACME"]],
+      // Kept exactly as written, escape included, so the highlight still matches it.
+      ["SELECT id FROM billing.firms WHERE company_name = E'O\\'Brien'", ["O\\'Brien"]],
+      ["SELECT id FROM billing.firms WHERE company_name = E'it''s'", ["it''s"]],
       ["SELECT id FROM billing.firms WHERE company_name = $$ACME$$", ["ACME"]],
       ["SELECT id FROM billing.firms WHERE company_name = $tag$ACME$tag$", ["ACME"]],
-      ["SELECT id FROM billing.firms WHERE company_name IS DISTINCT FROM 'ACME'", ["ACME"]],
       ["SELECT id FROM crm.people WHERE note = E'jane@example.test'", ["jane@example.test"]],
     ];
     for (const [sql, literals] of cases) {
       expect(sensitiveLiterals(sql, "postgresql").sort(), sql).toEqual(literals);
+    }
+  });
+
+  it("reads the string literal a dialect spells its own way", () => {
+    expect(
+      sensitiveLiterals("SELECT id FROM firms WHERE company_name = N'ACME'", "transactsql"),
+    ).toEqual(["ACME"]);
+    expect(
+      sensitiveLiterals('SELECT id FROM firms WHERE company_name = "ACME"', "bigquery"),
+    ).toEqual(["ACME"]);
+  });
+
+  it("flags a literal compared with a MySQL or SQLite pattern operator", () => {
+    const cases: Array<[string, string]> = [
+      ["mysql", "REGEXP"],
+      ["mysql", "NOT REGEXP"],
+      ["mysql", "RLIKE"],
+      ["mysql", "NOT RLIKE"],
+      ["sqlite", "GLOB"],
+      ["sqlite", "IS NOT"],
+    ];
+    for (const [dialect, op] of cases) {
+      const sql = `SELECT id FROM firms WHERE company_name ${op} 'acme'`;
+      expect(sensitiveLiterals(sql, dialect), sql).toEqual(["acme"]);
+    }
+  });
+
+  it("stays silent when the parser re-stringifies an operand it did not model", () => {
+    // IS DISTINCT FROM arrives as raw text quoting a value and a column alike.
+    for (const operand of ["'ACME'", "status"]) {
+      const sql = `SELECT id FROM billing.firms WHERE company_name IS DISTINCT FROM ${operand}`;
+      expect(sensitiveLiterals(sql, "postgresql"), sql).toEqual([]);
+    }
+  });
+
+  it("never reports an empty literal, which would tint every '' in the query", () => {
+    for (const sql of [
+      "SELECT id FROM billing.firms WHERE company_name = $$$$",
+      "SELECT id FROM billing.firms WHERE company_name = COALESCE(status, '')",
+    ]) {
+      expect(sensitiveLiterals(sql, "postgresql"), sql).toEqual([]);
     }
   });
 
