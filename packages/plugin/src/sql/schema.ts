@@ -240,14 +240,18 @@ interface WriteTarget {
   op: string;
 }
 
-// "SELECT ... INTO t" creates t (Postgres, T-SQL) and "INTO OUTFILE/DUMPFILE '<path>'"
-// writes the rows to a file (MySQL); "INTO @var" binds a variable and writes nothing.
+// Only the keyword separates a file from a table: a quoted Postgres identifier reaches
+// `expr` as a string literal exactly like an OUTFILE path, and MySQL accepts a path in
+// double quotes. Anything else is the table "SELECT ... INTO t" creates.
 function intoTarget(node: Record<string, unknown>): WriteTarget | null {
-  if (typeof node.expr === "string") {
-    return { ref: { schema: null, name: node.expr }, op: "create" };
+  const keyword = typeof node.keyword === "string" ? node.keyword.toUpperCase() : null;
+  if (keyword === "OUTFILE" || keyword === "DUMPFILE") {
+    const path = stringLiteral(node.expr);
+    return path === null ? null : { ref: { schema: null, name: path }, op: "export" };
   }
-  const path = stringLiteral(node.expr);
-  return path === null ? null : { ref: { schema: null, name: path }, op: "export" };
+  // "INTO @var" holds var nodes rather than a name, and binds nothing durable.
+  const name = typeof node.expr === "string" ? node.expr : stringLiteral(node.expr);
+  return name === null ? null : { ref: { schema: null, name }, op: "create" };
 }
 
 // CREATE VIEW keeps its target in the create node ("{db, view}"), never in tableList.

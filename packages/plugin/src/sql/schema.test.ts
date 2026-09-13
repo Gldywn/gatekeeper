@@ -63,7 +63,41 @@ describe("analyzeTableOps", () => {
     });
   });
 
-  it("names the file a MySQL INTO OUTFILE/DUMPFILE writes to", () => {
+  it("names the target of a SELECT ... INTO in T-SQL, including a temporary table", () => {
+    expect(analyzeTableOps("SELECT * INTO staging_copy FROM crm.people", "transactsql")).toEqual({
+      writes: ["staging_copy"],
+      reads: ["crm.people"],
+      writeOp: "create",
+    });
+    expect(analyzeTableOps("SELECT * INTO #staging_copy FROM crm.people", "transactsql")).toEqual({
+      writes: ["#staging_copy"],
+      reads: ["crm.people"],
+      writeOp: "create",
+    });
+  });
+
+  it("names a SELECT ... INTO target carried by a later UNION branch", () => {
+    expect(
+      analyzeTableOps(
+        "SELECT id FROM crm.people UNION SELECT id INTO staging_copy FROM billing.firms",
+        pg,
+      ),
+    ).toEqual({
+      writes: ["staging_copy"],
+      reads: ["crm.people", "billing.firms"],
+      writeOp: "create",
+    });
+  });
+
+  it("reads a quoted SELECT ... INTO target as a table, not as a file path", () => {
+    expect(analyzeTableOps('SELECT * INTO "Staging Copy" FROM crm.people', pg)).toEqual({
+      writes: ["Staging Copy"],
+      reads: ["crm.people"],
+      writeOp: "create",
+    });
+  });
+
+  it("names the file a MySQL INTO OUTFILE/DUMPFILE writes to, whatever quotes it uses", () => {
     expect(
       analyzeTableOps("SELECT id, email INTO OUTFILE '/tmp/people.csv' FROM crm.people", "mysql"),
     ).toEqual({
@@ -75,6 +109,13 @@ describe("analyzeTableOps", () => {
       analyzeTableOps("SELECT id INTO DUMPFILE '/tmp/people.bin' FROM crm.people", "mysql"),
     ).toEqual({
       writes: ["/tmp/people.bin"],
+      reads: ["crm.people"],
+      writeOp: "export",
+    });
+    expect(
+      analyzeTableOps('SELECT id INTO OUTFILE "/tmp/people.tsv" FROM crm.people', "mysql"),
+    ).toEqual({
+      writes: ["/tmp/people.tsv"],
       reads: ["crm.people"],
       writeOp: "export",
     });
