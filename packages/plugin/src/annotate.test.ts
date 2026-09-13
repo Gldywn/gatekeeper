@@ -104,6 +104,8 @@ describe("SchemaAnnotator.schemaFor", () => {
     expect(schema?.tables).toEqual(["billing.firms"]);
     expect(schema?.client).toEqual(["company_name"]);
     expect(schema?.pii).toEqual([]);
+    // The outer * expands the mocked columns too, so the flag can only come from the alias.
+    expect(schema?.star).toBe(true);
   });
 
   it("returns null when the SQL will not parse", async () => {

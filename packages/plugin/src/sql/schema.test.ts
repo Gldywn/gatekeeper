@@ -249,12 +249,13 @@ describe("analyzeSql", () => {
     }
   });
 
-  it("collects the column list a derived table renames its columns with", () => {
+  it("collects the column list a relation alias renames its columns with", () => {
     const cases: Array<[string, string[]]> = [
       [
         "SELECT * FROM (SELECT id, name FROM billing.firms) f(firm_id, company_name)",
         ["firm_id", "company_name"],
       ],
+      ["SELECT * FROM billing.firms f(firm_id, company_name)", ["firm_id", "company_name"]],
       [
         "SELECT * FROM crm.people p JOIN (SELECT name FROM billing.firms) f(company_name) ON true",
         ["company_name"],
@@ -274,8 +275,38 @@ describe("analyzeSql", () => {
     }
   });
 
-  it("does not take a plain relation alias for a renamed column", () => {
-    expect(analyzeSql("SELECT name FROM billing.firms f", "postgresql")?.aliases).toEqual([]);
+  it("does not take a relation alias that renames no column for an output name", () => {
+    for (const sql of [
+      "SELECT name FROM billing.firms f",
+      "SELECT * FROM (SELECT name FROM billing.firms) f",
+      "SELECT * FROM (VALUES ('a')) AS f",
+    ]) {
+      expect(analyzeSql(sql, "postgresql")?.aliases, sql).toEqual([]);
+    }
+  });
+
+  it("collects a table function's alias as the output column it names", () => {
+    const cases: Array<[string, string, string[]]> = [
+      ["SELECT * FROM unnest(ARRAY['a']) AS contact_email", "postgresql", ["contact_email"]],
+      ["SELECT * FROM generate_series(1, 3) contact_email", "postgresql", ["contact_email"]],
+      [
+        "SELECT * FROM crm.people p CROSS JOIN LATERAL unnest(p.tags) AS contact_email",
+        "postgresql",
+        ["contact_email"],
+      ],
+      ["SELECT * FROM firms, UNNEST(tags) AS contact_email", "bigquery", ["contact_email"]],
+    ];
+    for (const [sql, dialect, aliases] of cases) {
+      expect(analyzeSql(sql, dialect)?.aliases, sql).toEqual(aliases);
+    }
+  });
+
+  it("cannot tell a quoted relation alias holding parentheses from a column list", () => {
+    // The parser strips the quotes, so the alias arrives exactly like a column list. Accepted
+    // as an over-report: the annotation errs toward showing a name rather than hiding one.
+    expect(analyzeSql('SELECT * FROM billing.firms AS "f(email)"', "postgresql")?.aliases).toEqual([
+      "email",
+    ]);
   });
 
   it("exposes the column list a CTE renames its columns with", () => {

@@ -179,8 +179,9 @@ function aliasName(as: unknown): string | null {
   return null;
 }
 
-// A derived table renames its columns inside the relation alias itself, which the
-// parser hands back unsplit as the raw string "f(company_name, ...)".
+// A relation renames its columns inside the alias itself, which the parser hands back
+// unsplit as the raw string "f(company_name, ...)". A quoted alias holding parentheses is
+// indistinguishable and is split too; a quoted column name holding them never matches.
 const RELATION_COLUMN_LIST = /^[^()]+\(([^()]*)\)$/;
 
 function relationColumnAliases(as: unknown): string[] {
@@ -191,6 +192,12 @@ function relationColumnAliases(as: unknown): string[] {
     .split(",")
     .map((c) => c.trim())
     .filter(Boolean);
+}
+
+// A table function has no relation to rename, so its alias names the single output column
+// it returns ("FROM unnest(tags) AS contact_email") instead of standing for a table.
+function isFunctionRelation(item: Record<string, unknown>): boolean {
+  return item.type === "unnest" || (isNode(item.expr) && item.expr.type === "function");
 }
 
 // The parser's columnList carries only the source column, so "c.name AS company_name"
@@ -207,7 +214,14 @@ function outputAliases(ast: unknown): string[] {
     }
     if (Array.isArray(n.from)) {
       for (const item of n.from) {
-        if (isNode(item)) aliases.push(...relationColumnAliases(item.as));
+        if (!isNode(item)) continue;
+        const renamed = relationColumnAliases(item.as);
+        if (renamed.length > 0) {
+          aliases.push(...renamed);
+          continue;
+        }
+        const alias = isFunctionRelation(item) ? aliasName(item.as) : null;
+        if (alias) aliases.push(alias);
       }
     }
   });
@@ -216,7 +230,8 @@ function outputAliases(ast: unknown): string[] {
 
 export interface ParsedQuery {
   tables: TableRef[];
-  // Source column names as the parser resolves them, never an output alias.
+  // Source column names as the parser resolves them, plus the column lists it folds into
+  // columnList itself (a CTE's, a typed table function's), never an output alias.
   columns: string[];
   // Output names the query assigns (AS, RETURNING, a relation column list): what the
   // result set, and the agent, will see.
