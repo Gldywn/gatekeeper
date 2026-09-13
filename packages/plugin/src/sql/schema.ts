@@ -195,47 +195,64 @@ function selectAliases(ast: unknown): string[] {
 
 // Accessors that read one key out of a JSON document; the parser keeps the key in
 // the right operand and reports only the containing column.
-const JSON_OPERATORS = new Set(["->", "->>", "#>", "#>>"]);
-// Every dialect names its JSON functions with "json" in them (json_extract,
-// jsonb_extract_path_text, JSON_VALUE), so the match stays dialect-generic.
+export const JSON_OPERATORS = new Set(["->", "->>", "#>", "#>>"]);
+// Outside snowflake, every dialect names its JSON functions with "json" in them
+// (json_extract, jsonb_extract_path_text, JSON_VALUE): a dialect-generic match.
 const JSON_FUNCTION = /json/i;
+// A path operand ("$.contact.email", "{contact,email}") holds a key per segment, while
+// anything else is one literal key whose dots belong to it ("email.txt").
+const JSON_PATH = /^\s*[${]/;
 
-// The name a JSON path operand exposes: "email", "$.contact.email" and
-// "{contact,email}" all end on the same key. Array indexes and "$" name nothing.
-export function jsonKeyName(path: string): string | null {
-  const segments = path
-    .split(/[.,[\]{}]/)
-    .map((segment) => segment.replace(/[$"']/g, "").trim())
-    .filter((segment) => segment !== "" && !/^\d+$/.test(segment));
-  return segments[segments.length - 1] ?? null;
-}
-
-// The parser puts a function's name under name.name[], except in the bigquery
-// dialect where an unqualified name lands in name.schema; take the last either way.
-function functionName(node: Record<string, unknown>): string {
-  let name = "";
-  walk(node.name, (n) => {
-    if (typeof n.value === "string") name = n.value;
-  });
-  return name;
-}
-
-// The JSON keys one node reads, in path order: the string operand of an accessor
-// operator, or the string arguments of a JSON function.
-function accessorKeys(node: Record<string, unknown>): string[] {
-  if (node.type === "binary_expr" && JSON_OPERATORS.has(String(node.operator))) {
-    const path = stringLiteral(node.right);
-    const key = path === null ? null : jsonKeyName(path);
-    return key ? [key] : [];
+// The names a JSON path operand exposes, outermost first. Array indexes name nothing.
+export function jsonKeyNames(path: string): string[] {
+  if (!JSON_PATH.test(path)) {
+    return path.trim() ? [path.trim()] : [];
   }
-  if (node.type !== "function" || !JSON_FUNCTION.test(functionName(node))) {
+  return (
+    path
+      .split(/[.,[\]{}]/)
+      // Strip only what delimits a segment, never a character inside it, so every name
+      // returned still occurs verbatim in the operand the highlighter has to mark up.
+      .map((segment) => segment.trim().replace(/^["'$]+|["'$]+$/g, ""))
+      .filter((segment) => segment !== "" && !/^\d+$/.test(segment))
+  );
+}
+
+// The parser spreads a function name over name.name[] and name.schema (an unqualified
+// bigquery name lands in the latter, a qualifier in the other), so any part counts.
+function isJsonFunction(node: Record<string, unknown>): boolean {
+  let match = false;
+  walk(node.name, (n) => {
+    if (typeof n.value === "string" && JSON_FUNCTION.test(n.value)) match = true;
+  });
+  return match;
+}
+
+// The operands one node reads its keys from: what an accessor operator takes on the
+// right (a path, or an array of them), the subscripts of a bracketed column, or the
+// arguments a JSON function takes after the document itself.
+function keyOperands(node: Record<string, unknown>): unknown[] {
+  if (node.type === "binary_expr" && JSON_OPERATORS.has(String(node.operator))) {
+    const right = node.right;
+    const list = isNode(right) && isNode(right.expr_list) ? right.expr_list.value : null;
+    return Array.isArray(list) ? list : [right];
+  }
+  if (node.type === "column_ref" && Array.isArray(node.array_index)) {
+    return node.array_index.map((entry) => (isNode(entry) ? entry.index : null));
+  }
+  if (node.type !== "function" || !isJsonFunction(node)) {
     return [];
   }
   const args = isNode(node.args) && Array.isArray(node.args.value) ? node.args.value : [];
-  return args.flatMap((arg) => {
-    const path = stringLiteral(arg);
-    const key = path === null ? null : jsonKeyName(path);
-    return key ? [key] : [];
+  // The document comes first and the keys after it; a call that already starts on a
+  // string builds or parses a document rather than reading one.
+  return args.length < 2 || stringLiteral(args[0]) !== null ? [] : args.slice(1);
+}
+
+function accessorKeys(node: Record<string, unknown>): string[] {
+  return keyOperands(node).flatMap((operand) => {
+    const path = stringLiteral(operand);
+    return path === null ? [] : jsonKeyNames(path);
   });
 }
 
@@ -375,13 +392,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const IBAN_RE = /^[A-Za-z]{2}\d{2}[A-Za-z0-9]{10,30}$/;
 
 function columnName(node: unknown): string | null {
-  if (!isNode(node)) return null;
-  if (node.type !== "column_ref") {
-    // A JSON accessor carries the meaningful name in its key, so a literal compared
-    // to profile->>'company_name' is classified on the key, not on "profile".
-    const keys = accessorKeys(node);
-    return keys[keys.length - 1] ?? null;
-  }
+  if (!isNode(node) || node.type !== "column_ref") return null;
   const c = node.column;
   if (typeof c === "string") return c;
   if (isNode(c)) {
@@ -389,6 +400,14 @@ function columnName(node: unknown): string | null {
     if (isNode(c.expr) && typeof c.expr.value === "string") return c.expr.value;
   }
   return null;
+}
+
+// What a comparison side names: the column it reads, plus the keys of one JSON accessor
+// (profile->>'company_name' carries its meaning in the key, never in "profile").
+function comparedNames(node: unknown): string[] {
+  if (!isNode(node)) return [];
+  const column = columnName(node);
+  return [...(column === null ? [] : [column]), ...accessorKeys(node)];
 }
 
 function stringLiteral(node: unknown): string | null {
@@ -428,8 +447,7 @@ export function sensitiveLiterals(sql: string, dialect: string): string[] {
         [n.left, n.right],
         [n.right, n.left],
       ] as const) {
-        const col = columnName(side);
-        if (col && classifyColumn(col)) {
+        if (comparedNames(side).some((name) => classifyColumn(name) !== null)) {
           addLiteral(other);
           if (isNode(other) && other.type === "expr_list" && Array.isArray(other.value)) {
             for (const item of other.value) addLiteral(item);

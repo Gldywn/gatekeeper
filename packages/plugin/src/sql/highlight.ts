@@ -1,7 +1,7 @@
 import { escapeHtml } from "../html";
 import { type Tok, tokenize } from "./format";
 import { visibleControls } from "./sanitize";
-import { jsonKeyName } from "./schema";
+import { JSON_OPERATORS, jsonKeyNames } from "./schema";
 
 // Case-sensitive by design: the previous regex pass matched only the uppercase
 // spellings, so INTERVAL etc. read as keywords only when written that way.
@@ -30,28 +30,27 @@ function lastSegment(word: string): string {
   return dot === -1 ? word : word.slice(dot + 1);
 }
 
-const JSON_OPERATORS = new Set(["->", "->>", "#>", "#>>"]);
-
-// A key read through a JSON accessor is quoted like a value but names a column, so
-// it is tinted like an identifier, and only on the path segment that was flagged.
+// A key read through a JSON accessor is quoted like a value but names a column, so every
+// flagged segment of the path is tinted like an identifier, in place. A segment the raw
+// operand does not hold verbatim is left alone: the body must stay the query as written.
 function jsonKeySpan(
   inner: string,
   piiSet: ReadonlySet<string>,
   clientSet: ReadonlySet<string>,
 ): string | null {
-  const seg = jsonKeyName(inner);
-  if (!seg) {
-    return null;
+  let out = "";
+  let cursor = 0;
+  for (const seg of jsonKeyNames(inner)) {
+    const key = seg.toLowerCase();
+    const cls = piiSet.has(key) ? "pii-col" : clientSet.has(key) ? "client-col" : "";
+    const at = cls ? inner.indexOf(seg, cursor) : -1;
+    if (at === -1) {
+      continue;
+    }
+    out += `${escapeHtml(inner.slice(cursor, at))}<span class="${cls}">${escapeHtml(seg)}</span>`;
+    cursor = at + seg.length;
   }
-  const key = seg.toLowerCase();
-  const cls = piiSet.has(key) ? "pii-col" : clientSet.has(key) ? "client-col" : "";
-  if (!cls) {
-    return null;
-  }
-  const at = inner.lastIndexOf(seg);
-  const head = escapeHtml(inner.slice(0, at));
-  const tail = escapeHtml(inner.slice(at + seg.length));
-  return `${head}<span class="${cls}">${escapeHtml(seg)}</span>${tail}`;
+  return cursor === 0 ? null : out + escapeHtml(inner.slice(cursor));
 }
 
 function prevSignificant(toks: Tok[], i: number): Tok | undefined {

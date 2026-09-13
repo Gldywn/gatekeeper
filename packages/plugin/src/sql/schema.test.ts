@@ -236,7 +236,7 @@ describe("analyzeSql", () => {
     const cases: Array<[string, string, string[]]> = [
       ["postgresql", "SELECT profile->>'email' FROM crm.people", ["email"]],
       ["postgresql", "SELECT profile->'contact'->>'email' FROM crm.people", ["email", "contact"]],
-      ["postgresql", "SELECT profile#>>'{contact,email}' FROM crm.people", ["email"]],
+      ["postgresql", "SELECT profile#>>'{contact,email}' FROM crm.people", ["contact", "email"]],
       ["postgresql", "SELECT profile#>'{contact}' FROM crm.people", ["contact"]],
       ["postgresql", "SELECT jsonb_extract_path_text(profile, 'email') FROM crm.people", ["email"]],
       [
@@ -246,7 +246,7 @@ describe("analyzeSql", () => {
       ],
       ["postgresql", "SELECT id FROM crm.people WHERE profile->>'email' IS NOT NULL", ["email"]],
       ["mysql", "SELECT profile->>'$.email' FROM people", ["email"]],
-      ["mysql", "SELECT profile->'$.contact.email' FROM people", ["email"]],
+      ["mysql", "SELECT profile->'$.contact.email' FROM people", ["contact", "email"]],
       ["mysql", "SELECT JSON_EXTRACT(profile, '$.email') FROM people", ["email"]],
       ["mariadb", "SELECT JSON_EXTRACT(profile, '$.email') FROM people", ["email"]],
       ["sqlite", "SELECT json_extract(profile, '$.email') FROM people", ["email"]],
@@ -263,6 +263,55 @@ describe("analyzeSql", () => {
     expect(analyzeSql("SELECT tags->0 FROM crm.people", "postgresql")?.jsonKeys).toEqual([]);
     expect(analyzeSql("SELECT profile->>'$' FROM people", "mysql")?.jsonKeys).toEqual([]);
     expect(analyzeSql("SELECT id, email FROM crm.people", "postgresql")?.jsonKeys).toEqual([]);
+  });
+
+  it("keeps a whole key that is not a path, dots included", () => {
+    const cases: Array<[string, string[]]> = [
+      ["SELECT profile->>'email.txt' FROM crm.people", ["email.txt"]],
+      ["SELECT profile->>'a.email' FROM crm.people", ["a.email"]],
+      [
+        "SELECT jsonb_extract_path_text(profile, 'contact.email') FROM crm.people",
+        ["contact.email"],
+      ],
+    ];
+    for (const [sql, keys] of cases) {
+      expect(analyzeSql(sql, "postgresql")?.jsonKeys, sql).toEqual(keys);
+    }
+  });
+
+  it("reads a subscripted key and an array path operand", () => {
+    const cases: Array<[string, string, string[]]> = [
+      ["postgresql", "SELECT profile['email'] FROM crm.people", ["email"]],
+      ["snowflake", "SELECT profile['contact']['email'] FROM crm.people", ["contact", "email"]],
+      [
+        "postgresql",
+        "SELECT profile #> ARRAY['contact','email'] FROM crm.people",
+        ["contact", "email"],
+      ],
+    ];
+    for (const [dialect, sql, keys] of cases) {
+      expect(analyzeSql(sql, dialect)?.jsonKeys, sql).toEqual(keys);
+    }
+  });
+
+  it("matches a JSON function through its schema qualifier", () => {
+    expect(
+      analyzeSql(
+        "SELECT pg_catalog.jsonb_extract_path_text(profile, 'email') FROM crm.people",
+        "postgresql",
+      )?.jsonKeys,
+    ).toEqual(["email"]);
+  });
+
+  it("reads no key from a call that builds or parses a document", () => {
+    // The document an extractor reads comes first; a leading string is a key being
+    // written, not one being exposed.
+    expect(
+      analyzeSql("SELECT json_build_object('email', 1) FROM t", "postgresql")?.jsonKeys,
+    ).toEqual([]);
+    expect(
+      analyzeSql('SELECT PARSE_JSON(\'{"email":"x"}\') FROM t', "snowflake")?.jsonKeys,
+    ).toEqual([]);
   });
 
   it("returns null when the statement cannot be parsed", () => {
@@ -437,6 +486,21 @@ describe("sensitiveLiterals", () => {
         "mysql",
       ),
     ).toEqual(["ACME"]);
+  });
+
+  it("flags a literal compared to a subscripted key", () => {
+    expect(
+      sensitiveLiterals(
+        "SELECT id FROM crm.people WHERE profile['company_name'] = 'ACME'",
+        "postgresql",
+      ),
+    ).toEqual(["ACME"]);
+  });
+
+  it("ignores a literal compared to a document a call builds", () => {
+    expect(
+      sensitiveLiterals("SELECT id FROM t WHERE json_build_object('email', 1) = 'x'", "postgresql"),
+    ).toEqual([]);
   });
 
   it("ignores a literal compared to a JSON key that is not sensitive", () => {
