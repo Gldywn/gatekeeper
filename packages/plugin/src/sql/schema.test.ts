@@ -413,6 +413,26 @@ describe("sensitiveLiterals", () => {
     ).toEqual(["ACME", "BETA"]);
   });
 
+  it("flags a written literal through REPLACE, a CTE-wrapped UPDATE, a quoted column, and a PII target", () => {
+    const cases: Array<[string, string, string[]]> = [
+      ["REPLACE INTO firms (id, company_name) VALUES (1, 'ACME')", "mysql", ["ACME"]],
+      [
+        "WITH x AS (UPDATE billing.firms SET company_name = 'ACME' RETURNING id) SELECT * FROM x",
+        "postgresql",
+        ["ACME"],
+      ],
+      [
+        "INSERT INTO billing.firms (id, \"companyName\") VALUES (1, 'ACME')",
+        "postgresql",
+        ["ACME"],
+      ],
+      ["UPDATE crm.people SET phone = '0600000000' WHERE id = 1", "postgresql", ["0600000000"]],
+    ];
+    for (const [sql, dialect, literals] of cases) {
+      expect(sensitiveLiterals(sql, dialect), sql).toEqual(literals);
+    }
+  });
+
   it("ignores a write that carries no sensitive value", () => {
     expect(
       sensitiveLiterals("UPDATE billing.firms SET status = 'active' WHERE id = 1", "postgresql"),
