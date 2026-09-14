@@ -235,16 +235,67 @@ function formatRef(ref: TableRef): string {
   return ref.schema ? `${ref.schema}.${ref.name}` : ref.name;
 }
 
-// The tables a modifying query writes to versus reads from, split by the parser's
-// per-entry operation prefix ("{op}::{schema}::{table}"): everything but a plain
-// select is a write/destructive target. Feeds the card's Writes/Deletes annotation.
+interface WriteTarget {
+  ref: TableRef;
+  op: string;
+}
+
+// Only the keyword separates a file from a table: a quoted Postgres identifier reaches
+// `expr` as a string literal exactly like an OUTFILE path, and MySQL accepts a path in
+// double quotes. Anything else is the table "SELECT ... INTO t" creates.
+function intoTarget(node: Record<string, unknown>): WriteTarget | null {
+  const keyword = typeof node.keyword === "string" ? node.keyword.toUpperCase() : null;
+  if (keyword === "OUTFILE" || keyword === "DUMPFILE") {
+    const path = stringLiteral(node.expr);
+    return path === null ? null : { ref: { schema: null, name: path }, op: "export" };
+  }
+  // "INTO @var" holds var nodes rather than a name, and binds nothing durable.
+  const name = typeof node.expr === "string" ? node.expr : stringLiteral(node.expr);
+  return name === null ? null : { ref: { schema: null, name }, op: "create" };
+}
+
+// CREATE VIEW keeps its target in the create node ("{db, view}"), never in tableList.
+function viewTarget(node: Record<string, unknown>): WriteTarget | null {
+  const view = node.view;
+  if (!isNode(view) || typeof view.view !== "string") {
+    return null;
+  }
+  return {
+    ref: { schema: typeof view.db === "string" ? view.db : null, name: view.view },
+    op: "create",
+  };
+}
+
+// The write destinations tableList does not carry, because the parser keeps them in the
+// statement node instead of the table list: a SELECT ... INTO target and a CREATE VIEW.
+function astWriteTargets(ast: unknown): WriteTarget[] {
+  const targets: WriteTarget[] = [];
+  walk(ast, (n) => {
+    // A select with no INTO still carries an `into` placeholder, without a type.
+    if (n.type === "into") {
+      const target = intoTarget(n);
+      if (target) targets.push(target);
+      return;
+    }
+    if (n.type === "create" && n.keyword === "view") {
+      const target = viewTarget(n);
+      if (target) targets.push(target);
+    }
+  });
+  return targets;
+}
+
+// The tables a modifying query writes to versus reads from: the table list split on its
+// per-entry operation prefix ("{op}::{schema}::{table}"), plus the destinations that live
+// in the AST alone. Feeds the card's Writes/Deletes annotation.
 export function analyzeTableOps(
   sql: string,
   dialect: string,
 ): { writes: string[]; reads: string[]; writeOp: string | null } | null {
   let tableList: string[];
+  let ast: unknown;
   try {
-    ({ tableList } = parser.parse(sql, { database: dialect }));
+    ({ tableList, ast } = parser.parse(sql, { database: dialect }));
   } catch {
     return null;
   }
@@ -263,6 +314,10 @@ export function analyzeTableOps(
       writes.push(ref);
       writeOp ??= op;
     }
+  }
+  for (const target of astWriteTargets(ast)) {
+    writes.push(target.ref);
+    writeOp ??= target.op;
   }
   return {
     writes: dedupeRefs(writes).map(formatRef),
@@ -328,15 +383,20 @@ const COMPARISON_OPS = new Set([
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const IBAN_RE = /^[A-Za-z]{2}\d{2}[A-Za-z0-9]{10,30}$/;
 
-function columnName(node: unknown): string | null {
-  if (!isNode(node) || node.type !== "column_ref") return null;
-  const c = node.column;
-  if (typeof c === "string") return c;
-  if (isNode(c)) {
-    if (typeof c.value === "string") return c.value;
-    if (isNode(c.expr) && typeof c.expr.value === "string") return c.expr.value;
+// A column name as the parser spells it: a plain string, a value node, or a nested
+// expr, depending on the dialect and on whether the identifier was quoted.
+function columnLabel(node: unknown): string | null {
+  if (typeof node === "string") return node;
+  if (isNode(node)) {
+    if (typeof node.value === "string") return node.value;
+    if (isNode(node.expr) && typeof node.expr.value === "string") return node.expr.value;
   }
   return null;
+}
+
+function columnName(node: unknown): string | null {
+  if (!isNode(node) || node.type !== "column_ref") return null;
+  return columnLabel(node.column);
 }
 
 // The quoted spans of a raw SQL fragment the parser kept as text instead of modelling,
@@ -372,6 +432,11 @@ function literalValues(node: unknown): string[] {
   return [];
 }
 
+// A node the grammar allows only one string in: an OUTFILE path, a SELECT ... INTO target.
+function stringLiteral(node: unknown): string | null {
+  return literalValues(node)[0] ?? null;
+}
+
 // Either side of a comparison can wrap what it compares: lower(col), col::text,
 // COALESCE(col, ''), max(col), = ANY(ARRAY[...]). Descending those wrappers yields
 // the operands that carry the signal, and stopping at every other node keeps a
@@ -395,8 +460,9 @@ function hasSensitiveColumn(node: unknown): boolean {
 }
 
 // String literals that expose a sensitive value in the query text itself: a value
-// bound to a PII/client column (WHERE company_name = 'ACME'), or one whose shape is
-// itself PII (an email or IBAN). Render-only, like the column flags.
+// bound to a PII/client column (WHERE company_name = 'ACME', SET company_name = 'ACME',
+// an inserted row), or one whose shape is itself PII (an email or IBAN). Render-only,
+// like the column flags.
 export function sensitiveLiterals(sql: string, dialect: string): string[] {
   let ast: unknown;
   try {
@@ -411,10 +477,33 @@ export function sensitiveLiterals(sql: string, dialect: string): string[] {
       found.add(value);
     }
   };
+  const addLiteral = (node: unknown) => {
+    for (const value of literalValues(node)) add(value);
+  };
   walk(ast, (n) => {
     for (const value of literalValues(n)) {
       if (EMAIL_RE.test(value) || IBAN_RE.test(value)) {
         add(value);
+      }
+    }
+    // Assignments hang off `set` wherever they appear: UPDATE, MySQL INSERT ... SET,
+    // and the update branch of an upsert (ON CONFLICT / ON DUPLICATE KEY).
+    if (Array.isArray(n.set)) {
+      for (const item of n.set) {
+        if (!isNode(item)) continue;
+        const col = columnLabel(item.column);
+        if (col && classifyColumn(col)) addLiteral(item.value);
+      }
+    }
+    // INSERT/REPLACE ... VALUES: the column list lines up positionally with each row.
+    if (Array.isArray(n.columns) && isNode(n.values) && Array.isArray(n.values.values)) {
+      const columns = n.columns.map(columnLabel);
+      for (const row of n.values.values) {
+        if (!isNode(row) || !Array.isArray(row.value)) continue;
+        row.value.forEach((value, i) => {
+          const col = columns[i];
+          if (col && classifyColumn(col)) addLiteral(value);
+        });
       }
     }
     if (n.type !== "binary_expr" || !COMPARISON_OPS.has(String(n.operator).toUpperCase())) {

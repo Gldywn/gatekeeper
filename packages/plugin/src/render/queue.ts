@@ -205,6 +205,9 @@ function destructiveVerb(op: string | null): string {
       return "Alter";
     case "create":
       return "Create";
+    // A MySQL INTO OUTFILE/DUMPFILE writes the rows out to a file, not to a table.
+    case "export":
+      return "Export";
     case "rename":
       return "Rename";
     default:
