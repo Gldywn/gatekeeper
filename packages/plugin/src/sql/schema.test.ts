@@ -42,6 +42,116 @@ describe("analyzeTableOps", () => {
     });
   });
 
+  it("names the target of a SELECT ... INTO, which the table list never carries", () => {
+    expect(analyzeTableOps("SELECT * INTO staging_copy FROM crm.people", pg)).toEqual({
+      writes: ["staging_copy"],
+      reads: ["crm.people"],
+      writeOp: "create",
+    });
+  });
+
+  it("names the SELECT ... INTO target when the read comes from a CTE", () => {
+    expect(
+      analyzeTableOps(
+        "WITH recent AS (SELECT * FROM crm.people) SELECT * INTO staging_copy FROM recent",
+        pg,
+      ),
+    ).toEqual({
+      writes: ["staging_copy"],
+      reads: ["crm.people", "recent"],
+      writeOp: "create",
+    });
+  });
+
+  it("names the target of a SELECT ... INTO in T-SQL, including a temporary table", () => {
+    expect(analyzeTableOps("SELECT * INTO staging_copy FROM crm.people", "transactsql")).toEqual({
+      writes: ["staging_copy"],
+      reads: ["crm.people"],
+      writeOp: "create",
+    });
+    expect(analyzeTableOps("SELECT * INTO #staging_copy FROM crm.people", "transactsql")).toEqual({
+      writes: ["#staging_copy"],
+      reads: ["crm.people"],
+      writeOp: "create",
+    });
+  });
+
+  it("names a SELECT ... INTO target carried by a later UNION branch", () => {
+    expect(
+      analyzeTableOps(
+        "SELECT id FROM crm.people UNION SELECT id INTO staging_copy FROM billing.firms",
+        pg,
+      ),
+    ).toEqual({
+      writes: ["staging_copy"],
+      reads: ["crm.people", "billing.firms"],
+      writeOp: "create",
+    });
+  });
+
+  it("reads a quoted SELECT ... INTO target as a table, not as a file path", () => {
+    expect(analyzeTableOps('SELECT * INTO "Staging Copy" FROM crm.people', pg)).toEqual({
+      writes: ["Staging Copy"],
+      reads: ["crm.people"],
+      writeOp: "create",
+    });
+  });
+
+  it("names the file a MySQL INTO OUTFILE/DUMPFILE writes to, whatever quotes it uses", () => {
+    expect(
+      analyzeTableOps("SELECT id, email INTO OUTFILE '/tmp/people.csv' FROM crm.people", "mysql"),
+    ).toEqual({
+      writes: ["/tmp/people.csv"],
+      reads: ["crm.people"],
+      writeOp: "export",
+    });
+    expect(
+      analyzeTableOps("SELECT id INTO DUMPFILE '/tmp/people.bin' FROM crm.people", "mysql"),
+    ).toEqual({
+      writes: ["/tmp/people.bin"],
+      reads: ["crm.people"],
+      writeOp: "export",
+    });
+    expect(
+      analyzeTableOps('SELECT id INTO OUTFILE "/tmp/people.tsv" FROM crm.people', "mysql"),
+    ).toEqual({
+      writes: ["/tmp/people.tsv"],
+      reads: ["crm.people"],
+      writeOp: "export",
+    });
+  });
+
+  it("does not report INTO @variable as a write target", () => {
+    expect(analyzeTableOps("SELECT id INTO @handle FROM crm.people", "mysql")).toEqual({
+      writes: [],
+      reads: ["crm.people"],
+      writeOp: null,
+    });
+  });
+
+  it("names the view a CREATE VIEW defines, qualified when the SQL qualifies it", () => {
+    expect(analyzeTableOps("CREATE VIEW people_v AS SELECT * FROM crm.people", pg)).toEqual({
+      writes: ["people_v"],
+      reads: ["crm.people"],
+      writeOp: "create",
+    });
+    expect(
+      analyzeTableOps("CREATE OR REPLACE VIEW billing.people_v AS SELECT * FROM crm.people", pg),
+    ).toEqual({
+      writes: ["billing.people_v"],
+      reads: ["crm.people"],
+      writeOp: "create",
+    });
+  });
+
+  it("still reports a CREATE TABLE ... AS SELECT target exactly once", () => {
+    expect(analyzeTableOps("CREATE TABLE staging_copy AS SELECT * FROM crm.people", pg)).toEqual({
+      writes: ["staging_copy"],
+      reads: ["crm.people"],
+      writeOp: "create",
+    });
+  });
+
   it("returns null when the statement will not parse", () => {
     expect(analyzeTableOps("VACUUM", pg)).toBeNull();
   });
@@ -455,6 +565,83 @@ describe("sensitiveLiterals", () => {
     expect(
       sensitiveLiterals("SELECT id FROM t WHERE ref = 'FR7630006000011234567890189'", "postgresql"),
     ).toEqual(["FR7630006000011234567890189"]);
+  });
+
+  it("flags a literal assigned to a sensitive column by an UPDATE", () => {
+    expect(
+      sensitiveLiterals(
+        "UPDATE billing.firms SET company_name = 'ACME' WHERE id = 1",
+        "postgresql",
+      ),
+    ).toEqual(["ACME"]);
+    expect(
+      sensitiveLiterals("UPDATE billing.firms SET \"companyName\" = 'ACME'", "postgresql"),
+    ).toEqual(["ACME"]);
+  });
+
+  it("flags an inserted literal, on every VALUES row", () => {
+    expect(
+      sensitiveLiterals(
+        "INSERT INTO billing.firms (id, company_name) VALUES (1, 'ACME'), (2, 'BETA')",
+        "postgresql",
+      ).sort(),
+    ).toEqual(["ACME", "BETA"]);
+  });
+
+  it("flags the literals of an upsert, both inserted and updated", () => {
+    expect(
+      sensitiveLiterals(
+        `INSERT INTO billing.firms (id, company_name) VALUES (1, 'ACME')
+           ON CONFLICT (id) DO UPDATE SET company_name = 'BETA'`,
+        "postgresql",
+      ).sort(),
+    ).toEqual(["ACME", "BETA"]);
+  });
+
+  it("reads MySQL's INSERT ... SET and ON DUPLICATE KEY UPDATE assignments", () => {
+    expect(
+      sensitiveLiterals("INSERT INTO firms SET id = 1, company_name = 'ACME'", "mysql"),
+    ).toEqual(["ACME"]);
+    expect(
+      sensitiveLiterals(
+        `INSERT INTO firms (id, company_name) VALUES (1, 'ACME')
+           ON DUPLICATE KEY UPDATE company_name = 'BETA'`,
+        "mysql",
+      ).sort(),
+    ).toEqual(["ACME", "BETA"]);
+  });
+
+  it("flags a written literal through REPLACE, a CTE-wrapped UPDATE, a quoted column, and a PII target", () => {
+    const cases: Array<[string, string, string[]]> = [
+      ["REPLACE INTO firms (id, company_name) VALUES (1, 'ACME')", "mysql", ["ACME"]],
+      [
+        "WITH x AS (UPDATE billing.firms SET company_name = 'ACME' RETURNING id) SELECT * FROM x",
+        "postgresql",
+        ["ACME"],
+      ],
+      [
+        "INSERT INTO billing.firms (id, \"companyName\") VALUES (1, 'ACME')",
+        "postgresql",
+        ["ACME"],
+      ],
+      ["UPDATE crm.people SET phone = '0600000000' WHERE id = 1", "postgresql", ["0600000000"]],
+    ];
+    for (const [sql, dialect, literals] of cases) {
+      expect(sensitiveLiterals(sql, dialect), sql).toEqual(literals);
+    }
+  });
+
+  it("ignores a write that carries no sensitive value", () => {
+    expect(
+      sensitiveLiterals("UPDATE billing.firms SET status = 'active' WHERE id = 1", "postgresql"),
+    ).toEqual([]);
+    // INSERT ... SELECT: the projection holds source columns, never values to zip.
+    expect(
+      sensitiveLiterals(
+        "INSERT INTO billing.firms (id, company_name) SELECT id, name FROM crm.people",
+        "postgresql",
+      ),
+    ).toEqual([]);
   });
 
   it("ignores non-sensitive filters and identifier comparisons", () => {
