@@ -42,6 +42,116 @@ describe("analyzeTableOps", () => {
     });
   });
 
+  it("names the target of a SELECT ... INTO, which the table list never carries", () => {
+    expect(analyzeTableOps("SELECT * INTO staging_copy FROM crm.people", pg)).toEqual({
+      writes: ["staging_copy"],
+      reads: ["crm.people"],
+      writeOp: "create",
+    });
+  });
+
+  it("names the SELECT ... INTO target when the read comes from a CTE", () => {
+    expect(
+      analyzeTableOps(
+        "WITH recent AS (SELECT * FROM crm.people) SELECT * INTO staging_copy FROM recent",
+        pg,
+      ),
+    ).toEqual({
+      writes: ["staging_copy"],
+      reads: ["crm.people", "recent"],
+      writeOp: "create",
+    });
+  });
+
+  it("names the target of a SELECT ... INTO in T-SQL, including a temporary table", () => {
+    expect(analyzeTableOps("SELECT * INTO staging_copy FROM crm.people", "transactsql")).toEqual({
+      writes: ["staging_copy"],
+      reads: ["crm.people"],
+      writeOp: "create",
+    });
+    expect(analyzeTableOps("SELECT * INTO #staging_copy FROM crm.people", "transactsql")).toEqual({
+      writes: ["#staging_copy"],
+      reads: ["crm.people"],
+      writeOp: "create",
+    });
+  });
+
+  it("names a SELECT ... INTO target carried by a later UNION branch", () => {
+    expect(
+      analyzeTableOps(
+        "SELECT id FROM crm.people UNION SELECT id INTO staging_copy FROM billing.firms",
+        pg,
+      ),
+    ).toEqual({
+      writes: ["staging_copy"],
+      reads: ["crm.people", "billing.firms"],
+      writeOp: "create",
+    });
+  });
+
+  it("reads a quoted SELECT ... INTO target as a table, not as a file path", () => {
+    expect(analyzeTableOps('SELECT * INTO "Staging Copy" FROM crm.people', pg)).toEqual({
+      writes: ["Staging Copy"],
+      reads: ["crm.people"],
+      writeOp: "create",
+    });
+  });
+
+  it("names the file a MySQL INTO OUTFILE/DUMPFILE writes to, whatever quotes it uses", () => {
+    expect(
+      analyzeTableOps("SELECT id, email INTO OUTFILE '/tmp/people.csv' FROM crm.people", "mysql"),
+    ).toEqual({
+      writes: ["/tmp/people.csv"],
+      reads: ["crm.people"],
+      writeOp: "export",
+    });
+    expect(
+      analyzeTableOps("SELECT id INTO DUMPFILE '/tmp/people.bin' FROM crm.people", "mysql"),
+    ).toEqual({
+      writes: ["/tmp/people.bin"],
+      reads: ["crm.people"],
+      writeOp: "export",
+    });
+    expect(
+      analyzeTableOps('SELECT id INTO OUTFILE "/tmp/people.tsv" FROM crm.people', "mysql"),
+    ).toEqual({
+      writes: ["/tmp/people.tsv"],
+      reads: ["crm.people"],
+      writeOp: "export",
+    });
+  });
+
+  it("does not report INTO @variable as a write target", () => {
+    expect(analyzeTableOps("SELECT id INTO @handle FROM crm.people", "mysql")).toEqual({
+      writes: [],
+      reads: ["crm.people"],
+      writeOp: null,
+    });
+  });
+
+  it("names the view a CREATE VIEW defines, qualified when the SQL qualifies it", () => {
+    expect(analyzeTableOps("CREATE VIEW people_v AS SELECT * FROM crm.people", pg)).toEqual({
+      writes: ["people_v"],
+      reads: ["crm.people"],
+      writeOp: "create",
+    });
+    expect(
+      analyzeTableOps("CREATE OR REPLACE VIEW billing.people_v AS SELECT * FROM crm.people", pg),
+    ).toEqual({
+      writes: ["billing.people_v"],
+      reads: ["crm.people"],
+      writeOp: "create",
+    });
+  });
+
+  it("still reports a CREATE TABLE ... AS SELECT target exactly once", () => {
+    expect(analyzeTableOps("CREATE TABLE staging_copy AS SELECT * FROM crm.people", pg)).toEqual({
+      writes: ["staging_copy"],
+      reads: ["crm.people"],
+      writeOp: "create",
+    });
+  });
+
   it("returns null when the statement will not parse", () => {
     expect(analyzeTableOps("VACUUM", pg)).toBeNull();
   });
@@ -314,6 +424,94 @@ describe("analyzeSql", () => {
     ).toEqual([]);
   });
 
+  it("collects the output aliases of a RETURNING clause", () => {
+    const cases: Array<[string, string[]]> = [
+      [
+        "UPDATE billing.firms SET status = 'closed' RETURNING name AS contact_email",
+        ["contact_email"],
+      ],
+      [
+        "INSERT INTO billing.firms (name) VALUES ('Acme') RETURNING name AS company_name",
+        ["company_name"],
+      ],
+      ["DELETE FROM billing.firms WHERE id = 1 RETURNING name contact_email", ["contact_email"]],
+    ];
+    for (const [sql, aliases] of cases) {
+      expect(analyzeSql(sql, "postgresql")?.aliases, sql).toEqual(aliases);
+    }
+  });
+
+  it("collects the column list a relation alias renames its columns with", () => {
+    const cases: Array<[string, string[]]> = [
+      [
+        "SELECT * FROM (SELECT id, name FROM billing.firms) f(firm_id, company_name)",
+        ["firm_id", "company_name"],
+      ],
+      ["SELECT * FROM billing.firms f(firm_id, company_name)", ["firm_id", "company_name"]],
+      [
+        "SELECT * FROM crm.people p JOIN (SELECT name FROM billing.firms) f(company_name) ON true",
+        ["company_name"],
+      ],
+      [
+        "SELECT * FROM crm.people p CROSS JOIN LATERAL unnest(p.tags) AS t(contact_email)",
+        ["contact_email"],
+      ],
+      ["SELECT * FROM (VALUES ('a')) AS t(company_name)", ["company_name"]],
+      [
+        "UPDATE billing.firms f SET status = 'closed' FROM (SELECT id FROM crm.people) p(contact_email) WHERE f.id = p.id",
+        ["contact_email"],
+      ],
+    ];
+    for (const [sql, aliases] of cases) {
+      expect(analyzeSql(sql, "postgresql")?.aliases, sql).toEqual(aliases);
+    }
+  });
+
+  it("does not take a relation alias that renames no column for an output name", () => {
+    for (const sql of [
+      "SELECT name FROM billing.firms f",
+      "SELECT * FROM (SELECT name FROM billing.firms) f",
+      "SELECT * FROM (VALUES ('a')) AS f",
+    ]) {
+      expect(analyzeSql(sql, "postgresql")?.aliases, sql).toEqual([]);
+    }
+  });
+
+  it("collects a table function's alias as the output column it names", () => {
+    const cases: Array<[string, string, string[]]> = [
+      ["SELECT * FROM unnest(ARRAY['a']) AS contact_email", "postgresql", ["contact_email"]],
+      ["SELECT * FROM generate_series(1, 3) contact_email", "postgresql", ["contact_email"]],
+      [
+        "SELECT * FROM crm.people p CROSS JOIN LATERAL unnest(p.tags) AS contact_email",
+        "postgresql",
+        ["contact_email"],
+      ],
+      ["SELECT * FROM firms, UNNEST(tags) AS contact_email", "bigquery", ["contact_email"]],
+    ];
+    for (const [sql, dialect, aliases] of cases) {
+      expect(analyzeSql(sql, dialect)?.aliases, sql).toEqual(aliases);
+    }
+  });
+
+  it("cannot tell a quoted relation alias holding parentheses from a column list", () => {
+    // The parser strips the quotes, so the alias arrives exactly like a column list. Accepted
+    // as an over-report: the annotation errs toward showing a name rather than hiding one.
+    expect(analyzeSql('SELECT * FROM billing.firms AS "f(email)"', "postgresql")?.aliases).toEqual([
+      "email",
+    ]);
+  });
+
+  it("exposes the column list a CTE renames its columns with", () => {
+    // The parser folds a CTE column list into columnList, so it reaches the classifier
+    // as a source column rather than an alias; assert the exposure, not the bucket.
+    const parsed = analyzeSql(
+      "WITH x(company_name) AS (SELECT name FROM billing.firms) SELECT * FROM x",
+      "postgresql",
+    );
+    expect(parsed).not.toBeNull();
+    expect(clientColumns(parsed as NonNullable<typeof parsed>, [])).toEqual(["company_name"]);
+  });
+
   it("returns null when the statement cannot be parsed", () => {
     expect(analyzeSql("this is not a query at all !@#", "postgresql")).toBeNull();
   });
@@ -459,6 +657,83 @@ describe("sensitiveLiterals", () => {
     expect(
       sensitiveLiterals("SELECT id FROM t WHERE ref = 'FR7630006000011234567890189'", "postgresql"),
     ).toEqual(["FR7630006000011234567890189"]);
+  });
+
+  it("flags a literal assigned to a sensitive column by an UPDATE", () => {
+    expect(
+      sensitiveLiterals(
+        "UPDATE billing.firms SET company_name = 'ACME' WHERE id = 1",
+        "postgresql",
+      ),
+    ).toEqual(["ACME"]);
+    expect(
+      sensitiveLiterals("UPDATE billing.firms SET \"companyName\" = 'ACME'", "postgresql"),
+    ).toEqual(["ACME"]);
+  });
+
+  it("flags an inserted literal, on every VALUES row", () => {
+    expect(
+      sensitiveLiterals(
+        "INSERT INTO billing.firms (id, company_name) VALUES (1, 'ACME'), (2, 'BETA')",
+        "postgresql",
+      ).sort(),
+    ).toEqual(["ACME", "BETA"]);
+  });
+
+  it("flags the literals of an upsert, both inserted and updated", () => {
+    expect(
+      sensitiveLiterals(
+        `INSERT INTO billing.firms (id, company_name) VALUES (1, 'ACME')
+           ON CONFLICT (id) DO UPDATE SET company_name = 'BETA'`,
+        "postgresql",
+      ).sort(),
+    ).toEqual(["ACME", "BETA"]);
+  });
+
+  it("reads MySQL's INSERT ... SET and ON DUPLICATE KEY UPDATE assignments", () => {
+    expect(
+      sensitiveLiterals("INSERT INTO firms SET id = 1, company_name = 'ACME'", "mysql"),
+    ).toEqual(["ACME"]);
+    expect(
+      sensitiveLiterals(
+        `INSERT INTO firms (id, company_name) VALUES (1, 'ACME')
+           ON DUPLICATE KEY UPDATE company_name = 'BETA'`,
+        "mysql",
+      ).sort(),
+    ).toEqual(["ACME", "BETA"]);
+  });
+
+  it("flags a written literal through REPLACE, a CTE-wrapped UPDATE, a quoted column, and a PII target", () => {
+    const cases: Array<[string, string, string[]]> = [
+      ["REPLACE INTO firms (id, company_name) VALUES (1, 'ACME')", "mysql", ["ACME"]],
+      [
+        "WITH x AS (UPDATE billing.firms SET company_name = 'ACME' RETURNING id) SELECT * FROM x",
+        "postgresql",
+        ["ACME"],
+      ],
+      [
+        "INSERT INTO billing.firms (id, \"companyName\") VALUES (1, 'ACME')",
+        "postgresql",
+        ["ACME"],
+      ],
+      ["UPDATE crm.people SET phone = '0600000000' WHERE id = 1", "postgresql", ["0600000000"]],
+    ];
+    for (const [sql, dialect, literals] of cases) {
+      expect(sensitiveLiterals(sql, dialect), sql).toEqual(literals);
+    }
+  });
+
+  it("ignores a write that carries no sensitive value", () => {
+    expect(
+      sensitiveLiterals("UPDATE billing.firms SET status = 'active' WHERE id = 1", "postgresql"),
+    ).toEqual([]);
+    // INSERT ... SELECT: the projection holds source columns, never values to zip.
+    expect(
+      sensitiveLiterals(
+        "INSERT INTO billing.firms (id, company_name) SELECT id, name FROM crm.people",
+        "postgresql",
+      ),
+    ).toEqual([]);
   });
 
   it("ignores non-sensitive filters and identifier comparisons", () => {

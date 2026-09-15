@@ -136,6 +136,30 @@ describe("render/queue", () => {
     expect(html).toContain('<span class="tbl-chip">users</span>');
   });
 
+  it("names the target of a SELECT ... INTO, not just the table it reads", () => {
+    const html = cardHtml(
+      ready("q8", "SELECT * INTO staging_copy FROM crm.people"),
+      "postgresql",
+      noDrafts,
+      "destructive",
+    );
+    expect(html).toContain('class="cs-writes destructive"');
+    expect(html).toContain('Create</span><span class="tbl-chip">staging_copy</span>');
+    expect(html).toContain('class="cs-reads"');
+    expect(html).toContain('<span class="tbl-chip">crm.people</span>');
+  });
+
+  it("names the file a MySQL INTO OUTFILE exports to", () => {
+    const html = cardHtml(
+      ready("q9", "SELECT id, email INTO OUTFILE '/tmp/people.csv' FROM crm.people"),
+      "mysql",
+      noDrafts,
+      "destructive",
+    );
+    expect(html).toContain('class="cs-writes destructive"');
+    expect(html).toContain('Export</span><span class="tbl-chip">/tmp/people.csv</span>');
+  });
+
   it("keeps a multi-statement query blocked even in destructive mode", () => {
     const html = cardHtml(
       ready("q7", "SELECT 1; DROP TABLE t"),
