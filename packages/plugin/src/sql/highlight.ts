@@ -1,6 +1,7 @@
 import { escapeHtml } from "../html";
 import { type Tok, tokenize } from "./format";
 import { visibleControls } from "./sanitize";
+import { JSON_OPERATORS, jsonKeyNames } from "./schema";
 
 // Case-sensitive by design: the previous regex pass matched only the uppercase
 // spellings, so INTERVAL etc. read as keywords only when written that way.
@@ -27,6 +28,35 @@ const FUNCTIONS = new Set(["count", "sum", "now", "avg", "max", "min"]);
 function lastSegment(word: string): string {
   const dot = word.lastIndexOf(".");
   return dot === -1 ? word : word.slice(dot + 1);
+}
+
+// A key read through a JSON accessor is quoted like a value but names a column, so every
+// flagged segment of the path is tinted like an identifier, in place. A segment the raw
+// operand does not hold verbatim is left alone: the body must stay the query as written.
+function jsonKeySpan(
+  inner: string,
+  piiSet: ReadonlySet<string>,
+  clientSet: ReadonlySet<string>,
+): string | null {
+  let out = "";
+  let cursor = 0;
+  for (const seg of jsonKeyNames(inner)) {
+    const key = seg.toLowerCase();
+    const cls = piiSet.has(key) ? "pii-col" : clientSet.has(key) ? "client-col" : "";
+    const at = cls ? inner.indexOf(seg, cursor) : -1;
+    if (at === -1) {
+      continue;
+    }
+    out += `${escapeHtml(inner.slice(cursor, at))}<span class="${cls}">${escapeHtml(seg)}</span>`;
+    cursor = at + seg.length;
+  }
+  return cursor === 0 ? null : out + escapeHtml(inner.slice(cursor));
+}
+
+function prevSignificant(toks: Tok[], i: number): Tok | undefined {
+  let j = i - 1;
+  while (j >= 0 && (toks[j].t === "ws" || toks[j].t === "comment")) j--;
+  return toks[j];
 }
 
 function classifyWord(
@@ -88,6 +118,15 @@ export function highlight(
       const inner = closed ? tk.v.slice(1, -1) : tk.v.slice(1);
       // Single quotes are a value literal; a flagged value adds "sensitive-val".
       if (quote === "'") {
+        const prev = prevSignificant(toks, i);
+        const keySpan =
+          prev?.t === "op" && JSON_OPERATORS.has(prev.v)
+            ? jsonKeySpan(inner, piiSet, clientSet)
+            : null;
+        if (keySpan !== null) {
+          out += `${quote}${keySpan}${closed ? quote : ""}`;
+          continue;
+        }
         const cls = sensitive.has(inner) ? "st sensitive-val" : "st";
         out += `<span class="${cls}">${escapeHtml(tk.v)}</span>`;
         continue;

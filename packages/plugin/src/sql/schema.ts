@@ -228,6 +228,77 @@ function outputAliases(ast: unknown): string[] {
   return unique(aliases);
 }
 
+// Accessors that read one key out of a JSON document; the parser keeps the key in
+// the right operand and reports only the containing column.
+export const JSON_OPERATORS = new Set(["->", "->>", "#>", "#>>"]);
+// Outside snowflake, every dialect names its JSON functions with "json" in them
+// (json_extract, jsonb_extract_path_text, JSON_VALUE): a dialect-generic match.
+const JSON_FUNCTION = /json/i;
+// A path operand ("$.contact.email", "{contact,email}") holds a key per segment, while
+// anything else is one literal key whose dots belong to it ("email.txt").
+const JSON_PATH = /^\s*[${]/;
+
+// The names a JSON path operand exposes, outermost first. Array indexes name nothing.
+export function jsonKeyNames(path: string): string[] {
+  if (!JSON_PATH.test(path)) {
+    return path.trim() ? [path.trim()] : [];
+  }
+  return (
+    path
+      .split(/[.,[\]{}]/)
+      // Strip only what delimits a segment, never a character inside it, so every name
+      // returned still occurs verbatim in the operand the highlighter has to mark up.
+      .map((segment) => segment.trim().replace(/^["'$]+|["'$]+$/g, ""))
+      .filter((segment) => segment !== "" && !/^\d+$/.test(segment))
+  );
+}
+
+// The parser spreads a function name over name.name[] and name.schema (an unqualified
+// bigquery name lands in the latter, a qualifier in the other), so any part counts.
+function isJsonFunction(node: Record<string, unknown>): boolean {
+  let match = false;
+  walk(node.name, (n) => {
+    if (typeof n.value === "string" && JSON_FUNCTION.test(n.value)) match = true;
+  });
+  return match;
+}
+
+// The operands one node reads its keys from: what an accessor operator takes on the
+// right (a path, or an array of them), the subscripts of a bracketed column, or the
+// arguments a JSON function takes after the document itself.
+function keyOperands(node: Record<string, unknown>): unknown[] {
+  if (node.type === "binary_expr" && JSON_OPERATORS.has(String(node.operator))) {
+    const right = node.right;
+    const list = isNode(right) && isNode(right.expr_list) ? right.expr_list.value : null;
+    return Array.isArray(list) ? list : [right];
+  }
+  if (node.type === "column_ref" && Array.isArray(node.array_index)) {
+    return node.array_index.map((entry) => (isNode(entry) ? entry.index : null));
+  }
+  if (node.type !== "function" || !isJsonFunction(node)) {
+    return [];
+  }
+  const args = isNode(node.args) && Array.isArray(node.args.value) ? node.args.value : [];
+  // The document comes first and the keys after it; a call that already starts on a
+  // string builds or parses a document rather than reading one.
+  return args.length < 2 || stringLiteral(args[0]) !== null ? [] : args.slice(1);
+}
+
+function accessorKeys(node: Record<string, unknown>): string[] {
+  return keyOperands(node).flatMap((operand) => {
+    const path = stringLiteral(operand);
+    return path === null ? [] : jsonKeyNames(path);
+  });
+}
+
+function jsonKeys(ast: unknown): string[] {
+  const keys: string[] = [];
+  walk(ast, (n) => {
+    keys.push(...accessorKeys(n));
+  });
+  return unique(keys);
+}
+
 export interface ParsedQuery {
   tables: TableRef[];
   // Source column names as the parser resolves them, plus the column lists it folds into
@@ -236,6 +307,9 @@ export interface ParsedQuery {
   // Output names the query assigns (AS, RETURNING, a relation column list): what the
   // result set, and the agent, will see.
   aliases: string[];
+  // Keys read out of a JSON document (profile->>'email'): the parser reports only
+  // the containing column, so the key is the sole trace of what is exposed.
+  jsonKeys: string[];
   star: boolean;
 }
 
@@ -261,6 +335,7 @@ export function analyzeSql(sql: string, dialect: string): ParsedQuery | null {
       tables: dedupeRefs(refs),
       columns: unique(columns),
       aliases: outputAliases(ast),
+      jsonKeys: jsonKeys(ast),
       star,
     };
   } catch {
@@ -363,12 +438,18 @@ export function analyzeTableOps(
   };
 }
 
-type ExposedInput = Pick<ParsedQuery, "columns" | "star"> & Partial<Pick<ParsedQuery, "aliases">>;
+type ExposedInput = Pick<ParsedQuery, "columns" | "star"> &
+  Partial<Pick<ParsedQuery, "aliases" | "jsonKeys">>;
 
 // The distinct column names a query would expose: the ones it names, the output
-// aliases it assigns, plus (for SELECT *) the real columns of the tables it reads.
+// aliases it assigns, the JSON keys it reads, plus (for SELECT *) the real columns
+// of the tables it reads.
 function exposedColumns(parsed: ExposedInput, tableColumns: string[]): string[] {
-  const exposed = new Set<string>([...parsed.columns, ...(parsed.aliases ?? [])]);
+  const exposed = new Set<string>([
+    ...parsed.columns,
+    ...(parsed.aliases ?? []),
+    ...(parsed.jsonKeys ?? []),
+  ]);
   if (parsed.star) {
     for (const name of tableColumns) {
       exposed.add(name);
@@ -481,7 +562,9 @@ function stringLiteral(node: unknown): string | null {
 function operands(node: unknown): Record<string, unknown>[] {
   if (!isNode(node)) return [];
   const t = node.type;
-  if (t === "function") return operands(node.args);
+  // A JSON function is an operand in itself: splitting it into arguments would drop the
+  // key it reads (json_extract(profile, '$.email')), which is where its meaning sits.
+  if (t === "function" && !isJsonFunction(node)) return operands(node.args);
   if (t === "aggr_func") return operands(isNode(node.args) ? node.args.expr : null);
   if (t === "cast") return operands(node.expr);
   if (t === "array") return operands(node.expr_list);
@@ -489,10 +572,13 @@ function operands(node: unknown): Record<string, unknown>[] {
   return [node];
 }
 
+// An operand names what it compares through its column or, for a JSON accessor, through
+// its key (profile->>'company_name' carries its meaning in the key, never in "profile").
 function hasSensitiveColumn(node: unknown): boolean {
   return operands(node).some((operand) => {
     const col = columnName(operand);
-    return col !== null && classifyColumn(col) !== null;
+    if (col !== null && classifyColumn(col) !== null) return true;
+    return accessorKeys(operand).some((key) => classifyColumn(key) !== null);
   });
 }
 
