@@ -736,6 +736,20 @@ describe("sensitiveLiterals", () => {
     ).toEqual([]);
   });
 
+  it("reads the same value forms in a write as in a filter", () => {
+    // One reader serves both paths, so a write sees the E-string, dollar-quoted and
+    // per-dialect spellings too, and an assigned empty value stays unreported.
+    const cases: Array<[string, string, string[]]> = [
+      ["postgresql", "UPDATE billing.firms SET company_name = E'ACME' WHERE id = 1", ["ACME"]],
+      ["postgresql", "UPDATE billing.firms SET company_name = $$ACME$$ WHERE id = 1", ["ACME"]],
+      ["transactsql", "INSERT INTO billing.firms (company_name) VALUES (N'ACME')", ["ACME"]],
+      ["postgresql", "UPDATE billing.firms SET company_name = '' WHERE id = 1", []],
+    ];
+    for (const [dialect, sql, literals] of cases) {
+      expect(sensitiveLiterals(sql, dialect), sql).toEqual(literals);
+    }
+  });
+
   it("ignores non-sensitive filters and identifier comparisons", () => {
     expect(sensitiveLiterals("SELECT id FROM t WHERE status = 'active'", "postgresql")).toEqual([]);
     expect(sensitiveLiterals("SELECT id FROM t WHERE id = 5", "postgresql")).toEqual([]);
@@ -789,5 +803,144 @@ describe("sensitiveLiterals", () => {
 
   it("returns nothing when the SQL will not parse", () => {
     expect(sensitiveLiterals("not a query", "postgresql")).toEqual([]);
+  });
+
+  it("resolves the column through a function, cast, or COALESCE wrapper", () => {
+    const cases: Array<[string, string[]]> = [
+      ["SELECT id FROM billing.firms WHERE lower(company_name) = 'acme'", ["acme"]],
+      ["SELECT id FROM billing.firms WHERE company_name::text = 'ACME'", ["ACME"]],
+      ["SELECT id FROM billing.firms WHERE CAST(company_name AS text) = 'ACME'", ["ACME"]],
+      ["SELECT id FROM billing.firms WHERE COALESCE(company_name, '') = 'ACME'", ["ACME"]],
+      ["SELECT id FROM billing.firms WHERE lower(trim(company_name)) = 'acme'", ["acme"]],
+      ["SELECT id FROM billing.firms WHERE 'ACME' = upper(company_name)", ["ACME"]],
+      ["SELECT id FROM crm.people GROUP BY id HAVING max(salary) = '90000'", ["90000"]],
+    ];
+    for (const [sql, literals] of cases) {
+      expect(sensitiveLiterals(sql, "postgresql").sort(), sql).toEqual(literals);
+    }
+  });
+
+  it("flags the literals of an IN list, a BETWEEN range, and an ANY/ALL array", () => {
+    const cases: Array<[string, string[]]> = [
+      [
+        "SELECT id FROM billing.firms WHERE lower(company_name) IN ('acme', 'beta')",
+        ["acme", "beta"],
+      ],
+      [
+        "SELECT id FROM crm.people WHERE birth_date BETWEEN '1990-01-01' AND '1991-01-01'",
+        ["1990-01-01", "1991-01-01"],
+      ],
+      [
+        "SELECT id FROM crm.people WHERE birth_date NOT BETWEEN '1990-01-01' AND '1991-01-01'",
+        ["1990-01-01", "1991-01-01"],
+      ],
+      [
+        "SELECT id FROM billing.firms WHERE company_name = ANY(ARRAY['ACME', 'BETA'])",
+        ["ACME", "BETA"],
+      ],
+      ["SELECT id FROM billing.firms WHERE company_name <> ALL(ARRAY['ACME'])", ["ACME"]],
+    ];
+    for (const [sql, literals] of cases) {
+      expect(sensitiveLiterals(sql, "postgresql").sort(), sql).toEqual(literals);
+    }
+  });
+
+  it("flags a literal compared with a pattern or regex operator", () => {
+    for (const op of ["~", "~*", "!~", "!~*", "SIMILAR TO", "NOT SIMILAR TO", "NOT ILIKE"]) {
+      const sql = `SELECT id FROM billing.firms WHERE company_name ${op} 'acme'`;
+      expect(sensitiveLiterals(sql, "postgresql"), sql).toEqual(["acme"]);
+    }
+  });
+
+  it("reads the value forms the parser leaves as raw text", () => {
+    const cases: Array<[string, string[]]> = [
+      ["SELECT id FROM billing.firms WHERE company_name = E'ACME'", ["ACME"]],
+      // Kept exactly as written, escape included, so the highlight still matches it.
+      ["SELECT id FROM billing.firms WHERE company_name = E'O\\'Brien'", ["O\\'Brien"]],
+      ["SELECT id FROM billing.firms WHERE company_name = E'it''s'", ["it''s"]],
+      ["SELECT id FROM billing.firms WHERE company_name = $$ACME$$", ["ACME"]],
+      ["SELECT id FROM billing.firms WHERE company_name = $tag$ACME$tag$", ["ACME"]],
+      ["SELECT id FROM crm.people WHERE note = E'jane@example.test'", ["jane@example.test"]],
+    ];
+    for (const [sql, literals] of cases) {
+      expect(sensitiveLiterals(sql, "postgresql").sort(), sql).toEqual(literals);
+    }
+  });
+
+  it("reads the string literal a dialect spells its own way", () => {
+    expect(
+      sensitiveLiterals("SELECT id FROM firms WHERE company_name = N'ACME'", "transactsql"),
+    ).toEqual(["ACME"]);
+    expect(
+      sensitiveLiterals('SELECT id FROM firms WHERE company_name = "ACME"', "bigquery"),
+    ).toEqual(["ACME"]);
+  });
+
+  it("flags a literal compared with a MySQL or SQLite pattern operator", () => {
+    const cases: Array<[string, string]> = [
+      ["mysql", "REGEXP"],
+      ["mysql", "NOT REGEXP"],
+      ["mysql", "RLIKE"],
+      ["mysql", "NOT RLIKE"],
+      ["sqlite", "GLOB"],
+      ["sqlite", "IS NOT"],
+    ];
+    for (const [dialect, op] of cases) {
+      const sql = `SELECT id FROM firms WHERE company_name ${op} 'acme'`;
+      expect(sensitiveLiterals(sql, dialect), sql).toEqual(["acme"]);
+    }
+  });
+
+  it("stays silent when the parser re-stringifies an operand it did not model", () => {
+    // IS DISTINCT FROM arrives as raw text quoting a value and a column alike.
+    for (const operand of ["'ACME'", "status"]) {
+      const sql = `SELECT id FROM billing.firms WHERE company_name IS DISTINCT FROM ${operand}`;
+      expect(sensitiveLiterals(sql, "postgresql"), sql).toEqual([]);
+    }
+  });
+
+  it("never reports an empty literal, which would tint every '' in the query", () => {
+    for (const sql of [
+      "SELECT id FROM billing.firms WHERE company_name = $$$$",
+      "SELECT id FROM billing.firms WHERE company_name = COALESCE(status, '')",
+    ]) {
+      expect(sensitiveLiterals(sql, "postgresql"), sql).toEqual([]);
+    }
+  });
+
+  it("leaves a bind parameter and an IS NULL check alone", () => {
+    expect(
+      sensitiveLiterals("SELECT id FROM billing.firms WHERE company_name = $1", "postgresql"),
+    ).toEqual([]);
+    expect(
+      sensitiveLiterals(
+        "SELECT id FROM billing.firms WHERE company_name IS NOT NULL",
+        "postgresql",
+      ),
+    ).toEqual([]);
+  });
+
+  it("flags a wrapped call only when one of its arguments is sensitive", () => {
+    expect(
+      sensitiveLiterals(
+        "SELECT id FROM billing.firms WHERE concat(city, status) = 'ACME'",
+        "postgresql",
+      ),
+    ).toEqual([]);
+    expect(
+      sensitiveLiterals(
+        "SELECT id FROM billing.firms WHERE concat(company_name, status) = 'ACME'",
+        "postgresql",
+      ),
+    ).toEqual(["ACME"]);
+  });
+
+  it("never reaches into a subquery for the literals of an outer comparison", () => {
+    expect(
+      sensitiveLiterals(
+        "SELECT id FROM billing.firms WHERE company_name IN (SELECT label FROM crm.tags WHERE status = 'active')",
+        "postgresql",
+      ),
+    ).toEqual([]);
   });
 });

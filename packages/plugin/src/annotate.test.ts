@@ -110,6 +110,23 @@ describe("SchemaAnnotator.schemaFor", () => {
     expect(schema?.star).toBe(false);
   });
 
+  it("flags the value of a filter that wraps its sensitive column", async () => {
+    const getColumns = vi.fn(async () => columns("id", "company_name", "status"));
+    const annotator = new SchemaAnnotator({
+      getColumns,
+      dialect: () => "postgresql",
+      defaultSchema: () => "public",
+      generation: () => 0,
+    });
+
+    const schema = await annotator.schemaFor(
+      "SELECT id FROM billing.firms WHERE lower(company_name) = 'acme'",
+    );
+
+    expect(schema?.client).toEqual(["company_name"]);
+    expect(schema?.literals).toEqual(["acme"]);
+  });
+
   it("flags a sensitive output name a RETURNING clause introduces", async () => {
     // No table column is sensitive on its own: the write only exposes the value under
     // the output name it assigns in RETURNING.
