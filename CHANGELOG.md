@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.1](https://github.com/Gldywn/gatekeeper/compare/v0.2.0...v0.2.1) (2026-09-15)
+
+
+### Bug Fixes
+
+* **plugin:** flag output names from RETURNING and relation column lists ([#36](https://github.com/Gldywn/gatekeeper/issues/36)) ([f4bf103](https://github.com/Gldywn/gatekeeper/commit/f4bf1031d1c19f4faee28923e650dd9b953d37d0))
+* **plugin:** flag sensitive literals assigned by a write ([#37](https://github.com/Gldywn/gatekeeper/issues/37)) ([b7c03b3](https://github.com/Gldywn/gatekeeper/commit/b7c03b30efb8fb63f593d083317061f31ad36f91))
+* **plugin:** flag sensitive literals through a wrapped column ([#39](https://github.com/Gldywn/gatekeeper/issues/39)) ([8005978](https://github.com/Gldywn/gatekeeper/commit/80059786832285896f65ac9c5316a55d1b5358b1))
+* **plugin:** flag sensitive output aliases in the schema annotation ([#34](https://github.com/Gldywn/gatekeeper/issues/34)) ([1b04715](https://github.com/Gldywn/gatekeeper/commit/1b04715848d405faf556bdc541cb2b03b15c4fc7))
+* **plugin:** flag the keys read through a JSON accessor ([#35](https://github.com/Gldywn/gatekeeper/issues/35)) ([52292fd](https://github.com/Gldywn/gatekeeper/commit/52292fd95955557fdfbf6aacefc24f7892fd1fd3))
+* **plugin:** name the SELECT INTO and CREATE VIEW write target ([#38](https://github.com/Gldywn/gatekeeper/issues/38)) ([87344ff](https://github.com/Gldywn/gatekeeper/commit/87344ffdcdeb922ec8ec6cc5d221e80c9ce27b0b))
+* **skills:** clear dist before unzip so plugin upgrades fully replace the old build ([#33](https://github.com/Gldywn/gatekeeper/issues/33)) ([64862b4](https://github.com/Gldywn/gatekeeper/commit/64862b42626773ac0fda299e389c1148fdcd6864))
+
 ## [0.2.0](https://github.com/Gldywn/gatekeeper/compare/v0.1.1...v0.2.0) (2026-08-28)
 
 
