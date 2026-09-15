@@ -342,6 +342,94 @@ describe("analyzeSql", () => {
     }
   });
 
+  it("collects the output aliases of a RETURNING clause", () => {
+    const cases: Array<[string, string[]]> = [
+      [
+        "UPDATE billing.firms SET status = 'closed' RETURNING name AS contact_email",
+        ["contact_email"],
+      ],
+      [
+        "INSERT INTO billing.firms (name) VALUES ('Acme') RETURNING name AS company_name",
+        ["company_name"],
+      ],
+      ["DELETE FROM billing.firms WHERE id = 1 RETURNING name contact_email", ["contact_email"]],
+    ];
+    for (const [sql, aliases] of cases) {
+      expect(analyzeSql(sql, "postgresql")?.aliases, sql).toEqual(aliases);
+    }
+  });
+
+  it("collects the column list a relation alias renames its columns with", () => {
+    const cases: Array<[string, string[]]> = [
+      [
+        "SELECT * FROM (SELECT id, name FROM billing.firms) f(firm_id, company_name)",
+        ["firm_id", "company_name"],
+      ],
+      ["SELECT * FROM billing.firms f(firm_id, company_name)", ["firm_id", "company_name"]],
+      [
+        "SELECT * FROM crm.people p JOIN (SELECT name FROM billing.firms) f(company_name) ON true",
+        ["company_name"],
+      ],
+      [
+        "SELECT * FROM crm.people p CROSS JOIN LATERAL unnest(p.tags) AS t(contact_email)",
+        ["contact_email"],
+      ],
+      ["SELECT * FROM (VALUES ('a')) AS t(company_name)", ["company_name"]],
+      [
+        "UPDATE billing.firms f SET status = 'closed' FROM (SELECT id FROM crm.people) p(contact_email) WHERE f.id = p.id",
+        ["contact_email"],
+      ],
+    ];
+    for (const [sql, aliases] of cases) {
+      expect(analyzeSql(sql, "postgresql")?.aliases, sql).toEqual(aliases);
+    }
+  });
+
+  it("does not take a relation alias that renames no column for an output name", () => {
+    for (const sql of [
+      "SELECT name FROM billing.firms f",
+      "SELECT * FROM (SELECT name FROM billing.firms) f",
+      "SELECT * FROM (VALUES ('a')) AS f",
+    ]) {
+      expect(analyzeSql(sql, "postgresql")?.aliases, sql).toEqual([]);
+    }
+  });
+
+  it("collects a table function's alias as the output column it names", () => {
+    const cases: Array<[string, string, string[]]> = [
+      ["SELECT * FROM unnest(ARRAY['a']) AS contact_email", "postgresql", ["contact_email"]],
+      ["SELECT * FROM generate_series(1, 3) contact_email", "postgresql", ["contact_email"]],
+      [
+        "SELECT * FROM crm.people p CROSS JOIN LATERAL unnest(p.tags) AS contact_email",
+        "postgresql",
+        ["contact_email"],
+      ],
+      ["SELECT * FROM firms, UNNEST(tags) AS contact_email", "bigquery", ["contact_email"]],
+    ];
+    for (const [sql, dialect, aliases] of cases) {
+      expect(analyzeSql(sql, dialect)?.aliases, sql).toEqual(aliases);
+    }
+  });
+
+  it("cannot tell a quoted relation alias holding parentheses from a column list", () => {
+    // The parser strips the quotes, so the alias arrives exactly like a column list. Accepted
+    // as an over-report: the annotation errs toward showing a name rather than hiding one.
+    expect(analyzeSql('SELECT * FROM billing.firms AS "f(email)"', "postgresql")?.aliases).toEqual([
+      "email",
+    ]);
+  });
+
+  it("exposes the column list a CTE renames its columns with", () => {
+    // The parser folds a CTE column list into columnList, so it reaches the classifier
+    // as a source column rather than an alias; assert the exposure, not the bucket.
+    const parsed = analyzeSql(
+      "WITH x(company_name) AS (SELECT name FROM billing.firms) SELECT * FROM x",
+      "postgresql",
+    );
+    expect(parsed).not.toBeNull();
+    expect(clientColumns(parsed as NonNullable<typeof parsed>, [])).toEqual(["company_name"]);
+  });
+
   it("returns null when the statement cannot be parsed", () => {
     expect(analyzeSql("this is not a query at all !@#", "postgresql")).toBeNull();
   });
