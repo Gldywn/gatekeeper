@@ -396,8 +396,26 @@ const COMPARISON_OPS = new Set([
   "LIKE",
   "ILIKE",
   "NOT LIKE",
+  "NOT ILIKE",
+  "SIMILAR TO",
+  "NOT SIMILAR TO",
+  "~",
+  "~*",
+  "!~",
+  "!~*",
+  // MySQL/MariaDB and SQLite spell the regex family their own way.
+  "REGEXP",
+  "NOT REGEXP",
+  "RLIKE",
+  "NOT RLIKE",
+  "GLOB",
   "IN",
   "NOT IN",
+  "BETWEEN",
+  "NOT BETWEEN",
+  // SQLite compares values with IS/IS NOT; on "IS NULL" they carry no literal anyway.
+  "IS",
+  "IS NOT",
 ]);
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const IBAN_RE = /^[A-Za-z]{2}\d{2}[A-Za-z0-9]{10,30}$/;
@@ -418,16 +436,64 @@ function columnName(node: unknown): string | null {
   return columnLabel(node.column);
 }
 
-function stringLiteral(node: unknown): string | null {
-  if (!isNode(node)) return null;
+// The quoted spans of a raw SQL fragment the parser kept as text instead of modelling,
+// escapes included so the value still matches the query text. Single quotes only: the
+// parser re-quotes an unmodelled operand (IS DISTINCT FROM) with double quotes, where a
+// value and a bare column read alike.
+const RAW_QUOTED = /'((?:[^'\\]|''|\\.)*)'/g;
+
+// Node types holding a plain string literal, one per dialect family: "string" is
+// BigQuery's double-quoted form, "var_string" the T-SQL N'ACME' one.
+const STRING_NODES = new Set([
+  "single_quote_string",
+  "double_quote_string",
+  "string",
+  "var_string",
+]);
+
+// The literal values a node carries. Beyond the string nodes, the parser leaves E'ACME'
+// as raw text in a "default" node, and dollar-quoted $$ACME$$ as a "var" whose prefix and
+// suffix match (which a $1 bind parameter, having no suffix, never does).
+function literalValues(node: unknown): string[] {
+  if (!isNode(node)) return [];
   const t = node.type;
-  if (
-    (t === "single_quote_string" || t === "double_quote_string") &&
-    typeof node.value === "string"
-  ) {
-    return node.value;
+  if (typeof t === "string" && STRING_NODES.has(t) && typeof node.value === "string") {
+    return [node.value];
   }
-  return null;
+  if (t === "var" && typeof node.name === "string" && typeof node.prefix === "string") {
+    return node.prefix === node.suffix ? [node.name] : [];
+  }
+  if (t === "default" && typeof node.value === "string") {
+    return [...node.value.matchAll(RAW_QUOTED)].map((m) => m[1]);
+  }
+  return [];
+}
+
+// A node the grammar allows only one string in: an OUTFILE path, a SELECT ... INTO target.
+function stringLiteral(node: unknown): string | null {
+  return literalValues(node)[0] ?? null;
+}
+
+// Either side of a comparison can wrap what it compares: lower(col), col::text,
+// COALESCE(col, ''), max(col), = ANY(ARRAY[...]). Descending those wrappers yields
+// the operands that carry the signal, and stopping at every other node keeps a
+// subquery's own literals out.
+function operands(node: unknown): Record<string, unknown>[] {
+  if (!isNode(node)) return [];
+  const t = node.type;
+  if (t === "function") return operands(node.args);
+  if (t === "aggr_func") return operands(isNode(node.args) ? node.args.expr : null);
+  if (t === "cast") return operands(node.expr);
+  if (t === "array") return operands(node.expr_list);
+  if (t === "expr_list") return Array.isArray(node.value) ? node.value.flatMap(operands) : [];
+  return [node];
+}
+
+function hasSensitiveColumn(node: unknown): boolean {
+  return operands(node).some((operand) => {
+    const col = columnName(operand);
+    return col !== null && classifyColumn(col) !== null;
+  });
 }
 
 // String literals that expose a sensitive value in the query text itself: a value
@@ -442,14 +508,20 @@ export function sensitiveLiterals(sql: string, dialect: string): string[] {
     return [];
   }
   const found = new Set<string>();
+  // An empty value carries nothing and would tint every '' in the rendered query.
+  const add = (value: string) => {
+    if (value !== "") {
+      found.add(value);
+    }
+  };
   const addLiteral = (node: unknown) => {
-    const v = stringLiteral(node);
-    if (v !== null) found.add(v);
+    for (const value of literalValues(node)) add(value);
   };
   walk(ast, (n) => {
-    const s = stringLiteral(n);
-    if (s !== null && (EMAIL_RE.test(s) || IBAN_RE.test(s))) {
-      found.add(s);
+    for (const value of literalValues(n)) {
+      if (EMAIL_RE.test(value) || IBAN_RE.test(value)) {
+        add(value);
+      }
     }
     // Assignments hang off `set` wherever they appear: UPDATE, MySQL INSERT ... SET,
     // and the update branch of an upsert (ON CONFLICT / ON DUPLICATE KEY).
@@ -471,17 +543,19 @@ export function sensitiveLiterals(sql: string, dialect: string): string[] {
         });
       }
     }
-    if (n.type === "binary_expr" && COMPARISON_OPS.has(String(n.operator).toUpperCase())) {
-      for (const [side, other] of [
-        [n.left, n.right],
-        [n.right, n.left],
-      ] as const) {
-        const col = columnName(side);
-        if (col && classifyColumn(col)) {
-          addLiteral(other);
-          if (isNode(other) && other.type === "expr_list" && Array.isArray(other.value)) {
-            for (const item of other.value) addLiteral(item);
-          }
+    if (n.type !== "binary_expr" || !COMPARISON_OPS.has(String(n.operator).toUpperCase())) {
+      return;
+    }
+    for (const [side, other] of [
+      [n.left, n.right],
+      [n.right, n.left],
+    ] as const) {
+      if (!hasSensitiveColumn(side)) {
+        continue;
+      }
+      for (const operand of operands(other)) {
+        for (const value of literalValues(operand)) {
+          add(value);
         }
       }
     }
