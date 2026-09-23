@@ -3,11 +3,13 @@ import {
   activityLatency,
   capitalize,
   clockTime,
+  countsLabel,
   dayKey,
   dayLabel,
   escapeHtml,
   outcomeMeta,
   previewSql,
+  rowsLabel,
 } from "../html";
 import {
   chevronDown,
@@ -28,6 +30,7 @@ import { highlight } from "../sql/highlight";
 import { visibleControls } from "../sql/sanitize";
 import type { SchemaContext } from "../sql/schema";
 import type { ActivityEntry } from "../types";
+import { approvalHtml, approvalLabel, autoIcon } from "./auto";
 import { flyoutMenu } from "./controls";
 
 export function activityShell(body: string, connChip: string): string {
@@ -166,14 +169,34 @@ function riskIcon(cls: RiskClass): string {
   return "";
 }
 
-// The one right-side metric, and only when it means something: rows returned for an
-// approved read, rows changed for an approved write/destructive (its blast radius),
-// nothing otherwise. A blank beats a filler like a decision-time dressed up as latency.
-function activityMetric(e: ActivityEntry, cls: RiskClass): string {
-  if (e.state !== "approved" || e.rowCount == null) {
+// The one right-side metric, and only when it means something: what an approved write
+// changed, else what the query returned, each said in full so neither can be read as the
+// other. A blank beats a filler, and an unknown count stays blank.
+function activityMetric(e: ActivityEntry): string {
+  if (e.state !== "approved") {
     return "";
   }
-  return cls === "read" ? `${e.rowCount} rows` : `${e.rowCount} affected`;
+  if (typeof e.affectedRows === "number") {
+    return rowsLabel(e.affectedRows, "changed");
+  }
+  return typeof e.rowCount === "number" ? rowsLabel(e.rowCount, "returned") : "";
+}
+
+// The bolt says Auto mode was involved at all, whether it ran the read, evaluated it
+// before a human decided, or stopped it on a local check. Who decided in the end is the
+// status chip's job, which turns cyan when nothing human did.
+function autoFlag(e: ActivityEntry): string {
+  const evaluation = e.approval?.evaluation ?? e.evaluation;
+  if (!evaluation && !e.autoHold) {
+    return "";
+  }
+  const label =
+    e.approval?.source === "automatic"
+      ? "Approved automatically by Auto mode"
+      : evaluation
+        ? "Evaluated by Auto mode, decided by you"
+        : "Auto mode stopped this read before evaluation";
+  return `<span class="act-flag auto" title="${label}" aria-label="${label}">${autoIcon}</span>`;
 }
 
 export function activityEntryHtml(
@@ -190,20 +213,23 @@ export function activityEntryHtml(
   // The full reason/error rides the expanded panel, tinted toward the outcome colour.
   const note = state === "rejected" ? e.reason?.trim() : state === "failed" ? e.error?.trim() : "";
   const cls = classifyQuery(e.sql, dialect).class;
-  const rows = state === "approved" && e.rowCount != null ? ` &middot; ${e.rowCount} rows` : "";
+  // The row shows the leading fact; the open panel has room for both.
+  const counts =
+    state === "approved" ? countsLabel({ rowCount: e.rowCount, affectedRows: e.affectedRows }) : "";
+  const rows = counts ? ` &middot; ${escapeHtml(counts)}` : "";
   return `
           <div class="act-entry${isExpanded ? " open" : ""}" data-act="${escapeHtml(e.id)}">
             <button class="act-row" type="button" data-act-sql="${escapeHtml(e.id)}" aria-expanded="${isExpanded}">
               <span class="chev">${chevronDown}</span>
               <span class="act-time">${escapeHtml(clockTime(ts))}</span>
-              <span class="act-state ${escapeHtml(state)}">${escapeHtml(label)}</span>
+              <span class="act-state ${escapeHtml(state)}${e.approval?.source === "automatic" ? " auto" : ""}">${escapeHtml(label)}</span>
               ${riskIcon(cls)}<span class="act-intent">${escapeHtml(headline)}</span>
-              <span class="act-flags" data-act-flags="${escapeHtml(e.id)}"></span>
-              <span class="act-metric">${escapeHtml(activityMetric(e, cls))}</span>
+              ${autoFlag(e)}<span class="act-flags" data-act-flags="${escapeHtml(e.id)}"></span>
+              <span class="act-metric">${escapeHtml(activityMetric(e))}</span>
             </button>
             <div class="act-detail"${isExpanded ? "" : " hidden"}>
               <div class="act-meta">${escapeHtml(e.id)} &middot; ${escapeHtml(new Date(ts).toLocaleString())}${rows}</div>
-              ${note ? `<div class="act-enote ${escapeHtml(state)}">${escapeHtml(note)}</div>` : ""}
+              ${approvalHtml(e.approval, e.evaluation, e.autoHold)}${note ? `<div class="act-enote ${escapeHtml(state)}">${escapeHtml(note)}</div>` : ""}
               <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(visibleControls(e.sql))}" aria-label="Copy SQL">${copyIcon}</button><code data-act-sqlbody="${escapeHtml(e.id)}">${highlight(formatSql(e.sql))}</code></pre>
             </div>
           </div>`;
@@ -299,8 +325,21 @@ export function activityMarkdown(
       lines.push(`- Latency: ${latency}`);
     }
     lines.push(`- Request: ${e.id}`);
+    if (e.approval)
+      lines.push(
+        `- Approval: ${approvalLabel(e.approval)}`,
+        `- Evaluation: ${JSON.stringify(e.approval.evaluation ?? null)}`,
+      );
+    if (e.autoHold)
+      lines.push(
+        `- Auto mode: ${e.autoHold.sent ? "sent, evaluation unfinished" : "stopped locally, nothing sent"}`,
+        `- Auto mode reason: ${e.autoHold.reason}`,
+      );
+    if (e.state === "approved" && e.affectedRows != null) {
+      lines.push(`- Rows changed: ${e.affectedRows}`);
+    }
     if (e.state === "approved" && e.rowCount != null) {
-      lines.push(`- Rows: ${e.rowCount}`);
+      lines.push(`- Rows returned: ${e.rowCount}`);
     }
     if (e.reason?.trim()) {
       lines.push(`- Reason: ${e.reason.trim()}`);
@@ -323,7 +362,8 @@ const CSV_HEADER = [
   "intent",
   "flags",
   "request_id",
-  "rows",
+  "rows_returned",
+  "rows_changed",
   "reason",
   "error",
   "sql",
@@ -350,6 +390,7 @@ export function activityCsv(entries: ActivityEntry[], flags: ActivityFlagMap = n
       (flags.get(e.id) ?? []).join("; "),
       e.id,
       e.rowCount != null ? `${e.rowCount}` : "",
+      e.affectedRows != null ? `${e.affectedRows}` : "",
       e.reason?.trim() ?? "",
       e.error?.trim() ?? "",
       visibleControls(e.sql).replace(/\s+/g, " ").trim(),
@@ -377,10 +418,15 @@ export function activityJson(entries: ActivityEntry[], flags: ActivityFlagMap = 
       intent: e.intent?.trim() || null,
       flags: flags.get(e.id) ?? [],
       request_id: e.id,
-      rows: e.rowCount,
+      rows_returned: e.rowCount ?? null,
+      // An entry from before the count existed reads as unknown, never as zero.
+      rows_changed: e.affectedRows ?? null,
       reason: e.reason?.trim() || null,
       error: e.error?.trim() || null,
       sql: visibleControls(e.sql.trim()),
+      ...(e.approval ? { approval: e.approval } : {}),
+      ...(e.evaluation ? { evaluation: e.evaluation } : {}),
+      ...(e.autoHold ? { autoHold: e.autoHold } : {}),
     };
   });
   return `${JSON.stringify(rows, null, 2)}\n`;

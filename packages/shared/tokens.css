@@ -22,6 +22,9 @@
   --exec: oklch(74% 0.1 235);
   /* Client-confidentiality accent: a violet distinct from the red PII danger. */
   --client: oklch(70% 0.15 300);
+  /* Auto mode (delegated execution): an electric cyan, brighter and greener than --exec. */
+  --auto: oklch(85% 0.13 195);
+  --auto-ink: oklch(24% 0.05 195);
 
   --s1: 4px;
   --s2: 8px;

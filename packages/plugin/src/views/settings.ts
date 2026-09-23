@@ -1,5 +1,6 @@
 import { escapeHtml } from "../html";
 import { gearIcon, xIcon } from "../icons";
+import { autoSettingsHtml } from "../render/auto";
 import { modeDropdown, switchInput } from "../render/controls";
 import { RECENTLY_RESOLVED_OPTIONS, RESULT_CACHE_OPTIONS, type Settings } from "../settings";
 import type { RiskMode } from "../sql/mode";
@@ -8,6 +9,8 @@ interface SettingsViewDeps {
   root: HTMLElement;
   settings: () => Settings;
   mode: () => RiskMode;
+  auto?: () => boolean;
+  keySaved?: () => boolean;
 }
 
 interface ToggleSpec {
@@ -19,15 +22,9 @@ interface ToggleSpec {
   example?: { text: string; cls: string };
 }
 
-// Ordered so schema annotation, the base that resolves the columns the flags read,
-// leads its group.
+// The tables and columns a query reads are always resolved and shown (2026-09-21
+// decision); only what is highlighted on top of them stays a preference.
 const DETECTION_TOGGLES: ToggleSpec[] = [
-  {
-    key: "schemaAnnotation",
-    name: "Schema annotation",
-    desc: "Resolve and show the tables and columns a query reads (host-side).",
-    example: { text: "reads users", cls: "reads" },
-  },
   {
     key: "piiFlagging",
     name: "PII flagging",
@@ -55,11 +52,15 @@ export class SettingsView {
   private readonly root: HTMLElement;
   private readonly settings: () => Settings;
   private readonly mode: () => RiskMode;
+  private readonly auto: () => boolean;
+  private readonly keySaved: () => boolean;
 
   constructor(deps: SettingsViewDeps) {
     this.root = deps.root;
     this.settings = deps.settings;
     this.mode = deps.mode;
+    this.auto = deps.auto ?? (() => false);
+    this.keySaved = deps.keySaved ?? (() => false);
   }
 
   open(): void {
@@ -104,7 +105,7 @@ export class SettingsView {
               <span class="set-name">Execution mode</span>
               <span class="set-desc">Which statements Gatekeeper will run once you approve. Resets to read-only on load or a connection switch.</span>
             </div>
-            <span class="set-control" id="modeCtlSettings">${modeDropdown(this.mode())}</span>
+            <span class="set-control" id="modeCtlSettings">${modeDropdown(this.mode(), false, this.auto())}</span>
           </div>
           <div class="set-row">
             <div class="set-text">
@@ -113,6 +114,7 @@ export class SettingsView {
             </div>
             <span class="set-control">${switchInput("confirmWrites", "Double confirmation", s.confirmWrites)}</span>
           </div>
+          <div id="autoSettings" data-on="${this.auto()}">${autoSettingsHtml(this.auto(), this.keySaved())}</div>
           <div class="set-row recommend">
             <div class="set-text">
               <span class="set-name"><span class="set-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3"/></svg></span>Schema access <span class="set-rec">recommended</span></span>
@@ -123,6 +125,7 @@ export class SettingsView {
         </section>
         <section class="set-group">
           ${groupHead("Detection")}
+          <p class="set-desc">Display preferences only. Auto mode always checks sensitive sources and inputs.</p>
           ${DETECTION_TOGGLES.map((t) => toggleRow(t, s)).join("")}
         </section>
         <section class="set-group">

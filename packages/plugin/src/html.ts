@@ -118,3 +118,31 @@ export function activityNote(e: ActivityEntry): string {
   }
   return "";
 }
+
+// Two different facts about an approved query: how many rows it returned, and how many a
+// write changed. They are never merged, an absent count is unknown and says nothing, and a
+// known zero is an answer worth printing.
+// Thousands separators without toLocaleString, so the rendered count is byte-stable
+// regardless of the host's locale.
+export function formatCount(n: number): string {
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+export function rowsLabel(n: number, verb: "returned" | "changed"): string {
+  return `${formatCount(n)} ${n === 1 ? "row" : "rows"} ${verb}`;
+}
+
+/** The known counts of an approved query, in reading order, or "" when none is known. */
+export function countsLabel(counts: {
+  rowCount?: number | null;
+  affectedRows?: number | null;
+}): string {
+  const parts: string[] = [];
+  if (typeof counts.affectedRows === "number") {
+    parts.push(rowsLabel(counts.affectedRows, "changed"));
+  }
+  if (typeof counts.rowCount === "number") {
+    parts.push(rowsLabel(counts.rowCount, "returned"));
+  }
+  return parts.join(" \u00b7 ");
+}

@@ -11,9 +11,10 @@ import {
   runQuery,
   setTabTitle,
 } from "@beekeeperstudio/plugin";
+import type { AutoEvaluation, AutoHold } from "@gatekeeper/shared";
 import { enter, type Loop, pulse, reveal } from "./anim";
 import { SchemaAnnotator } from "./annotate";
-import { clock, escapeHtml, relAge } from "./html";
+import { clock, countsLabel, escapeHtml, relAge } from "./html";
 import {
   alertTriangleIcon,
   checkIcon,
@@ -33,6 +34,7 @@ import {
 import { BrokerClient } from "./net/broker";
 import { connectionScopeKey } from "./net/scope";
 import { SingleInstance, type SingleInstanceWire } from "./net/singleinstance";
+import { autoIcon, autoPopHtml, SAVED_KEY_MASK } from "./render/auto";
 import { ConfirmModal } from "./render/confirm";
 import { connChipInner } from "./render/connchip";
 import { modeDropdown, switchInput } from "./render/controls";
@@ -43,6 +45,7 @@ import { presence, rosterRow } from "./render/roster";
 import { capResult, type Field, type HistResult } from "./result";
 import { collectSchema } from "./schema-collect";
 import { filterSchema, resultBudgetBytes, type Settings, SettingsStore } from "./settings";
+import { AUTO_KEY, currentEvaluation, validEvaluation } from "./sql/auto";
 import { classifyQuery, type RiskClass, rank } from "./sql/classify";
 import { formatSql } from "./sql/format";
 import { highlight } from "./sql/highlight";
@@ -68,6 +71,13 @@ const POLL_MS = 1000;
 const RENEW_MS = 15_000;
 const TICK_MS = 1000;
 const CONN_CHECK_MS = 5000;
+// Printable ASCII only, so a pasted key can never smuggle whitespace or control bytes.
+const API_KEY_FORMAT = /^[\x21-\x7e]{1,4096}$/;
+// What the human typed, or "" while the field still shows the saved-key mask.
+const typedKey = (input?: HTMLInputElement | null): string => {
+  const value = input?.value.trim() ?? "";
+  return value.includes(SAVED_KEY_MASK[0]) ? "" : value;
+};
 // Re-touch the reported schema this often so it stays inside the server's TTL while the tab
 // is active with schema access on; when the tab stops, the snapshot expires and is dropped.
 const SCHEMA_HEARTBEAT_MS = 60_000;
@@ -202,6 +212,18 @@ export class Gatekeeper {
   // Ephemeral armed access mode: in-memory only, never persisted. Resets to "read"
   // on load, on a connection switch, and on re-pair.
   private mode: RiskMode = "read";
+  private autoEnabled = false;
+  private autoGeneration = 0;
+  private autoKey = "";
+  private autoBusy = false;
+  private autoAbort?: AbortController;
+  private autoCard?: Card;
+  // Proposals already waiting when Auto mode was switched on. Enabling delegates the
+  // approvals to come, never the ones a human may already be weighing up.
+  private autoDeferred = new Set<string>();
+  private keySaveTimer?: number;
+  // Only whether a key exists, so Settings can show it is set without the key itself.
+  private keySaved = false;
   private conn: {
     id: number;
     connectionName: string;
@@ -215,6 +237,11 @@ export class Gatekeeper {
   // and reads connGeneration through a getter so a mid-fetch switch invalidates it.
   private readonly annotator = new SchemaAnnotator({
     getColumns,
+    getMetadata: async (sql) => {
+      const result = await runQuery(sql);
+      if (result.error) throw new Error("Metadata unavailable");
+      return result.results[0]?.rows ?? [];
+    },
     dialect: () => this.dialect,
     defaultSchema: () => this.conn?.schema ?? undefined,
     generation: () => this.connGeneration,
@@ -290,6 +317,42 @@ export class Gatekeeper {
       root,
       settings: () => this.settingsStore.get(),
       mode: () => this.mode,
+      auto: () => this.autoEnabled,
+      keySaved: () => this.keySaved,
+    });
+    root.addEventListener("click", (e) => {
+      // The confirm overlay is rebuilt on every open, so its copy button delegates off
+      // the root like the modal's own actions. Copying leaves the dialog as it is.
+      const copyInConfirm = (e.target as HTMLElement).closest<HTMLElement>(
+        "#confirm [data-copy-sql]",
+      );
+      if (copyInConfirm) {
+        this.copySql(copyInConfirm);
+        return;
+      }
+      if ((e.target as HTMLElement).closest("[data-auto-settings]")) {
+        this.openAutoSettings();
+        return;
+      }
+      const toggle = (e.target as HTMLElement).closest<HTMLButtonElement | HTMLInputElement>(
+        "[data-auto-toggle]",
+      );
+      if (toggle) void this.toggleAuto(toggle);
+    });
+    // The mask is not editable text: focusing clears it for a paste, leaving empty restores it.
+    root.addEventListener("focusin", (e) => {
+      const input = (e.target as HTMLElement).closest<HTMLInputElement>("[data-auto-key]");
+      if (input?.value === SAVED_KEY_MASK) input.value = "";
+    });
+    root.addEventListener("focusout", (e) => {
+      const input = (e.target as HTMLElement).closest<HTMLInputElement>("[data-auto-key]");
+      if (input && !input.value && this.keySaved) input.value = SAVED_KEY_MASK;
+    });
+    root.addEventListener("input", (e) => {
+      const input = (e.target as HTMLElement).closest<HTMLInputElement>("[data-auto-key]");
+      if (!input) return;
+      window.clearTimeout(this.keySaveTimer);
+      this.keySaveTimer = window.setTimeout(() => void this.saveAutoKey(input), 400);
     });
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
@@ -360,6 +423,11 @@ export class Gatekeeper {
     } catch {
       this.starred = false;
     }
+    try {
+      this.keySaved = Boolean(await appStorage.getItem<string>(AUTO_KEY, { encrypted: true }));
+    } catch {
+      this.keySaved = false;
+    }
     // Gate the whole boot behind a cross-tab election: only the active instance talks to
     // the broker, the rest sit inert, so several open tabs never double-poll or race.
     this.single = new SingleInstance(
@@ -380,7 +448,9 @@ export class Gatekeeper {
     const gen = ++this.activeGen;
     this.token = await this.broker.loadToken();
     try {
-      this.applyConnection(await getConnectionInfo());
+      const connection = await getConnectionInfo();
+      if (gen !== this.activeGen) return;
+      this.applyConnection(connection);
       this.lastConnCheck = Date.now();
     } catch {
       // Connection info is best-effort; the queue still works without it. A
@@ -403,6 +473,9 @@ export class Gatekeeper {
     if (!this.wiredNotifications) {
       this.wiredNotifications = true;
       addNotificationListener("tablesChanged", () => {
+        this.resetAuto("Schema changed. Enable Auto mode again after review");
+        this.applyMode("read");
+        this.connGeneration++;
         this.annotator.clearCache();
         this.scheduleSchemaReport();
       });
@@ -421,6 +494,12 @@ export class Gatekeeper {
   // Lost the election (another tab owns the slot): stop every broker-touching loop and
   // show the inert standby screen. A later promotion re-runs activate().
   private deactivate(): void {
+    this.resetAuto("Tab ownership changed");
+    this.mode = "read";
+    this.connGeneration++;
+    this.cards.length = 0;
+    this.history.length = 0;
+    this.annotator.clearCache();
     this.activeGen++;
     this.polling = false;
     this.pollGeneration++;
@@ -584,12 +663,13 @@ export class Gatekeeper {
   private async loadInflight(): Promise<void> {
     try {
       const gen = this.connGeneration;
+      const active = this.activeGen;
       const inflight = await this.broker.inflight(this.connScopeKey());
       if (inflight === null) {
         return;
       }
       // A connection switch mid-fetch means these belong to the old database.
-      if (gen !== this.connGeneration) {
+      if (gen !== this.connGeneration || active !== this.activeGen) {
         return;
       }
       for (const proposal of inflight) {
@@ -640,13 +720,16 @@ export class Gatekeeper {
     });
   }
 
-  private async checkConnection(): Promise<void> {
+  private async checkConnection(): Promise<boolean> {
+    const generation = this.connGeneration;
+    const active = this.activeGen;
     let conn: ConnectionInfo;
     try {
       conn = await getConnectionInfo();
     } catch {
-      return; // Keep the last known connection; retry on the next throttle window.
+      return false;
     }
+    if (generation !== this.connGeneration || active !== this.activeGen) return false;
     // Detect a switch by the composite identity, not the display name alone: two
     // connections can share a name yet point at different engines/databases, and
     // those must not silently keep the prior scope, cards, or history.
@@ -658,14 +741,21 @@ export class Gatekeeper {
     // SAFETY-CRITICAL: also key the switch on Beekeeper's stable connection id, so an
     // armed mode never carries across two connections that share name+engine+database
     // but point at different hosts (the scope key alone cannot tell them apart).
-    if (this.conn?.id === conn.id && this.connScopeKey() === nextKey) {
-      return;
+    if (
+      this.conn?.id === conn.id &&
+      this.connScopeKey() === nextKey &&
+      this.conn.schema === (conn.defaultSchema ?? null)
+    ) {
+      this.applyConnection(conn);
+      return true;
     }
     this.applyConnection(conn);
     this.onConnectionSwitch();
+    return false;
   }
 
   private onConnectionSwitch(): void {
+    this.resetAuto("Connection changed");
     // SAFETY-CRITICAL: a card claimed under the old connection must not run against
     // the new database. Bump the generation (aborts an in-flight approve) and drop
     // the cards; the broker re-offers still-pending proposals.
@@ -898,13 +988,16 @@ export class Gatekeeper {
       if (!value) {
         return;
       }
+      const attempt = this.activeGen;
       const outcome = await this.broker.exchange(value);
+      if (attempt !== this.activeGen) return;
       if (!outcome.ok) {
         err.textContent = outcome.error;
         input.select();
         return;
       }
-      const gen = this.activeGen;
+      const gen = ++this.activeGen;
+      this.resetAuto("Pairing changed");
       // Re-pairing is a fresh session; the armed mode never survives it.
       this.mode = "read";
       this.token = await this.broker.loadToken();
@@ -949,21 +1042,26 @@ export class Gatekeeper {
     <span class="conn-chip" id="conn"></span>
     <span class="armed" id="armed"></span>
     <span class="bar-right">
+      <span class="sa-hint-wrap auto" id="autoHint" data-on="${this.autoEnabled}">
+        <button class="sa-hint" type="button" data-auto-settings aria-label="Auto mode">${autoIcon}<span class="sa-dot"></span><span class="sa-check">${checkIcon}</span></button>
+        ${autoPopHtml()}
+      </span>
       <span class="sa-hint-wrap" id="schemaHint" data-on="${s.schemaAccess}">
-        <button class="sa-hint" type="button" data-schema-hint aria-label="Schema access">
+        <button class="sa-hint" type="button" data-schema-settings aria-label="Schema access">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3"/></svg>
           <span class="sa-dot"></span>
           <span class="sa-check">${checkIcon}</span>
         </button>
         <span class="sa-pop">
           <span class="sa-body sa-off">
-            <span class="sa-pt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg>Sharper queries</span>
-            <p>Without this, agents guess your table and column names. Turn on Schema access so they read the real structure through get_schema and write accurate SQL. Never exposes any row data.</p>
-            <button class="sa-enable" type="button" data-schema-enable>Enable Schema access</button>
+            <span class="sa-pt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg>Schema access</span>
+            <p>Without this, agents guess your table and column names. Turn it on so they read the real structure through <code>get_schema</code> and write sharper queries. <b>No row data is ever exposed.</b></p>
+            <button class="sa-enable" type="button" data-schema-toggle>Enable Schema access</button>
           </span>
           <span class="sa-body sa-on">
-            <span class="sa-pt ok"><span class="sa-pt-ico">${checkIcon}</span>Sharper queries</span>
-            <p>Schema access is on. Agents read your structure (tables, columns, types, keys) through get_schema and write more accurate SQL. Never exposes any row data.</p>
+            <span class="sa-pt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg>Schema access</span>
+            <p>Agents now read your tables, columns, types and keys through <code>get_schema</code>, which is what makes their queries sharper. <b>No row data is ever exposed.</b></p>
+            <button class="sa-enable tonal" type="button" data-schema-toggle>Disable Schema access</button>
           </span>
         </span>
       </span>
@@ -979,7 +1077,6 @@ export class Gatekeeper {
           </div>
           <div class="pop-group">
             <div class="pop-eyebrow">Detection</div>
-            ${quickSwitch("schemaAnnotation", "Schema annotation", s.schemaAnnotation)}
             ${quickSwitch("piiFlagging", "PII flagging", s.piiFlagging)}
             ${quickSwitch("clientFlagging", "Client-data flagging", s.clientFlagging)}
             ${quickSwitch("sensitiveValues", "Sensitive-value detection", s.sensitiveValues)}
@@ -1148,12 +1245,20 @@ export class Gatekeeper {
       this.setSettingsOpen(false);
       this.settingsView.open();
     });
-    // The header schema hint (and its Enable button) opens the settings, never toggles
-    // Schema access directly, so enabling it stays a deliberate act in one place.
-    this.root.querySelector<HTMLElement>("#schemaHint")?.addEventListener("click", (e) => {
-      if ((e.target as HTMLElement).closest("[data-schema-enable], [data-schema-hint]")) {
+    this.root.querySelector<HTMLElement>("#schemaHint")?.addEventListener("click", async (e) => {
+      const target = e.target as HTMLElement;
+      if (target.closest("[data-schema-toggle]")) {
+        await this.updateSetting("schemaAccess", !this.settingsStore.get().schemaAccess);
+        const enabled = this.settingsStore.get().schemaAccess;
+        this.root
+          .querySelector<HTMLElement>(
+            `#schemaHint .${enabled ? "sa-on" : "sa-off"} [data-schema-toggle]`,
+          )
+          ?.focus();
+      } else if (target.closest("[data-schema-settings]")) {
         this.setSettingsOpen(false);
         this.settingsView.open();
+        this.root.querySelector<HTMLElement>('#settings [data-setting="schemaAccess"]')?.focus();
       }
     });
     this.root.querySelector<HTMLElement>("#ctaCluster")?.addEventListener("click", (e) => {
@@ -1372,6 +1477,269 @@ export class Gatekeeper {
     }
   }
 
+  private renderAuto(): void {
+    const focused = document.activeElement as HTMLElement | null;
+    const on = String(this.autoEnabled);
+    for (const el of this.root.querySelectorAll<HTMLElement>("#autoHint, #autoSettings")) {
+      el.dataset.on = on;
+    }
+    const toggle = this.root.querySelector<HTMLInputElement>("#autoSettings [data-auto-toggle]");
+    if (toggle) toggle.checked = this.autoEnabled;
+    this.renderModeSurfaces();
+    // The popover button that just flipped is now hidden, so hand focus to its counterpart.
+    if (focused?.closest("#autoHint [data-auto-toggle]")) {
+      this.root
+        .querySelector<HTMLElement>(
+          `#autoHint .${this.autoEnabled ? "sa-on" : "sa-off"} [data-auto-toggle]`,
+        )
+        ?.focus();
+    }
+  }
+
+  private openAutoSettings(): void {
+    this.setSettingsOpen(false);
+    this.settingsView.open();
+    const section = this.root.querySelector<HTMLElement>("#autoSettings");
+    section?.scrollIntoView({ block: "center" });
+    section
+      ?.querySelector<HTMLElement>("[data-auto-key], [data-auto-toggle]")
+      ?.focus({ preventScroll: true });
+  }
+
+  private resetAuto(reason: string): void {
+    this.autoEnabled = false;
+    this.autoGeneration++;
+    this.autoAbort?.abort();
+    this.autoKey = "";
+    this.autoDeferred.clear();
+    for (const card of this.cards) {
+      // Reset authority without overwriting an already established review reason.
+      if (card.autoStatus === "Evaluating with Jev" && !card.evaluation) {
+        card.autoStatus = `Needs review: ${reason === "Auto mode disabled" ? "Auto mode disabled while evaluating" : reason}`;
+      }
+    }
+    this.renderAuto();
+    this.renderQueue();
+  }
+
+  private async toggleAuto(toggle: HTMLElement): Promise<void> {
+    if (this.autoEnabled || (toggle instanceof HTMLInputElement && !toggle.checked)) {
+      const fromMarker = toggle.closest("#armed");
+      this.resetAuto("Auto mode disabled");
+      this.applyMode("read");
+      if (fromMarker) this.root.querySelector<HTMLElement>("#autoHint .sa-hint")?.focus();
+      return;
+    }
+    // One check at a time per control, and the control shows it is working meanwhile.
+    if (toggle.getAttribute("aria-busy") === "true") return;
+    const body = toggle.closest<HTMLElement>(".auto-body");
+    const input = body?.querySelector<HTMLInputElement>("[data-auto-key]");
+    const entered = typedKey(input);
+    const generation = ++this.autoGeneration;
+    const connection = this.connGeneration;
+    const active = this.activeGen;
+    const message = body?.querySelector<HTMLElement>("[data-auto-message]");
+    const fail = (text: string, keyField = false): void => {
+      if (message) {
+        message.textContent = text;
+        message.dataset.tone = "";
+      }
+      if (toggle instanceof HTMLInputElement) toggle.checked = false;
+      if (keyField) input?.focus();
+    };
+    const stale = () =>
+      generation !== this.autoGeneration ||
+      connection !== this.connGeneration ||
+      active !== this.activeGen;
+    // A missing or refused key is fixed in Settings, so the popover sends the user there
+    // and the reason shows under the key field.
+    const keyProblem = (text: string): void => {
+      if (input) {
+        fail(text, true);
+        return;
+      }
+      this.openAutoSettings();
+      const note = this.root.querySelector<HTMLElement>("#autoSettings [data-auto-message]");
+      if (note) {
+        note.textContent = text;
+        note.dataset.tone = "";
+      }
+    };
+    if (message) {
+      message.textContent =
+        toggle instanceof HTMLInputElement ? "Checking the key with TypeSafe…" : "";
+      message.dataset.tone = "busy";
+    }
+    toggle.setAttribute("aria-busy", "true");
+    try {
+      const key = entered || (await appStorage.getItem<string>(AUTO_KEY, { encrypted: true }));
+      if (stale()) return;
+      if (!key) {
+        keyProblem("Paste your TypeSafe API key first.");
+        return;
+      }
+      if (!API_KEY_FORMAT.test(key)) {
+        keyProblem("This API key is not valid.");
+        return;
+      }
+      if (entered) await appStorage.setItem(AUTO_KEY, entered, { encrypted: true });
+      const verdict = await this.broker.checkKey(key);
+      if (stale()) return;
+      if (verdict === "invalid") {
+        keyProblem("TypeSafe refused this API key.");
+        return;
+      }
+      if (verdict === "outdated") {
+        fail("Restart the Gatekeeper server to use Auto mode. It predates this plugin.");
+        return;
+      }
+      if (verdict === "unavailable") {
+        fail("TypeSafe could not be reached. Try again.");
+        return;
+      }
+      if (!(await this.checkConnection())) {
+        fail("The connection could not be verified. Try again.");
+        return;
+      }
+      if (stale()) return;
+      this.confirmModal.cancel();
+      this.applyMode("read");
+      this.autoKey = key;
+      this.autoDeferred = new Set(this.cards.map((c) => c.id));
+      this.autoEnabled = true;
+      this.renderAuto();
+      await this.reportConnection();
+      void this.evaluateNext();
+    } catch {
+      fail("Auto mode could not be enabled. Check the key, encrypted storage and connection.");
+    } finally {
+      toggle.removeAttribute("aria-busy");
+      if (message?.dataset.tone === "busy") message.textContent = "";
+    }
+  }
+
+  // Saved as typed, so replacing the key never requires turning Auto mode off; a running
+  // Auto mode uses the new key from its next evaluation.
+  private async saveAutoKey(input: HTMLInputElement): Promise<void> {
+    const key = typedKey(input);
+    const message = input.closest(".auto-body")?.querySelector<HTMLElement>("[data-auto-message]");
+    const say = (text: string, ok = false): void => {
+      if (!message) return;
+      message.textContent = text;
+      message.dataset.tone = ok ? "ok" : "";
+    };
+    if (!key) return;
+    if (!API_KEY_FORMAT.test(key)) {
+      say("This API key is not valid.");
+      return;
+    }
+    try {
+      await appStorage.setItem(AUTO_KEY, key, { encrypted: true });
+      if (this.autoEnabled) this.autoKey = key;
+      this.keySaved = true;
+      say("Key saved.", true);
+    } catch {
+      say("The key could not be saved to encrypted storage.");
+    }
+  }
+
+  private reviewCard(card: Card, reason: string): void {
+    if (!this.cards.includes(card)) return;
+    card.state = "ready";
+    if (card.authorityLost) {
+      this.drop(card.id);
+      return;
+    }
+    card.autoStatus = `Needs review: ${reason}`;
+    this.renderQueue();
+  }
+
+  private async evaluateNext(): Promise<void> {
+    if (!this.autoEnabled || this.autoBusy) return;
+    const card = this.cards.find(
+      (c) =>
+        c.state === "ready" &&
+        c.autoAttempt !== this.autoGeneration &&
+        !c.authorityLost &&
+        !this.autoDeferred.has(c.id) &&
+        classifyQuery(c.sql, this.dialect).class === "read",
+    );
+    if (!card) return;
+    const generation = this.autoGeneration;
+    const conn = this.connGeneration;
+    const active = this.activeGen;
+    const lease = card.leaseId;
+    const sql = card.sql;
+    card.autoAttempt = generation;
+    const valid = () =>
+      this.autoEnabled &&
+      generation === this.autoGeneration &&
+      conn === this.connGeneration &&
+      active === this.activeGen &&
+      this.cards.includes(card) &&
+      card.state === "ready" &&
+      !card.authorityLost &&
+      card.leaseId === lease &&
+      card.sql === sql &&
+      card.expiresAt > Date.now() &&
+      card.leaseExpiresAt > Date.now();
+    this.autoBusy = true;
+    this.autoCard = card;
+    const controller = new AbortController();
+    this.autoAbort = controller;
+    const timer = window.setTimeout(() => {
+      controller.abort();
+      if (valid()) this.reviewCard(card, "Evaluation timed out. Approve manually");
+    }, 15000);
+    try {
+      card.autoStatus = "Evaluating with Jev";
+      this.renderQueue();
+      if (!(await this.checkConnection()) || !valid() || controller.signal.aborted) return;
+      const analysis = await this.annotator.inspectRead(
+        sql,
+        () => valid() && !controller.signal.aborted,
+      );
+      if (!valid() || controller.signal.aborted) return;
+      if (!analysis?.complete || !analysis.input) {
+        this.reviewCard(card, analysis?.reasons[0] ?? "Metadata unavailable");
+        return;
+      }
+      if (!(await this.checkConnection()) || !valid() || controller.signal.aborted) return;
+      card.autoSent = true;
+      const evaluation = await this.broker.evaluate(
+        card.id,
+        lease,
+        this.connScopeKey()!,
+        this.autoKey,
+        analysis.input,
+        controller.signal,
+      );
+      if (!valid() || controller.signal.aborted) return;
+      if (!validEvaluation(evaluation)) {
+        this.reviewCard(card, "Invalid evaluator response or stale policy/model");
+        return;
+      }
+      card.evaluation = evaluation;
+      if (!currentEvaluation(evaluation)) {
+        this.reviewCard(
+          card,
+          evaluation.reasons?.join(". ") || "Evaluator uncertainty or stale policy/model",
+        );
+        return;
+      }
+      await this.approve(card.id, false, evaluation);
+    } catch {
+      if (valid()) this.reviewCard(card, "Evaluator or metadata unavailable. Approve manually");
+    } finally {
+      window.clearTimeout(timer);
+      this.autoBusy = false;
+      this.autoCard = undefined;
+      if (card.state === "ready" && card.autoStatus === "Evaluating with Jev")
+        this.reviewCard(card, "Evaluation cancelled or authority changed");
+      void this.evaluateNext();
+    }
+  }
+
   private async resetSettings(): Promise<void> {
     await this.settingsStore.reset();
     // Re-render the open overlay to the defaults, re-sync the quick menu and hint, and clear
@@ -1395,11 +1763,12 @@ export class Gatekeeper {
   }
 
   private openModeArm(next: RiskMode): void {
+    const autoNotice = this.autoEnabled ? " Confirming turns off Auto mode." : "";
     if (next === "write") {
       this.confirmModal.open({
         tone: "write",
         heading: "Enable Write Mode",
-        body: "Write mode lets you approve INSERT and UPDATE statements. Each still runs only on your one-click approval, one at a time.",
+        body: `Write mode lets you approve INSERT and UPDATE statements. Each still runs only on your one-click approval, one at a time.${autoNotice}`,
         confirmLabel: "Enable Write Mode",
         onConfirm: () => this.applyMode("write"),
       });
@@ -1410,7 +1779,7 @@ export class Gatekeeper {
     this.confirmModal.open({
       tone: "destructive",
       heading: "Enable Destructive Mode",
-      body: "Destructive mode lets you approve DELETE, DROP, TRUNCATE and other data-changing statements. Type the database name to confirm.",
+      body: `Destructive mode lets you approve DELETE, DROP, TRUNCATE and other data-changing statements. Type the database name to confirm.${autoNotice}`,
       confirmLabel: "Enable Destructive Mode",
       challenge: {
         label: "Type the database name to confirm",
@@ -1427,6 +1796,8 @@ export class Gatekeeper {
     if (next === this.mode) {
       return;
     }
+    // Invalidate running evaluations and pending activation before granting write authority.
+    if (next !== "read") this.resetAuto("Auto mode disabled");
     this.mode = next;
     this.renderConnLabel();
     this.renderModeSurfaces();
@@ -1439,11 +1810,11 @@ export class Gatekeeper {
   private renderModeSurfaces(): void {
     const header = this.root.querySelector<HTMLElement>("#modeCtlHeader");
     if (header) {
-      header.innerHTML = modeDropdown(this.mode, true);
+      header.innerHTML = modeDropdown(this.mode, true, this.autoEnabled);
     }
     const overlay = this.root.querySelector<HTMLElement>("#modeCtlSettings");
     if (overlay) {
-      overlay.innerHTML = modeDropdown(this.mode);
+      overlay.innerHTML = modeDropdown(this.mode, false, this.autoEnabled);
     }
     // Double-confirmation only matters once a write/destructive mode is armed, so the quick
     // menu surfaces it only then; the full settings screen always shows it to preconfigure.
@@ -1459,6 +1830,11 @@ export class Gatekeeper {
   private renderArmed(): void {
     const el = this.root.querySelector<HTMLElement>("#armed");
     if (!el) {
+      return;
+    }
+    // Auto mode forces read, so it takes the same slot and never shares it.
+    if (this.autoEnabled) {
+      el.innerHTML = `<span class="armed-chip auto"><span class="armed-ico">${autoIcon}</span>AUTO MODE<button class="armed-off" type="button" data-auto-toggle title="Disable Auto mode" aria-label="Disable Auto mode">${xIcon}</button></span>`;
       return;
     }
     if (this.mode === "read") {
@@ -1515,18 +1891,26 @@ export class Gatekeeper {
       return;
     }
     let claimed = false;
+    const connection = this.connGeneration;
+    const active = this.activeGen;
     try {
       const res = await this.broker.pending(this.connScopeKey());
+      if (connection !== this.connGeneration || active !== this.activeGen) return;
       if (res.status === 401) {
         this.polling = false;
         this.token = null;
+        this.resetAuto("Pairing lost");
+        this.activeGen++;
+        this.mode = "read";
         await this.broker.clearToken();
         this.renderPairing("This tab was unpaired. Enter a fresh code to reconnect.");
         return;
       }
       if (res.status === 200) {
         claimed = true;
-        this.claim((await res.json()) as Proposal);
+        const proposal = (await res.json()) as Proposal;
+        if (connection !== this.connGeneration || active !== this.activeGen) return;
+        this.claim(proposal);
       }
       this.pollFailures = 0;
       this.setConnectionState("connected");
@@ -1540,10 +1924,11 @@ export class Gatekeeper {
         this.setConnectionState("reconnecting");
       }
       log.error(err instanceof Error ? err : String(err));
+    } finally {
+      if (this.polling && active === this.activeGen) {
+        this.pollTimer = window.setTimeout(() => void this.poll(), claimed ? 0 : POLL_MS);
+      }
     }
-    // Drain the queue back-to-back: /pending offers one proposal at a time, so a
-    // claim likely means more are waiting; only idle at POLL_MS once it is empty.
-    this.pollTimer = window.setTimeout(() => void this.poll(), claimed ? 0 : POLL_MS);
   }
 
   // Re-poll (and refresh the roster) right now instead of waiting out the
@@ -1635,9 +2020,15 @@ export class Gatekeeper {
       // Keep the fresher lease if /inflight and a re-offered /pending race on the
       // same proposal, so a live lease is never overwritten by a stale one.
       if (proposal.leaseExpiresAt >= existing.leaseExpiresAt) {
+        if (proposal.leaseId !== existing.leaseId) {
+          existing.autoAttempt = undefined;
+          existing.authorityLost = false;
+          existing.evaluation = undefined;
+        }
         existing.leaseId = proposal.leaseId;
         existing.leaseExpiresAt = proposal.leaseExpiresAt;
       }
+      void this.evaluateNext();
       return;
     }
     // Skip a proposal already past its TTL (re-adopted from /inflight right after a
@@ -1649,6 +2040,7 @@ export class Gatekeeper {
     this.cards.push(card);
     this.renderQueue();
     void this.analyzeSchema(card);
+    void this.evaluateNext();
   }
 
   // Annotate the card with the tables and PII-suspect columns the query touches.
@@ -1656,12 +2048,6 @@ export class Gatekeeper {
   // ever reaches the broker, so the agent gains no schema knowledge.
   private async analyzeSchema(card: Card): Promise<void> {
     const settings = this.settingsStore.get();
-    // schemaAnnotation off skips the fetch entirely; re-enabling re-runs this.
-    if (!settings.schemaAnnotation) {
-      card.schema = null;
-      this.renderCardSchema(card);
-      return;
-    }
     const schema = await this.annotator.schemaFor(card.sql);
     // A mid-fetch connection switch yields undefined; leave the prior annotation
     // rather than blanking a card whose columns simply could not be resolved.
@@ -1677,12 +2063,13 @@ export class Gatekeeper {
       // Renew while a human deliberates (ready) and while the approved query
       // runs (executing). An unrenewed executing card would expire mid-query
       // and be failed as execution_unknown even though it actually succeeded.
-      if (card.state !== "ready" && card.state !== "executing") {
+      if (card.state !== "ready" && card.state !== "executing" && card.state !== "approving") {
         continue;
       }
       const leaseId = card.leaseId;
       try {
         const res = await this.broker.renew(card.id, leaseId);
+        if (card.leaseId !== leaseId) continue;
         if (res.ok) {
           card.leaseExpiresAt = res.leaseExpiresAt;
           continue;
@@ -1702,6 +2089,7 @@ export class Gatekeeper {
   // down every one of its paths, and finish() is a no-op once the card is gone, so
   // dropping it lost the record of a query that really ran.
   private resolveLostLease(card: Card, state?: RequestState): void {
+    card.authorityLost = true;
     if (card.state !== "ready") {
       return;
     }
@@ -1841,14 +2229,38 @@ export class Gatekeeper {
     }
   }
 
-  private async approve(id: string, confirmed = false): Promise<void> {
-    // Catch a switch since the last throttled poll before touching the database.
-    await this.checkConnection();
+  private async approve(id: string, confirmed = false, evaluation?: AutoEvaluation): Promise<void> {
     const card = this.cards.find((c) => c.id === id);
-    if (card?.state !== "ready") {
+    if (card?.state !== "ready" || card.authorityLost) {
       return;
     }
+    if (!evaluation && this.autoCard === card) this.autoAbort?.abort();
     const gen = this.connGeneration;
+    const active = this.activeGen;
+    const auto = this.autoGeneration;
+    const lease = card.leaseId;
+    const sql = card.sql;
+    const valid = () =>
+      gen === this.connGeneration &&
+      active === this.activeGen &&
+      this.cards.includes(card) &&
+      !card.authorityLost &&
+      card.leaseId === lease &&
+      card.sql === sql &&
+      card.expiresAt > Date.now() &&
+      card.leaseExpiresAt > Date.now() &&
+      (!evaluation ||
+        (this.autoEnabled &&
+          auto === this.autoGeneration &&
+          this.mode === "read" &&
+          !this.autoAbort?.signal.aborted &&
+          currentEvaluation(evaluation)));
+    // Reserve synchronously, before the host round-trip, for both approval sources.
+    this.setCardState(id, "approving");
+    if (!(await this.checkConnection()) || !valid()) {
+      this.reviewCard(card, "Connection or approval authority changed");
+      return;
+    }
     // SAFETY-CRITICAL: the real gate. Never run a statement the armed mode cannot
     // approve, nor a blocked (empty or multi-statement) one.
     const verdict = classifyQuery(card.sql, this.dialect);
@@ -1864,6 +2276,7 @@ export class Gatekeeper {
     // Reads never prompt. The confirm re-enters approve() with confirmed=true, which
     // re-runs every check above (connection, lease, mode) against live state.
     if (!confirmed && verdict.class !== "read" && this.settingsStore.get().confirmWrites) {
+      this.setCardState(id, "ready");
       const destructive = verdict.class === "destructive";
       this.confirmModal.open({
         tone: destructive ? "destructive" : "write",
@@ -1872,12 +2285,16 @@ export class Gatekeeper {
           ? "This deletes or drops data on the live database the moment you confirm, and Gatekeeper cannot undo it."
           : "This changes data on the live database the moment you confirm.",
         sql: card.sql,
+        schema: card.schema ?? undefined,
         confirmLabel: destructive ? "Run destructive" : "Run write",
         onConfirm: () => void this.approve(id, true),
       });
       return;
     }
-    this.setCardState(id, "executing");
+    card.approval = {
+      source: evaluation ? "automatic" : "human",
+      evaluation: evaluation ?? card.evaluation,
+    };
     // If the broker refuses the executing transition (the request was cancelled,
     // or the lease was lost), do not run the query: its result could never be
     // delivered, and the human approval no longer maps to a live proposal.
@@ -1887,15 +2304,28 @@ export class Gatekeeper {
     }
     // Final anti-race guard: the connection poll is throttled, so a switch during the
     // postExecuting round-trip could go unseen; re-read live before touching the DB.
-    await this.checkConnection();
-    if (gen !== this.connGeneration) {
+    const connected = await this.checkConnection();
+    const finalVerdict = classifyQuery(card.sql, this.dialect);
+    if (
+      !connected ||
+      !valid() ||
+      finalVerdict.blocked ||
+      rank(finalVerdict.class) > modeRank(this.mode)
+    ) {
+      try {
+        if (!(await this.broker.withdrawExecution(id, lease))) card.authorityLost = true;
+      } catch {
+        card.authorityLost = true;
+      }
+      this.reviewCard(card, "Execution stopped before SQL ran. Approval authority changed");
       return;
     }
+    this.setCardState(id, "executing");
     try {
       const { rows, fields, affectedRows } = await runApprovedQuery(card.sql);
       // The query may have hit the new database after a switch; never deliver its
       // rows against the old proposal.
-      if (gen !== this.connGeneration) {
+      if (gen !== this.connGeneration || active !== this.activeGen) {
         return;
       }
       this.setCardState(id, "posting");
@@ -1917,15 +2347,18 @@ export class Gatekeeper {
         this.finish(id, "failed", "result not delivered");
         return;
       }
-      // Tell the human when the agent got fewer rows than the query returned.
+      // A write reports what it changed, a read what it returned, and a write that also
+      // returns rows says both. Tell the human too when the agent got fewer rows.
+      const changed = verdict.class !== "read" ? affectedRows : undefined;
+      const counts = countsLabel({ rowCount: forAgent.rowCount, affectedRows: changed });
       const note = forAgent.truncated
-        ? `${forAgent.rowCount} rows (agent received ${forAgent.rows.length})`
-        : `${forAgent.rowCount} rows`;
+        ? `${counts} (agent received ${forAgent.rows.length})`
+        : counts;
       this.finish(
         id,
         "approved",
         note,
-        capResult(rows, fields, resultBudgetBytes(this.settingsStore.get())),
+        capResult(rows, fields, resultBudgetBytes(this.settingsStore.get()), undefined, changed),
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -1939,11 +2372,14 @@ export class Gatekeeper {
     if (card?.state !== "ready") {
       return;
     }
+    if (this.autoCard === card) this.autoAbort?.abort();
     // The deny-with-reason form passes the human note here; it goes to the agent
-    // and is reflected back into the history row. Empty falls back to the defaults.
+    // and is reflected back into the history row. A plain decline carries no note: the
+    // state already says a human declined, and a placeholder would sit in the audit
+    // record for good.
     const custom = reason?.trim();
     this.setCardState(id, "rejecting");
-    await this.postResult(card, { status: "rejected", reason: custom || "Rejected by user." });
+    await this.postResult(card, { status: "rejected", reason: custom || undefined });
     this.finish(id, "rejected", "declined", undefined, custom || undefined);
   }
 
@@ -1969,7 +2405,7 @@ export class Gatekeeper {
       .querySelector<HTMLInputElement>(`[data-card="${id}"] .deny-reason`)
       ?.value.trim();
     this.denyDrafts.delete(id);
-    // Empty note keeps reject()'s "Rejected by user." fallback; never send "".
+    // Empty note means a plain decline, with no reason attached; never send "".
     void this.reject(id, reason || undefined);
   }
 
@@ -2000,16 +2436,31 @@ export class Gatekeeper {
 
   private async postExecuting(card: Card): Promise<boolean> {
     try {
-      return await this.broker.executing(card.id, card.leaseId);
+      return await this.broker.executing(card.id, card.leaseId, card.approval);
     } catch (err) {
       log.error(err instanceof Error ? err : String(err));
       return false;
     }
   }
 
+  // What Auto mode did with a read it did not approve itself. It rides every result so the
+  // audit trail can still say, later, whether anything ever left this machine.
+  private autoHold(card: Card): AutoHold | undefined {
+    if (!card.autoStatus || card.evaluation) {
+      return undefined;
+    }
+    return {
+      sent: Boolean(card.autoSent),
+      reason: card.autoStatus.replace(/^Needs review:\s*/, "").slice(0, 200),
+    };
+  }
+
   private async postResult(card: Card, body: Record<string, unknown>): Promise<boolean> {
     try {
-      return await this.broker.result(card.id, card.leaseId, body);
+      return await this.broker.result(card.id, card.leaseId, {
+        ...body,
+        autoHold: this.autoHold(card),
+      });
     } catch (err) {
       log.error(err instanceof Error ? err : String(err));
       return false;
@@ -2040,7 +2491,9 @@ export class Gatekeeper {
     // A custom reason replaces the terse default label; the row and detail
     // overlay both read HistItem.note, so nothing here is hardcoded.
     const displayNote = reason?.trim() || note;
+    const generation = this.connGeneration;
     const commit = () => {
+      if (generation !== this.connGeneration || !this.cards.includes(card)) return;
       this.drop(id);
       this.history.unshift({
         id,
@@ -2052,6 +2505,9 @@ export class Gatekeeper {
         session: card.session,
         intent: card.intent,
         result,
+        approval: card.approval,
+        evaluation: card.evaluation,
+        autoHold: this.autoHold(card),
       });
       if (this.history.length > this.settingsStore.get().recentlyResolved) {
         this.history.pop();

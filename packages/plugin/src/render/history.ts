@@ -2,6 +2,7 @@ import { capitalize, escapeHtml, previewSql, relAge, sessionDisplayName } from "
 import { agentBadge } from "../icons";
 import { highlight } from "../sql/highlight";
 import type { HistItem } from "../types";
+import { autoIcon } from "./auto";
 import { statusIcon } from "./status";
 
 export function historyRow(item: HistItem): string {
@@ -14,7 +15,7 @@ export function historyRow(item: HistItem): string {
           ${agentBadge(harness)}
           <span class="hwho" title="${escapeHtml(who)}">${escapeHtml(who)}</span>
           <span class="hlabel" title="${labelHtml}">${labelHtml}</span>
-          ${statusIcon(item.status)}
+          ${item.status === "approved" && item.approval?.source === "automatic" ? `<span class="hstate auto" title="Approved automatically" aria-label="Approved automatically">${autoIcon}</span>` : statusIcon(item.status)}
           <span class="hintent">${escapeHtml(item.intent ? capitalize(item.intent) : previewSql(item.sql))}</span>
           <span class="hsql">${highlight(previewSql(item.sql))}</span>
           <span class="htime">

@@ -17,6 +17,7 @@ import { modeRank, type RiskMode } from "../sql/mode";
 import { visibleControls } from "../sql/sanitize";
 import { analyzeTableOps, type SchemaContext } from "../sql/schema";
 import type { Card, CardState, SessionMeta } from "../types";
+import { AUTO_LEADS, autoIcon, NOTHING_SENT } from "./auto";
 
 const WRITE_MODE_NOTE = "Write mode required to approve this query.";
 const DESTRUCTIVE_MODE_NOTE = "Destructive mode required to approve this query.";
@@ -77,13 +78,22 @@ export function cardGate(
   };
 }
 
+// The textual fallback can land on any class, not only destructive: a SELECT the parser
+// chokes on (an ambiguous backslash in a regex, say) still reads as a read. Name the class
+// it guessed rather than claim one.
+const UNPARSED_GUESS: Record<RiskClass, string> = {
+  read: "Reading it as a plain read",
+  write: "Treating it as a write",
+  destructive: "Treating it as destructive",
+};
+
 // Shown standing, not on hover: an unreadable statement is exactly the one the human must
 // read for themselves, so it cannot hide behind the Approve tooltip.
 function unparsedNote(gate: CardGate): string {
   if (gate.parseOk) {
     return "";
   }
-  return `<div class="cs-unparsed">${warnIcon}Gatekeeper could not read this statement, so it is treated as destructive. Check it yourself before approving.</div>`;
+  return `<div class="cs-unparsed">${warnIcon}Gatekeeper could not parse this statement. ${UNPARSED_GUESS[gate.cls]} is a guess from its text, so read it yourself before approving.</div>`;
 }
 
 export function queueHtml(
@@ -141,6 +151,39 @@ export function groupHtml(
       </section>`;
 }
 
+const AUTO_EVALUATING = "Evaluating with Jev";
+const EVAL_NOTE = "Auto mode is evaluating this read with Jev.";
+
+// One line that names Auto mode first, says where the read stands, and only then carries
+// the reason. Whether the query ever left the machine is the part a human must not guess.
+function autoNote(card: Card): string {
+  if (!card.autoStatus) {
+    return "";
+  }
+  if (card.autoStatus === AUTO_EVALUATING) {
+    return `<div class="cs-unparsed auto evaluating" role="status"><span class="auto-bolt">${autoIcon}</span><span><b>Auto mode:</b> <i>${AUTO_EVALUATING}&hellip;</i></span></div>`;
+  }
+  const lead = card.evaluation
+    ? `${AUTO_LEADS.refused}, waiting for your review.`
+    : card.autoSent
+      ? `${AUTO_LEADS.unfinished}, waiting for your review.`
+      : `${AUTO_LEADS.local}, waiting for your review. ${NOTHING_SENT}`;
+  // Each reason reads as its own tag rather than as more sentence: Jev returns them as a
+  // list, and a local refusal carries one.
+  const reasons = card.evaluation?.reasons?.length
+    ? card.evaluation.reasons
+    : card.autoStatus
+        .replace(/^Needs review:\s*/, "")
+        .split(/\.\s+/)
+        .filter(Boolean);
+  const tags = reasons
+    .map(
+      (reason) => `<span class="auto-reason over">${escapeHtml(reason.replace(/\.$/, ""))}</span>`,
+    )
+    .join("");
+  return `<div class="cs-unparsed auto" role="status">${autoIcon}<span><b>Auto mode:</b> ${lead}<span class="auto-reasons">${tags}</span></span></div>`;
+}
+
 export function cardHtml(
   card: Card,
   dialect: string,
@@ -148,7 +191,12 @@ export function cardHtml(
   mode: RiskMode = "read",
   connReadOnly = false,
 ): string {
-  const gate = cardGate(card.sql, dialect, mode, connReadOnly);
+  const evaluating = card.autoStatus === AUTO_EVALUATING;
+  // An evaluation in flight borrows the blocked-Approve chrome: the reason rides in the
+  // same popover, and Reject stays open for a human who has already made up their mind.
+  const gate = evaluating
+    ? { ...cardGate(card.sql, dialect, mode, connReadOnly), approveEnabled: false, note: EVAL_NOTE }
+    : cardGate(card.sql, dialect, mode, connReadOnly);
   const remaining = card.expiresAt - Date.now();
   let actions: string;
   if (card.state !== "ready") {
@@ -159,15 +207,15 @@ export function cardHtml(
   const badge = riskBadge(gate.cls);
   const riskAnno = riskAnnotation(card.sql, dialect, gate.cls);
   return `
-      <div class="card ${cardClassFor(gate)}" data-card="${card.id}">
+      <div class="card ${cardClassFor(gate)}${evaluating ? " auto-eval" : ""}" data-card="${card.id}">
         <div class="top">
-          ${badge}${card.intent ? `<span class="intent">${escapeHtml(capitalize(card.intent))}</span>` : `<span class="intent">${escapeHtml(card.id)}</span>`}
+          ${badge}${evaluating ? `<span class="auto-mark" title="${EVAL_NOTE}" aria-label="${EVAL_NOTE}">${autoIcon}</span>` : ""}${card.intent ? `<span class="intent">${escapeHtml(capitalize(card.intent))}</span>` : `<span class="intent">${escapeHtml(card.id)}</span>`}
           <span class="${remaining <= 45_000 ? "lease low" : "lease"}">${clock(remaining)}</span>
         </div>
         <div class="meta">${escapeHtml(card.id)} &middot; ${relAge(card.createdAt)}</div>
         <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(visibleControls(card.sql))}" aria-label="Copy SQL">${copyIcon}</button><code class="sql-body" id="sqlbody-${card.id}">${highlight(formatSql(card.sql), card.schema?.pii, card.schema?.client, card.schema?.literals)}</code></pre>
         ${unparsedNote(gate)}${riskAnno}<div class="card-schema" id="cs-${card.id}">${schemaInner(card.schema, gate.cls !== "read")}</div>
-        ${actions}
+        ${autoNote(card)}${actions}
       </div>`;
 }
 

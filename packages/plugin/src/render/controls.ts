@@ -57,7 +57,9 @@ const MODE_OPTIONS: ModeOption[] = [
 // A styled (non-native) dropdown for the access mode, reflecting the live armed mode.
 // The app wires open/close on [data-mode-trigger]/[data-mode-menu] and selection on
 // [data-mode-opt].
-export function modeDropdown(mode: RiskMode, compact = false): string {
+// `auto` is kept in the signature for callers: the menu itself no longer says anything
+// about Auto mode, the popover and Settings carry that explanation.
+export function modeDropdown(mode: RiskMode, compact = false, _auto = false): string {
   const current = MODE_OPTIONS.find((m) => m.mode === mode) ?? MODE_OPTIONS[0];
   const options = MODE_OPTIONS.map((m) => {
     const sel = m.mode === mode;

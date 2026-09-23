@@ -1,4 +1,11 @@
-import { capitalize, escapeHtml, relAge, sessionDisplayName } from "../html";
+import {
+  capitalize,
+  countsLabel,
+  escapeHtml,
+  formatCount,
+  relAge,
+  sessionDisplayName,
+} from "../html";
 import {
   agentBadge,
   checkIcon,
@@ -15,6 +22,7 @@ import type { HistResult } from "../result";
 import { formatSql } from "../sql/format";
 import { highlight } from "../sql/highlight";
 import type { HistItem } from "../types";
+import { approvalHtml } from "./auto";
 import { flyoutMenu } from "./controls";
 import { statusIcon } from "./status";
 
@@ -41,7 +49,7 @@ export function detailHtml(item: HistItem): string {
         ${item.intent ? `<p class="detail-intent">${escapeHtml(capitalize(item.intent))}</p>` : ""}
         <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(item.sql)}" aria-label="Copy SQL">${copyIcon}</button><code class="sql-body" id="detail-sqlbody">${highlight(formatSql(item.sql))}</code></pre>
         <div class="card-schema" id="detail-cs"></div>
-        ${outcomeHtml(item)}
+        ${approvalHtml(item.approval, item.evaluation, item.autoHold)}${outcomeHtml(item)}
       </div>`;
 }
 
@@ -76,19 +84,18 @@ function outcomeInner(item: HistItem): string {
 
 function approvedOutcome(item: HistItem): string {
   const result = item.result;
-  const rowCount = result?.rowCount ?? 0;
-  const head = ocHead(
-    checkIcon,
-    "Approved",
-    `${formatCount(rowCount)} ${rowCount === 1 ? "row" : "rows"}`,
-  );
-  if (!result || rowCount === 0) {
-    return head + ocMsg("The query ran and returned no rows.");
+  if (!result) {
+    return ocHead(checkIcon, "Approved", "") + ocMsg("The query ran. No count was recorded.");
   }
-  // rowCount > 0 but the rows were purged (retention or the byte budget): keep the
-  // scalar count honest without claiming the data is still here.
+  // The meta carries the facts: what a write changed, what the query returned, or both.
+  const head = ocHead(checkIcon, "Approved", countsLabel(result));
+  if (result.rowCount === 0) {
+    return head + ocMsg("The query returned no rows.");
+  }
+  // Rows returned but no longer here (retention or the byte budget): keep the scalar
+  // count honest without claiming the data is still around.
   if (result.rows.length === 0) {
-    return head + ocMsg(`${formatCount(rowCount)} rows returned, no longer held in memory.`);
+    return head + ocMsg("The rows this query returned are no longer held in memory.");
   }
   return `${head}<div class="detail-oc-body" id="detail-grid">${resultGrid(result)}</div>`;
 }
@@ -133,10 +140,4 @@ export function gridFoot(result: HistResult): string {
       ])}</span>`
     : "";
   return `<div class="grid-foot"><span class="rc"><b>${formatCount(result.rowCount)}</b> ${noun}${capTag}</span>${actions}</div>`;
-}
-
-// Thousands separators without toLocaleString, so the rendered count is byte-stable
-// regardless of the host's locale.
-function formatCount(n: number): string {
-  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }

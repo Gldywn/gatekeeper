@@ -82,6 +82,7 @@ body {
   min-width: 0;
   position: relative;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--s3);
   padding: var(--s3);
@@ -131,9 +132,11 @@ body {
    dialect badge, database/schema path, and the read-only lock. */
 .conn-chip {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 9px;
   min-width: 0;
+  max-width: 100%;
   padding: 5px 10px 5px 9px;
   border: 1px solid var(--edge);
   border-radius: 6px;
@@ -152,6 +155,8 @@ body {
   height: 15px;
 }
 .chip-name {
+  overflow-wrap: anywhere;
+  min-width: 0;
   font-size: 12.5px;
   font-weight: 600;
   color: var(--text);
@@ -160,7 +165,8 @@ body {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--muted);
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  min-width: 0;
 }
 /* Dialect tag inside the chip (postgresql, mysql, ...). */
 .badge {
@@ -626,14 +632,6 @@ body {
 .sa-hint-wrap[data-on="false"] .sa-on {
   display: none;
 }
-.sa-pt-ico {
-  display: inline-flex;
-}
-.sa-pt.ok .sa-pt-ico svg {
-  width: 14px;
-  height: 14px;
-  color: var(--ok);
-}
 .sa-pop {
   position: absolute;
   top: calc(100% + 10px);
@@ -653,7 +651,7 @@ body {
     transform var(--dur) var(--ease-out);
 }
 .sa-hint-wrap:hover .sa-pop,
-.sa-hint-wrap:focus-within .sa-pop {
+.sa-hint-wrap:has(:focus-visible) .sa-pop {
   opacity: 1;
   transform: none;
   pointer-events: auto;
@@ -1191,11 +1189,15 @@ label.qs-row {
 /* A destructive card's SQL brackets go red; write keeps the default amber, and the
    .blocked chrome (mode/connection) never overrides the class colour. */
 .card.write .sql::before,
-.card.write .sql::after {
+.card.write .sql::after,
+.confirm-card.write .sql::before,
+.confirm-card.write .sql::after {
   border-color: var(--amber);
 }
 .card.destructive .sql::before,
-.card.destructive .sql::after {
+.card.destructive .sql::after,
+.confirm-card.destructive .sql::before,
+.confirm-card.destructive .sql::after {
   border-color: var(--danger);
 }
 
@@ -3010,6 +3012,11 @@ label.qs-row {
 .act-state.approved {
   --sc: var(--ok);
 }
+/* Approved, but by Auto mode rather than by a human: the chip carries the feature's own
+   colour, so the exception reads from the status itself. */
+.act-state.approved.auto {
+  --sc: var(--auto);
+}
 .act-state.rejected {
   --sc: var(--amber);
 }
@@ -3416,20 +3423,12 @@ label.qs-row {
   line-height: 1.5;
   color: var(--muted);
 }
+/* The queue card's SQL block, kept scrollable here so a long statement cannot push the
+   actions off screen. Everything else (frame, colours, copy button) comes from .sql. */
 .confirm-sql {
   margin: 0 0 var(--s4);
   max-height: 30vh;
   overflow: auto;
-  padding: 10px 12px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text);
-  background: var(--sunken);
-  border: 1px solid var(--edge);
-  border-radius: 6px;
-  white-space: pre-wrap;
-  word-break: break-word;
 }
 .confirm-challenge {
   display: flex;
@@ -3811,4 +3810,325 @@ label.qs-row {
   100% {
     box-shadow: 0 0 0 0 color-mix(in oklch, var(--amber) 0%, transparent);
   }
+}
+
+/* ---- Auto mode ----
+   Reuses the Schema access hint, the armed chip and the card note; only the accent
+   changes, so the feature reads as part of the panel rather than beside it. */
+.armed-chip.auto {
+  --sc: var(--auto);
+  color: var(--auto-ink);
+  background: var(--auto);
+}
+.sa-hint-wrap.auto .sa-dot {
+  background: var(--auto);
+}
+.sa-hint-wrap.auto .sa-dot::after {
+  border-color: var(--auto);
+}
+.sa-hint-wrap.auto[data-on="true"] .sa-hint,
+.sa-hint-wrap.auto .sa-pt svg {
+  color: var(--auto);
+}
+.sa-hint-wrap.auto .sa-enable:not(.tonal) {
+  color: var(--auto-ink);
+  background: var(--auto);
+}
+.sa-hint-wrap.auto .sa-enable:not(.tonal):hover {
+  background: color-mix(in oklch, var(--auto) 88%, white);
+}
+/* Turning a feature off stays one click and fully visible, in the feature's accent as a
+   tint (the dialect badge recipe) so it never reads as the primary Enable. */
+.sa-enable.tonal {
+  color: var(--amber);
+  background: color-mix(in oklch, var(--amber) 14%, transparent);
+}
+.sa-enable.tonal:hover {
+  background: color-mix(in oklch, var(--amber) 24%, transparent);
+}
+.sa-hint-wrap.auto .sa-enable.tonal {
+  color: var(--auto);
+  background: color-mix(in oklch, var(--auto) 14%, transparent);
+}
+.sa-hint-wrap.auto .sa-enable.tonal:hover {
+  background: color-mix(in oklch, var(--auto) 24%, transparent);
+}
+.sa-enable:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+/* A SQL keyword or a tool name inside prose keeps the house voice: mono, in the colour
+   the highlighter gives keywords everywhere else. Both feature popovers share it. */
+.sa-pop code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--amber);
+}
+.set-rec.auto {
+  color: var(--auto);
+  border-color: color-mix(in oklch, var(--auto) 45%, transparent);
+}
+p.auto-message {
+  margin: 4px 0 0;
+  font-size: 11.5px;
+  color: var(--danger);
+}
+p.auto-message:empty {
+  display: none;
+}
+/* Too narrow to hang each popover off its own icon without overflowing left: hang both
+   from the right cluster instead, and drop the caret that could no longer point at it. */
+@media (max-width: 540px) {
+  .sa-hint-wrap {
+    position: static;
+  }
+  .sa-pop::before {
+    display: none;
+  }
+}
+.set-row.recommend.auto {
+  border-color: color-mix(in oklch, var(--auto) 38%, transparent);
+  background: color-mix(in oklch, var(--auto) 5%, transparent);
+}
+.recommend.auto .set-ico,
+.cs-unparsed.auto svg {
+  color: var(--auto);
+}
+.auto-key {
+  display: grid;
+  gap: 4px;
+  margin-top: var(--s2);
+}
+.auto-key .confirm-input {
+  width: 100%;
+  max-width: 24rem;
+}
+.auto-key .confirm-input:focus-visible {
+  outline-color: var(--auto);
+}
+.cs-unparsed.auto {
+  border-color: color-mix(in oklch, var(--auto) 32%, transparent);
+  background: color-mix(in oklch, var(--auto) 8%, transparent);
+}
+/* Evaluation facts are data, so they read like the activity note beside them. */
+/* The evaluation trace, in the detail and in the audit trail: the pending card's Auto note,
+   opened out over several lines because it carries the numbers a human may want to read. */
+.auto-trace {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 7px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in oklch, var(--auto) 32%, transparent);
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--auto) 8%, transparent);
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text);
+}
+.auto-trace-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+}
+.auto-trace-line svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-top: 1px;
+  color: var(--auto);
+}
+.auto-trace-meta {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+/* An axis past its cutoff, and the reason it produced: amber, the held state. */
+.auto-reason.over {
+  color: var(--amber);
+  background: color-mix(in oklch, var(--amber) 13%, transparent);
+}
+.auto-reason.metric {
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+/* The one glyph beside the worded chips, for a row nothing human decided: it carries its
+   meaning on its own, so it does not dress up as one of them. */
+.act-flag.auto {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  color: var(--auto);
+  background: none;
+}
+.act-flag.auto svg {
+  width: 13px;
+  height: 13px;
+}
+.hstate.auto {
+  color: var(--auto);
+}
+p.auto-message[data-tone="ok"] {
+  color: var(--ok);
+}
+/* Dimmed while Auto mode is off, yet still editable: a key can be saved before enabling. */
+#autoSettings:not([data-on="true"]) .auto-key .confirm-input:not(:focus) {
+  opacity: 0.55;
+}
+/* The reason an option is off is prose, not the SQL it would allow. */
+.dd-opt.off .o-allow {
+  font-family: var(--font-ui);
+}
+p.auto-message[data-tone="busy"] {
+  color: var(--muted);
+}
+/* Checking the key takes a network round trip: the button carries the executing spinner,
+   in its own ink, and stays put under reduced motion. */
+.sa-enable[aria-busy="true"] {
+  gap: 6px;
+  cursor: progress;
+}
+.sa-enable[aria-busy="true"]::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in oklch, currentColor 30%, transparent);
+  border-top-color: currentColor;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .sa-enable[aria-busy="true"]::before {
+    animation: spin 0.7s linear infinite;
+  }
+}
+/* A read under evaluation: the card takes a faint Auto tint, the note keeps the card's own
+   note shape, and the only motion is the bolt and one sweep across that note. */
+/* Centred inside one title line, so it holds its place when the title wraps, and pulled
+   close to the title: it reads as part of it, not as a column of its own. */
+.auto-mark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: 1.5em;
+  margin-top: 1px;
+  margin-right: -3px;
+  color: var(--auto);
+}
+.auto-mark svg {
+  width: 15px;
+  height: 15px;
+}
+/* The border fills in the Auto accent, the same ring the landing page draws on a guard,
+   looping here because it marks work in progress. The card keeps its usual edge
+   underneath, so the line reads against it instead of cyan over cyan. */
+@property --auto-fill {
+  syntax: "<number>";
+  initial-value: 1;
+  inherits: false;
+}
+.card.auto-eval {
+  position: relative;
+}
+.card.auto-eval::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: calc(var(--r) + 1px);
+  padding: 1px;
+  background: conic-gradient(
+    from -90deg,
+    var(--auto) calc(var(--auto-fill) * 1turn),
+    transparent 0
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+}
+.cs-unparsed.auto.evaluating {
+  position: relative;
+  overflow: hidden;
+}
+.auto-bolt {
+  display: inline-flex;
+  flex: none;
+  transform-origin: center;
+}
+.cs-unparsed.auto.evaluating::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 20%,
+    color-mix(in oklch, var(--auto) 22%, transparent) 50%,
+    transparent 80%
+  );
+  opacity: 0;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .cs-unparsed.auto.evaluating::after {
+    opacity: 1;
+    animation: auto-sweep 2.4s var(--ease-in-out) infinite;
+  }
+  @keyframes auto-sweep {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(100%);
+    }
+  }
+  .card.auto-eval::before {
+    animation: auto-fill 2.8s linear infinite;
+  }
+  @keyframes auto-fill {
+    from {
+      --auto-fill: 0;
+    }
+    to {
+      --auto-fill: 1;
+    }
+  }
+  .auto-bolt {
+    animation: auto-bolt 1.4s var(--ease-in-out) infinite;
+  }
+  @keyframes auto-bolt {
+    0%,
+    100% {
+      transform: scale(1);
+      opacity: 0.85;
+    }
+    50% {
+      transform: scale(1.18);
+      opacity: 1;
+    }
+  }
+}
+.auto-reasons {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-left: 6px;
+  vertical-align: baseline;
+}
+.auto-reason {
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  color: var(--auto);
+  background: color-mix(in oklch, var(--auto) 13%, transparent);
+}
+.auto-trace .auto-reasons {
+  margin-left: 0;
+}
+/* The one claim a human must not have to infer, set apart without shouting. */
+.auto-strong {
+  font-style: italic;
 }

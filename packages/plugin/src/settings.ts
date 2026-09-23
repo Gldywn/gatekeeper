@@ -6,7 +6,6 @@ import type { SchemaContext } from "./sql/schema";
 export interface Settings {
   piiFlagging: boolean;
   clientFlagging: boolean;
-  schemaAnnotation: boolean;
   sensitiveValues: boolean;
   // Require a second one-click confirmation before an approved write or destructive
   // statement runs. On by default; a read never prompts.
@@ -37,7 +36,6 @@ export function defaultSettings(): Settings {
   return {
     piiFlagging: true,
     clientFlagging: true,
-    schemaAnnotation: true,
     sensitiveValues: true,
     confirmWrites: true,
     schemaAccess: false,
@@ -59,7 +57,6 @@ export function normalizeSettings(raw: unknown): Settings {
   return {
     piiFlagging: asBool(r.piiFlagging, true),
     clientFlagging: asBool(r.clientFlagging, true),
-    schemaAnnotation: asBool(r.schemaAnnotation, true),
     sensitiveValues: asBool(r.sensitiveValues, true),
     confirmWrites: asBool(r.confirmWrites, true),
     schemaAccess: asBool(r.schemaAccess, false),
@@ -72,10 +69,13 @@ export function normalizeSettings(raw: unknown): Settings {
   };
 }
 
-// Apply the host-side detection toggles to a fresh annotation. schemaAnnotation off
-// drops the whole thing; each axis blanks only its own set. Never mutates the input.
+// Apply the host-side display preferences to a fresh annotation; each axis blanks only
+// its own set. Never mutates the input.
+// Naming the tables and columns a query reads is how a human reads that query, not a
+// preference, so it is unconditional since the 2026-09-21 decision and no longer has a
+// setting. A schemaAnnotation:false left in an older stored blob is ignored, not migrated.
 export function filterSchema(schema: SchemaContext | null, s: Settings): SchemaContext | null {
-  if (!schema || !s.schemaAnnotation) {
+  if (!schema) {
     return null;
   }
   return {
@@ -84,6 +84,7 @@ export function filterSchema(schema: SchemaContext | null, s: Settings): SchemaC
     pii: s.piiFlagging ? schema.pii : [],
     client: s.clientFlagging ? schema.client : [],
     literals: s.sensitiveValues ? schema.literals : [],
+    ...(schema.analysis ? { analysis: schema.analysis } : {}),
   };
 }
 

@@ -1,4 +1,9 @@
 import { escapeHtml } from "../html";
+import { copyIcon } from "../icons";
+import { formatSql } from "../sql/format";
+import { highlight } from "../sql/highlight";
+import { visibleControls } from "../sql/sanitize";
+import type { SchemaContext } from "../sql/schema";
 
 // The tone tints only the heading and the confirm button; the modal border stays
 // neutral (no coloured top accent), so blue/amber/red reads as intent, not chrome.
@@ -20,6 +25,9 @@ export interface ConfirmSpec {
   // Optional statement to recall verbatim above the actions, so the human re-reads
   // exactly what will run before confirming.
   sql?: string;
+  // The card's annotation, so the statement reads here exactly as it does on the card:
+  // same formatting, same keyword colours, same PII, client and literal marks.
+  schema?: SchemaContext;
   challenge?: ConfirmChallenge;
   onConfirm: () => void;
   // Called on cancel, backdrop, or Escape, so a caller can revert an optimistic
@@ -42,11 +50,13 @@ export function confirmHtml(spec: ConfirmSpec): string {
             <input class="confirm-input" type="text" data-confirm-input autocomplete="off" spellcheck="false" placeholder="${escapeHtml(spec.challenge.placeholder)}" aria-label="${escapeHtml(spec.challenge.label)}" />
           </label>`
     : "";
+  // The same SQL block as the queue card, down to the corner frame and the copy button:
+  // the last thing a human reads before a write must not be a different rendering of it.
   const sql = spec.sql
-    ? `<pre class="confirm-sql"><code>${escapeHtml(spec.sql.trim())}</code></pre>`
+    ? `<pre class="sql confirm-sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(visibleControls(spec.sql))}" aria-label="Copy SQL">${copyIcon}</button><code class="sql-body">${highlight(formatSql(spec.sql), spec.schema?.pii, spec.schema?.client, spec.schema?.literals)}</code></pre>`
     : "";
   return `
-      <div class="detail-card confirm-card">
+      <div class="detail-card confirm-card ${spec.tone}">
         <h2 class="confirm-title ${spec.tone}">${escapeHtml(spec.heading)}</h2>
         <p class="confirm-text">${escapeHtml(spec.body)}</p>
         ${sql}
