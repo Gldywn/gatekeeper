@@ -1,7 +1,7 @@
 ---
 name: update-gatekeeper
 description: Check whether an existing Gatekeeper install is current and bring it up to date across all three pieces (the Beekeeper Studio plugin, the MCP server, the skills), acting only on what is actually behind. Use when someone asks to update or upgrade Gatekeeper, asks whether they are running the latest version, mentions a new Gatekeeper release, or wants to know which version of Gatekeeper they have.
-version: 0.3.0 # x-release-please-version
+version: 0.3.1 # x-release-please-version
 ---
 
 # Update Gatekeeper
