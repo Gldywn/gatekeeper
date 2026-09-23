@@ -13,7 +13,10 @@
         { "type": "json", "path": "packages/plugin/package.json", "jsonpath": "$.version" },
         { "type": "json", "path": "packages/plugin/manifest.json", "jsonpath": "$.version" },
         { "type": "json", "path": "packages/server/package.json", "jsonpath": "$.version" },
-        { "type": "json", "path": "packages/shared/package.json", "jsonpath": "$.version" }
+        { "type": "json", "path": "packages/shared/package.json", "jsonpath": "$.version" },
+        { "type": "generic", "path": "skills/gatekeeper/SKILL.md" },
+        { "type": "generic", "path": "skills/install-gatekeeper/SKILL.md" },
+        { "type": "generic", "path": "skills/update-gatekeeper/SKILL.md" }
       ]
     }
   }

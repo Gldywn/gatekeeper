@@ -5,8 +5,8 @@ plugin manager, a server on npm, and a skill on `skills.sh`.
 
 ## One version for the whole repo
 
-The plugin, the server and the shared wire contract are released together under a single
-version and a single tag (`v0.1.0`), not per package. Two reasons:
+Starting with the release after `v0.3.0`, the plugin, server, shared wire contract and all
+three skills are versioned together under a single version and tag, not per package. Two reasons:
 
 - **The wire contract.** `packages/shared` is the protocol the plugin and the server speak
   to each other. Versioning them independently creates a compatibility matrix, and there
@@ -19,7 +19,8 @@ version and a single tag (`v0.1.0`), not per package. Two reasons:
   the next plugin release. One release per version removes the failure mode entirely.
 
 `release-please` owns every version number. Do not hand-edit versions: the config bumps
-the root `package.json`, all three package manifests, and `packages/plugin/manifest.json`
+the root `package.json`, all three package manifests, `packages/plugin/manifest.json`
+and the version in each `skills/*/SKILL.md` frontmatter
 from one source of truth.
 
 ## The pipeline
