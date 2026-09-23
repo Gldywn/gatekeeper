@@ -1,0 +1,258 @@
+[
+  {
+    "id": "broad-payment-attempts",
+    "family": "broad-payments",
+    "split": "development",
+    "expected": "allow",
+    "domain": "payments",
+    "category": "ordinary",
+    "reason": "Payment intent references, update times, an order reference key and attempt method, status and amount summaries identify no person or company.",
+    "sql": "SELECT pi.id, pi.\"updatedAt\", pi.metadata ->> 'orderRef' AS order_ref, array_agg(pa.payment_method_kind || ':' || pa.status || ':' || pa.captured_amount_cents::text ORDER BY pa.payment_method_kind) AS attempts FROM payment_orchestrator.payment_intent pi JOIN payment_orchestrator.payment_attempt pa ON pa.payment_intent_id = pi.id WHERE pi.status = 'AUTHORIZED' AND EXISTS (SELECT 1 FROM payment_orchestrator.payment_attempt c WHERE c.payment_intent_id = pi.id AND c.status = 'CAPTURED') GROUP BY pi.id, pi.\"updatedAt\", pi.metadata ORDER BY pi.\"updatedAt\"",
+    "columns": {},
+    "relations": {
+      "payment_orchestrator.payment_intent": {
+        "id": "text",
+        "updatedAt": "timestamp",
+        "metadata": "jsonb",
+        "status": "text"
+      },
+      "payment_orchestrator.payment_attempt": {
+        "payment_intent_id": "text",
+        "payment_method_kind": "text",
+        "status": "text",
+        "captured_amount_cents": "int8"
+      }
+    }
+  },
+  {
+    "id": "broad-payment-statuses",
+    "family": "broad-payments",
+    "split": "development",
+    "expected": "allow",
+    "domain": "payments",
+    "category": "ordinary",
+    "reason": "A count per operational status over the whole relation selects no person or company.",
+    "sql": "SELECT status, count(*) AS n FROM payment_orchestrator.payment_intent GROUP BY status ORDER BY status",
+    "columns": { "status": "text" }
+  },
+  {
+    "id": "broad-stock-cte",
+    "family": "broad-stock",
+    "split": "development",
+    "expected": "allow",
+    "domain": "inventory",
+    "category": "ordinary",
+    "reason": "A CTE over product codes and quantities returns ordinary inventory data.",
+    "sql": "WITH low AS (SELECT sku, quantity FROM inventory.stock WHERE quantity < 10) SELECT sku, quantity FROM low ORDER BY quantity",
+    "columns": { "sku": "text", "quantity": "int4" }
+  },
+  {
+    "id": "broad-stock-window",
+    "family": "broad-stock",
+    "split": "development",
+    "expected": "allow",
+    "domain": "inventory",
+    "category": "ordinary",
+    "reason": "Ranking products by price inside a category discloses ordinary catalog data.",
+    "sql": "SELECT sku, category, price, rank() OVER (PARTITION BY category ORDER BY price DESC) AS price_rank FROM inventory.catalog",
+    "columns": { "sku": "text", "category": "text", "price": "numeric" }
+  },
+  {
+    "id": "broad-stock-case",
+    "family": "broad-stock",
+    "split": "development",
+    "expected": "allow",
+    "domain": "inventory",
+    "category": "ordinary",
+    "reason": "A CASE bucket over quantities with a concatenated label stays within product data.",
+    "sql": "SELECT sku || '-' || size_code AS variant, CASE WHEN quantity > 100 THEN 'high' ELSE 'low' END AS level, coalesce(reserved, 0) AS reserved FROM inventory.stock",
+    "columns": { "sku": "text", "size_code": "text", "quantity": "int4", "reserved": "int4" }
+  },
+  {
+    "id": "broad-daily-orders",
+    "family": "broad-orders",
+    "split": "development",
+    "expected": "allow",
+    "domain": "orders",
+    "category": "ordinary",
+    "reason": "Daily order counts and totals over the whole relation identify no customer.",
+    "sql": "SELECT date_trunc('day', created_at) AS day, count(*) AS orders, sum(total_cents) AS total FROM sales.orders WHERE created_at >= now() - interval '7 days' GROUP BY 1 ORDER BY 1",
+    "columns": { "created_at": "timestamptz", "total_cents": "int8" }
+  },
+  {
+    "id": "broad-derived-average",
+    "family": "broad-orders",
+    "split": "development",
+    "expected": "allow",
+    "domain": "orders",
+    "category": "ordinary",
+    "reason": "A derived table of per-status totals then averaged returns aggregates only.",
+    "sql": "SELECT avg(t.total) AS average_total FROM (SELECT status, sum(total_cents) AS total FROM sales.orders GROUP BY status) t",
+    "columns": { "status": "text", "total_cents": "int8" }
+  },
+  {
+    "id": "broad-ticket-notes",
+    "family": "broad-support",
+    "split": "development",
+    "expected": "review",
+    "domain": "support",
+    "category": "context",
+    "reason": "Aggregated free text written by or about customers can contain personal information.",
+    "sql": "SELECT ticket_ref, string_agg(note_text, ' | ' ORDER BY noted_at) AS notes FROM support.ticket_notes GROUP BY ticket_ref",
+    "columns": { "ticket_ref": "text", "note_text": "text", "noted_at": "timestamptz" }
+  },
+  {
+    "id": "broad-member-test",
+    "family": "broad-support",
+    "split": "development",
+    "expected": "review",
+    "domain": "support",
+    "category": "pii",
+    "reason": "A filtered count comparing a holder label with a supplied value tests an identifiable person's membership.",
+    "sql": "SELECT count(*) FILTER (WHERE holder_label = 'Synthetic Person') AS matches FROM support.memberships",
+    "columns": { "holder_label": "text" }
+  },
+  {
+    "id": "broad-reset-masked",
+    "family": "broad-access",
+    "split": "development",
+    "expected": "review",
+    "domain": "access",
+    "category": "context",
+    "reason": "A CTE renames a recovery value; the source still grants account access.",
+    "sql": "WITH r AS (SELECT user_ref, recovery_hint AS label FROM auth.recovery_requests) SELECT label FROM r",
+    "columns": { "user_ref": "text", "recovery_hint": "text" }
+  },
+  {
+    "id": "broad-cte-email-masked",
+    "family": "broad-local",
+    "split": "development",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "pii",
+    "reason": "A CTE alias cannot hide an email source.",
+    "sql": "WITH c AS (SELECT email AS contact FROM crm.people) SELECT contact FROM c",
+    "columns": { "email": "text" }
+  },
+  {
+    "id": "broad-agg-email",
+    "family": "broad-local",
+    "split": "development",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "pii",
+    "reason": "Aggregating email addresses still reads them.",
+    "sql": "SELECT account_ref, array_agg(email) AS emails FROM crm.people GROUP BY account_ref",
+    "columns": { "account_ref": "text", "email": "text" }
+  },
+  {
+    "id": "broad-json-wrapped",
+    "family": "broad-local",
+    "split": "development",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "unsupported",
+    "reason": "A whole JSON document stays opaque when wrapped in a cast or function.",
+    "sql": "SELECT id, metadata::text AS payload FROM payment_orchestrator.payment_intent",
+    "columns": { "id": "text", "metadata": "jsonb" }
+  },
+  {
+    "id": "broad-setting-read",
+    "family": "broad-local",
+    "split": "development",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "read-only",
+    "reason": "Reading server settings is a system-data read outside the reviewed transformations.",
+    "sql": "SELECT current_setting('app.settings.jwt_secret', true) AS value, sku FROM inventory.stock",
+    "columns": { "sku": "text" }
+  },
+  {
+    "id": "broad-sequence",
+    "family": "broad-local",
+    "split": "development",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "read-only",
+    "reason": "Advancing a sequence changes database state.",
+    "sql": "SELECT nextval('inventory.batch_seq') AS batch, sku FROM inventory.stock",
+    "columns": { "sku": "text" }
+  },
+  {
+    "id": "broad-v-refund-window",
+    "family": "broad-v-refunds",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "payments",
+    "category": "ordinary",
+    "reason": "A running total of refund amounts per day identifies no person or company.",
+    "sql": "SELECT refunded_on, amount_cents, sum(amount_cents) OVER (ORDER BY refunded_on) AS running_total FROM billing.refunds",
+    "columns": { "refunded_on": "date", "amount_cents": "int8" }
+  },
+  {
+    "id": "broad-v-refund-cte",
+    "family": "broad-v-refunds",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "payments",
+    "category": "ordinary",
+    "reason": "Refund reason codes counted through a CTE are operational categories.",
+    "sql": "WITH r AS (SELECT reason_code FROM billing.refunds WHERE refunded_on >= date '2026-01-01') SELECT reason_code, count(*) AS n FROM r GROUP BY reason_code",
+    "columns": { "reason_code": "text", "refunded_on": "date" }
+  },
+  {
+    "id": "broad-v-shipment-labels",
+    "family": "broad-v-shipping",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "logistics",
+    "category": "ordinary",
+    "reason": "Carrier and zone codes concatenated into a lane label are logistics metadata.",
+    "sql": "SELECT carrier_code || '/' || zone_code AS lane, count(*) AS parcels FROM logistics.shipments GROUP BY 1",
+    "columns": { "carrier_code": "text", "zone_code": "text" }
+  },
+  {
+    "id": "broad-v-recipient-lines",
+    "family": "broad-v-shipping",
+    "split": "validation",
+    "expected": "review",
+    "domain": "logistics",
+    "category": "context",
+    "reason": "Delivery instructions are free text that can name recipients or addresses.",
+    "sql": "SELECT shipment_ref, lower(delivery_instructions) AS instructions FROM logistics.shipments",
+    "columns": { "shipment_ref": "text", "delivery_instructions": "text" }
+  },
+  {
+    "id": "broad-v-vendor-test",
+    "family": "broad-v-shipping",
+    "split": "validation",
+    "expected": "review",
+    "domain": "logistics",
+    "category": "client",
+    "reason": "A boolean over a vendor label tests an identifiable company.",
+    "sql": "SELECT bool_or(vendor_label = 'Synthetic Business') AS ships_for_vendor FROM logistics.shipments",
+    "columns": { "vendor_label": "text" }
+  },
+  {
+    "id": "broad-v-agg-contact",
+    "family": "broad-v-local",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "pii",
+    "reason": "A window over phone numbers still reads them.",
+    "sql": "SELECT row_number() OVER (ORDER BY phone) AS n FROM crm.people",
+    "columns": { "phone": "text" }
+  },
+  {
+    "id": "broad-v-custom-function",
+    "family": "broad-v-local",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "read-only",
+    "reason": "A user function has unknown effects and hidden sources.",
+    "sql": "SELECT sku, inventory.reorder_hint(sku) AS hint FROM inventory.stock",
+    "columns": { "sku": "text" }
+  }
+]

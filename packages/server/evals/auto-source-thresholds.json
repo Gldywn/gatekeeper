@@ -1,0 +1,7 @@
+{
+  "read_only": 0.95,
+  "personal_disclosure": 0.1,
+  "organization_disclosure": 0.15,
+  "secret_disclosure": 0.15,
+  "insufficient_context": 0.45
+}

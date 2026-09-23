@@ -1,8 +1,9 @@
-import { Parser } from "node-sql-parser";
+// The package is CommonJS. Node exposes its exports through the default import.
+import nodeSqlParser from "node-sql-parser";
 
 // One instance shared by every SQL-inspecting module (read-only guard, schema
 // analysis): node-sql-parser holds no per-call state, so reusing it is safe.
-export const parser = new Parser();
+export const parser = new nodeSqlParser.Parser();
 
 // Beekeeper's databaseType to the dialect name node-sql-parser expects. The single
 // home for dialect handling; every parse that needs a dialect routes through here.

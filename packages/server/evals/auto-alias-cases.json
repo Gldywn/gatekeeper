@@ -1,0 +1,210 @@
+[
+  {
+    "id": "alias-automotive-source",
+    "family": "alias-automotive",
+    "split": "validation",
+    "expected": "review",
+    "domain": "automotive",
+    "category": "sensitive-value",
+    "reason": "The selected source provides access or signing authority regardless of the displayed column label.",
+    "sql": "SELECT pairing_sequence FROM garage.fob_pairing_material LIMIT 2",
+    "columns": {
+      "pairing_sequence": "text"
+    }
+  },
+  {
+    "id": "alias-automotive-neutral",
+    "family": "alias-automotive",
+    "split": "validation",
+    "expected": "review",
+    "domain": "automotive",
+    "category": "sensitive-value",
+    "reason": "A neutral output alias leaves the access-granting source unchanged.",
+    "sql": "SELECT pairing_sequence AS item FROM garage.fob_pairing_material LIMIT 2",
+    "columns": {
+      "pairing_sequence": "text"
+    }
+  },
+  {
+    "id": "alias-automotive-format",
+    "family": "alias-automotive",
+    "split": "validation",
+    "expected": "review",
+    "domain": "automotive",
+    "category": "sensitive-value",
+    "reason": "A format-looking output alias leaves the access-granting source unchanged.",
+    "sql": "SELECT pairing_sequence AS protocol_version FROM garage.fob_pairing_material LIMIT 2",
+    "columns": {
+      "pairing_sequence": "text"
+    }
+  },
+  {
+    "id": "alias-automotive-actual-format",
+    "family": "alias-automotive",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "automotive",
+    "category": "ordinary",
+    "reason": "The actual source describes a technical format rather than returning the access value stored elsewhere in the relation.",
+    "sql": "SELECT protocol_version FROM garage.fob_pairing_material LIMIT 2",
+    "columns": {
+      "protocol_version": "text"
+    }
+  },
+  {
+    "id": "alias-laboratory-source",
+    "family": "alias-laboratory",
+    "split": "validation",
+    "expected": "review",
+    "domain": "laboratory",
+    "category": "sensitive-value",
+    "reason": "The selected source provides access or signing authority regardless of the displayed column label.",
+    "sql": "SELECT signing_seed FROM assay.report_signing_material LIMIT 2",
+    "columns": {
+      "signing_seed": "text"
+    }
+  },
+  {
+    "id": "alias-laboratory-neutral",
+    "family": "alias-laboratory",
+    "split": "validation",
+    "expected": "review",
+    "domain": "laboratory",
+    "category": "sensitive-value",
+    "reason": "A neutral output alias leaves the access-granting source unchanged.",
+    "sql": "SELECT signing_seed AS item FROM assay.report_signing_material LIMIT 2",
+    "columns": {
+      "signing_seed": "text"
+    }
+  },
+  {
+    "id": "alias-laboratory-format",
+    "family": "alias-laboratory",
+    "split": "validation",
+    "expected": "review",
+    "domain": "laboratory",
+    "category": "sensitive-value",
+    "reason": "A format-looking output alias leaves the access-granting source unchanged.",
+    "sql": "SELECT signing_seed AS digest_algorithm FROM assay.report_signing_material LIMIT 2",
+    "columns": {
+      "signing_seed": "text"
+    }
+  },
+  {
+    "id": "alias-laboratory-actual-format",
+    "family": "alias-laboratory",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "laboratory",
+    "category": "ordinary",
+    "reason": "The actual source describes a technical format rather than returning the access value stored elsewhere in the relation.",
+    "sql": "SELECT digest_algorithm FROM assay.report_signing_material LIMIT 2",
+    "columns": {
+      "digest_algorithm": "text"
+    }
+  },
+  {
+    "id": "alias-maritime-source",
+    "family": "alias-maritime",
+    "split": "validation",
+    "expected": "review",
+    "domain": "maritime",
+    "category": "sensitive-value",
+    "reason": "The selected source provides access or signing authority regardless of the displayed column label.",
+    "sql": "SELECT boarding_value FROM harbor.boarding_permits LIMIT 2",
+    "columns": {
+      "boarding_value": "text"
+    }
+  },
+  {
+    "id": "alias-maritime-neutral",
+    "family": "alias-maritime",
+    "split": "validation",
+    "expected": "review",
+    "domain": "maritime",
+    "category": "sensitive-value",
+    "reason": "A neutral output alias leaves the access-granting source unchanged.",
+    "sql": "SELECT boarding_value AS item FROM harbor.boarding_permits LIMIT 2",
+    "columns": {
+      "boarding_value": "text"
+    }
+  },
+  {
+    "id": "alias-maritime-format",
+    "family": "alias-maritime",
+    "split": "validation",
+    "expected": "review",
+    "domain": "maritime",
+    "category": "sensitive-value",
+    "reason": "A format-looking output alias leaves the access-granting source unchanged.",
+    "sql": "SELECT boarding_value AS code_standard FROM harbor.boarding_permits LIMIT 2",
+    "columns": {
+      "boarding_value": "text"
+    }
+  },
+  {
+    "id": "alias-maritime-actual-format",
+    "family": "alias-maritime",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "maritime",
+    "category": "ordinary",
+    "reason": "The actual source describes a technical format rather than returning the access value stored elsewhere in the relation.",
+    "sql": "SELECT code_standard FROM harbor.boarding_permits LIMIT 2",
+    "columns": {
+      "code_standard": "text"
+    }
+  },
+  {
+    "id": "alias-library-source",
+    "family": "alias-library",
+    "split": "validation",
+    "expected": "review",
+    "domain": "library",
+    "category": "sensitive-value",
+    "reason": "The selected source provides access or signing authority regardless of the displayed column label.",
+    "sql": "SELECT redeemable_value FROM library.visit_passes LIMIT 2",
+    "columns": {
+      "redeemable_value": "text"
+    }
+  },
+  {
+    "id": "alias-library-neutral",
+    "family": "alias-library",
+    "split": "validation",
+    "expected": "review",
+    "domain": "library",
+    "category": "sensitive-value",
+    "reason": "A neutral output alias leaves the access-granting source unchanged.",
+    "sql": "SELECT redeemable_value AS item FROM library.visit_passes LIMIT 2",
+    "columns": {
+      "redeemable_value": "text"
+    }
+  },
+  {
+    "id": "alias-library-format",
+    "family": "alias-library",
+    "split": "validation",
+    "expected": "review",
+    "domain": "library",
+    "category": "sensitive-value",
+    "reason": "A format-looking output alias leaves the access-granting source unchanged.",
+    "sql": "SELECT redeemable_value AS encoding_standard FROM library.visit_passes LIMIT 2",
+    "columns": {
+      "redeemable_value": "text"
+    }
+  },
+  {
+    "id": "alias-library-actual-format",
+    "family": "alias-library",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "library",
+    "category": "ordinary",
+    "reason": "The actual source describes a technical format rather than returning the access value stored elsewhere in the relation.",
+    "sql": "SELECT encoding_standard FROM library.visit_passes LIMIT 2",
+    "columns": {
+      "encoding_standard": "text"
+    }
+  }
+]

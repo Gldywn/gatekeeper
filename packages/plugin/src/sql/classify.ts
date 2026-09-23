@@ -1,4 +1,5 @@
 import type { AccessMode } from "@gatekeeper/shared";
+import { prepareSql } from "./identifiers";
 import { parser } from "./sql-parser";
 
 // The plugin's risk class is the shared access mode; kept as a local alias so the many
@@ -138,7 +139,7 @@ export function classifyQuery(sql: string, dialect = "postgresql"): RiskVerdict 
   }
   let ast: unknown;
   try {
-    ast = parser.astify(sql, { database: dialect });
+    ast = parser.astify(prepareSql(sql, dialect).sql, { database: dialect });
   } catch {
     return fallback(sql);
   }

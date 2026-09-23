@@ -1,0 +1,497 @@
+[
+  {
+    "id": "export-holder-accounts-config",
+    "family": "export-treasury-overview",
+    "split": "development",
+    "expected": "allow",
+    "domain": "treasury",
+    "category": "ordinary",
+    "reason": "Account configuration flags, providers, statuses, currencies and creation dates selected for one company by an opaque identifier; no names, contacts or credentials are returned.",
+    "sql": "SELECT cc.is_enabled AS config_enabled, cc.default_account_id, a.id AS account_id, (a.id = cc.default_account_id) AS is_default, a.provider, a.status, a.currency, a.direct_debit_mandate_status, ah.id AS account_holder_id, ah.provider AS holder_provider, ah.verification_status, a.\"createdAt\" AS account_created_at FROM treasury.account_holders ah JOIN treasury.accounts a ON a.account_holder_id = ah.id LEFT JOIN treasury.company_configs cc ON cc.company_id = ah.owner_id WHERE ah.owner_id = '00000000-0000-4000-8000-00000000c001' AND ah.owner_type = 'BUSINESS' ORDER BY a.\"createdAt\"",
+    "columns": {},
+    "relations": {
+      "treasury.account_holders": {
+        "id": "uuid",
+        "owner_id": "uuid",
+        "owner_type": "text",
+        "provider": "text",
+        "verification_status": "text"
+      },
+      "treasury.accounts": {
+        "id": "uuid",
+        "account_holder_id": "uuid",
+        "provider": "text",
+        "status": "text",
+        "currency": "text",
+        "direct_debit_mandate_status": "text",
+        "createdAt": "timestamp"
+      },
+      "treasury.company_configs": {
+        "company_id": "uuid",
+        "is_enabled": "bool",
+        "default_account_id": "uuid"
+      }
+    }
+  },
+  {
+    "id": "export-migration-state",
+    "family": "export-treasury-overview",
+    "split": "development",
+    "expected": "allow",
+    "domain": "treasury",
+    "category": "ordinary",
+    "reason": "A migration record for one company by opaque identifier: provider references, a funds amount, completion flags and dates, no identity or credential.",
+    "sql": "SELECT id, completed_at, funds_amount, swan_account_id, mangopay_wallet_id, mangopay_payout_provider_id IS NOT NULL AS has_payout, mangopay_transfer_provider_id IS NOT NULL AS has_transfer, swan_payin_provider_id IS NOT NULL AS has_swan_payin, \"createdAt\", \"updatedAt\" FROM treasury.mangopay_to_swan_migration WHERE company_id = '00000000-0000-4000-8000-00000000c001'",
+    "columns": {
+      "id": "uuid",
+      "company_id": "uuid",
+      "completed_at": "timestamp",
+      "funds_amount": "numeric",
+      "swan_account_id": "text",
+      "mangopay_wallet_id": "text",
+      "mangopay_payout_provider_id": "text",
+      "mangopay_transfer_provider_id": "text",
+      "swan_payin_provider_id": "text",
+      "createdAt": "timestamp",
+      "updatedAt": "timestamp"
+    }
+  },
+  {
+    "id": "export-order-flows-union",
+    "family": "export-treasury-flows",
+    "split": "development",
+    "expected": "allow",
+    "domain": "treasury",
+    "category": "ordinary",
+    "reason": "Order counts, cent totals and latest dates per status for one company's accounts, combined with UNION ALL under constant labels; aggregates of ordinary amounts without identity.",
+    "sql": "SELECT 'transfer_out' AS kind, t.status, count(*) AS orders, sum(t.amount) AS total_cents, max(t.\"createdAt\") AS last_created, max(t.completed_at) AS last_completed FROM treasury.transfer_orders t JOIN treasury.accounts a ON a.id = t.source_account_id JOIN treasury.account_holders ah ON ah.id = a.account_holder_id WHERE ah.owner_id = '00000000-0000-4000-8000-00000000c001' AND ah.owner_type = 'BUSINESS' GROUP BY t.status UNION ALL SELECT 'debit_in' AS kind, d.status, count(*) AS orders, sum(d.amount) AS total_cents, max(d.\"createdAt\") AS last_created, max(d.completed_at) AS last_completed FROM treasury.debit_orders d JOIN treasury.accounts a ON a.id = d.source_account_id JOIN treasury.account_holders ah ON ah.id = a.account_holder_id WHERE ah.owner_id = '00000000-0000-4000-8000-00000000c001' AND ah.owner_type = 'BUSINESS' GROUP BY d.status ORDER BY 1, 2",
+    "columns": {},
+    "relations": {
+      "treasury.transfer_orders": {
+        "status": "text",
+        "amount": "int8",
+        "createdAt": "timestamp",
+        "completed_at": "timestamp",
+        "source_account_id": "uuid"
+      },
+      "treasury.debit_orders": {
+        "status": "text",
+        "amount": "int8",
+        "createdAt": "timestamp",
+        "completed_at": "timestamp",
+        "source_account_id": "uuid"
+      },
+      "treasury.accounts": { "id": "uuid", "account_holder_id": "uuid" },
+      "treasury.account_holders": { "id": "uuid", "owner_id": "uuid", "owner_type": "text" }
+    }
+  },
+  {
+    "id": "export-accounts-with-migration",
+    "family": "export-treasury-overview",
+    "split": "development",
+    "expected": "allow",
+    "domain": "treasury",
+    "category": "ordinary",
+    "reason": "Account flags and statuses joined with a migration's completion date and funds amount for one company by opaque identifier; operational data only.",
+    "sql": "SELECT cc.is_enabled AS config_enabled, cc.default_account_id, a.id AS account_id, (a.id = cc.default_account_id) AS is_default, a.provider, a.status, a.direct_debit_mandate_status, ah.verification_status, a.\"createdAt\" AS account_created_at, m.id AS migration_id, m.completed_at AS migration_completed_at, m.funds_amount AS migration_funds_amount FROM treasury.account_holders ah JOIN treasury.accounts a ON a.account_holder_id = ah.id LEFT JOIN treasury.company_configs cc ON cc.company_id = ah.owner_id LEFT JOIN treasury.mangopay_to_swan_migration m ON m.company_id = ah.owner_id WHERE ah.owner_id = '00000000-0000-4000-8000-00000000c001' AND ah.owner_type = 'BUSINESS' ORDER BY a.\"createdAt\"",
+    "columns": {},
+    "relations": {
+      "treasury.account_holders": {
+        "id": "uuid",
+        "owner_id": "uuid",
+        "owner_type": "text",
+        "verification_status": "text"
+      },
+      "treasury.accounts": {
+        "id": "uuid",
+        "account_holder_id": "uuid",
+        "provider": "text",
+        "status": "text",
+        "direct_debit_mandate_status": "text",
+        "createdAt": "timestamp"
+      },
+      "treasury.company_configs": {
+        "company_id": "uuid",
+        "is_enabled": "bool",
+        "default_account_id": "uuid"
+      },
+      "treasury.mangopay_to_swan_migration": {
+        "id": "uuid",
+        "company_id": "uuid",
+        "completed_at": "timestamp",
+        "funds_amount": "numeric"
+      }
+    }
+  },
+  {
+    "id": "export-debit-orders-by-account",
+    "family": "export-treasury-flows",
+    "split": "development",
+    "expected": "allow",
+    "domain": "treasury",
+    "category": "ordinary",
+    "reason": "Debit order counts, cent totals and date ranges per provider, account, source type and status for one company by opaque identifier.",
+    "sql": "SELECT a.provider, a.id AS account_id, d.source_entity_type, d.status, count(*) AS orders, sum(d.amount) AS total_cents, min(d.\"createdAt\") AS first_created, max(d.\"createdAt\") AS last_created FROM treasury.debit_orders d JOIN treasury.accounts a ON a.id = d.source_account_id JOIN treasury.account_holders ah ON ah.id = a.account_holder_id WHERE ah.owner_id = '00000000-0000-4000-8000-00000000c001' AND ah.owner_type = 'BUSINESS' GROUP BY a.provider, a.id, d.source_entity_type, d.status ORDER BY a.provider, d.source_entity_type",
+    "columns": {},
+    "relations": {
+      "treasury.debit_orders": {
+        "source_entity_type": "text",
+        "status": "text",
+        "amount": "int8",
+        "createdAt": "timestamp",
+        "source_account_id": "uuid"
+      },
+      "treasury.accounts": { "id": "uuid", "provider": "text", "account_holder_id": "uuid" },
+      "treasury.account_holders": { "id": "uuid", "owner_id": "uuid", "owner_type": "text" }
+    }
+  },
+  {
+    "id": "export-company-thresholds",
+    "family": "export-company-settings",
+    "split": "development",
+    "expected": "allow",
+    "domain": "company",
+    "category": "ordinary",
+    "reason": "Two numeric thresholds of one company selected by opaque identifier; commercial settings without identity.",
+    "sql": "SELECT \"thresholdForFunds\", \"thresholdForDiscounts\" FROM platform.company WHERE id = '00000000-0000-4000-8000-00000000c001'",
+    "columns": {
+      "id": "uuid",
+      "thresholdForFunds": "numeric",
+      "thresholdForDiscounts": "numeric"
+    }
+  },
+  {
+    "id": "export-subvention-status-counts",
+    "family": "export-subventions",
+    "split": "development",
+    "expected": "allow",
+    "domain": "benefits",
+    "category": "ordinary",
+    "reason": "Subsidy counts and date ranges per status and type for one company's groups by opaque identifier.",
+    "sql": "SELECT s.status, s.type, count(*) AS subventions, min(s.created_at) AS first_created, max(s.created_at) AS last_created, max(s.updated_at) AS last_updated FROM subvention.subvention s JOIN subvention.subvention_group g ON g.id = s.subvention_group_id WHERE g.company_id = '00000000-0000-4000-8000-00000000c001' GROUP BY s.status, s.type ORDER BY s.status, s.type",
+    "columns": {},
+    "relations": {
+      "subvention.subvention": {
+        "status": "text",
+        "type": "text",
+        "created_at": "timestamptz",
+        "updated_at": "timestamptz",
+        "subvention_group_id": "uuid"
+      },
+      "subvention.subvention_group": { "id": "uuid", "company_id": "uuid" }
+    }
+  },
+  {
+    "id": "export-subvention-lifecycle",
+    "family": "export-subventions",
+    "split": "development",
+    "expected": "allow",
+    "domain": "benefits",
+    "category": "ordinary",
+    "reason": "Subsidy status, presence flags (including one screened JSON key) and schedule dates for one company's groups; no payload or identity is returned.",
+    "sql": "SELECT s.status, s.cohort_id IS NOT NULL AS has_cohort, s.grantees_frozen_at IS NOT NULL AS grantees_frozen, (s.budget->>'amountPerShare') IS NOT NULL AS has_amount_per_share, s.created_at, s.starts_at, s.ends_at FROM subvention.subvention s JOIN subvention.subvention_group g ON g.id = s.subvention_group_id WHERE g.company_id = '00000000-0000-4000-8000-00000000c001' AND s.status IN ('DRAFT', 'PUBLISHED', 'READY') ORDER BY s.created_at",
+    "columns": {},
+    "relations": {
+      "subvention.subvention": {
+        "status": "text",
+        "cohort_id": "uuid",
+        "grantees_frozen_at": "timestamptz",
+        "budget": "jsonb",
+        "created_at": "timestamptz",
+        "starts_at": "timestamptz",
+        "ends_at": "timestamptz",
+        "subvention_group_id": "uuid"
+      },
+      "subvention.subvention_group": { "id": "uuid", "company_id": "uuid" }
+    }
+  },
+  {
+    "id": "export-v-account-holders",
+    "family": "export-v-banking-members",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "treasury",
+    "category": "ordinary",
+    "reason": "Account holder references, provider, verification status and dates for one company by opaque identifier.",
+    "sql": "SELECT id, provider, provider_id, verification_status, \"createdAt\", \"updatedAt\" FROM treasury.account_holders WHERE owner_id = '00000000-0000-4000-8000-00000000c002' AND owner_type = 'BUSINESS' ORDER BY \"createdAt\"",
+    "columns": {
+      "id": "uuid",
+      "provider": "text",
+      "provider_id": "text",
+      "verification_status": "text",
+      "owner_id": "uuid",
+      "owner_type": "text",
+      "createdAt": "timestamp",
+      "updatedAt": "timestamp"
+    }
+  },
+  {
+    "id": "export-v-accounts-nested-in",
+    "family": "export-v-banking-members",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "treasury",
+    "category": "ordinary",
+    "reason": "Accounts of one company's holders through a nested IN subquery: references, provider, status, currency and dates.",
+    "sql": "SELECT id, account_holder_id, provider, provider_id, status, currency, \"createdAt\", \"updatedAt\" FROM treasury.accounts WHERE account_holder_id IN (SELECT id FROM treasury.account_holders WHERE owner_id = '00000000-0000-4000-8000-00000000c002' AND owner_type = 'BUSINESS') ORDER BY \"createdAt\"",
+    "columns": {},
+    "relations": {
+      "treasury.accounts": {
+        "id": "uuid",
+        "account_holder_id": "uuid",
+        "provider": "text",
+        "provider_id": "text",
+        "status": "text",
+        "currency": "text",
+        "createdAt": "timestamp",
+        "updatedAt": "timestamp"
+      },
+      "treasury.account_holders": { "id": "uuid", "owner_id": "uuid", "owner_type": "text" }
+    }
+  },
+  {
+    "id": "export-v-memberships-nested-in",
+    "family": "export-v-banking-members",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "treasury",
+    "category": "ordinary",
+    "reason": "Account membership references, pseudonymous user identifiers, permission flags, status and dates through two nested IN subqueries; no names or contacts.",
+    "sql": "SELECT id, account_id, user_id, is_owner, status, provider, provider_id, provider_end_user_id, invitation_id, can_view_accounts, can_manage_payments, can_manage_members, can_manage_beneficiaries, can_manage_cards, \"createdAt\", \"updatedAt\" FROM treasury.account_memberships WHERE account_id IN (SELECT id FROM treasury.accounts WHERE account_holder_id IN (SELECT id FROM treasury.account_holders WHERE owner_id = '00000000-0000-4000-8000-00000000c002' AND owner_type = 'BUSINESS')) ORDER BY \"createdAt\"",
+    "columns": {},
+    "relations": {
+      "treasury.account_memberships": {
+        "id": "uuid",
+        "account_id": "uuid",
+        "user_id": "uuid",
+        "is_owner": "bool",
+        "status": "text",
+        "provider": "text",
+        "provider_id": "text",
+        "provider_end_user_id": "text",
+        "invitation_id": "uuid",
+        "can_view_accounts": "bool",
+        "can_manage_payments": "bool",
+        "can_manage_members": "bool",
+        "can_manage_beneficiaries": "bool",
+        "can_manage_cards": "bool",
+        "createdAt": "timestamp",
+        "updatedAt": "timestamp"
+      },
+      "treasury.accounts": { "id": "uuid", "account_holder_id": "uuid" },
+      "treasury.account_holders": { "id": "uuid", "owner_id": "uuid", "owner_type": "text" }
+    }
+  },
+  {
+    "id": "export-v-provider-end-users",
+    "family": "export-v-banking-members",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "treasury",
+    "category": "ordinary",
+    "reason": "Provider end-user references for two pseudonymous user identifiers, with the metadata's JSON type and one screened key's presence; no payload is returned.",
+    "sql": "SELECT id, user_id, provider, provider_id, deactivated_at, jsonb_typeof(provider_metadata) AS metadata_type, jsonb_exists(provider_metadata, 'identificationLevels') AS has_identification_levels, \"createdAt\", \"updatedAt\" FROM treasury.provider_end_users WHERE user_id IN ('00000000-0000-4000-8000-00000000a001', '00000000-0000-4000-8000-00000000a002') ORDER BY \"createdAt\"",
+    "columns": {
+      "id": "uuid",
+      "user_id": "uuid",
+      "provider": "text",
+      "provider_id": "text",
+      "deactivated_at": "timestamp",
+      "provider_metadata": "jsonb",
+      "createdAt": "timestamp",
+      "updatedAt": "timestamp"
+    }
+  },
+  {
+    "id": "export-v-invitations-nested-in",
+    "family": "export-v-banking-members",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "treasury",
+    "category": "ordinary",
+    "reason": "Membership invitation references, pseudonymous user and inviter identifiers, status and dates through nested IN subqueries.",
+    "sql": "SELECT id, account_id, user_id, inviter_id, provider_id, status, \"createdAt\", \"updatedAt\" FROM treasury.account_membership_invitations WHERE account_id IN (SELECT id FROM treasury.accounts WHERE account_holder_id IN (SELECT id FROM treasury.account_holders WHERE owner_id = '00000000-0000-4000-8000-00000000c002' AND owner_type = 'BUSINESS')) ORDER BY \"createdAt\"",
+    "columns": {},
+    "relations": {
+      "treasury.account_membership_invitations": {
+        "id": "uuid",
+        "account_id": "uuid",
+        "user_id": "uuid",
+        "inviter_id": "uuid",
+        "provider_id": "text",
+        "status": "text",
+        "createdAt": "timestamp",
+        "updatedAt": "timestamp"
+      },
+      "treasury.accounts": { "id": "uuid", "account_holder_id": "uuid" },
+      "treasury.account_holders": { "id": "uuid", "owner_id": "uuid", "owner_type": "text" }
+    }
+  },
+  {
+    "id": "export-v-company-membership",
+    "family": "export-v-banking-members",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "company",
+    "category": "ordinary",
+    "reason": "Company membership rows for two pseudonymous user identifiers: role and lifecycle dates, without names or contacts.",
+    "sql": "SELECT id, \"userId\", \"companyId\", role, \"joinedAt\", \"leftAt\", \"deactivatedAt\", \"reactivatedAt\", \"createdAt\", \"updatedAt\" FROM platform.company_membership WHERE \"companyId\" = '00000000-0000-4000-8000-00000000c002' AND \"userId\" IN ('00000000-0000-4000-8000-00000000a001', '00000000-0000-4000-8000-00000000a002')",
+    "columns": {
+      "id": "uuid",
+      "userId": "uuid",
+      "companyId": "uuid",
+      "role": "text",
+      "joinedAt": "timestamp",
+      "leftAt": "timestamp",
+      "deactivatedAt": "timestamp",
+      "reactivatedAt": "timestamp",
+      "createdAt": "timestamp",
+      "updatedAt": "timestamp"
+    }
+  },
+  {
+    "id": "export-v-provider-request-paths",
+    "family": "export-v-provider-requests",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "treasury",
+    "category": "ordinary",
+    "reason": "Provider API responses reduced to screened JSON paths: membership and user references, status, permission flags and a legal-representative flag, filtered by path, date and an account reference.",
+    "sql": "SELECT id, \"createdAt\", status_code, response_data #>> '{data,accountMembership,id}' AS swan_membership_id, response_data #>> '{data,accountMembership,user,id}' AS swan_user_id, response_data #>> '{data,accountMembership,legalRepresentative}' AS legal_representative, response_data #>> '{data,accountMembership,statusInfo,status}' AS swan_status, response_data #>> '{data,accountMembership,canViewAccount}' AS can_view_account, response_data #>> '{data,accountMembership,canInitiatePayments}' AS can_initiate_payments, response_data #>> '{data,accountMembership,canManageAccountMembership}' AS can_manage_account_membership, response_data #>> '{data,accountMembership,canManageBeneficiaries}' AS can_manage_beneficiaries, response_data #>> '{data,accountMembership,canManageCards}' AS can_manage_cards, response_data #>> '{data,accountMembership,hasRequiredIdentificationLevel}' AS has_required_identification_level FROM treasury.provider_requests WHERE \"createdAt\" >= '2026-09-19 00:00:00' AND path = '/graphql' AND response_data #>> '{data,accountMembership,accountId}' = '00000000-0000-4000-8000-00000000b001' ORDER BY \"createdAt\"",
+    "columns": {
+      "id": "uuid",
+      "createdAt": "timestamp",
+      "status_code": "int4",
+      "path": "text",
+      "response_data": "jsonb"
+    }
+  },
+  {
+    "id": "export-neg-union-email",
+    "family": "export-neg-local",
+    "split": "development",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "pii",
+    "reason": "A UNION ALL branch cannot smuggle an email source into a labelled result.",
+    "sql": "SELECT 'holder' AS kind, provider FROM treasury.account_holders UNION ALL SELECT 'contact' AS kind, email FROM platform.users",
+    "columns": {},
+    "relations": {
+      "treasury.account_holders": { "provider": "text" },
+      "platform.users": { "email": "text" }
+    }
+  },
+  {
+    "id": "export-neg-union-setting",
+    "family": "export-neg-local",
+    "split": "development",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "read-only",
+    "reason": "A UNION ALL branch reading a server setting is a system-data read.",
+    "sql": "SELECT 'status' AS kind, status FROM treasury.accounts UNION ALL SELECT 'setting' AS kind, current_setting('app.settings.jwt_secret', true) FROM treasury.accounts",
+    "columns": { "status": "text" }
+  },
+  {
+    "id": "export-neg-json-whole-response",
+    "family": "export-neg-local",
+    "split": "development",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "unsupported",
+    "reason": "A whole provider response document stays opaque.",
+    "sql": "SELECT id, response_data FROM treasury.provider_requests WHERE path = '/graphql'",
+    "columns": { "id": "uuid", "path": "text", "response_data": "jsonb" }
+  },
+  {
+    "id": "export-neg-json-email-path",
+    "family": "export-neg-local",
+    "split": "development",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "pii",
+    "reason": "A JSON path ending in an email key reads a contact value.",
+    "sql": "SELECT response_data #>> '{data,accountMembership,user,email}' AS contact FROM treasury.provider_requests",
+    "columns": { "response_data": "jsonb" }
+  },
+  {
+    "id": "export-v-neg-nested-in-email",
+    "family": "export-v-neg-local",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "pii",
+    "reason": "A nested IN subquery filtering on an email address stays local.",
+    "sql": "SELECT id, status FROM treasury.accounts WHERE account_holder_id IN (SELECT id FROM treasury.account_holders WHERE contact_email = 'alex@example.invalid')",
+    "columns": {},
+    "relations": {
+      "treasury.accounts": { "id": "uuid", "status": "text", "account_holder_id": "uuid" },
+      "treasury.account_holders": { "id": "uuid", "contact_email": "text" }
+    }
+  },
+  {
+    "id": "export-v-neg-membership-names",
+    "family": "export-v-neg-local",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "pii",
+    "reason": "Company memberships joined to member names disclose identities.",
+    "sql": "SELECT m.role, u.first_name, u.last_name FROM platform.company_membership m JOIN platform.users u ON u.id = m.\"userId\" WHERE m.\"companyId\" = '00000000-0000-4000-8000-00000000c002'",
+    "columns": {},
+    "relations": {
+      "platform.company_membership": { "role": "text", "userId": "uuid", "companyId": "uuid" },
+      "platform.users": { "id": "uuid", "first_name": "text", "last_name": "text" }
+    }
+  },
+  {
+    "id": "export-v-neg-intersect-union-mix",
+    "family": "export-v-neg-local",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "unsupported",
+    "reason": "Mixed INTERSECT and UNION precedence is not modelled from the parser's flat chain.",
+    "sql": "SELECT status FROM treasury.accounts UNION SELECT status FROM treasury.transfer_orders INTERSECT SELECT status FROM treasury.debit_orders",
+    "columns": {},
+    "relations": {
+      "treasury.accounts": { "status": "text" },
+      "treasury.transfer_orders": { "status": "text" },
+      "treasury.debit_orders": { "status": "text" }
+    }
+  },
+  {
+    "id": "export-review-ticket-notes-union",
+    "family": "export-review",
+    "split": "development",
+    "expected": "review",
+    "domain": "support",
+    "category": "context",
+    "reason": "A UNION ALL of free-text support notes can contain personal information about account members.",
+    "sql": "SELECT 'holder' AS kind, note_text FROM treasury.holder_notes UNION ALL SELECT 'account' AS kind, note_text FROM treasury.account_notes",
+    "columns": {},
+    "relations": {
+      "treasury.holder_notes": { "note_text": "text" },
+      "treasury.account_notes": { "note_text": "text" }
+    }
+  },
+  {
+    "id": "export-v-review-member-label",
+    "family": "export-v-review",
+    "split": "validation",
+    "expected": "review",
+    "domain": "company",
+    "category": "context",
+    "reason": "A membership label free text can reveal who the member is.",
+    "sql": "SELECT m.role, m.display_label, m.\"joinedAt\" FROM platform.company_membership m WHERE m.\"companyId\" = '00000000-0000-4000-8000-00000000c002'",
+    "columns": {},
+    "relations": {
+      "platform.company_membership": {
+        "role": "text",
+        "display_label": "text",
+        "joinedAt": "timestamp",
+        "companyId": "uuid"
+      }
+    }
+  }
+]

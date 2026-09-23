@@ -7,6 +7,77 @@ function columns(...names: string[]): Column[] {
 }
 
 describe("SchemaAnnotator.schemaFor", () => {
+  it("exposes incomplete analysis instead of treating failed metadata as clean", async () => {
+    const annotator = new SchemaAnnotator({
+      getColumns: async () => columns("quantity"),
+      getMetadata: async () => {
+        throw new Error("private database detail");
+      },
+      dialect: () => "postgresql",
+      defaultSchema: () => "public",
+      generation: () => 0,
+    });
+    const sql = "SELECT quantity FROM public.products WHERE quantity > 0";
+    expect((await annotator.schemaFor(sql))?.analysis).toEqual({
+      complete: false,
+      reasons: ["Metadata unavailable"],
+    });
+    expect(await annotator.inspectRead(sql)).toEqual({
+      complete: false,
+      reasons: ["Metadata unavailable"],
+    });
+  });
+  it.each(["mysql", "sqlserver", "sqlite"])(
+    "never sends PostgreSQL catalog SQL on a %s connection",
+    async (dialect) => {
+      const getMetadata = vi.fn(async () => []);
+      const annotator = new SchemaAnnotator({
+        getColumns: async () => columns("quantity"),
+        getMetadata,
+        dialect: () => dialect,
+        defaultSchema: () => "public",
+        generation: () => 0,
+      });
+      expect(await annotator.inspectRead("SELECT quantity FROM public.products")).toEqual({
+        complete: false,
+        reasons: ["Auto mode beta supports PostgreSQL only"],
+      });
+      await annotator.schemaFor("SELECT quantity FROM public.products");
+      expect(getMetadata).not.toHaveBeenCalled();
+    },
+  );
+  it("checks the search path before running the catalog query", async () => {
+    const getMetadata = vi.fn(async () => [{ path: '["public","pg_catalog"]' }]);
+    const annotator = new SchemaAnnotator({
+      getColumns: async () => [],
+      getMetadata,
+      dialect: () => "postgresql",
+      defaultSchema: () => "public",
+      generation: () => 0,
+    });
+    expect(await annotator.inspectRead("SELECT quantity FROM public.products")).toEqual({
+      complete: false,
+      reasons: ["PostgreSQL catalog must come first in the search path"],
+    });
+    expect(getMetadata).toHaveBeenCalledOnce();
+  });
+  it("discards a snapshot when catalog identity changes while a table is loading", async () => {
+    let resolve!: (rows: Record<string, unknown>[]) => void;
+    const annotator = new SchemaAnnotator({
+      getColumns: async () => [],
+      getMetadata: () =>
+        new Promise((r) => {
+          resolve = r;
+        }),
+      dialect: () => "postgresql",
+      defaultSchema: () => "public",
+      generation: () => 0,
+    });
+    const pending = annotator.inspectRead("SELECT quantity FROM public.products");
+    annotator.clearCache();
+    resolve([]);
+    expect(await pending).toBeUndefined();
+  });
   it("returns the tables and PII/client/literal annotation for a query", async () => {
     const getColumns = vi.fn(async () => columns("id", "email", "company_name", "status"));
     const annotator = new SchemaAnnotator({

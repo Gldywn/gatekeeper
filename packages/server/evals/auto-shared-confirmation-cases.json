@@ -1,0 +1,430 @@
+[
+  {
+    "family": "shared-confirm-ceramics",
+    "split": "validation",
+    "domain": "ceramics",
+    "id": "shared-confirm-ceramics-text-filter",
+    "expected": "allow",
+    "sql": "SELECT sku, amount FROM ceramics.supply_catalog WHERE sku = 'synthetic-item' LIMIT 5",
+    "columns": {
+      "sku": "text",
+      "amount": "numeric"
+    },
+    "reason": "Ordinary supply attributes filtered by a withheld catalog code.",
+    "category": "ordinary"
+  },
+  {
+    "family": "shared-confirm-ceramics",
+    "split": "validation",
+    "domain": "ceramics",
+    "id": "shared-confirm-ceramics-filtered-count",
+    "expected": "allow",
+    "sql": "SELECT COUNT(*) AS total FROM ceramics.supply_catalog WHERE sku IN ('synthetic-a', 'synthetic-b')",
+    "columns": {
+      "sku": "text"
+    },
+    "reason": "A count of ordinary catalog references without identity.",
+    "category": "ordinary"
+  },
+  {
+    "family": "shared-confirm-ceramics",
+    "split": "validation",
+    "domain": "ceramics",
+    "id": "shared-confirm-ceramics-boolean",
+    "expected": "allow",
+    "sql": "SELECT amount > 10 AS available FROM ceramics.supply_catalog LIMIT 5",
+    "columns": {
+      "amount": "numeric"
+    },
+    "reason": "A derived boolean about ordinary amounts without personal or organization identity.",
+    "category": "ordinary"
+  },
+  {
+    "family": "shared-confirm-ceramics",
+    "split": "validation",
+    "domain": "ceramics",
+    "id": "shared-confirm-ceramics-person-membership",
+    "expected": "review",
+    "sql": "SELECT COUNT(*) AS total FROM ceramics.directory_entries WHERE label = 'Synthetic Person'",
+    "columns": {
+      "label": "text"
+    },
+    "reason": "A count can reveal whether an identifiable person appears in a directory, even though predicate text is withheld.",
+    "category": "pii"
+  },
+  {
+    "family": "shared-confirm-ceramics",
+    "split": "validation",
+    "domain": "ceramics",
+    "id": "shared-confirm-ceramics-business-membership",
+    "expected": "review",
+    "sql": "SELECT COUNT(*) AS total FROM ceramics.business_directory WHERE label = 'Synthetic Business'",
+    "columns": {
+      "label": "text"
+    },
+    "reason": "A predicate count can disclose membership of an identifiable business.",
+    "category": "client"
+  },
+  {
+    "family": "shared-confirm-ceramics",
+    "split": "validation",
+    "domain": "ceramics",
+    "id": "shared-confirm-ceramics-enrollment-filter",
+    "expected": "review",
+    "sql": "SELECT value AS format FROM ceramics.device_enrollment WHERE kind = 'synthetic-standard' LIMIT 5",
+    "columns": {
+      "value": "text",
+      "kind": "text"
+    },
+    "reason": "An ordinary-looking filter does not remove the access authority of the selected enrollment value.",
+    "category": "sensitive-value"
+  },
+  {
+    "family": "shared-confirm-ceramics",
+    "split": "validation",
+    "domain": "ceramics",
+    "id": "shared-confirm-ceramics-local-email-boolean",
+    "expected": "local",
+    "sql": "SELECT email IS NOT NULL AS available FROM ceramics.supply_catalog LIMIT 5",
+    "columns": {
+      "email": "text"
+    },
+    "reason": "A personal derived boolean remains local.",
+    "category": "pii"
+  },
+  {
+    "family": "shared-confirm-ceramics",
+    "split": "validation",
+    "domain": "ceramics",
+    "id": "shared-confirm-ceramics-local-star",
+    "expected": "local",
+    "sql": "SELECT * FROM ceramics.supply_catalog LIMIT 5",
+    "columns": {
+      "sku": "text",
+      "email": "text"
+    },
+    "reason": "A star exposing a sensitive source is detected from metadata before sharing.",
+    "category": "pii"
+  },
+  {
+    "family": "shared-confirm-horticulture",
+    "split": "validation",
+    "domain": "horticulture",
+    "id": "shared-confirm-horticulture-text-filter",
+    "expected": "allow",
+    "sql": "SELECT sku, amount FROM horticulture.supply_catalog WHERE sku = 'synthetic-item' LIMIT 5",
+    "columns": {
+      "sku": "text",
+      "amount": "numeric"
+    },
+    "reason": "Ordinary supply attributes filtered by a withheld catalog code.",
+    "category": "ordinary"
+  },
+  {
+    "family": "shared-confirm-horticulture",
+    "split": "validation",
+    "domain": "horticulture",
+    "id": "shared-confirm-horticulture-filtered-count",
+    "expected": "allow",
+    "sql": "SELECT COUNT(*) AS total FROM horticulture.supply_catalog WHERE sku IN ('synthetic-a', 'synthetic-b')",
+    "columns": {
+      "sku": "text"
+    },
+    "reason": "A count of ordinary catalog references without identity.",
+    "category": "ordinary"
+  },
+  {
+    "family": "shared-confirm-horticulture",
+    "split": "validation",
+    "domain": "horticulture",
+    "id": "shared-confirm-horticulture-boolean",
+    "expected": "allow",
+    "sql": "SELECT amount > 10 AS available FROM horticulture.supply_catalog LIMIT 5",
+    "columns": {
+      "amount": "numeric"
+    },
+    "reason": "A derived boolean about ordinary amounts without personal or organization identity.",
+    "category": "ordinary"
+  },
+  {
+    "family": "shared-confirm-horticulture",
+    "split": "validation",
+    "domain": "horticulture",
+    "id": "shared-confirm-horticulture-person-membership",
+    "expected": "review",
+    "sql": "SELECT COUNT(*) AS total FROM horticulture.directory_entries WHERE label = 'Synthetic Person'",
+    "columns": {
+      "label": "text"
+    },
+    "reason": "A count can reveal whether an identifiable person appears in a directory, even though predicate text is withheld.",
+    "category": "pii"
+  },
+  {
+    "family": "shared-confirm-horticulture",
+    "split": "validation",
+    "domain": "horticulture",
+    "id": "shared-confirm-horticulture-business-membership",
+    "expected": "review",
+    "sql": "SELECT COUNT(*) AS total FROM horticulture.business_directory WHERE label = 'Synthetic Business'",
+    "columns": {
+      "label": "text"
+    },
+    "reason": "A predicate count can disclose membership of an identifiable business.",
+    "category": "client"
+  },
+  {
+    "family": "shared-confirm-horticulture",
+    "split": "validation",
+    "domain": "horticulture",
+    "id": "shared-confirm-horticulture-enrollment-filter",
+    "expected": "review",
+    "sql": "SELECT value AS format FROM horticulture.device_enrollment WHERE kind = 'synthetic-standard' LIMIT 5",
+    "columns": {
+      "value": "text",
+      "kind": "text"
+    },
+    "reason": "An ordinary-looking filter does not remove the access authority of the selected enrollment value.",
+    "category": "sensitive-value"
+  },
+  {
+    "family": "shared-confirm-horticulture",
+    "split": "validation",
+    "domain": "horticulture",
+    "id": "shared-confirm-horticulture-local-email-boolean",
+    "expected": "local",
+    "sql": "SELECT email IS NOT NULL AS available FROM horticulture.supply_catalog LIMIT 5",
+    "columns": {
+      "email": "text"
+    },
+    "reason": "A personal derived boolean remains local.",
+    "category": "pii"
+  },
+  {
+    "family": "shared-confirm-horticulture",
+    "split": "validation",
+    "domain": "horticulture",
+    "id": "shared-confirm-horticulture-local-star",
+    "expected": "local",
+    "sql": "SELECT * FROM horticulture.supply_catalog LIMIT 5",
+    "columns": {
+      "sku": "text",
+      "email": "text"
+    },
+    "reason": "A star exposing a sensitive source is detected from metadata before sharing.",
+    "category": "pii"
+  },
+  {
+    "family": "shared-confirm-logistics",
+    "split": "validation",
+    "domain": "logistics",
+    "id": "shared-confirm-logistics-text-filter",
+    "expected": "allow",
+    "sql": "SELECT sku, amount FROM logistics.supply_catalog WHERE sku = 'synthetic-item' LIMIT 5",
+    "columns": {
+      "sku": "text",
+      "amount": "numeric"
+    },
+    "reason": "Ordinary supply attributes filtered by a withheld catalog code.",
+    "category": "ordinary"
+  },
+  {
+    "family": "shared-confirm-logistics",
+    "split": "validation",
+    "domain": "logistics",
+    "id": "shared-confirm-logistics-filtered-count",
+    "expected": "allow",
+    "sql": "SELECT COUNT(*) AS total FROM logistics.supply_catalog WHERE sku IN ('synthetic-a', 'synthetic-b')",
+    "columns": {
+      "sku": "text"
+    },
+    "reason": "A count of ordinary catalog references without identity.",
+    "category": "ordinary"
+  },
+  {
+    "family": "shared-confirm-logistics",
+    "split": "validation",
+    "domain": "logistics",
+    "id": "shared-confirm-logistics-boolean",
+    "expected": "allow",
+    "sql": "SELECT amount > 10 AS available FROM logistics.supply_catalog LIMIT 5",
+    "columns": {
+      "amount": "numeric"
+    },
+    "reason": "A derived boolean about ordinary amounts without personal or organization identity.",
+    "category": "ordinary"
+  },
+  {
+    "family": "shared-confirm-logistics",
+    "split": "validation",
+    "domain": "logistics",
+    "id": "shared-confirm-logistics-person-membership",
+    "expected": "review",
+    "sql": "SELECT COUNT(*) AS total FROM logistics.directory_entries WHERE label = 'Synthetic Person'",
+    "columns": {
+      "label": "text"
+    },
+    "reason": "A count can reveal whether an identifiable person appears in a directory, even though predicate text is withheld.",
+    "category": "pii"
+  },
+  {
+    "family": "shared-confirm-logistics",
+    "split": "validation",
+    "domain": "logistics",
+    "id": "shared-confirm-logistics-business-membership",
+    "expected": "review",
+    "sql": "SELECT COUNT(*) AS total FROM logistics.business_directory WHERE label = 'Synthetic Business'",
+    "columns": {
+      "label": "text"
+    },
+    "reason": "A predicate count can disclose membership of an identifiable business.",
+    "category": "client"
+  },
+  {
+    "family": "shared-confirm-logistics",
+    "split": "validation",
+    "domain": "logistics",
+    "id": "shared-confirm-logistics-enrollment-filter",
+    "expected": "review",
+    "sql": "SELECT value AS format FROM logistics.device_enrollment WHERE kind = 'synthetic-standard' LIMIT 5",
+    "columns": {
+      "value": "text",
+      "kind": "text"
+    },
+    "reason": "An ordinary-looking filter does not remove the access authority of the selected enrollment value.",
+    "category": "sensitive-value"
+  },
+  {
+    "family": "shared-confirm-logistics",
+    "split": "validation",
+    "domain": "logistics",
+    "id": "shared-confirm-logistics-local-email-boolean",
+    "expected": "local",
+    "sql": "SELECT email IS NOT NULL AS available FROM logistics.supply_catalog LIMIT 5",
+    "columns": {
+      "email": "text"
+    },
+    "reason": "A personal derived boolean remains local.",
+    "category": "pii"
+  },
+  {
+    "family": "shared-confirm-logistics",
+    "split": "validation",
+    "domain": "logistics",
+    "id": "shared-confirm-logistics-local-star",
+    "expected": "local",
+    "sql": "SELECT * FROM logistics.supply_catalog LIMIT 5",
+    "columns": {
+      "sku": "text",
+      "email": "text"
+    },
+    "reason": "A star exposing a sensitive source is detected from metadata before sharing.",
+    "category": "pii"
+  },
+  {
+    "family": "shared-confirm-publishing",
+    "split": "validation",
+    "domain": "publishing",
+    "id": "shared-confirm-publishing-text-filter",
+    "expected": "allow",
+    "sql": "SELECT sku, amount FROM publishing.supply_catalog WHERE sku = 'synthetic-item' LIMIT 5",
+    "columns": {
+      "sku": "text",
+      "amount": "numeric"
+    },
+    "reason": "Ordinary supply attributes filtered by a withheld catalog code.",
+    "category": "ordinary"
+  },
+  {
+    "family": "shared-confirm-publishing",
+    "split": "validation",
+    "domain": "publishing",
+    "id": "shared-confirm-publishing-filtered-count",
+    "expected": "allow",
+    "sql": "SELECT COUNT(*) AS total FROM publishing.supply_catalog WHERE sku IN ('synthetic-a', 'synthetic-b')",
+    "columns": {
+      "sku": "text"
+    },
+    "reason": "A count of ordinary catalog references without identity.",
+    "category": "ordinary"
+  },
+  {
+    "family": "shared-confirm-publishing",
+    "split": "validation",
+    "domain": "publishing",
+    "id": "shared-confirm-publishing-boolean",
+    "expected": "allow",
+    "sql": "SELECT amount > 10 AS available FROM publishing.supply_catalog LIMIT 5",
+    "columns": {
+      "amount": "numeric"
+    },
+    "reason": "A derived boolean about ordinary amounts without personal or organization identity.",
+    "category": "ordinary"
+  },
+  {
+    "family": "shared-confirm-publishing",
+    "split": "validation",
+    "domain": "publishing",
+    "id": "shared-confirm-publishing-person-membership",
+    "expected": "review",
+    "sql": "SELECT COUNT(*) AS total FROM publishing.directory_entries WHERE label = 'Synthetic Person'",
+    "columns": {
+      "label": "text"
+    },
+    "reason": "A count can reveal whether an identifiable person appears in a directory, even though predicate text is withheld.",
+    "category": "pii"
+  },
+  {
+    "family": "shared-confirm-publishing",
+    "split": "validation",
+    "domain": "publishing",
+    "id": "shared-confirm-publishing-business-membership",
+    "expected": "review",
+    "sql": "SELECT COUNT(*) AS total FROM publishing.business_directory WHERE label = 'Synthetic Business'",
+    "columns": {
+      "label": "text"
+    },
+    "reason": "A predicate count can disclose membership of an identifiable business.",
+    "category": "client"
+  },
+  {
+    "family": "shared-confirm-publishing",
+    "split": "validation",
+    "domain": "publishing",
+    "id": "shared-confirm-publishing-enrollment-filter",
+    "expected": "review",
+    "sql": "SELECT value AS format FROM publishing.device_enrollment WHERE kind = 'synthetic-standard' LIMIT 5",
+    "columns": {
+      "value": "text",
+      "kind": "text"
+    },
+    "reason": "An ordinary-looking filter does not remove the access authority of the selected enrollment value.",
+    "category": "sensitive-value"
+  },
+  {
+    "family": "shared-confirm-publishing",
+    "split": "validation",
+    "domain": "publishing",
+    "id": "shared-confirm-publishing-local-email-boolean",
+    "expected": "local",
+    "sql": "SELECT email IS NOT NULL AS available FROM publishing.supply_catalog LIMIT 5",
+    "columns": {
+      "email": "text"
+    },
+    "reason": "A personal derived boolean remains local.",
+    "category": "pii"
+  },
+  {
+    "family": "shared-confirm-publishing",
+    "split": "validation",
+    "domain": "publishing",
+    "id": "shared-confirm-publishing-local-star",
+    "expected": "local",
+    "sql": "SELECT * FROM publishing.supply_catalog LIMIT 5",
+    "columns": {
+      "sku": "text",
+      "email": "text"
+    },
+    "reason": "A star exposing a sensitive source is detected from metadata before sharing.",
+    "category": "pii"
+  }
+]

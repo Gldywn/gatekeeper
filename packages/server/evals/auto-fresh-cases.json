@@ -1,0 +1,1651 @@
+[
+  {
+    "id": "fresh-library-loan-rules",
+    "family": "fresh-library",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "library",
+    "category": "ordinary",
+    "reason": "Reference lending rules describe media, not individual loans.",
+    "sql": "SELECT medium_code, loan_days FROM library.lending_rules LIMIT 20",
+    "columns": {
+      "medium_code": "text",
+      "loan_days": "int4"
+    }
+  },
+  {
+    "id": "fresh-library-binding-costs",
+    "family": "fresh-library",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "library",
+    "category": "ordinary",
+    "reason": "Binding rates contain commercial amounts without borrower or supplier identity.",
+    "sql": "SELECT binding_code, unit_cost FROM library.binding_rates LIMIT 15",
+    "columns": {
+      "binding_code": "text",
+      "unit_cost": "numeric"
+    }
+  },
+  {
+    "id": "fresh-library-reader-capabilities",
+    "family": "fresh-library",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "library",
+    "category": "ordinary",
+    "reason": "A reader model and capability flag do not grant entry or describe a visitor.",
+    "sql": "SELECT reader_model, supports_nfc FROM library.entry_devices LIMIT 5",
+    "columns": {
+      "reader_model": "text",
+      "supports_nfc": "bool"
+    }
+  },
+  {
+    "id": "fresh-library-pass-encoding",
+    "family": "fresh-library",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "library",
+    "category": "ordinary",
+    "reason": "Encoding specifications describe the pass format, not a redeemable pass value.",
+    "sql": "SELECT encoding_standard, symbol_width FROM library.visit_passes LIMIT 10",
+    "columns": {
+      "encoding_standard": "text",
+      "symbol_width": "int4"
+    }
+  },
+  {
+    "id": "fresh-library-shelf-capacity",
+    "family": "fresh-library",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "library",
+    "category": "ordinary",
+    "reason": "Shelf specifications describe equipment rather than people.",
+    "sql": "SELECT shelf_class, capacity_kg FROM library.shelving_specs LIMIT 25",
+    "columns": {
+      "shelf_class": "text",
+      "capacity_kg": "numeric"
+    }
+  },
+  {
+    "id": "fresh-library-borrowing-traces",
+    "family": "fresh-library",
+    "split": "validation",
+    "expected": "review",
+    "domain": "library",
+    "category": "pii",
+    "reason": "A persistent reader handle links reading choices and timestamps to an individual.",
+    "sql": "SELECT reader_handle, borrowed_title, borrowed_at FROM library.loan_ledger LIMIT 5",
+    "columns": {
+      "reader_handle": "text",
+      "borrowed_title": "text",
+      "borrowed_at": "timestamptz"
+    }
+  },
+  {
+    "id": "fresh-library-book-suppliers",
+    "family": "fresh-library",
+    "split": "validation",
+    "expected": "review",
+    "domain": "library",
+    "category": "client",
+    "reason": "Legal entity labels and incorporation references identify actual suppliers.",
+    "sql": "SELECT legal_entity_label, incorporation_ref FROM library.book_suppliers LIMIT 5",
+    "columns": {
+      "legal_entity_label": "text",
+      "incorporation_ref": "text"
+    }
+  },
+  {
+    "id": "fresh-library-visit-admission",
+    "family": "fresh-library",
+    "split": "validation",
+    "expected": "review",
+    "domain": "library",
+    "category": "sensitive-value",
+    "reason": "A redeemable visitor pass grants entry, unlike its encoding standard.",
+    "sql": "SELECT redeemable_value FROM library.visit_passes LIMIT 1",
+    "columns": {
+      "redeemable_value": "text"
+    }
+  },
+  {
+    "id": "fresh-library-import-fragments",
+    "family": "fresh-library",
+    "split": "validation",
+    "expected": "review",
+    "domain": "library",
+    "category": "context",
+    "reason": "An untyped imported text value has no resolved business meaning and may contain private data.",
+    "sql": "SELECT raw_value FROM library.import_fragments LIMIT 5",
+    "columns": {
+      "raw_value": "text"
+    }
+  },
+  {
+    "id": "fresh-library-visit-admission-alias",
+    "family": "fresh-library",
+    "split": "validation",
+    "expected": "review",
+    "domain": "library",
+    "category": "sensitive-value",
+    "reason": "A format-looking alias does not change the admission value returned from the source.",
+    "sql": "SELECT redeemable_value AS encoding_standard FROM library.visit_passes LIMIT 2",
+    "columns": {
+      "redeemable_value": "text"
+    }
+  },
+  {
+    "id": "fresh-veterinary-procedure-prices",
+    "family": "fresh-veterinary",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "veterinary",
+    "category": "ordinary",
+    "reason": "Generic veterinary procedure prices identify neither animals nor their keepers.",
+    "sql": "SELECT procedure_code, standard_fee FROM vet.procedure_catalog LIMIT 20",
+    "columns": {
+      "procedure_code": "text",
+      "standard_fee": "numeric"
+    }
+  },
+  {
+    "id": "fresh-veterinary-supply-margins",
+    "family": "fresh-veterinary",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "veterinary",
+    "category": "ordinary",
+    "reason": "Supply product margins alone do not identify a person or business.",
+    "sql": "SELECT item_code, gross_margin FROM vet.supply_rates LIMIT 10",
+    "columns": {
+      "item_code": "text",
+      "gross_margin": "numeric"
+    }
+  },
+  {
+    "id": "fresh-veterinary-cabinet-format",
+    "family": "fresh-veterinary",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "veterinary",
+    "category": "ordinary",
+    "reason": "A combination mechanism class and length do not reveal the combination.",
+    "sql": "SELECT mechanism_class, digit_count FROM vet.cabinet_combinations LIMIT 5",
+    "columns": {
+      "mechanism_class": "text",
+      "digit_count": "int4"
+    }
+  },
+  {
+    "id": "fresh-veterinary-imaging-capabilities",
+    "family": "fresh-veterinary",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "veterinary",
+    "category": "ordinary",
+    "reason": "Generic scanner capabilities contain no examination records.",
+    "sql": "SELECT scanner_model, supports_dicom FROM vet.imaging_specs LIMIT 10",
+    "columns": {
+      "scanner_model": "text",
+      "supports_dicom": "bool"
+    }
+  },
+  {
+    "id": "fresh-veterinary-kennel-dimensions",
+    "family": "fresh-veterinary",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "veterinary",
+    "category": "ordinary",
+    "reason": "Kennel dimensions are reference equipment data without occupancy.",
+    "sql": "SELECT size_class, floor_area_m2 FROM vet.kennel_specs LIMIT 20",
+    "columns": {
+      "size_class": "text",
+      "floor_area_m2": "numeric"
+    }
+  },
+  {
+    "id": "fresh-veterinary-keeper-visits",
+    "family": "fresh-veterinary",
+    "split": "validation",
+    "expected": "review",
+    "domain": "veterinary",
+    "category": "pii",
+    "reason": "The keeper handle links a person's household animal and attendance history.",
+    "sql": "SELECT keeper_handle, animal_label, visit_date FROM vet.appointments LIMIT 3",
+    "columns": {
+      "keeper_handle": "text",
+      "animal_label": "text",
+      "visit_date": "date"
+    }
+  },
+  {
+    "id": "fresh-veterinary-clinic-partners",
+    "family": "fresh-veterinary",
+    "split": "validation",
+    "expected": "review",
+    "domain": "veterinary",
+    "category": "client",
+    "reason": "Registered practice labels and registry references identify organizations.",
+    "sql": "SELECT registered_label, business_registry_ref FROM vet.referral_practices LIMIT 5",
+    "columns": {
+      "registered_label": "text",
+      "business_registry_ref": "text"
+    }
+  },
+  {
+    "id": "fresh-veterinary-cabinet-entry",
+    "family": "fresh-veterinary",
+    "split": "validation",
+    "expected": "review",
+    "domain": "veterinary",
+    "category": "sensitive-value",
+    "reason": "A cabinet opening sequence grants physical access.",
+    "sql": "SELECT opening_sequence FROM vet.cabinet_combinations LIMIT 1",
+    "columns": {
+      "opening_sequence": "text"
+    }
+  },
+  {
+    "id": "fresh-veterinary-consultation-text",
+    "family": "fresh-veterinary",
+    "split": "validation",
+    "expected": "review",
+    "domain": "veterinary",
+    "category": "context",
+    "reason": "Unstructured consultation text can contain keeper identity and cannot be resolved as harmless.",
+    "sql": "SELECT freeform_entry FROM vet.consultation_imports LIMIT 2",
+    "columns": {
+      "freeform_entry": "text"
+    }
+  },
+  {
+    "id": "fresh-veterinary-keeper-debt",
+    "family": "fresh-veterinary",
+    "split": "validation",
+    "expected": "review",
+    "domain": "veterinary",
+    "category": "pii",
+    "reason": "A product-looking alias still returns a person's handle linked to their debt.",
+    "sql": "SELECT keeper_handle AS item_code, overdue_balance FROM vet.billing_ledger LIMIT 1",
+    "columns": {
+      "keeper_handle": "text",
+      "overdue_balance": "numeric"
+    }
+  },
+  {
+    "id": "fresh-laboratory-assay-ranges",
+    "family": "fresh-laboratory",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "laboratory",
+    "category": "ordinary",
+    "reason": "Reference ranges describe tests rather than a subject's test results.",
+    "sql": "SELECT assay_code, lower_bound, upper_bound FROM assay.reference_ranges LIMIT 20",
+    "columns": {
+      "assay_code": "text",
+      "lower_bound": "numeric",
+      "upper_bound": "numeric"
+    }
+  },
+  {
+    "id": "fresh-laboratory-consumable-prices",
+    "family": "fresh-laboratory",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "laboratory",
+    "category": "ordinary",
+    "reason": "Reagent prices do not identify subjects or suppliers.",
+    "sql": "SELECT reagent_code, pack_cost FROM assay.consumable_rates LIMIT 25",
+    "columns": {
+      "reagent_code": "text",
+      "pack_cost": "numeric"
+    }
+  },
+  {
+    "id": "fresh-laboratory-instrument-capability",
+    "family": "fresh-laboratory",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "laboratory",
+    "category": "ordinary",
+    "reason": "An instrument capability flag says nothing about an individual specimen.",
+    "sql": "SELECT model_code, supports_uv FROM assay.instrument_specs LIMIT 10",
+    "columns": {
+      "model_code": "text",
+      "supports_uv": "bool"
+    }
+  },
+  {
+    "id": "fresh-laboratory-seal-format",
+    "family": "fresh-laboratory",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "laboratory",
+    "category": "ordinary",
+    "reason": "Cryptographic algorithm and modulus size are technical parameters rather than private signing material.",
+    "sql": "SELECT digest_algorithm, modulus_bits FROM assay.report_signing_material LIMIT 10",
+    "columns": {
+      "digest_algorithm": "text",
+      "modulus_bits": "int4"
+    }
+  },
+  {
+    "id": "fresh-laboratory-rack-layout",
+    "family": "fresh-laboratory",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "laboratory",
+    "category": "ordinary",
+    "reason": "Rack formats and well counts contain no specimen assignments.",
+    "sql": "SELECT rack_format, well_count FROM assay.rack_specs LIMIT 15",
+    "columns": {
+      "rack_format": "text",
+      "well_count": "int4"
+    }
+  },
+  {
+    "id": "fresh-laboratory-subject-results",
+    "family": "fresh-laboratory",
+    "split": "validation",
+    "expected": "review",
+    "domain": "laboratory",
+    "category": "pii",
+    "reason": "A stable donor reference linked to a positive result discloses a person's health attribute.",
+    "sql": "SELECT donor_ref, positive FROM assay.screening_results LIMIT 2",
+    "columns": {
+      "donor_ref": "text",
+      "positive": "bool"
+    }
+  },
+  {
+    "id": "fresh-laboratory-sponsor-register",
+    "family": "fresh-laboratory",
+    "split": "validation",
+    "expected": "review",
+    "domain": "laboratory",
+    "category": "client",
+    "reason": "Trading labels and business domains identify study sponsors.",
+    "sql": "SELECT trading_label, registered_domain FROM assay.study_sponsors LIMIT 3",
+    "columns": {
+      "trading_label": "text",
+      "registered_domain": "text"
+    }
+  },
+  {
+    "id": "fresh-laboratory-seal-material",
+    "family": "fresh-laboratory",
+    "split": "validation",
+    "expected": "review",
+    "domain": "laboratory",
+    "category": "sensitive-value",
+    "reason": "A signing seed can create valid report signatures.",
+    "sql": "SELECT signing_seed FROM assay.report_signing_material LIMIT 1",
+    "columns": {
+      "signing_seed": "text"
+    }
+  },
+  {
+    "id": "fresh-laboratory-specimen-payload",
+    "family": "fresh-laboratory",
+    "split": "validation",
+    "expected": "review",
+    "domain": "laboratory",
+    "category": "context",
+    "reason": "An opaque specimen import can include donor identity or results with unresolved meaning.",
+    "sql": "SELECT payload_text FROM assay.specimen_imports LIMIT 2",
+    "columns": {
+      "payload_text": "text"
+    }
+  },
+  {
+    "id": "fresh-laboratory-seal-material-alias",
+    "family": "fresh-laboratory",
+    "split": "validation",
+    "expected": "review",
+    "domain": "laboratory",
+    "category": "sensitive-value",
+    "reason": "Renaming a signing seed after an algorithm does not remove its signing authority.",
+    "sql": "SELECT signing_seed AS digest_algorithm FROM assay.report_signing_material LIMIT 2",
+    "columns": {
+      "signing_seed": "text"
+    }
+  },
+  {
+    "id": "fresh-waste-management-material-rates",
+    "family": "fresh-waste-management",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "waste-management",
+    "category": "ordinary",
+    "reason": "Material rates are generic commercial data without account linkage.",
+    "sql": "SELECT material_code, rate_per_tonne FROM recycling.material_rates LIMIT 30",
+    "columns": {
+      "material_code": "text",
+      "rate_per_tonne": "numeric"
+    }
+  },
+  {
+    "id": "fresh-waste-management-container-specs",
+    "family": "fresh-waste-management",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "waste-management",
+    "category": "ordinary",
+    "reason": "Container model specifications are not individual household collection records.",
+    "sql": "SELECT container_model, volume_litres FROM recycling.container_specs LIMIT 10",
+    "columns": {
+      "container_model": "text",
+      "volume_litres": "numeric"
+    }
+  },
+  {
+    "id": "fresh-waste-management-depot-capability",
+    "family": "fresh-waste-management",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "waste-management",
+    "category": "ordinary",
+    "reason": "A terminal's NFC capability grants no depot access.",
+    "sql": "SELECT terminal_model, accepts_nfc FROM recycling.depot_terminals LIMIT 5",
+    "columns": {
+      "terminal_model": "text",
+      "accepts_nfc": "bool"
+    }
+  },
+  {
+    "id": "fresh-waste-management-voucher-layout",
+    "family": "fresh-waste-management",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "waste-management",
+    "category": "ordinary",
+    "reason": "Barcode standard and validity duration do not expose the redeemable voucher.",
+    "sql": "SELECT barcode_standard, validity_days FROM recycling.dropoff_vouchers LIMIT 5",
+    "columns": {
+      "barcode_standard": "text",
+      "validity_days": "int4"
+    }
+  },
+  {
+    "id": "fresh-waste-management-sorting-thresholds",
+    "family": "fresh-waste-management",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "waste-management",
+    "category": "ordinary",
+    "reason": "Material sorting thresholds do not concern a person or identified business.",
+    "sql": "SELECT grade_code, moisture_limit FROM recycling.sorting_rules LIMIT 15",
+    "columns": {
+      "grade_code": "text",
+      "moisture_limit": "numeric"
+    }
+  },
+  {
+    "id": "fresh-waste-management-household-collections",
+    "family": "fresh-waste-management",
+    "split": "validation",
+    "expected": "review",
+    "domain": "waste-management",
+    "category": "pii",
+    "reason": "A stable household reference links domestic activity and timing to residents.",
+    "sql": "SELECT household_ref, collected_kg, collected_at FROM recycling.collection_events LIMIT 2",
+    "columns": {
+      "household_ref": "text",
+      "collected_kg": "numeric",
+      "collected_at": "timestamptz"
+    }
+  },
+  {
+    "id": "fresh-waste-management-haulier-register",
+    "family": "fresh-waste-management",
+    "split": "validation",
+    "expected": "review",
+    "domain": "waste-management",
+    "category": "client",
+    "reason": "Haulier trading labels and registration numbers identify companies.",
+    "sql": "SELECT trading_label, registry_number FROM recycling.hauliers LIMIT 5",
+    "columns": {
+      "trading_label": "text",
+      "registry_number": "text"
+    }
+  },
+  {
+    "id": "fresh-waste-management-voucher-redemption",
+    "family": "fresh-waste-management",
+    "split": "validation",
+    "expected": "review",
+    "domain": "waste-management",
+    "category": "sensitive-value",
+    "reason": "The redemption code grants disposal entitlement rather than describing voucher format.",
+    "sql": "SELECT redemption_code FROM recycling.dropoff_vouchers LIMIT 1",
+    "columns": {
+      "redemption_code": "text"
+    }
+  },
+  {
+    "id": "fresh-waste-management-dispatch-payload",
+    "family": "fresh-waste-management",
+    "split": "validation",
+    "expected": "review",
+    "domain": "waste-management",
+    "category": "context",
+    "reason": "An unspecified dispatch payload could contain collection identities and locations.",
+    "sql": "SELECT payload FROM recycling.dispatch_imports LIMIT 2",
+    "columns": {
+      "payload": "text"
+    }
+  },
+  {
+    "id": "fresh-waste-management-household-charges",
+    "family": "fresh-waste-management",
+    "split": "validation",
+    "expected": "review",
+    "domain": "waste-management",
+    "category": "pii",
+    "reason": "Domestic billing amounts linked to a household reference disclose personal financial information.",
+    "sql": "SELECT household_ref, overdue_amount FROM recycling.collection_charges LIMIT 3",
+    "columns": {
+      "household_ref": "text",
+      "overdue_amount": "numeric"
+    }
+  },
+  {
+    "id": "fresh-automotive-parts-catalog",
+    "family": "fresh-automotive",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "automotive",
+    "category": "ordinary",
+    "reason": "Generic parts and prices contain no vehicle keeper identity.",
+    "sql": "SELECT part_code, list_price FROM garage.parts_catalog LIMIT 30",
+    "columns": {
+      "part_code": "text",
+      "list_price": "numeric"
+    }
+  },
+  {
+    "id": "fresh-automotive-labour-rates",
+    "family": "fresh-automotive",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "automotive",
+    "category": "ordinary",
+    "reason": "Standard repair durations and rates describe a service catalog.",
+    "sql": "SELECT operation_code, standard_minutes, hourly_rate FROM garage.labour_rates LIMIT 15",
+    "columns": {
+      "operation_code": "text",
+      "standard_minutes": "int4",
+      "hourly_rate": "numeric"
+    }
+  },
+  {
+    "id": "fresh-automotive-fob-protocol",
+    "family": "fresh-automotive",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "automotive",
+    "category": "ordinary",
+    "reason": "Radio band and protocol version describe a mechanism, not a pairing credential.",
+    "sql": "SELECT radio_band_mhz, protocol_version FROM garage.fob_pairing_material LIMIT 10",
+    "columns": {
+      "radio_band_mhz": "numeric",
+      "protocol_version": "text"
+    }
+  },
+  {
+    "id": "fresh-automotive-tool-capability",
+    "family": "fresh-automotive",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "automotive",
+    "category": "ordinary",
+    "reason": "A diagnostic tool's bus capability describes equipment.",
+    "sql": "SELECT tool_model, supports_can FROM garage.diagnostic_tools LIMIT 10",
+    "columns": {
+      "tool_model": "text",
+      "supports_can": "bool"
+    }
+  },
+  {
+    "id": "fresh-automotive-tyre-pressure",
+    "family": "fresh-automotive",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "automotive",
+    "category": "ordinary",
+    "reason": "Generic tyre pressure recommendations do not identify a vehicle or driver.",
+    "sql": "SELECT tyre_class, recommended_kpa FROM garage.tyre_reference LIMIT 20",
+    "columns": {
+      "tyre_class": "text",
+      "recommended_kpa": "numeric"
+    }
+  },
+  {
+    "id": "fresh-automotive-vehicle-history",
+    "family": "fresh-automotive",
+    "split": "validation",
+    "expected": "review",
+    "domain": "automotive",
+    "category": "pii",
+    "reason": "Licence plates and repair narratives can link activity to identifiable vehicle keepers.",
+    "sql": "SELECT licence_plate, repair_summary FROM garage.service_visits LIMIT 2",
+    "columns": {
+      "licence_plate": "text",
+      "repair_summary": "text"
+    }
+  },
+  {
+    "id": "fresh-automotive-fleet-register",
+    "family": "fresh-automotive",
+    "split": "validation",
+    "expected": "review",
+    "domain": "automotive",
+    "category": "client",
+    "reason": "Legal entity labels and registry references identify fleet businesses.",
+    "sql": "SELECT legal_entity_label, registration_ref FROM garage.fleet_operators LIMIT 3",
+    "columns": {
+      "legal_entity_label": "text",
+      "registration_ref": "text"
+    }
+  },
+  {
+    "id": "fresh-automotive-fob-pairing",
+    "family": "fresh-automotive",
+    "split": "validation",
+    "expected": "review",
+    "domain": "automotive",
+    "category": "sensitive-value",
+    "reason": "The pairing sequence can authorize access to a vehicle.",
+    "sql": "SELECT pairing_sequence FROM garage.fob_pairing_material LIMIT 1",
+    "columns": {
+      "pairing_sequence": "text"
+    }
+  },
+  {
+    "id": "fresh-automotive-job-payload",
+    "family": "fresh-automotive",
+    "split": "validation",
+    "expected": "review",
+    "domain": "automotive",
+    "category": "context",
+    "reason": "An extra imported value has unresolved meaning and could contain private job details.",
+    "sql": "SELECT extra_value FROM garage.imported_jobs LIMIT 3",
+    "columns": {
+      "extra_value": "text"
+    }
+  },
+  {
+    "id": "fresh-automotive-fob-pairing-alias",
+    "family": "fresh-automotive",
+    "split": "validation",
+    "expected": "review",
+    "domain": "automotive",
+    "category": "sensitive-value",
+    "reason": "A protocol-looking alias does not make a vehicle pairing sequence harmless.",
+    "sql": "SELECT pairing_sequence AS protocol_version FROM garage.fob_pairing_material LIMIT 2",
+    "columns": {
+      "pairing_sequence": "text"
+    }
+  },
+  {
+    "id": "fresh-fitness-class-formats",
+    "family": "fresh-fitness",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "fitness",
+    "category": "ordinary",
+    "reason": "Generic exercise class formats list no enrolled participants.",
+    "sql": "SELECT activity_code, duration_minutes FROM training.class_formats LIMIT 15",
+    "columns": {
+      "activity_code": "text",
+      "duration_minutes": "int4"
+    }
+  },
+  {
+    "id": "fresh-fitness-plan-prices",
+    "family": "fresh-fitness",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "fitness",
+    "category": "ordinary",
+    "reason": "A plan catalog contains prices without membership assignments.",
+    "sql": "SELECT plan_code, monthly_fee FROM training.plan_catalog LIMIT 10",
+    "columns": {
+      "plan_code": "text",
+      "monthly_fee": "numeric"
+    }
+  },
+  {
+    "id": "fresh-fitness-turnstile-format",
+    "family": "fresh-fitness",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "fitness",
+    "category": "ordinary",
+    "reason": "Pass encoding and length describe a format without disclosing a usable pass.",
+    "sql": "SELECT encoding_type, bit_length FROM training.entry_passes LIMIT 10",
+    "columns": {
+      "encoding_type": "text",
+      "bit_length": "int4"
+    }
+  },
+  {
+    "id": "fresh-fitness-equipment-capabilities",
+    "family": "fresh-fitness",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "fitness",
+    "category": "ordinary",
+    "reason": "Equipment capability flags do not describe an athlete's condition.",
+    "sql": "SELECT model_code, incline_supported FROM training.machine_specs LIMIT 20",
+    "columns": {
+      "model_code": "text",
+      "incline_supported": "bool"
+    }
+  },
+  {
+    "id": "fresh-fitness-load-reference",
+    "family": "fresh-fitness",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "fitness",
+    "category": "ordinary",
+    "reason": "Weight plate specifications do not expose workout records.",
+    "sql": "SELECT plate_code, mass_kg FROM training.weight_catalog LIMIT 25",
+    "columns": {
+      "plate_code": "text",
+      "mass_kg": "numeric"
+    }
+  },
+  {
+    "id": "fresh-fitness-athlete-progress",
+    "family": "fresh-fitness",
+    "split": "validation",
+    "expected": "review",
+    "domain": "fitness",
+    "category": "pii",
+    "reason": "A stable athlete handle links body measurements to an individual.",
+    "sql": "SELECT athlete_handle, body_fat_percent FROM training.progress_records LIMIT 2",
+    "columns": {
+      "athlete_handle": "text",
+      "body_fat_percent": "numeric"
+    }
+  },
+  {
+    "id": "fresh-fitness-sponsor-labels",
+    "family": "fresh-fitness",
+    "split": "validation",
+    "expected": "review",
+    "domain": "fitness",
+    "category": "client",
+    "reason": "Actual sponsors' labels and domains identify organizations.",
+    "sql": "SELECT sponsor_label, registered_domain FROM training.sponsor_directory LIMIT 5",
+    "columns": {
+      "sponsor_label": "text",
+      "registered_domain": "text"
+    }
+  },
+  {
+    "id": "fresh-fitness-turnstile-value",
+    "family": "fresh-fitness",
+    "split": "validation",
+    "expected": "review",
+    "domain": "fitness",
+    "category": "sensitive-value",
+    "reason": "A usable admission value grants access through the turnstile.",
+    "sql": "SELECT admission_value FROM training.entry_passes LIMIT 1",
+    "columns": {
+      "admission_value": "text"
+    }
+  },
+  {
+    "id": "fresh-fitness-coaching-notes",
+    "family": "fresh-fitness",
+    "split": "validation",
+    "expected": "review",
+    "domain": "fitness",
+    "category": "context",
+    "reason": "Unstructured coaching notes may contain identities and health attributes.",
+    "sql": "SELECT imported_text FROM training.coaching_notes LIMIT 2",
+    "columns": {
+      "imported_text": "text"
+    }
+  },
+  {
+    "id": "fresh-fitness-athlete-condition",
+    "family": "fresh-fitness",
+    "split": "validation",
+    "expected": "review",
+    "domain": "fitness",
+    "category": "pii",
+    "reason": "A boolean injury restriction linked to an athlete is personal health information.",
+    "sql": "SELECT athlete_handle, injury_restriction FROM training.exercise_clearance LIMIT 2",
+    "columns": {
+      "athlete_handle": "text",
+      "injury_restriction": "bool"
+    }
+  },
+  {
+    "id": "fresh-maritime-cargo-rates",
+    "family": "fresh-maritime",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "maritime",
+    "category": "ordinary",
+    "reason": "Generic cargo tariffs identify no shipper.",
+    "sql": "SELECT cargo_class, tariff_per_tonne FROM harbor.tariff_catalog LIMIT 20",
+    "columns": {
+      "cargo_class": "text",
+      "tariff_per_tonne": "numeric"
+    }
+  },
+  {
+    "id": "fresh-maritime-crane-loads",
+    "family": "fresh-maritime",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "maritime",
+    "category": "ordinary",
+    "reason": "Crane model specifications contain no crew or commercial party identity.",
+    "sql": "SELECT crane_model, rated_load_tonnes FROM harbor.crane_specs LIMIT 10",
+    "columns": {
+      "crane_model": "text",
+      "rated_load_tonnes": "numeric"
+    }
+  },
+  {
+    "id": "fresh-maritime-boarding-format",
+    "family": "fresh-maritime",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "maritime",
+    "category": "ordinary",
+    "reason": "Permit code standard and lifetime do not disclose a redeemable boarding value.",
+    "sql": "SELECT code_standard, validity_hours FROM harbor.boarding_permits LIMIT 10",
+    "columns": {
+      "code_standard": "text",
+      "validity_hours": "int4"
+    }
+  },
+  {
+    "id": "fresh-maritime-berth-capabilities",
+    "family": "fresh-maritime",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "maritime",
+    "category": "ordinary",
+    "reason": "Generic berth classes and power capabilities contain no vessel movements.",
+    "sql": "SELECT berth_class, shore_power_available FROM harbor.berth_specs LIMIT 15",
+    "columns": {
+      "berth_class": "text",
+      "shore_power_available": "bool"
+    }
+  },
+  {
+    "id": "fresh-maritime-packing-reference",
+    "family": "fresh-maritime",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "maritime",
+    "category": "ordinary",
+    "reason": "Packing limits are technical reference data.",
+    "sql": "SELECT package_type, maximum_mass_kg FROM harbor.packing_rules LIMIT 20",
+    "columns": {
+      "package_type": "text",
+      "maximum_mass_kg": "numeric"
+    }
+  },
+  {
+    "id": "fresh-maritime-crew-shifts",
+    "family": "fresh-maritime",
+    "split": "validation",
+    "expected": "review",
+    "domain": "maritime",
+    "category": "pii",
+    "reason": "Crew handles and embarkation times reveal an individual's movements.",
+    "sql": "SELECT crew_handle, embarkation_time FROM harbor.crew_movements LIMIT 3",
+    "columns": {
+      "crew_handle": "text",
+      "embarkation_time": "timestamptz"
+    }
+  },
+  {
+    "id": "fresh-maritime-shipper-register",
+    "family": "fresh-maritime",
+    "split": "validation",
+    "expected": "review",
+    "domain": "maritime",
+    "category": "client",
+    "reason": "Shipper registration details identify commercial entities.",
+    "sql": "SELECT registered_label, incorporation_number FROM harbor.shippers LIMIT 3",
+    "columns": {
+      "registered_label": "text",
+      "incorporation_number": "text"
+    }
+  },
+  {
+    "id": "fresh-maritime-boarding-redemption",
+    "family": "fresh-maritime",
+    "split": "validation",
+    "expected": "review",
+    "domain": "maritime",
+    "category": "sensitive-value",
+    "reason": "A redeemable boarding value authorizes physical entry.",
+    "sql": "SELECT boarding_value FROM harbor.boarding_permits LIMIT 1",
+    "columns": {
+      "boarding_value": "text"
+    }
+  },
+  {
+    "id": "fresh-maritime-manifest-text",
+    "family": "fresh-maritime",
+    "split": "validation",
+    "expected": "review",
+    "domain": "maritime",
+    "category": "context",
+    "reason": "A raw manifest may contain party identities with no resolved field meaning.",
+    "sql": "SELECT raw_manifest FROM harbor.manifest_imports LIMIT 2",
+    "columns": {
+      "raw_manifest": "text"
+    }
+  },
+  {
+    "id": "fresh-maritime-boarding-redemption-alias",
+    "family": "fresh-maritime",
+    "split": "validation",
+    "expected": "review",
+    "domain": "maritime",
+    "category": "sensitive-value",
+    "reason": "An encoding-standard alias still returns a usable boarding credential.",
+    "sql": "SELECT boarding_value AS code_standard FROM harbor.boarding_permits LIMIT 2",
+    "columns": {
+      "boarding_value": "text"
+    }
+  },
+  {
+    "id": "fresh-municipal-permit-fees",
+    "family": "fresh-municipal",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "municipal",
+    "category": "ordinary",
+    "reason": "A generic permit fee schedule does not disclose applicants.",
+    "sql": "SELECT permit_class, base_fee FROM civic.fee_schedule LIMIT 25",
+    "columns": {
+      "permit_class": "text",
+      "base_fee": "numeric"
+    }
+  },
+  {
+    "id": "fresh-municipal-paving-rates",
+    "family": "fresh-municipal",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "municipal",
+    "category": "ordinary",
+    "reason": "Material prices without vendor identity are allowed commercial amounts.",
+    "sql": "SELECT paving_grade, cost_per_m2 FROM civic.material_prices LIMIT 15",
+    "columns": {
+      "paving_grade": "text",
+      "cost_per_m2": "numeric"
+    }
+  },
+  {
+    "id": "fresh-municipal-locker-format",
+    "family": "fresh-municipal",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "municipal",
+    "category": "ordinary",
+    "reason": "Latch model and code length do not give the locker opening sequence.",
+    "sql": "SELECT latch_model, sequence_length FROM civic.collection_locker_access LIMIT 10",
+    "columns": {
+      "latch_model": "text",
+      "sequence_length": "int4"
+    }
+  },
+  {
+    "id": "fresh-municipal-signal-capabilities",
+    "family": "fresh-municipal",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "municipal",
+    "category": "ordinary",
+    "reason": "Traffic equipment capabilities are not observations of road users.",
+    "sql": "SELECT controller_model, adaptive_enabled FROM civic.signal_models LIMIT 20",
+    "columns": {
+      "controller_model": "text",
+      "adaptive_enabled": "bool"
+    }
+  },
+  {
+    "id": "fresh-municipal-bin-dimensions",
+    "family": "fresh-municipal",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "municipal",
+    "category": "pii",
+    "reason": "Bin classes and capacities do not disclose personal locations. The street fragment in the relation name alone does not require a local hold.",
+    "sql": "SELECT bin_class, capacity_litres FROM civic.street_bin_specs LIMIT 20",
+    "columns": {
+      "bin_class": "text",
+      "capacity_litres": "numeric"
+    }
+  },
+  {
+    "id": "fresh-municipal-lighting-specs",
+    "family": "fresh-municipal",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "municipal",
+    "category": "ordinary",
+    "reason": "Generic lighting wattage describes hardware without resident, contractor or access data.",
+    "sql": "SELECT luminaire_class, rated_watts FROM civic.lighting_specs LIMIT 15",
+    "columns": {
+      "luminaire_class": "text",
+      "rated_watts": "numeric"
+    }
+  },
+  {
+    "id": "fresh-municipal-resident-support",
+    "family": "fresh-municipal",
+    "split": "validation",
+    "expected": "review",
+    "domain": "municipal",
+    "category": "pii",
+    "reason": "A resident reference connects public-assistance amounts to a person.",
+    "sql": "SELECT resident_ref, benefit_amount FROM civic.assistance_awards LIMIT 2",
+    "columns": {
+      "resident_ref": "text",
+      "benefit_amount": "numeric"
+    }
+  },
+  {
+    "id": "fresh-municipal-contractor-register",
+    "family": "fresh-municipal",
+    "split": "validation",
+    "expected": "review",
+    "domain": "municipal",
+    "category": "client",
+    "reason": "Contractor trade labels and registry references identify businesses.",
+    "sql": "SELECT trading_label, commercial_registry_ref FROM civic.contractors LIMIT 3",
+    "columns": {
+      "trading_label": "text",
+      "commercial_registry_ref": "text"
+    }
+  },
+  {
+    "id": "fresh-municipal-locker-opening",
+    "family": "fresh-municipal",
+    "split": "validation",
+    "expected": "review",
+    "domain": "municipal",
+    "category": "sensitive-value",
+    "reason": "The opening sequence grants access to stored items.",
+    "sql": "SELECT opening_sequence FROM civic.collection_locker_access LIMIT 1",
+    "columns": {
+      "opening_sequence": "text"
+    }
+  },
+  {
+    "id": "fresh-municipal-petition-text",
+    "family": "fresh-municipal",
+    "split": "validation",
+    "expected": "review",
+    "domain": "municipal",
+    "category": "context",
+    "reason": "Unstructured petition text can identify residents and their circumstances.",
+    "sql": "SELECT submission_text FROM civic.petition_imports LIMIT 2",
+    "columns": {
+      "submission_text": "text"
+    }
+  },
+  {
+    "id": "fresh-municipal-resident-condition",
+    "family": "fresh-municipal",
+    "split": "validation",
+    "expected": "review",
+    "domain": "municipal",
+    "category": "pii",
+    "reason": "A disability exemption flag linked to a resident discloses a private attribute.",
+    "sql": "SELECT resident_ref, disability_exemption FROM civic.permit_awards LIMIT 1",
+    "columns": {
+      "resident_ref": "text",
+      "disability_exemption": "bool"
+    }
+  },
+  {
+    "id": "fresh-foodservice-ingredient-prices",
+    "family": "fresh-foodservice",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "foodservice",
+    "category": "ordinary",
+    "reason": "Ingredient prices contain no vendor identity or diner information.",
+    "sql": "SELECT ingredient_code, cost_per_kg FROM kitchen.ingredient_rates LIMIT 20",
+    "columns": {
+      "ingredient_code": "text",
+      "cost_per_kg": "numeric"
+    }
+  },
+  {
+    "id": "fresh-foodservice-recipe-quantities",
+    "family": "fresh-foodservice",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "foodservice",
+    "category": "ordinary",
+    "reason": "Generic recipe portions do not concern an individual diner.",
+    "sql": "SELECT recipe_code, portion_grams FROM kitchen.recipe_specs LIMIT 20",
+    "columns": {
+      "recipe_code": "text",
+      "portion_grams": "numeric"
+    }
+  },
+  {
+    "id": "fresh-foodservice-pickup-format",
+    "family": "fresh-foodservice",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "foodservice",
+    "category": "ordinary",
+    "reason": "Pickup barcode format and lifetime do not reveal a redeemable pickup value.",
+    "sql": "SELECT barcode_format, expiry_minutes FROM kitchen.pickup_credentials LIMIT 10",
+    "columns": {
+      "barcode_format": "text",
+      "expiry_minutes": "int4"
+    }
+  },
+  {
+    "id": "fresh-foodservice-oven-capabilities",
+    "family": "fresh-foodservice",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "foodservice",
+    "category": "ordinary",
+    "reason": "Oven specifications contain no personal or access data.",
+    "sql": "SELECT oven_model, steam_supported FROM kitchen.oven_specs LIMIT 10",
+    "columns": {
+      "oven_model": "text",
+      "steam_supported": "bool"
+    }
+  },
+  {
+    "id": "fresh-foodservice-menu-allergens",
+    "family": "fresh-foodservice",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "foodservice",
+    "category": "ordinary",
+    "reason": "A product ingredient flag describes a recipe, not a person's allergy.",
+    "sql": "SELECT recipe_code, contains_peanuts FROM kitchen.recipe_specs LIMIT 15",
+    "columns": {
+      "recipe_code": "text",
+      "contains_peanuts": "bool"
+    }
+  },
+  {
+    "id": "fresh-foodservice-diner-allergies",
+    "family": "fresh-foodservice",
+    "split": "validation",
+    "expected": "review",
+    "domain": "foodservice",
+    "category": "pii",
+    "reason": "An allergy boolean attached to a diner handle is personal health information.",
+    "sql": "SELECT diner_handle, peanut_allergy FROM kitchen.dietary_requests LIMIT 2",
+    "columns": {
+      "diner_handle": "text",
+      "peanut_allergy": "bool"
+    }
+  },
+  {
+    "id": "fresh-foodservice-supplier-labels",
+    "family": "fresh-foodservice",
+    "split": "validation",
+    "expected": "review",
+    "domain": "foodservice",
+    "category": "client",
+    "reason": "Registered supplier labels and tax registration references identify companies.",
+    "sql": "SELECT registered_label, tax_registration_ref FROM kitchen.ingredient_suppliers LIMIT 3",
+    "columns": {
+      "registered_label": "text",
+      "tax_registration_ref": "text"
+    }
+  },
+  {
+    "id": "fresh-foodservice-pickup-redemption",
+    "family": "fresh-foodservice",
+    "split": "validation",
+    "expected": "review",
+    "domain": "foodservice",
+    "category": "sensitive-value",
+    "reason": "A claim value authorizes collection of another party's order.",
+    "sql": "SELECT claim_value FROM kitchen.pickup_credentials LIMIT 1",
+    "columns": {
+      "claim_value": "text"
+    }
+  },
+  {
+    "id": "fresh-foodservice-reservation-text",
+    "family": "fresh-foodservice",
+    "split": "validation",
+    "expected": "review",
+    "domain": "foodservice",
+    "category": "context",
+    "reason": "Raw reservation text can include diner identities and other private details.",
+    "sql": "SELECT raw_entry FROM kitchen.reservation_imports LIMIT 2",
+    "columns": {
+      "raw_entry": "text"
+    }
+  },
+  {
+    "id": "fresh-foodservice-pickup-redemption-alias",
+    "family": "fresh-foodservice",
+    "split": "validation",
+    "expected": "review",
+    "domain": "foodservice",
+    "category": "sensitive-value",
+    "reason": "A barcode-format alias still exposes the source claim value.",
+    "sql": "SELECT claim_value AS barcode_format FROM kitchen.pickup_credentials LIMIT 2",
+    "columns": {
+      "claim_value": "text"
+    }
+  },
+  {
+    "id": "fresh-aviation-fare-components",
+    "family": "fresh-aviation",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "aviation",
+    "category": "ordinary",
+    "reason": "Generic fare amounts contain no traveler or airline identity.",
+    "sql": "SELECT fare_class, base_amount FROM flight.fare_rules LIMIT 20",
+    "columns": {
+      "fare_class": "text",
+      "base_amount": "numeric"
+    }
+  },
+  {
+    "id": "fresh-aviation-baggage-reference",
+    "family": "fresh-aviation",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "aviation",
+    "category": "ordinary",
+    "reason": "Baggage rules are reference data without a traveler's allowance record.",
+    "sql": "SELECT cabin_class, allowance_kg FROM flight.baggage_rules LIMIT 15",
+    "columns": {
+      "cabin_class": "text",
+      "allowance_kg": "numeric"
+    }
+  },
+  {
+    "id": "fresh-aviation-boarding-encoding",
+    "family": "fresh-aviation",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "aviation",
+    "category": "ordinary",
+    "reason": "Barcode symbology and encoding version are format metadata, not a usable boarding pass.",
+    "sql": "SELECT symbology, encoding_version FROM flight.boarding_credentials LIMIT 10",
+    "columns": {
+      "symbology": "text",
+      "encoding_version": "text"
+    }
+  },
+  {
+    "id": "fresh-aviation-seat-capabilities",
+    "family": "fresh-aviation",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "aviation",
+    "category": "ordinary",
+    "reason": "Seat design capabilities reveal neither an occupant nor a booking.",
+    "sql": "SELECT seat_model, recline_supported FROM flight.seat_specs LIMIT 20",
+    "columns": {
+      "seat_model": "text",
+      "recline_supported": "bool"
+    }
+  },
+  {
+    "id": "fresh-aviation-meal-prices",
+    "family": "fresh-aviation",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "aviation",
+    "category": "ordinary",
+    "reason": "Meal catalog prices do not identify travelers or suppliers.",
+    "sql": "SELECT meal_code, unit_price FROM flight.meal_catalog LIMIT 10",
+    "columns": {
+      "meal_code": "text",
+      "unit_price": "numeric"
+    }
+  },
+  {
+    "id": "fresh-aviation-traveler-movements",
+    "family": "fresh-aviation",
+    "split": "validation",
+    "expected": "review",
+    "domain": "aviation",
+    "category": "pii",
+    "reason": "A stable traveler reference links routes and times to a person's movements.",
+    "sql": "SELECT traveler_ref, route_code, departure_time FROM flight.itineraries LIMIT 2",
+    "columns": {
+      "traveler_ref": "text",
+      "route_code": "text",
+      "departure_time": "timestamptz"
+    }
+  },
+  {
+    "id": "fresh-aviation-carrier-register",
+    "family": "fresh-aviation",
+    "split": "validation",
+    "expected": "review",
+    "domain": "aviation",
+    "category": "client",
+    "reason": "Carrier legal labels and registration numbers identify actual businesses.",
+    "sql": "SELECT legal_entity_label, registration_number FROM flight.carriers LIMIT 3",
+    "columns": {
+      "legal_entity_label": "text",
+      "registration_number": "text"
+    }
+  },
+  {
+    "id": "fresh-aviation-boarding-payload",
+    "family": "fresh-aviation",
+    "split": "validation",
+    "expected": "review",
+    "domain": "aviation",
+    "category": "sensitive-value",
+    "reason": "A complete encoded boarding pass can grant admission and may also contain traveler data.",
+    "sql": "SELECT encoded_pass FROM flight.boarding_credentials LIMIT 1",
+    "columns": {
+      "encoded_pass": "text"
+    }
+  },
+  {
+    "id": "fresh-aviation-handling-notes",
+    "family": "fresh-aviation",
+    "split": "validation",
+    "expected": "review",
+    "domain": "aviation",
+    "category": "context",
+    "reason": "Unstructured handling imports may contain traveler or business identities.",
+    "sql": "SELECT unstructured_value FROM flight.handling_imports LIMIT 2",
+    "columns": {
+      "unstructured_value": "text"
+    }
+  },
+  {
+    "id": "fresh-aviation-traveler-assistance",
+    "family": "fresh-aviation",
+    "split": "validation",
+    "expected": "review",
+    "domain": "aviation",
+    "category": "pii",
+    "reason": "A mobility-assistance boolean linked to a traveler discloses personal information.",
+    "sql": "SELECT traveler_ref, wheelchair_required FROM flight.assistance_requests LIMIT 1",
+    "columns": {
+      "traveler_ref": "text",
+      "wheelchair_required": "bool"
+    }
+  },
+  {
+    "id": "fresh-local-email-column",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "pii",
+    "reason": "Known email columns must stay local before inference.",
+    "sql": "SELECT email FROM civic.resident_directory LIMIT 3",
+    "columns": {
+      "email": "text"
+    }
+  },
+  {
+    "id": "fresh-local-sensitive-alias",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "pii",
+    "reason": "A personal-name output alias triggers local checks even on a reference column.",
+    "sql": "SELECT medium_code AS full_name FROM library.lending_rules LIMIT 3",
+    "columns": {
+      "medium_code": "text"
+    }
+  },
+  {
+    "id": "fresh-local-personal-reference",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "review",
+    "domain": "local-boundary",
+    "category": "pii",
+    "reason": "The beta exempts identifier names locally. Jev should still hold potentially identifying references in admission records.",
+    "sql": "SELECT patient_id FROM vet.admission_records LIMIT 3",
+    "columns": {
+      "patient_id": "int8"
+    }
+  },
+  {
+    "id": "fresh-local-sensitive-boolean",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "pii",
+    "reason": "A boolean derived from a sensitive source does not remove the source sensitivity.",
+    "sql": "SELECT email IS NOT NULL AS available FROM training.enrolments LIMIT 1",
+    "columns": {
+      "email": "text"
+    }
+  },
+  {
+    "id": "fresh-local-business-column",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "client",
+    "reason": "Known company identity must not reach the evaluator.",
+    "sql": "SELECT company_name FROM harbor.suppliers LIMIT 3",
+    "columns": {
+      "company_name": "text"
+    }
+  },
+  {
+    "id": "fresh-local-business-predicate",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "client",
+    "reason": "Sensitive predicate dependencies remain local even when only fees are returned.",
+    "sql": "SELECT base_fee FROM civic.fee_schedule WHERE organization_name IS NOT NULL",
+    "columns": {
+      "base_fee": "numeric",
+      "organization_name": "text"
+    }
+  },
+  {
+    "id": "fresh-local-business-json",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "client",
+    "reason": "A sensitive JSON key must trigger local review.",
+    "sql": "SELECT payload->>'company_name' FROM flight.imports LIMIT 1",
+    "columns": {
+      "payload": "jsonb"
+    }
+  },
+  {
+    "id": "fresh-local-email-value",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "sensitive-value",
+    "reason": "A synthetic email literal must not be shared with the provider.",
+    "sql": "SELECT raw_value FROM assay.imports WHERE raw_value = 'fresh@example.invalid'",
+    "columns": {
+      "raw_value": "text"
+    }
+  },
+  {
+    "id": "fresh-local-known-access-source",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "sensitive-value",
+    "reason": "Known access-key source names stay local, regardless of the data display preferences.",
+    "sql": "SELECT api_key FROM recycling.integration_settings LIMIT 1",
+    "columns": {
+      "api_key": "text"
+    }
+  },
+  {
+    "id": "fresh-local-delete",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "read-only",
+    "reason": "A modifying statement cannot gain automatic authority.",
+    "sql": "DELETE FROM kitchen.recipe_specs WHERE recipe_code = 'synthetic'",
+    "columns": {
+      "recipe_code": "text"
+    }
+  },
+  {
+    "id": "fresh-local-lock",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "read-only",
+    "reason": "A locking read must remain outside automatic eligibility.",
+    "sql": "SELECT part_code FROM garage.parts_catalog FOR UPDATE",
+    "columns": {
+      "part_code": "text"
+    }
+  },
+  {
+    "id": "fresh-local-unknown-function",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "read-only",
+    "reason": "An unknown function cannot be assumed to have read-only effects.",
+    "sql": "SELECT issue_pass() FROM library.entry_devices LIMIT 1",
+    "columns": {
+      "reader_model": "text"
+    }
+  },
+  {
+    "id": "fresh-local-join",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "unsupported",
+    "reason": "A join requires unsupported dependency handling and must remain manual.",
+    "sql": "SELECT r.medium_code FROM library.lending_rules r JOIN library.binding_rates b ON r.medium_code = b.binding_code LIMIT 5",
+    "columns": {
+      "medium_code": "text",
+      "binding_code": "text"
+    }
+  },
+  {
+    "id": "fresh-local-predicate",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "local-boundary",
+    "category": "unsupported",
+    "reason": "A numeric predicate over ordinary allowances is supported by shared read analysis.",
+    "sql": "SELECT allowance_kg FROM flight.baggage_rules WHERE allowance_kg > 10 LIMIT 5",
+    "columns": {
+      "allowance_kg": "numeric"
+    }
+  },
+  {
+    "id": "fresh-local-aggregate",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "local-boundary",
+    "category": "unsupported",
+    "reason": "An aggregate over ordinary consumable costs is supported by shared read analysis.",
+    "sql": "SELECT SUM(pack_cost) FROM assay.consumable_rates",
+    "columns": {
+      "pack_cost": "numeric"
+    }
+  },
+  {
+    "id": "fresh-local-two-statements",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "unsupported",
+    "reason": "Multiple statements cannot be automatically eligible.",
+    "sql": "SELECT plate_code FROM training.weight_catalog LIMIT 1; SELECT plan_code FROM training.plan_catalog LIMIT 1",
+    "columns": {
+      "plate_code": "text",
+      "plan_code": "text"
+    }
+  },
+  {
+    "id": "fresh-local-missing-source",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "metadata",
+    "reason": "Missing catalog columns must hold the request locally.",
+    "sql": "SELECT latch_model FROM civic.collection_locker_access LIMIT 5",
+    "columns": {}
+  },
+  {
+    "id": "fresh-local-row-security",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "metadata",
+    "reason": "RLS can introduce unresolved dependencies and must stop inference.",
+    "sql": "SELECT crane_model FROM harbor.crane_specs LIMIT 5",
+    "columns": {
+      "crane_model": "text"
+    },
+    "metadata": {
+      "relrowsecurity": true
+    }
+  },
+  {
+    "id": "fresh-local-generated-source",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "metadata",
+    "reason": "A generated column can conceal dependencies and stays manual.",
+    "sql": "SELECT material_code FROM recycling.material_rates LIMIT 5",
+    "columns": {
+      "material_code": "text"
+    },
+    "metadata": {
+      "attgenerated": "s"
+    }
+  }
+]
