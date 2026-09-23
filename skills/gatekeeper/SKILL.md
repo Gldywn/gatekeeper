@@ -1,7 +1,7 @@
 ---
 name: gatekeeper
 description: Read and change a database safely through Gatekeeper. You propose SQL, a human approves and runs it in Beekeeper Studio, and the rows come back to you; you never connect to the DB or run SQL yourself. Reads are the default; a write runs only if a human arms write mode. Use this whenever you need to read data, run a SELECT, inspect a schema, verify a migration, debug against real data, change data through an approved write, or answer anything that needs the database, and whenever the user mentions Gatekeeper, approving a query, or looking something up in the database.
-version: 0.3.0 # x-release-please-version
+version: 0.3.1 # x-release-please-version
 ---
 
 # Gatekeeper

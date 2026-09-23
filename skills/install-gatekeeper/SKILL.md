@@ -1,7 +1,7 @@
 ---
 name: install-gatekeeper
 description: Install Gatekeeper end to end and leave it working, meaning the Beekeeper Studio plugin, the MCP server registered with the agent, the companion gatekeeper skill, and the one-time pairing. Do every part the environment allows, then hand the human a precise checklist for the rest. Use when someone asks to install, set up, finish setting up, update, uninstall or repair Gatekeeper, when the Gatekeeper MCP tools are missing or the server will not connect, or when the plugin has never been installed or paired.
-version: 0.3.0 # x-release-please-version
+version: 0.3.1 # x-release-please-version
 ---
 
 # Install Gatekeeper

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/Gldywn/gatekeeper/compare/v0.3.0...v0.3.1) (2026-09-23)
+
+
+### Bug Fixes
+
+* **release:** sync skill versions with repo releases ([#42](https://github.com/Gldywn/gatekeeper/issues/42)) ([6ed2696](https://github.com/Gldywn/gatekeeper/commit/6ed2696f4d49c8f6ddc3dc6cc20cdd684bda140c))
+
 ## [0.3.0](https://github.com/Gldywn/gatekeeper/compare/v0.2.0...v0.3.0) (2026-09-23)
 
 
