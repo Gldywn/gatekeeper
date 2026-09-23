@@ -19,7 +19,7 @@
 </p>
 
 Gatekeeper is a human-approved bridge between AI agents and your database. An agent proposes
-a query over MCP; nothing runs until you approve it in
+a query over MCP; by default, nothing runs until you approve it in
 [Beekeeper Studio](https://www.beekeeperstudio.io), on the SQL text, before execution. The
 query then runs on the connection Beekeeper already holds, and the rows return to the agent.
 
@@ -33,7 +33,7 @@ Shine by Swoop: https://uppbeat.io/t/swoop/shine
 </details>
 
 > [!TIP]
-> **Coming soon:** an auto mode that scores each query's risk against your session intent, so safe ones can run without a click. More on the way.
+> **Auto mode beta:** explicitly enable automatic approval for a narrow PostgreSQL read subset. Local checks and Jev must both pass. See [Auto mode](docs/AUTO-MODE.md) for setup, provider sharing and limitations.
 
 ## The three pieces
 
@@ -48,9 +48,9 @@ server has nothing to approve, the server without the plugin has no one to ask.
 
 ## Why
 
-- **You are the PII and safety check.** Every query is read by a human before it runs, and
-  the decision is recorded.
-- **No credentials leave Beekeeper.** Queries run through its already-authenticated
+- **Manual approval by default.** Auto mode is optional and ephemeral. The approval
+  source and available evaluator attribution are recorded.
+- **No database credentials leave Beekeeper.** Queries run through its already-authenticated
   connection. Point Beekeeper at a read replica or a read-only role for a hard backstop.
 - **Risk is classified, not assumed.** A dialect-aware parser sorts each query into read,
   write or destructive, and the Approve button stays blocked until the matching mode is
@@ -213,8 +213,8 @@ same block.
 
 ## Access modes
 
-Every query is approved by a human click on its text. The armed mode decides which risk
-classes that click is allowed to approve.
+By default, every query requires a human click on its text. Execution mode decides which
+risk classes can run. Auto mode is separate and forces Read only while enabled.
 
 | Mode | Approves | Armed by |
 |---|---|---|

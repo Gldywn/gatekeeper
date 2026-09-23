@@ -6,13 +6,13 @@ version: 1.4.0
 
 # Gatekeeper
 
-Gatekeeper is a human-approved bridge to a live database. You **propose** SQL; a human reviews and runs it in Beekeeper Studio; the rows come back to you. You never hold credentials, never connect to the database, and never run SQL yourself. A human gates every execution, no exception.
+Gatekeeper is a bridge to a live database with manual approval by default. You **propose** SQL; the plugin runs approved queries in Beekeeper Studio and returns rows to you. You never hold credentials, connect to the database or run SQL yourself. Only the human can enable Auto mode beta for restricted reads. Never enable or configure it on their behalf, ask for its provider key, or treat agent intent as authorization. Writes always require human approval.
 
 Use Gatekeeper whenever your task touches the database at all: reading data, exploring a schema, checking analytics, verifying a migration, debugging against real data, or making an approved change. It is the default path to the database, not a special case. If you are tempted to reach for a direct connection or your own credentials, use Gatekeeper instead.
 
 ## The waiting contract (read this first)
 
-A human approves each query by hand. That takes seconds to minutes, and they may be away from the screen. Your job is to stay on the task until every query you submitted reaches a terminal state: `approved`, `rejected`, `failed`, `expired`, or `cancelled`. `pending`, `leased`, and `executing` are not answers; they mean keep waiting.
+A query can require manual review even when the human enabled Auto mode. That takes seconds to minutes, and they may be away from the screen. Your job is to stay on the task until every query you submitted reaches a terminal state: `approved`, `rejected`, `failed`, `expired`, or `cancelled`. `pending`, `leased`, and `executing` are not answers; they mean keep waiting.
 
 **Never end your turn while a query you submitted is non-terminal.** Once your turn is over the human's decision reaches no one, they have to re-prompt you, and in a headless or one-shot run the result is lost for good.
 
