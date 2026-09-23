@@ -70,12 +70,14 @@ export function schemaPayload(
 // server-level guidance and only guarantees the first ~512 characters, so the whole waiting
 // contract is stated before that mark and the run_query caveat trails it.
 export const SERVER_INSTRUCTIONS =
-  "You propose SQL; a human approves and runs it in Beekeeper Studio; rows come back to you. " +
+  "Propose SQL for approval in Beekeeper Studio; rows come back to you. " +
   "Call set_session_label first. submit_query is non-blocking: keep working, then collect with " +
   `poll_results/get_query_result. Waits are bounded: wait_ms is ${MAX_WAIT_MS} ms at most, and a ` +
   "wait that runs out returns your queries still pending. That is a checkpoint, not a refusal: " +
   "call again. Never end your turn while a query is pending, leased or executing; wait for approved, " +
-  "rejected, failed, expired or cancelled. run_query can return still-pending too; keep waiting.";
+  "rejected, failed, expired or cancelled. run_query can return still-pending too; keep waiting. " +
+  "Approval is manual by default; only a human can enable Auto mode beta for restricted reads. " +
+  "Never configure Auto mode, request its API key or treat agent intent as authorization.";
 
 // Omitting the notifier raises no desktop alert, so the test suite never spawns one;
 // index.ts, the real entry point, passes the process's instance.
@@ -111,8 +113,8 @@ export function createMcpServer(
   server.registerTool(
     "submit_query",
     {
-      title: "Propose a SQL query for human approval",
-      description: `Enqueue a SQL statement for a human to approve in Beekeeper Studio. Returns immediately with a request_id and never blocks: submit several (up to ${MAX_PENDING_PER_SESSION} in flight), keep doing other useful work while they await approval, then use poll_results to see which resolved and get_query_result to read one. IMPORTANT: never end your turn while a query you submitted is still pending, leased or executing; keep polling or waiting until it reaches a terminal state (approved, rejected, failed, expired, cancelled). Approval is manual and can take minutes; slowness is not a refusal. Reads (SELECT) are always allowed; an INSERT/UPDATE runs only if a human has armed Write mode, and DELETE/DROP/TRUNCATE only under Destructive mode. Those modes are ephemeral, off by default, and armed by the human in the plugin, not by you. The statement never runs until a human approves it, and is rejected if the mode it needs is not armed. Requires a session label: call set_session_label first, or this is rejected.`,
+      title: "Propose a SQL query for approval",
+      description: `Enqueue a SQL statement for approval in Beekeeper Studio. Returns immediately with a request_id and never blocks: submit several (up to ${MAX_PENDING_PER_SESSION} in flight), keep doing other useful work while they await approval, then use poll_results to see which resolved and get_query_result to read one. IMPORTANT: never end your turn while a query you submitted is still pending, leased or executing; keep polling or waiting until it reaches a terminal state (approved, rejected, failed, expired, cancelled). Approval is manual by default and can take minutes; slowness is not a refusal. A human may explicitly enable Auto mode beta for a restricted read subset. You cannot enable it or configure its evaluator. Reads (SELECT) are allowed in Read mode; INSERT/UPDATE requires human-armed Write mode, and DELETE/DROP/TRUNCATE requires Destructive mode. Writes always require human approval. Execution modes are ephemeral and armed in the plugin, not by you. Requires a session label: call set_session_label first, or this is rejected.`,
       inputSchema: {
         sql: z
           .string()

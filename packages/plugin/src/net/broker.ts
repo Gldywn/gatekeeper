@@ -1,5 +1,13 @@
 import { appStorage } from "@beekeeperstudio/plugin";
-import type { ConnectionInput, RequestState } from "@gatekeeper/shared";
+import type {
+  ApprovalAttribution,
+  AutoEvaluation,
+  ConnectionInput,
+  EvaluationInput,
+  KeyStatus,
+  RequestState,
+} from "@gatekeeper/shared";
+import { AUTO_MODEL, AUTO_POLICY } from "../sql/auto";
 import type { ActivityEntry, Proposal, SessionRoster } from "../types";
 
 export interface BrokerConfig {
@@ -148,13 +156,66 @@ export class BrokerClient {
     return { ok: true, leaseExpiresAt };
   }
 
-  async executing(id: string, leaseId: string): Promise<boolean> {
+  async executing(id: string, leaseId: string, approval?: ApprovalAttribution): Promise<boolean> {
     const res = await this.request("/executing", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, leaseId }),
+      body: JSON.stringify({ id, leaseId, approval }),
     });
     return res.ok;
+  }
+
+  async withdrawExecution(id: string, leaseId: string): Promise<boolean> {
+    return (
+      await this.request("/execution/withdraw", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, leaseId }),
+      })
+    ).ok;
+  }
+
+  async evaluate(
+    id: string,
+    leaseId: string,
+    scope: string,
+    key: string,
+    input: EvaluationInput,
+    signal: AbortSignal,
+  ): Promise<AutoEvaluation> {
+    const res = await this.request("/evaluate", {
+      method: "POST",
+      signal,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id,
+        leaseId,
+        scope,
+        key,
+        input,
+        model: AUTO_MODEL,
+        policy: AUTO_POLICY,
+      }),
+    });
+    if (!res.ok) throw new Error("Evaluator unavailable or lease lost");
+    return (await res.json()) as AutoEvaluation;
+  }
+
+  // "outdated" is a broker predating the route (plugin and server update separately);
+  // anything else short of a clear verdict reads as unreachable.
+  async checkKey(key: string): Promise<KeyStatus | "outdated"> {
+    try {
+      const res = await this.request("/evaluate/key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key }),
+      });
+      if (res.status === 404) return "outdated";
+      const status = res.ok ? ((await res.json()) as { status?: unknown }).status : null;
+      return status === "valid" || status === "invalid" ? status : "unavailable";
+    } catch {
+      return "unavailable";
+    }
   }
 
   // Returns false when the broker did not accept the outcome (a refused lease, or a body

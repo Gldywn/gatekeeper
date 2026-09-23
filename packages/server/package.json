@@ -38,9 +38,9 @@
   },
   "scripts": {
     "build": "tsc && node notifier/build.mjs",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p evals/tsconfig.json",
     "start": "node dist/index.js",
-    "dev": "tsx src/index.ts",
+    "dev": "node ../../scripts/dev-server.mjs --watch",
     "test": "vitest run",
     "test:watch": "vitest",
     "prepublishOnly": "pnpm run build"

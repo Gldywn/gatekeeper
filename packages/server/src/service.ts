@@ -1,6 +1,7 @@
 import { MAX_WAIT_MS, NOTIFY_COOLDOWN_MS, POLL_MS } from "./config.js";
 import type { Notifier } from "./notify.js";
 import { classifyRisk } from "./policy.js";
+import { knownCount } from "./store/rows.js";
 import type { GatekeeperRequest, RequestState, RequestStore } from "./store.js";
 
 const TERMINAL_STATES: ReadonlySet<RequestState> = new Set([
@@ -63,7 +64,18 @@ function terminalOf(req: GatekeeperRequest): TerminalResult {
   switch (req.state) {
     case "approved":
       if (result.purged) {
-        return { status: "approved", purged: true, rows: [], fields: [] };
+        const counts = {
+          rowCount: knownCount(result.rowCount),
+          affectedRows: knownCount(result.affectedRows),
+        };
+        return {
+          status: "approved",
+          purged: true,
+          rows: [],
+          fields: [],
+          ...(counts.rowCount !== null ? { rowCount: counts.rowCount } : {}),
+          ...(counts.affectedRows !== null ? { affectedRows: counts.affectedRows } : {}),
+        };
       }
       return {
         status: "approved",

@@ -21,11 +21,13 @@ import {
   listInflight,
   listSessionRequests,
   markExecuting,
+  recordEvaluation,
   renewLease,
   resolve,
   type SubmitOutcome,
   submit,
   sweep,
+  withdrawExecution,
 } from "./store/requests.js";
 import { getSchema, setSchema, touchSchema } from "./store/schema.js";
 import {
@@ -111,12 +113,33 @@ export class RequestStore {
     return renewLease(this.ctx, id, leaseId, leaseMs);
   }
 
-  markExecuting(id: string, leaseId: string): GatekeeperRequest {
-    return markExecuting(this.ctx, id, leaseId);
+  markExecuting(
+    id: string,
+    leaseId: string,
+    approval?: import("@gatekeeper/shared").ApprovalAttribution,
+  ): GatekeeperRequest {
+    return markExecuting(this.ctx, id, leaseId, approval);
   }
 
-  resolve(id: string, leaseId: string, outcome: Outcome): GatekeeperRequest {
-    return resolve(this.ctx, id, leaseId, outcome);
+  withdrawExecution(id: string, leaseId: string): void {
+    withdrawExecution(this.ctx, id, leaseId);
+  }
+
+  recordEvaluation(
+    id: string,
+    leaseId: string,
+    evaluation: import("@gatekeeper/shared").AutoEvaluation,
+  ): void {
+    recordEvaluation(this.ctx, id, leaseId, evaluation);
+  }
+
+  resolve(
+    id: string,
+    leaseId: string,
+    outcome: Outcome,
+    autoHold?: import("@gatekeeper/shared").AutoHold,
+  ): GatekeeperRequest {
+    return resolve(this.ctx, id, leaseId, outcome, autoHold);
   }
 
   cancel(id: string, sessionId: string): GatekeeperRequest {

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Symlinks Beekeeper's plugin slot and the agent skill dir to THIS checkout so a
 // rebuild needs no reinstall. A symlink to a checkout that can't load crashes the
-// whole Beekeeper plugin manager, so link refuses that and never deletes a real install.
+// whole Beekeeper plugin manager, so link refuses that. A real install is moved aside,
+// never deleted, and unlink puts it back.
 
 import { execFileSync, spawnSync } from "node:child_process";
 import {
@@ -71,6 +72,9 @@ function skillDirs() {
 }
 
 const pluginSlot = () => join(pluginsDir(), "gatekeeper");
+// Outside plugins/: a copy left inside could be scanned as a second "gatekeeper" plugin.
+const pluginBackup = () => join(dirname(pluginsDir()), "gatekeeper-plugin.pre-dev");
+const skillBackup = (link) => `${link}.pre-dev`;
 const pluginSrc = (root) => join(root, "packages", "plugin");
 const pluginDist = (root) => join(pluginSrc(root), "dist", "index.html");
 const skillSrc = (root) => join(root, "skills", "gatekeeper");
@@ -102,19 +106,11 @@ function inspectLink(link) {
   return { kind: "other" };
 }
 
-// stashRealDir: for the skill, a real folder at the target is a re-syncable copy,
-// so move it aside (…​.pre-dev) and link; the plugin never does this, it refuses.
-function linkOne(label, src, link, stashRealDir = false) {
+function linkOne(label, src, link, bak) {
   if (!existsSync(src)) fail(`${label} source missing: ${src}`);
   const info = inspectLink(link);
   if (info.kind === "other") fail(`${link} exists and is not our symlink; refusing to touch it.`);
   if (info.kind === "realdir") {
-    if (!stashRealDir) {
-      fail(
-        `${link} is a real ${label} install (not our symlink); uninstall it normally first, then re-run. Never removed automatically.`,
-      );
-    }
-    const bak = `${link}.pre-dev`;
     if (existsSync(bak))
       fail(`${link} is a real folder and ${bak} already exists; resolve by hand.`);
     if (dry) {
@@ -134,9 +130,8 @@ function linkOne(label, src, link, stashRealDir = false) {
   console.log(`· linked ${link} -> ${src}`);
 }
 
-function unlinkOne(label, link) {
+function unlinkOne(label, link, bak) {
   const info = inspectLink(link);
-  const bak = `${link}.pre-dev`;
   if (info.kind === "symlink") {
     if (dry) console.log(`· would remove ${label} symlink ${link}`);
     else {
@@ -188,9 +183,14 @@ function link() {
       `${pluginDist(thisRoot)} is missing; build first (pnpm build) so Beekeeper can load the plugin.`,
     );
   }
-  linkOne("plugin", pluginSrc(thisRoot), pluginSlot());
+  linkOne("plugin", pluginSrc(thisRoot), pluginSlot(), pluginBackup());
   for (const dir of skillDirs())
-    linkOne("skill", skillSrc(thisRoot), join(dir, "gatekeeper"), true);
+    linkOne(
+      "skill",
+      skillSrc(thisRoot),
+      join(dir, "gatekeeper"),
+      skillBackup(join(dir, "gatekeeper")),
+    );
   console.log(`\n✓ Gatekeeper dev target: ${thisRoot}`);
   console.log(
     skillDirs().length
@@ -200,11 +200,12 @@ function link() {
 }
 
 function unlink() {
-  unlinkOne("plugin", pluginSlot());
-  for (const dir of skillDirs()) unlinkOne("skill", join(dir, "gatekeeper"));
+  unlinkOne("plugin", pluginSlot(), pluginBackup());
+  for (const dir of skillDirs())
+    unlinkOne("skill", join(dir, "gatekeeper"), skillBackup(join(dir, "gatekeeper")));
   console.log("\n✓ Dev symlinks removed. Restart Beekeeper and the agent session.");
   console.log(
-    "  Re-install from published to restore (Plugin Manager / npx skills add). MCP config is committed, nothing to undo.",
+    "  A slot with no stashed copy stays empty: re-install from published (Plugin Manager / npx skills add). MCP config is committed, nothing to undo.",
   );
 }
 
@@ -239,12 +240,13 @@ async function status() {
 
   console.log(`\nplugin slot: ${pluginSlot()}`);
   printSlot(inspectLink(pluginSlot()), primary, "plugin");
+  if (existsSync(pluginBackup())) console.log(`  stashed real folder: ${pluginBackup()}`);
 
   for (const dir of skillDirs()) {
     const link = join(dir, "gatekeeper");
     console.log(`\nskill slot: ${link}`);
     printSlot(inspectLink(link), primary, "skill");
-    if (existsSync(`${link}.pre-dev`)) console.log(`  stashed real folder: ${link}.pre-dev`);
+    if (existsSync(skillBackup(link))) console.log(`  stashed real folder: ${skillBackup(link)}`);
   }
 
   const up = await brokerAlive();

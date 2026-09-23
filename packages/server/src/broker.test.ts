@@ -1,8 +1,10 @@
 import { request } from "node:http";
 import type { AddressInfo } from "node:net";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createBroker } from "./broker.js";
 import { PAIRING_CODE_TTL_MS, PAIRING_IDLE_MS } from "./config.js";
+import { connectionScopeKey } from "./connection.js";
+import { EvaluationError } from "./evaluator.js";
 import { RequestStore } from "./store.js";
 
 const TOKEN = "test-capability-token";
@@ -20,6 +22,8 @@ interface Reply {
 let store: RequestStore;
 let server: ReturnType<typeof createBroker>;
 let port = 0;
+const evaluator = vi.fn();
+const keyChecker = vi.fn();
 
 function call(
   method: string,
@@ -61,7 +65,9 @@ function call(
 
 beforeEach(async () => {
   store = new RequestStore();
-  server = createBroker(store, "plug_test", TOKEN);
+  evaluator.mockReset();
+  keyChecker.mockReset();
+  server = createBroker(store, "plug_test", TOKEN, evaluator, keyChecker);
   await new Promise<void>((resolve) => {
     server.listen(0, "127.0.0.1", resolve);
   });
@@ -83,9 +89,272 @@ function mint(): string {
   return code.code;
 }
 
+describe("plugin-only automatic evaluation", () => {
+  function payload() {
+    const conn = {
+      connectionName: "test",
+      databaseType: "postgresql",
+      databaseName: "test",
+      schema: "public",
+      readOnly: false,
+      mode: "read",
+    };
+    store.setConnection(conn);
+    store.submit({ sessionId: "s1", sql: "SELECT quantity FROM public.products LIMIT 10" });
+    const proposal = store.claimNext("plug_test", 30000, connectionScopeKey(conn))!;
+    return {
+      id: proposal.id,
+      leaseId: proposal.leaseId,
+      scope: connectionScopeKey(conn),
+      key: "synthetic-key",
+      model: "jev-1.13.0",
+      policy: "auto-beta-6",
+      input: {
+        dialect: "postgresql",
+        sql: "SELECT quantity FROM public.products LIMIT 10",
+        dependencies: [
+          {
+            schema: "public",
+            table: "products",
+            column: "quantity",
+            type: "int4",
+            usage: "output",
+          },
+        ],
+      },
+    };
+  }
+  function answer(digest: string) {
+    return {
+      provider: "typesafe",
+      model: "jev-1.13.0",
+      policy: "auto-beta-6",
+      sqlDigest: digest,
+      evaluatedAt: Date.now(),
+      eligible: true,
+      reasons: [],
+      probabilities: {
+        read_only: 1,
+        personal_disclosure: 0,
+        secret_disclosure: 0,
+        organization_disclosure: 0,
+        insufficient_context: 0,
+      },
+    };
+  }
+  it("requires authentication and a matching live lease before inference", async () => {
+    const body = payload();
+    expect((await call("POST", "/evaluate", { body })).status).toBe(401);
+    expect(
+      (await call("POST", "/evaluate", { token: TOKEN, body: { ...body, leaseId: "wrong" } }))
+        .status,
+    ).toBe(409);
+    expect(
+      (await call("POST", "/evaluate", { token: TOKEN, body: { ...body, scope: "other" } })).status,
+    ).toBe(409);
+    expect(
+      (await call("POST", "/evaluate", { token: TOKEN, body: { ...body, model: "jev-latest" } }))
+        .status,
+    ).toBe(400);
+    expect(
+      (await call("POST", "/evaluate", { token: TOKEN, body: { ...body, policy: "auto-beta-2" } }))
+        .status,
+    ).toBe(400);
+    expect(evaluator).not.toHaveBeenCalled();
+  });
+  it("uses only issued decisions and stores attribution through result purging", async () => {
+    const body = payload();
+    evaluator.mockImplementation(async (_input, _key, _signal, digest) => answer(digest));
+    const evaluated = await call("POST", "/evaluate", { token: TOKEN, body });
+    expect(evaluated.status).toBe(200);
+    const approval = { source: "automatic", evaluation: JSON.parse(evaluated.body) };
+    const forged = {
+      ...approval,
+      evaluation: { ...approval.evaluation, evaluatedAt: Date.now() + 500 },
+    };
+    expect(
+      (
+        await call("POST", "/executing", {
+          token: TOKEN,
+          body: { id: body.id, leaseId: body.leaseId, approval: forged },
+        })
+      ).status,
+    ).toBe(409);
+    expect(
+      (
+        await call("POST", "/executing", {
+          token: TOKEN,
+          body: { id: body.id, leaseId: body.leaseId, approval },
+        })
+      ).status,
+    ).toBe(200);
+    await call("POST", "/result", {
+      token: TOKEN,
+      body: { id: body.id, leaseId: body.leaseId, status: "approved", rows: [], fields: [] },
+    });
+    expect(store.listActivity(body.scope)[0].approval).toEqual(approval);
+    expect(JSON.stringify(store.get(body.id))).not.toContain("synthetic-key");
+  });
+  it.each(["auto-beta-1", "auto-beta-2", "auto-beta-3"])(
+    "preserves %s attribution for human approval without granting automatic authority",
+    async (policy) => {
+      const body = payload();
+      const evaluation = { ...answer("a".repeat(64)), policy };
+      for (const source of ["automatic", "human"]) {
+        const result = await call("POST", "/executing", {
+          token: TOKEN,
+          body: { id: body.id, leaseId: body.leaseId, approval: { source, evaluation } },
+        });
+        expect(result.status).toBe(source === "human" ? 200 : 409);
+      }
+      await call("POST", "/result", {
+        token: TOKEN,
+        body: { id: body.id, leaseId: body.leaseId, status: "approved", rows: [], fields: [] },
+      });
+      expect(store.listActivity(body.scope)[0].approval).toEqual({ source: "human", evaluation });
+    },
+  );
+  it.each([false, true])(
+    "persists a plugin-reported hold with sent=%s outside result data",
+    async (sent) => {
+      const body = payload();
+      const autoHold = { sent, reason: "Sensitive source or alias: email" };
+      const reply = await call("POST", "/result", {
+        token: TOKEN,
+        body: { id: body.id, leaseId: body.leaseId, status: "rejected", autoHold },
+      });
+      expect(reply.status).toBe(200);
+      const saved = { sent, reason: "Sensitive source or alias" };
+      expect(store.get(body.id)?.policy).toMatchObject({ autoHold: saved });
+      expect(store.get(body.id)?.result).not.toHaveProperty("autoHold");
+      const activity = await call("GET", "/activity", { token: TOKEN });
+      expect(JSON.parse(activity.body).activity[0].autoHold).toEqual(saved);
+      expect(evaluator).not.toHaveBeenCalled();
+    },
+  );
+  it.each([
+    null,
+    { sent: "false", reason: "Metadata unavailable" },
+    { sent: false, reason: "" },
+    { sent: false, reason: "x".repeat(201) },
+    { sent: false, reason: "Metadata unavailable", rows: ["private value"] },
+  ])("rejects invalid hold metadata without resolving the request", async (autoHold) => {
+    const body = payload();
+    const reply = await call("POST", "/result", {
+      token: TOKEN,
+      body: { id: body.id, leaseId: body.leaseId, status: "rejected", autoHold },
+    });
+    expect(reply.status).toBe(400);
+    expect(reply.body).not.toContain("private value");
+    expect(store.get(body.id)?.state).toBe("leased");
+    expect(store.get(body.id)?.policy).toBeNull();
+  });
+  it("does not record a hold from a stale lease", async () => {
+    const body = payload();
+    const reply = await call("POST", "/result", {
+      token: TOKEN,
+      body: {
+        id: body.id,
+        leaseId: "wrong",
+        status: "rejected",
+        autoHold: { sent: false, reason: "Metadata unavailable" },
+      },
+    });
+    expect(reply.status).toBe(409);
+    expect(store.get(body.id)?.state).toBe("leased");
+    expect(store.get(body.id)?.policy).toBeNull();
+  });
+  it("discards answers after agent cancellation and limits concurrent evaluation", async () => {
+    const body = payload();
+    let resolve!: (v: unknown) => void;
+    evaluator.mockImplementation(
+      (_input, _key, _signal, digest) =>
+        new Promise((r) => {
+          resolve = () => r(answer(digest));
+        }),
+    );
+    const pending = call("POST", "/evaluate", { token: TOKEN, body });
+    await vi.waitFor(() => expect(evaluator).toHaveBeenCalledOnce());
+    expect((await call("POST", "/evaluate", { token: TOKEN, body })).status).toBe(409);
+    store.cancel(body.id, "s1");
+    resolve(null);
+    expect((await pending).status).toBe(409);
+  });
+  it("sanitizes provider failures and never changes a manual request into rejection", async () => {
+    const body = payload();
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      for (const [error, diagnostic] of [
+        [new Error("synthetic-key echoed by provider"), { stage: "internal" }],
+        [new EvaluationError("http", 422), { stage: "http", status: 422 }],
+        [new EvaluationError("response"), { stage: "response" }],
+      ] as const) {
+        evaluator.mockRejectedValue(error);
+        const result = await call("POST", "/evaluate", { token: TOKEN, body });
+        expect(result.status).toBe(503);
+        expect(JSON.parse(result.body).diagnostic).toEqual(diagnostic);
+        expect(result.body).not.toContain("synthetic-key");
+        expect(JSON.stringify(log.mock.calls)).not.toContain("synthetic-key");
+        expect(store.get(body.id)?.state).toBe("leased");
+      }
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("keeps a model concern in durable history after human rejection", async () => {
+    const body = payload();
+    evaluator.mockImplementation(async (_input, _key, _signal, digest) => ({
+      ...answer(digest),
+      eligible: false,
+      reasons: ["Potential personal disclosure"],
+      probabilities: { ...answer(digest).probabilities, personal_disclosure: 0.5 },
+    }));
+    expect((await call("POST", "/evaluate", { token: TOKEN, body })).status).toBe(200);
+    expect(store.get(body.id)?.state).toBe("leased");
+    await call("POST", "/result", {
+      token: TOKEN,
+      body: { id: body.id, leaseId: body.leaseId, status: "rejected", reason: "Not needed" },
+    });
+    expect(store.listActivity(body.scope)[0].evaluation?.reasons).toEqual([
+      "Potential personal disclosure",
+    ]);
+  });
+  it("withdraws a reservation without executing or settling the request", async () => {
+    const body = payload();
+    await call("POST", "/executing", {
+      token: TOKEN,
+      body: { id: body.id, leaseId: body.leaseId },
+    });
+    expect(
+      (
+        await call("POST", "/execution/withdraw", {
+          token: TOKEN,
+          body: { id: body.id, leaseId: body.leaseId },
+        })
+      ).status,
+    ).toBe(200);
+    expect(store.get(body.id)?.state).toBe("leased");
+  });
+});
+
 // A refused renewal used to say only "no". The plugin cannot act on that: a proposal put
 // back in the pool and one killed for good both refuse, and only the second deserves a
 // line in the human's resolved list.
+describe("API key check", () => {
+  it("answers only the paired plugin, with the provider's verdict and nothing else", async () => {
+    keyChecker.mockResolvedValue("invalid");
+    expect((await call("POST", "/evaluate/key", { body: { key: "k" } })).status).toBe(401);
+    expect(
+      (await call("POST", "/evaluate/key", { token: TOKEN, body: { key: "bad key" } })).status,
+    ).toBe(400);
+    const reply = await call("POST", "/evaluate/key", { token: TOKEN, body: { key: "k" } });
+    expect(reply.status).toBe(200);
+    expect(JSON.parse(reply.body)).toEqual({ status: "invalid" });
+    expect(keyChecker).toHaveBeenCalledOnce();
+  });
+});
+
 describe("a refused renewal reports where the request landed", () => {
   it("names the terminal state when the agent cancelled underneath the plugin", async () => {
     const { request: proposal } = store.submitNew({ sessionId: "s1", sql: "SELECT 1" });

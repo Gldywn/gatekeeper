@@ -1,5 +1,8 @@
+import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { isDeepStrictEqual } from "node:util";
 import type { AccessMode, ActivityEntry, Proposal, SessionRoster } from "@gatekeeper/shared";
+import { z } from "zod";
 import {
   BROKER_HOST,
   brokerPort,
@@ -11,6 +14,18 @@ import {
   PAIRING_MAX_ATTEMPTS,
 } from "./config.js";
 import { connectionScopeKey } from "./connection.js";
+import {
+  AUTO_MODEL,
+  AUTO_POLICY,
+  approvalAttribution,
+  autoHoldRecord,
+  checkKey,
+  EvaluationError,
+  type Evaluator,
+  evaluate,
+  evaluationInput,
+  type KeyChecker,
+} from "./evaluator.js";
 import { pairingPage } from "./pairing-page.js";
 import { type Outcome, type RequestStore, StoreError } from "./store.js";
 
@@ -26,6 +41,12 @@ const MAX_BODY_BYTES = 32 * 1024 * 1024;
 const PAIRING_BODY_BYTES = 1024;
 // The plugin polls at 1 Hz; coalesce its presence writes to this cadence.
 const PRESENCE_STAMP_MS = 15_000;
+// Printable ASCII only, the same rule the plugin applies before sending a key.
+const apiKey = z
+  .string()
+  .min(1)
+  .max(4096)
+  .regex(/^[\x21-\x7e]+$/);
 
 interface Broker {
   store: RequestStore;
@@ -34,9 +55,27 @@ interface Broker {
   token: string;
   /** Last presence stamp, so the plugin's 1 Hz poll does not write on every request. */
   stampedAt: number;
+  evaluator: Evaluator;
+  keyChecker: KeyChecker;
+  evaluating: boolean;
+  evaluations: Map<
+    string,
+    {
+      lease: string;
+      scope: string;
+      schema: string | null;
+      evaluation: import("@gatekeeper/shared").AutoEvaluation;
+    }
+  >;
 }
 
-export function createBroker(store: RequestStore, pluginId: string, token: string): Server {
+export function createBroker(
+  store: RequestStore,
+  pluginId: string,
+  token: string,
+  evaluator: Evaluator = evaluate,
+  keyChecker: KeyChecker = checkKey,
+): Server {
   const port = brokerPort();
   const broker: Broker = {
     store,
@@ -44,6 +83,10 @@ export function createBroker(store: RequestStore, pluginId: string, token: strin
     token,
     allowedHosts: new Set([`${BROKER_HOST}:${port}`, `localhost:${port}`]),
     stampedAt: 0,
+    evaluator,
+    keyChecker,
+    evaluating: false,
+    evaluations: new Map(),
   };
   return createServer((req, res) => {
     handle(broker, req, res).catch((err) => {
@@ -173,16 +216,167 @@ async function handle(broker: Broker, req: IncomingMessage, res: ServerResponse)
   if (req.method === "POST" && url.pathname === "/executing") {
     const body = await readJson(req);
     guarded(res, () => {
-      store.markExecuting(String(body.id), String(body.leaseId));
+      const approval =
+        body.approval === undefined
+          ? { source: "human" as const }
+          : approvalAttribution.parse(body.approval);
+      if (approval.source === "automatic") {
+        const row = store.get(String(body.id));
+        const issued = broker.evaluations.get(String(body.id));
+        const conn = store.getConnection();
+        if (
+          approval.evaluation?.policy !== AUTO_POLICY ||
+          !issued ||
+          issued.lease !== body.leaseId ||
+          !conn ||
+          conn.mode !== "read" ||
+          issued.scope !== connectionScopeKey(conn) ||
+          issued.schema !== conn.schema ||
+          !isDeepStrictEqual(issued.evaluation, approval.evaluation) ||
+          !approval.evaluation?.eligible ||
+          approval.evaluation.sqlDigest !==
+            createHash("sha256")
+              .update(row?.sql ?? "")
+              .digest("hex") ||
+          Date.now() - approval.evaluation.evaluatedAt > 30000
+        ) {
+          send(res, 409, { error: "Stale automatic decision" });
+          return;
+        }
+      }
+      store.markExecuting(String(body.id), String(body.leaseId), approval);
+      broker.evaluations.delete(String(body.id));
       send(res, 200, { ok: true });
     });
     return;
   }
 
+  if (req.method === "POST" && url.pathname === "/execution/withdraw") {
+    const body = await readJson(req, 4096);
+    guarded(res, () => {
+      store.withdrawExecution(String(body.id), String(body.leaseId));
+      send(res, 200, { ok: true });
+    });
+    return;
+  }
+
+  // Checked on each activation, so a refused key is caught before Auto mode turns on.
+  if (req.method === "POST" && url.pathname === "/evaluate/key") {
+    const parsed = z
+      .object({ key: apiKey })
+      .strict()
+      .safeParse(await readJson(req, 8192));
+    if (!parsed.success) {
+      send(res, 400, { error: "Invalid key" });
+      return;
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    const closed = () => controller.abort();
+    res.on("close", closed);
+    try {
+      send(res, 200, { status: await broker.keyChecker(parsed.data.key, controller.signal) });
+    } finally {
+      clearTimeout(timer);
+      res.off("close", closed);
+    }
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/evaluate") {
+    const parsed = z
+      .object({
+        id: z.string().max(100),
+        leaseId: z.string().max(100),
+        scope: z.string().max(1000),
+        model: z.literal(AUTO_MODEL),
+        policy: z.literal(AUTO_POLICY),
+        key: apiKey,
+        input: evaluationInput,
+      })
+      .strict()
+      .safeParse(await readJson(req, 32000));
+    if (!parsed.success) {
+      send(res, 400, {
+        error: "Invalid evaluation input",
+        diagnostic: { stage: "input", model: AUTO_MODEL, policy: AUTO_POLICY },
+      });
+      return;
+    }
+    const body = parsed.data;
+    const live = () => {
+      const row = store.get(body.id);
+      const conn = store.getConnection();
+      return (
+        row?.state === "leased" &&
+        row.pluginId === pluginId &&
+        row.leaseId === body.leaseId &&
+        (row.leaseExpiresAt ?? 0) > Date.now() &&
+        row.expiresAt > Date.now() &&
+        conn?.mode === "read" &&
+        connectionScopeKey(conn) === body.scope &&
+        (!row.connection || row.connection === body.scope)
+      );
+    };
+    if (broker.evaluating || !live()) {
+      send(res, 409, { error: "Evaluation unavailable or lease lost" });
+      return;
+    }
+    broker.evaluating = true;
+    const connection = store.getConnection()!;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 12000);
+    const closed = () => controller.abort();
+    res.on("close", closed);
+    try {
+      const digest = createHash("sha256").update(store.get(body.id)!.sql).digest("hex");
+      const evaluation = await broker.evaluator(body.input, body.key, controller.signal, digest);
+      if (
+        controller.signal.aborted ||
+        !live() ||
+        store.getConnection()?.schema !== connection.schema
+      ) {
+        send(res, 409, { error: "Evaluation cancelled or lease lost" });
+        return;
+      }
+      for (const [id, entry] of broker.evaluations) {
+        if (Date.now() - entry.evaluation.evaluatedAt > 30000) broker.evaluations.delete(id);
+      }
+      if (broker.evaluations.size >= 64)
+        broker.evaluations.delete(broker.evaluations.keys().next().value!);
+      broker.evaluations.set(body.id, {
+        lease: body.leaseId,
+        scope: body.scope,
+        schema: connection.schema,
+        evaluation,
+      });
+      store.recordEvaluation(body.id, body.leaseId, evaluation);
+      send(res, 200, evaluation);
+    } catch (error) {
+      // Provider bodies and exceptions can contain credentials or query-derived data.
+      const diagnostic =
+        error instanceof EvaluationError
+          ? { stage: error.stage, status: error.status }
+          : { stage: "internal" };
+      console.error(`[gatekeeper] Evaluation failed: ${JSON.stringify(diagnostic)}`);
+      send(res, 503, { error: "Evaluator unavailable; review manually", diagnostic });
+    } finally {
+      clearTimeout(timer);
+      res.off("close", closed);
+      broker.evaluating = false;
+    }
+    return;
+  }
+
   if (req.method === "POST" && url.pathname === "/result") {
     const body = await readJson(req);
+    const hold = autoHoldRecord.optional().safeParse(body.autoHold);
+    if (!hold.success) {
+      send(res, 400, { error: "Invalid Auto mode hold" });
+      return;
+    }
     guarded(res, () => {
-      store.resolve(String(body.id), String(body.leaseId), toOutcome(body));
+      store.resolve(String(body.id), String(body.leaseId), toOutcome(body), hold.data);
       send(res, 200, { ok: true });
     });
     return;

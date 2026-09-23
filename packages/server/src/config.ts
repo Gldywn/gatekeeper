@@ -7,8 +7,8 @@ export const POLL_MS = 250;
 export const PROPOSAL_TTL_MS = 15 * 60_000;
 // Keep an approved result long enough for the agent to fetch it, then strip it.
 export const RESULT_TTL_MS = 10 * 60_000;
-// Delete terminal requests, old audit rows, and dead sessions after this, so a
-// long-lived database does not grow without bound.
+// Technical events and unreferenced inactive sessions expire. Decided requests
+// and their referenced session metadata remain in the local Audit Trail.
 export const RETENTION_MS = 24 * 60 * 60_000;
 export const MAX_PENDING_PER_SESSION = 32;
 export const SWEEP_INTERVAL_MS = 5_000;

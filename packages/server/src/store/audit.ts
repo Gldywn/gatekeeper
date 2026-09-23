@@ -51,12 +51,23 @@ export function listActivity(
 ): ActivityEntry[] {
   const rows = ctx.db
     .prepare(
-      `SELECT r.id, r.created_at, r.decided_at, r.session_id, r.sql, r.intent, r.state, r.result_json,
+      `WITH recent AS (
+         SELECT * FROM (
+           SELECT id, decided_at FROM requests
+           WHERE decided_at IS NOT NULL AND connection = @connection
+           ORDER BY decided_at DESC, id DESC LIMIT @limit
+         )
+         UNION ALL
+         SELECT * FROM (
+           SELECT id, decided_at FROM requests
+           WHERE decided_at IS NOT NULL AND connection IS NULL
+           ORDER BY decided_at DESC, id DESC LIMIT @limit
+         )
+       )
+       SELECT r.id, r.created_at, r.decided_at, r.session_id, r.sql, r.intent, r.state, r.result_json, r.policy_json,
            s.harness, s.project, s.session_label
-         FROM requests r
+         FROM recent JOIN requests r ON r.id = recent.id
          LEFT JOIN sessions s ON s.session_id = r.session_id
-         WHERE r.decided_at IS NOT NULL
-           AND (r.connection IS NULL OR r.connection = @connection)
          ORDER BY r.decided_at DESC, r.id DESC
          LIMIT @limit`,
     )
@@ -69,6 +80,7 @@ export function listActivity(
     intent: string | null;
     state: RequestState;
     result_json: string | null;
+    policy_json: string | null;
     harness: string | null;
     project: string | null;
     session_label: string | null;
@@ -89,6 +101,10 @@ export function listActivity(
       reason: facts.reason,
       error: facts.error,
       rowCount: facts.rowCount,
+      affectedRows: facts.affectedRows,
+      approval: row.policy_json ? JSON.parse(row.policy_json).approval : undefined,
+      evaluation: row.policy_json ? JSON.parse(row.policy_json).evaluation : undefined,
+      autoHold: row.policy_json ? JSON.parse(row.policy_json).autoHold : undefined,
     };
   });
 }

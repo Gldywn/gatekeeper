@@ -6,6 +6,8 @@ export interface HistResult {
   fields: Field[];
   rows: Record<string, unknown>[];
   rowCount: number;
+  /** Rows a write changed. Absent means the host did not report it, never zero. */
+  affectedRows?: number;
   truncated: boolean;
   // Serialized size of the held rows, cached so the history budget never re-stringifies.
   bytes?: number;
@@ -32,6 +34,7 @@ export function capResult(
   fields: Field[],
   budgetBytes = Number.MAX_SAFE_INTEGER,
   maxRows = HIST_MAX_ROWS,
+  affectedRows?: number,
 ): HistResult {
   const rowCount = rows.length;
   let kept = rows.slice(0, maxRows);
@@ -42,5 +45,12 @@ export function capResult(
     bytes = JSON.stringify(kept).length;
     truncated = true;
   }
-  return { fields, rows: kept, rowCount, truncated, bytes };
+  return {
+    fields,
+    rows: kept,
+    rowCount,
+    truncated,
+    bytes,
+    ...(affectedRows === undefined ? {} : { affectedRows }),
+  };
 }
