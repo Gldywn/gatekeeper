@@ -1,7 +1,7 @@
 ---
 name: update-gatekeeper
 description: Check whether an existing Gatekeeper install is current and bring it up to date across all three pieces (the Beekeeper Studio plugin, the MCP server, the skills), acting only on what is actually behind. Use when someone asks to update or upgrade Gatekeeper, asks whether they are running the latest version, mentions a new Gatekeeper release, or wants to know which version of Gatekeeper they have.
-version: 1.0.1
+version: 0.3.0 # x-release-please-version
 ---
 
 # Update Gatekeeper
@@ -71,11 +71,11 @@ Either of the last two needs **an agent session restart** to take effect. The fi
 
 ## Piece 3: the skills
 
-The `gatekeeper` and `install-gatekeeper` skills carry their own version in their frontmatter, on their own scale, which does not map to the release version. Do not compare those numbers to the release and do not report a verdict from them: let the CLI do it.
+All three skills carry the Gatekeeper release version in their frontmatter. Use `skills list` to locate each installed `SKILL.md`, then compare its `version` with the latest release. Before this alignment, `gatekeeper` used `1.4.0` and the other two used `1.0.1`. Treat those as older even though their numbers are higher than `0.3.0`. A lower release version needs an update. The same number means the skill belongs to that release, but does not prove that an installation from a moving branch has identical contents.
 
 ```bash
 npx skills list                                              # what is installed, and where
-npx skills add Gldywn/gatekeeper -s '*' -a <agent-id> -g -y  # re-adds both, overwriting in place
+npx skills add Gldywn/gatekeeper -s '*' -a <agent-id> -g -y  # re-adds all three, overwriting in place
 ```
 
 The agent id is `claude-code`, `codex`, `opencode`, `cursor` or `gemini-cli`; `-g` for the user-level install, `-y` to skip the prompts. Never run the interactive form yourself, it waits for a keypress that never comes. `npx skills update` is the shorter form and worth trying first, but re-adding is the one that is always correct, so fall back to it rather than trusting a run whose output you cannot read clearly.
@@ -87,11 +87,11 @@ A skill change is picked up at **the next agent session**, same restart as above
 Always print all three lines, even when they are all current, and keep the restarts to the end so the human does them once:
 
 ```
-Gatekeeper, latest release 0.2.0
+Gatekeeper, latest release <version>
 
-- Plugin      0.1.1 -> 0.2.0, updated in place
+- Plugin      <installed> -> <version>, updated in place
 - MCP server  npx unpinned, current at your next agent launch, nothing to do
-- Skills      updated (gatekeeper 1.4.0, install-gatekeeper 1.0.0)
+- Skills      updated (gatekeeper <installed> -> <version>, install-gatekeeper <installed> -> <version>, update-gatekeeper <installed> -> <version>)
 
 Your turn
 1. Restart Beekeeper Studio to load the new plugin.

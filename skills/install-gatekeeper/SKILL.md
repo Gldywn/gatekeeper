@@ -1,7 +1,7 @@
 ---
 name: install-gatekeeper
 description: Install Gatekeeper end to end and leave it working, meaning the Beekeeper Studio plugin, the MCP server registered with the agent, the companion gatekeeper skill, and the one-time pairing. Do every part the environment allows, then hand the human a precise checklist for the rest. Use when someone asks to install, set up, finish setting up, update, uninstall or repair Gatekeeper, when the Gatekeeper MCP tools are missing or the server will not connect, or when the plugin has never been installed or paired.
-version: 1.0.1
+version: 0.3.0 # x-release-please-version
 ---
 
 # Install Gatekeeper
@@ -150,7 +150,7 @@ Two choices worth putting to the human rather than deciding for them. **Pinning:
 
 The `gatekeeper` skill is what teaches an agent to use the tools well: name the session, wait properly for a human decision instead of ending the turn on a pending query, write an intent a reviewer can approve at a glance. Without it an agent has the tools and none of the protocol, which mostly shows up as queries abandoned while the human was still deciding.
 
-It probably arrived with this one, since `npx skills add Gldywn/gatekeeper` offers both. Check first with `npx skills list`, which reports what is installed where. Failing that, look for a `gatekeeper` folder in the agent's skills directory: per project it is `.claude/skills/` for Claude Code and `.agents/skills/` for Codex, Cursor, OpenCode and most others, while the user-level folder differs per agent (`~/.claude/skills/`, `~/.cursor/skills/`, `~/.config/opencode/skills/`), which is exactly why `npx skills list` is the reliable check.
+It probably arrived with this one, since `npx skills add Gldywn/gatekeeper` offers all three skills. Check first with `npx skills list`, which reports what is installed where. Failing that, look for a `gatekeeper` folder in the agent's skills directory: per project it is `.claude/skills/` for Claude Code and `.agents/skills/` for Codex, Cursor, OpenCode and most others, while the user-level folder differs per agent (`~/.claude/skills/`, `~/.cursor/skills/`, `~/.config/opencode/skills/`), which is exactly why `npx skills list` is the reliable check.
 
 If it is missing:
 
