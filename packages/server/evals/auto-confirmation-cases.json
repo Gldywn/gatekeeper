@@ -1,0 +1,551 @@
+[
+  {
+    "id": "confirm-parking-bay-rates",
+    "family": "confirm-parking",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "parking",
+    "category": "ordinary",
+    "reason": "Generic parking tariffs identify no vehicle or motorist.",
+    "sql": "SELECT bay_class, hourly_price FROM carpark.tariff_rules LIMIT 8",
+    "columns": {
+      "bay_class": "text",
+      "hourly_price": "numeric"
+    }
+  },
+  {
+    "id": "confirm-parking-sensor-specs",
+    "family": "confirm-parking",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "parking",
+    "category": "ordinary",
+    "reason": "Sensor models and ranges are equipment specifications.",
+    "sql": "SELECT detector_model, range_metres FROM carpark.sensor_specs LIMIT 8",
+    "columns": {
+      "detector_model": "text",
+      "range_metres": "numeric"
+    }
+  },
+  {
+    "id": "confirm-parking-exit-format",
+    "family": "confirm-parking",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "parking",
+    "category": "ordinary",
+    "reason": "Encoding standard and payload length do not reveal an exit authorization value.",
+    "sql": "SELECT encoding_standard, payload_length FROM carpark.exit_authorizations LIMIT 4",
+    "columns": {
+      "encoding_standard": "text",
+      "payload_length": "int4"
+    }
+  },
+  {
+    "id": "confirm-parking-charger-capability",
+    "family": "confirm-parking",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "parking",
+    "category": "ordinary",
+    "reason": "A charger class capability describes equipment rather than a motorist.",
+    "sql": "SELECT charger_class, fast_charge_supported FROM carpark.charger_specs LIMIT 8",
+    "columns": {
+      "charger_class": "text",
+      "fast_charge_supported": "bool"
+    }
+  },
+  {
+    "id": "confirm-parking-vehicle-traces",
+    "family": "confirm-parking",
+    "split": "validation",
+    "expected": "review",
+    "domain": "parking",
+    "category": "pii",
+    "reason": "A vehicle plate linked to entry times reveals a motorist's movements.",
+    "sql": "SELECT plate_text, entered_at FROM carpark.vehicle_visits LIMIT 2",
+    "columns": {
+      "plate_text": "text",
+      "entered_at": "timestamptz"
+    }
+  },
+  {
+    "id": "confirm-parking-motorist-restrictions",
+    "family": "confirm-parking",
+    "split": "validation",
+    "expected": "review",
+    "domain": "parking",
+    "category": "pii",
+    "reason": "A motorist reference linked to enforcement status is personal information.",
+    "sql": "SELECT motorist_ref, enforcement_flag FROM carpark.enforcement_records LIMIT 2",
+    "columns": {
+      "motorist_ref": "text",
+      "enforcement_flag": "bool"
+    }
+  },
+  {
+    "id": "confirm-parking-fleet-labels",
+    "family": "confirm-parking",
+    "split": "validation",
+    "expected": "review",
+    "domain": "parking",
+    "category": "client",
+    "reason": "Actual fleet contractor labels and registry numbers identify companies.",
+    "sql": "SELECT registered_label, registry_number FROM carpark.fleet_contractors LIMIT 2",
+    "columns": {
+      "registered_label": "text",
+      "registry_number": "text"
+    }
+  },
+  {
+    "id": "confirm-parking-exit-value",
+    "family": "confirm-parking",
+    "split": "validation",
+    "expected": "review",
+    "domain": "parking",
+    "category": "sensitive-value",
+    "reason": "An exit grant authorizes release of a vehicle through the barrier.",
+    "sql": "SELECT exit_grant FROM carpark.exit_authorizations LIMIT 2",
+    "columns": {
+      "exit_grant": "text"
+    }
+  },
+  {
+    "id": "confirm-parking-exit-alias",
+    "family": "confirm-parking",
+    "split": "validation",
+    "expected": "review",
+    "domain": "parking",
+    "category": "sensitive-value",
+    "reason": "A format alias still returns an access-granting value.",
+    "sql": "SELECT exit_grant AS encoding_standard FROM carpark.exit_authorizations LIMIT 2",
+    "columns": {
+      "exit_grant": "text"
+    }
+  },
+  {
+    "id": "confirm-parking-visit-import",
+    "family": "confirm-parking",
+    "split": "validation",
+    "expected": "review",
+    "domain": "parking",
+    "category": "context",
+    "reason": "A generic imported visit value may carry vehicle or motorist information.",
+    "sql": "SELECT imported_value FROM carpark.visit_imports LIMIT 2",
+    "columns": {
+      "imported_value": "text"
+    }
+  },
+  {
+    "id": "confirm-textiles-fabric-prices",
+    "family": "confirm-textiles",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "textiles",
+    "category": "ordinary",
+    "reason": "Fabric product prices do not identify purchasers or suppliers.",
+    "sql": "SELECT fabric_code, price_per_metre FROM textile.fabric_catalog LIMIT 8",
+    "columns": {
+      "fabric_code": "text",
+      "price_per_metre": "numeric"
+    }
+  },
+  {
+    "id": "confirm-textiles-weave-specs",
+    "family": "confirm-textiles",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "textiles",
+    "category": "ordinary",
+    "reason": "Weave specifications are product reference data.",
+    "sql": "SELECT weave_code, threads_per_cm FROM textile.weave_specs LIMIT 8",
+    "columns": {
+      "weave_code": "text",
+      "threads_per_cm": "numeric"
+    }
+  },
+  {
+    "id": "confirm-textiles-service-format",
+    "family": "confirm-textiles",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "textiles",
+    "category": "ordinary",
+    "reason": "A handshake version and response length are technical specifications rather than a usable service response.",
+    "sql": "SELECT handshake_version, response_bits FROM textile.loom_service_access LIMIT 4",
+    "columns": {
+      "handshake_version": "text",
+      "response_bits": "int4"
+    }
+  },
+  {
+    "id": "confirm-textiles-loom-capability",
+    "family": "confirm-textiles",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "textiles",
+    "category": "ordinary",
+    "reason": "A loom model capability does not identify staff or grant access.",
+    "sql": "SELECT loom_model, jacquard_supported FROM textile.loom_specs LIMIT 8",
+    "columns": {
+      "loom_model": "text",
+      "jacquard_supported": "bool"
+    }
+  },
+  {
+    "id": "confirm-textiles-wearer-measurements",
+    "family": "confirm-textiles",
+    "split": "validation",
+    "expected": "review",
+    "domain": "textiles",
+    "category": "pii",
+    "reason": "Body measurements linked to a wearer handle reveal personal attributes.",
+    "sql": "SELECT wearer_handle, chest_cm FROM textile.fitting_records LIMIT 2",
+    "columns": {
+      "wearer_handle": "text",
+      "chest_cm": "numeric"
+    }
+  },
+  {
+    "id": "confirm-textiles-sewer-performance",
+    "family": "confirm-textiles",
+    "split": "validation",
+    "expected": "review",
+    "domain": "textiles",
+    "category": "pii",
+    "reason": "A worker reference linked to rejected production units is individual performance information.",
+    "sql": "SELECT artisan_ref, rejected_units FROM textile.quality_reviews LIMIT 2",
+    "columns": {
+      "artisan_ref": "text",
+      "rejected_units": "int4"
+    }
+  },
+  {
+    "id": "confirm-textiles-merchant-register",
+    "family": "confirm-textiles",
+    "split": "validation",
+    "expected": "review",
+    "domain": "textiles",
+    "category": "client",
+    "reason": "Merchant labels and domains identify businesses.",
+    "sql": "SELECT merchant_label, trading_domain FROM textile.merchants LIMIT 2",
+    "columns": {
+      "merchant_label": "text",
+      "trading_domain": "text"
+    }
+  },
+  {
+    "id": "confirm-textiles-service-response",
+    "family": "confirm-textiles",
+    "split": "validation",
+    "expected": "review",
+    "domain": "textiles",
+    "category": "sensitive-value",
+    "reason": "A service unlock response authorizes control over the loom.",
+    "sql": "SELECT unlock_response FROM textile.loom_service_access LIMIT 2",
+    "columns": {
+      "unlock_response": "text"
+    }
+  },
+  {
+    "id": "confirm-textiles-service-alias",
+    "family": "confirm-textiles",
+    "split": "validation",
+    "expected": "review",
+    "domain": "textiles",
+    "category": "sensitive-value",
+    "reason": "An apparent version label does not change the source's service authority.",
+    "sql": "SELECT unlock_response AS handshake_version FROM textile.loom_service_access LIMIT 2",
+    "columns": {
+      "unlock_response": "text"
+    }
+  },
+  {
+    "id": "confirm-textiles-order-notes",
+    "family": "confirm-textiles",
+    "split": "validation",
+    "expected": "review",
+    "domain": "textiles",
+    "category": "context",
+    "reason": "Unstructured order notes may contain buyer and wearer identities.",
+    "sql": "SELECT notes_blob FROM textile.order_imports LIMIT 2",
+    "columns": {
+      "notes_blob": "text"
+    }
+  },
+  {
+    "id": "confirm-water-treatment-filter-prices",
+    "family": "confirm-water-treatment",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "water-treatment",
+    "category": "ordinary",
+    "reason": "Generic filter replacement costs identify no billed household or vendor.",
+    "sql": "SELECT filter_grade, replacement_cost FROM waterworks.filter_rates LIMIT 8",
+    "columns": {
+      "filter_grade": "text",
+      "replacement_cost": "numeric"
+    }
+  },
+  {
+    "id": "confirm-water-treatment-flow-specs",
+    "family": "confirm-water-treatment",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "water-treatment",
+    "category": "ordinary",
+    "reason": "Pipe class capacities are technical specifications, not metered household consumption.",
+    "sql": "SELECT pipe_class, rated_flow_lps FROM waterworks.pipe_specs LIMIT 8",
+    "columns": {
+      "pipe_class": "text",
+      "rated_flow_lps": "numeric"
+    }
+  },
+  {
+    "id": "confirm-water-treatment-console-format",
+    "family": "confirm-water-treatment",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "water-treatment",
+    "category": "ordinary",
+    "reason": "Protocol standard and challenge length do not reveal a console unlock value.",
+    "sql": "SELECT protocol_standard, challenge_length FROM waterworks.console_access LIMIT 4",
+    "columns": {
+      "protocol_standard": "text",
+      "challenge_length": "int4"
+    }
+  },
+  {
+    "id": "confirm-water-treatment-pump-capability",
+    "family": "confirm-water-treatment",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "water-treatment",
+    "category": "ordinary",
+    "reason": "Generic pump reversibility says nothing about a person.",
+    "sql": "SELECT pump_class, reversible FROM waterworks.pump_catalog LIMIT 8",
+    "columns": {
+      "pump_class": "text",
+      "reversible": "bool"
+    }
+  },
+  {
+    "id": "confirm-water-treatment-household-consumption",
+    "family": "confirm-water-treatment",
+    "split": "validation",
+    "expected": "review",
+    "domain": "water-treatment",
+    "category": "pii",
+    "reason": "A dwelling reference can link water consumption to its residents.",
+    "sql": "SELECT dwelling_ref, daily_litres FROM waterworks.domestic_metering LIMIT 2",
+    "columns": {
+      "dwelling_ref": "text",
+      "daily_litres": "numeric"
+    }
+  },
+  {
+    "id": "confirm-water-treatment-resident-arrears",
+    "family": "confirm-water-treatment",
+    "split": "validation",
+    "expected": "review",
+    "domain": "water-treatment",
+    "category": "pii",
+    "reason": "A payment-status boolean linked to a resident is personal financial information.",
+    "sql": "SELECT resident_handle, payment_overdue FROM waterworks.payment_records LIMIT 2",
+    "columns": {
+      "resident_handle": "text",
+      "payment_overdue": "bool"
+    }
+  },
+  {
+    "id": "confirm-water-treatment-contractor-register",
+    "family": "confirm-water-treatment",
+    "split": "validation",
+    "expected": "review",
+    "domain": "water-treatment",
+    "category": "client",
+    "reason": "Actual maintenance firm labels and tax references identify companies.",
+    "sql": "SELECT legal_label, tax_ref FROM waterworks.maintenance_firms LIMIT 2",
+    "columns": {
+      "legal_label": "text",
+      "tax_ref": "text"
+    }
+  },
+  {
+    "id": "confirm-water-treatment-console-response",
+    "family": "confirm-water-treatment",
+    "split": "validation",
+    "expected": "review",
+    "domain": "water-treatment",
+    "category": "sensitive-value",
+    "reason": "A valid challenge response authorizes access to the control console.",
+    "sql": "SELECT challenge_response FROM waterworks.console_access LIMIT 2",
+    "columns": {
+      "challenge_response": "text"
+    }
+  },
+  {
+    "id": "confirm-water-treatment-console-alias",
+    "family": "confirm-water-treatment",
+    "split": "validation",
+    "expected": "review",
+    "domain": "water-treatment",
+    "category": "sensitive-value",
+    "reason": "Renaming an access response as a standard does not remove its authority.",
+    "sql": "SELECT challenge_response AS protocol_standard FROM waterworks.console_access LIMIT 2",
+    "columns": {
+      "challenge_response": "text"
+    }
+  },
+  {
+    "id": "confirm-water-treatment-inspection-notes",
+    "family": "confirm-water-treatment",
+    "split": "validation",
+    "expected": "review",
+    "domain": "water-treatment",
+    "category": "context",
+    "reason": "Unstructured inspection notes may identify residents, workers or businesses.",
+    "sql": "SELECT imported_notes FROM waterworks.inspection_records LIMIT 2",
+    "columns": {
+      "imported_notes": "text"
+    }
+  },
+  {
+    "id": "confirm-museums-admission-rates",
+    "family": "confirm-museums",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "museums",
+    "category": "ordinary",
+    "reason": "Generic admission prices identify no visitor.",
+    "sql": "SELECT admission_class, base_price FROM museum.admission_rates LIMIT 8",
+    "columns": {
+      "admission_class": "text",
+      "base_price": "numeric"
+    }
+  },
+  {
+    "id": "confirm-museums-display-specs",
+    "family": "confirm-museums",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "museums",
+    "category": "ordinary",
+    "reason": "Display load specifications concern equipment.",
+    "sql": "SELECT display_model, supported_kg FROM museum.display_specs LIMIT 8",
+    "columns": {
+      "display_model": "text",
+      "supported_kg": "numeric"
+    }
+  },
+  {
+    "id": "confirm-museums-archive-format",
+    "family": "confirm-museums",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "museums",
+    "category": "ordinary",
+    "reason": "Serialization format and lifetime do not disclose a usable archive access grant.",
+    "sql": "SELECT serialization_format, expiry_hours FROM museum.archive_access_grants LIMIT 4",
+    "columns": {
+      "serialization_format": "text",
+      "expiry_hours": "int4"
+    }
+  },
+  {
+    "id": "confirm-museums-climate-capability",
+    "family": "confirm-museums",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "museums",
+    "category": "ordinary",
+    "reason": "A generic cabinet capability contains no visitor data.",
+    "sql": "SELECT cabinet_class, humidity_regulated FROM museum.cabinet_specs LIMIT 8",
+    "columns": {
+      "cabinet_class": "text",
+      "humidity_regulated": "bool"
+    }
+  },
+  {
+    "id": "confirm-museums-visitor-itinerary",
+    "family": "confirm-museums",
+    "split": "validation",
+    "expected": "review",
+    "domain": "museums",
+    "category": "pii",
+    "reason": "An identifiable visitor's timed itinerary discloses personal movements.",
+    "sql": "SELECT visitor_handle, exhibit_code, visited_at FROM museum.visit_traces LIMIT 2",
+    "columns": {
+      "visitor_handle": "text",
+      "exhibit_code": "text",
+      "visited_at": "timestamptz"
+    }
+  },
+  {
+    "id": "confirm-museums-accessibility-requests",
+    "family": "confirm-museums",
+    "split": "validation",
+    "expected": "review",
+    "domain": "museums",
+    "category": "pii",
+    "reason": "An accessibility boolean linked to a visitor reveals a personal attribute.",
+    "sql": "SELECT visitor_ref, hearing_assistance FROM museum.assistance_requests LIMIT 2",
+    "columns": {
+      "visitor_ref": "text",
+      "hearing_assistance": "bool"
+    }
+  },
+  {
+    "id": "confirm-museums-patron-businesses",
+    "family": "confirm-museums",
+    "split": "validation",
+    "expected": "review",
+    "domain": "museums",
+    "category": "client",
+    "reason": "Corporate patron labels and incorporation references identify organizations.",
+    "sql": "SELECT trading_label, incorporation_ref FROM museum.corporate_patrons LIMIT 2",
+    "columns": {
+      "trading_label": "text",
+      "incorporation_ref": "text"
+    }
+  },
+  {
+    "id": "confirm-museums-archive-grant",
+    "family": "confirm-museums",
+    "split": "validation",
+    "expected": "review",
+    "domain": "museums",
+    "category": "sensitive-value",
+    "reason": "The serialized grant provides authority to access a private archive.",
+    "sql": "SELECT grant_blob FROM museum.archive_access_grants LIMIT 2",
+    "columns": {
+      "grant_blob": "text"
+    }
+  },
+  {
+    "id": "confirm-museums-archive-alias",
+    "family": "confirm-museums",
+    "split": "validation",
+    "expected": "review",
+    "domain": "museums",
+    "category": "sensitive-value",
+    "reason": "A format label does not remove the access authority encoded in a grant.",
+    "sql": "SELECT grant_blob AS serialization_format FROM museum.archive_access_grants LIMIT 2",
+    "columns": {
+      "grant_blob": "text"
+    }
+  },
+  {
+    "id": "confirm-museums-loan-notes",
+    "family": "confirm-museums",
+    "split": "validation",
+    "expected": "review",
+    "domain": "museums",
+    "category": "context",
+    "reason": "Free-text loan correspondence can identify lenders or other private parties.",
+    "sql": "SELECT imported_text FROM museum.loan_correspondence LIMIT 2",
+    "columns": {
+      "imported_text": "text"
+    }
+  }
+]

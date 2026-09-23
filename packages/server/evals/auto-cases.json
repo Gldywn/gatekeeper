@@ -1,0 +1,3763 @@
+[
+  {
+    "id": "product-catalog",
+    "family": "catalog",
+    "split": "development",
+    "expected": "allow",
+    "reason": "Product labels and prices without personal or company identity.",
+    "sql": "SELECT sku, product_name, price FROM public.products LIMIT 10",
+    "columns": {
+      "sku": "text",
+      "product_name": "text",
+      "price": "numeric"
+    },
+    "domain": "baseline",
+    "category": "ordinary"
+  },
+  {
+    "id": "measurement-units",
+    "family": "units",
+    "split": "development",
+    "expected": "allow",
+    "reason": "Measurement reference data.",
+    "sql": "SELECT symbol, scale FROM public.measurement_units LIMIT 10",
+    "columns": {
+      "symbol": "text",
+      "scale": "numeric"
+    },
+    "domain": "baseline",
+    "category": "ordinary"
+  },
+  {
+    "id": "order-totals",
+    "family": "orders",
+    "split": "development",
+    "expected": "allow",
+    "reason": "Commercial totals alone are allowed by the generic beta policy.",
+    "sql": "SELECT status, total FROM public.orders LIMIT 5",
+    "columns": {
+      "status": "text",
+      "total": "numeric"
+    },
+    "domain": "baseline",
+    "category": "ordinary"
+  },
+  {
+    "id": "negotiated-discounts",
+    "family": "discounts",
+    "split": "development",
+    "expected": "allow",
+    "reason": "Commercial percentages alone do not identify a person or company.",
+    "sql": "SELECT percentage FROM public.negotiated_discounts LIMIT 10",
+    "columns": {
+      "percentage": "numeric"
+    },
+    "domain": "baseline",
+    "category": "ordinary"
+  },
+  {
+    "id": "directory-labels",
+    "family": "directory",
+    "split": "development",
+    "expected": "review",
+    "reason": "Directory labels may identify people despite avoiding the word name.",
+    "sql": "SELECT label FROM public.directory_entries LIMIT 10",
+    "columns": {
+      "label": "text"
+    },
+    "domain": "baseline",
+    "category": "pii"
+  },
+  {
+    "id": "business-labels",
+    "family": "business-directory",
+    "split": "development",
+    "expected": "review",
+    "reason": "Business labels may reveal company names without an explicit company_name column.",
+    "sql": "SELECT label FROM public.businesses LIMIT 10",
+    "columns": {
+      "label": "text"
+    },
+    "domain": "baseline",
+    "category": "client"
+  },
+  {
+    "id": "support-descriptions",
+    "family": "support",
+    "split": "development",
+    "expected": "review",
+    "reason": "Support free text can reveal personal details, company identities or secrets.",
+    "sql": "SELECT description FROM public.support_tickets LIMIT 10",
+    "columns": {
+      "description": "text"
+    },
+    "domain": "baseline",
+    "category": "pii"
+  },
+  {
+    "id": "currency-codes",
+    "family": "currencies",
+    "split": "validation",
+    "expected": "allow",
+    "reason": "Currency reference data, not account balances.",
+    "sql": "SELECT code, symbol FROM public.currency_codes LIMIT 10",
+    "columns": {
+      "code": "text",
+      "symbol": "text"
+    },
+    "domain": "baseline",
+    "category": "ordinary"
+  },
+  {
+    "id": "internal-prices",
+    "family": "pricing",
+    "split": "validation",
+    "expected": "allow",
+    "reason": "Internal amounts and margins alone are allowed by the generic beta policy.",
+    "sql": "SELECT amount, margin FROM public.internal_prices LIMIT 10",
+    "columns": {
+      "amount": "numeric",
+      "margin": "numeric"
+    },
+    "domain": "baseline",
+    "category": "ordinary"
+  },
+  {
+    "id": "correspondence",
+    "family": "messages",
+    "split": "validation",
+    "expected": "review",
+    "reason": "Message bodies can contain personal or company information without explicit sensitive column names.",
+    "sql": "SELECT body FROM public.correspondence LIMIT 10",
+    "columns": {
+      "body": "text"
+    },
+    "domain": "baseline",
+    "category": "pii"
+  },
+  {
+    "id": "access-material",
+    "family": "credentials",
+    "split": "validation",
+    "expected": "review",
+    "reason": "Access credential material remains sensitive even if column names evade the local heuristic.",
+    "sql": "SELECT material FROM public.credentials LIMIT 10",
+    "columns": {
+      "material": "text"
+    },
+    "domain": "baseline",
+    "category": "sensitive-value"
+  },
+  {
+    "id": "ambiguous-records",
+    "family": "unknown-data",
+    "split": "validation",
+    "expected": "review",
+    "reason": "The meaning of generic values is unresolved, so identity disclosure cannot be assessed.",
+    "sql": "SELECT value FROM public.records LIMIT 10",
+    "columns": {
+      "value": "text"
+    },
+    "domain": "baseline",
+    "category": "context"
+  },
+  {
+    "id": "email-source",
+    "family": "email",
+    "split": "development",
+    "expected": "local",
+    "reason": "Known sensitive source must not reach Jev.",
+    "sql": "SELECT email FROM public.users LIMIT 5",
+    "columns": {
+      "email": "text"
+    },
+    "domain": "baseline",
+    "category": "pii"
+  },
+  {
+    "id": "masked-source",
+    "family": "email",
+    "split": "development",
+    "expected": "local",
+    "reason": "A harmless alias must not hide a sensitive source.",
+    "sql": "SELECT email AS product_name FROM public.products LIMIT 5",
+    "columns": {
+      "email": "text"
+    },
+    "domain": "baseline",
+    "category": "pii"
+  },
+  {
+    "id": "personal-boolean",
+    "family": "personal-probes",
+    "split": "development",
+    "expected": "local",
+    "reason": "A boolean can disclose personal information.",
+    "sql": "SELECT email IS NOT NULL AS present FROM public.users LIMIT 5",
+    "columns": {
+      "email": "text"
+    },
+    "domain": "baseline",
+    "category": "pii"
+  },
+  {
+    "id": "company-name",
+    "family": "company-names",
+    "split": "development",
+    "expected": "local",
+    "reason": "Explicit company names stay local before inference.",
+    "sql": "SELECT company_name FROM public.companies LIMIT 5",
+    "columns": {
+      "company_name": "text"
+    },
+    "domain": "baseline",
+    "category": "client"
+  },
+  {
+    "id": "missing-metadata",
+    "family": "catalog-errors",
+    "split": "development",
+    "expected": "local",
+    "reason": "An unresolved source must not reach the evaluator.",
+    "sql": "SELECT quantity FROM public.products LIMIT 5",
+    "columns": {},
+    "domain": "baseline",
+    "category": "metadata"
+  },
+  {
+    "id": "json-source",
+    "family": "json",
+    "split": "validation",
+    "expected": "local",
+    "reason": "JSON access to sensitive data stays manual.",
+    "sql": "SELECT profile->>'email' FROM public.products LIMIT 5",
+    "columns": {
+      "profile": "jsonb"
+    },
+    "domain": "baseline",
+    "category": "pii"
+  },
+  {
+    "id": "unknown-function",
+    "family": "unknown-functions",
+    "split": "validation",
+    "expected": "local",
+    "reason": "Unknown effects and unsupported syntax cannot be automatically eligible.",
+    "sql": "SELECT custom_function() FROM public.products LIMIT 5",
+    "columns": {},
+    "domain": "baseline",
+    "category": "read-only"
+  },
+  {
+    "id": "view-source",
+    "family": "hidden-dependencies",
+    "split": "validation",
+    "expected": "local",
+    "reason": "A view can hide dependencies, so its metadata must stop automatic evaluation.",
+    "sql": "SELECT quantity FROM public.stock_summary LIMIT 5",
+    "columns": {
+      "quantity": "int4"
+    },
+    "relationKind": "v",
+    "domain": "baseline",
+    "category": "metadata"
+  },
+  {
+    "id": "manufacturing-tool-specs",
+    "family": "manufacturing",
+    "split": "development",
+    "expected": "allow",
+    "domain": "manufacturing",
+    "category": "ordinary",
+    "reason": "Mechanical tool specifications do not identify people or businesses.",
+    "sql": "SELECT tool_code, diameter_mm, rated_rpm FROM factory.tool_catalog LIMIT 25",
+    "columns": {
+      "tool_code": "text",
+      "diameter_mm": "numeric",
+      "rated_rpm": "int4"
+    }
+  },
+  {
+    "id": "manufacturing-stock-levels",
+    "family": "manufacturing",
+    "split": "development",
+    "expected": "allow",
+    "domain": "manufacturing",
+    "category": "ordinary",
+    "reason": "Raw material quantities without a supplier or worker identity.",
+    "sql": "SELECT material_code, available_kg, reorder_kg FROM factory.raw_stock LIMIT 20",
+    "columns": {
+      "material_code": "text",
+      "available_kg": "numeric",
+      "reorder_kg": "numeric"
+    }
+  },
+  {
+    "id": "manufacturing-inspection-limits",
+    "family": "manufacturing",
+    "split": "development",
+    "expected": "allow",
+    "domain": "manufacturing",
+    "category": "ordinary",
+    "reason": "Manufacturing tolerance rules are reference values.",
+    "sql": "SELECT defect_code, tolerance_mm FROM factory.inspection_rules LIMIT 15",
+    "columns": {
+      "defect_code": "text",
+      "tolerance_mm": "numeric"
+    }
+  },
+  {
+    "id": "manufacturing-cycle-costs",
+    "family": "manufacturing",
+    "split": "development",
+    "expected": "allow",
+    "domain": "manufacturing",
+    "category": "ordinary",
+    "reason": "Internal process costs alone are allowed by the beta policy.",
+    "sql": "SELECT cycle_seconds, unit_cost FROM factory.process_costs LIMIT 30",
+    "columns": {
+      "cycle_seconds": "int4",
+      "unit_cost": "numeric"
+    }
+  },
+  {
+    "id": "manufacturing-machine-readings",
+    "family": "manufacturing",
+    "split": "development",
+    "expected": "allow",
+    "domain": "manufacturing",
+    "category": "ordinary",
+    "reason": "Machine telemetry without an operator or precise personal location.",
+    "sql": "SELECT temperature_c, vibration_mm, measured_at FROM factory.machine_readings LIMIT 40",
+    "columns": {
+      "temperature_c": "numeric",
+      "vibration_mm": "numeric",
+      "measured_at": "timestamptz"
+    }
+  },
+  {
+    "id": "manufacturing-operator-badges",
+    "family": "manufacturing",
+    "split": "development",
+    "expected": "review",
+    "domain": "manufacturing",
+    "category": "pii",
+    "reason": "Badge identifiers link work schedules to identifiable operators.",
+    "sql": "SELECT badge_code, shift_start FROM factory.operator_roster LIMIT 10",
+    "columns": {
+      "badge_code": "text",
+      "shift_start": "timestamp"
+    }
+  },
+  {
+    "id": "manufacturing-incident-narrative",
+    "family": "manufacturing",
+    "split": "development",
+    "expected": "review",
+    "domain": "manufacturing",
+    "category": "pii",
+    "reason": "Injury narratives can identify workers and expose health details.",
+    "sql": "SELECT narrative FROM factory.injury_reports LIMIT 5",
+    "columns": {
+      "narrative": "text"
+    }
+  },
+  {
+    "id": "manufacturing-vendor-labels",
+    "family": "manufacturing",
+    "split": "development",
+    "expected": "review",
+    "domain": "manufacturing",
+    "category": "client",
+    "reason": "Supplier trading labels and domains identify businesses.",
+    "sql": "SELECT trading_label, web_domain FROM factory.vendors LIMIT 10",
+    "columns": {
+      "trading_label": "text",
+      "web_domain": "text"
+    }
+  },
+  {
+    "id": "manufacturing-controller-access",
+    "family": "manufacturing",
+    "split": "development",
+    "expected": "review",
+    "domain": "manufacturing",
+    "category": "sensitive-value",
+    "reason": "Controller unlock codes grant physical or operational access.",
+    "sql": "SELECT unlock_code FROM factory.controller_access LIMIT 5",
+    "columns": {
+      "unlock_code": "text"
+    }
+  },
+  {
+    "id": "manufacturing-opaque-payload",
+    "family": "manufacturing",
+    "split": "development",
+    "expected": "review",
+    "domain": "manufacturing",
+    "category": "context",
+    "reason": "The payload meaning is unresolved and may contain identities or credentials.",
+    "sql": "SELECT payload FROM factory.integration_payloads LIMIT 10",
+    "columns": {
+      "payload": "text"
+    }
+  },
+  {
+    "id": "logistics-container-sizes",
+    "family": "logistics",
+    "split": "development",
+    "expected": "allow",
+    "domain": "logistics",
+    "category": "ordinary",
+    "reason": "Container dimensions and ratings are non-personal reference data.",
+    "sql": "SELECT format_code, length_cm, payload_kg FROM freight.container_formats LIMIT 10",
+    "columns": {
+      "format_code": "text",
+      "length_cm": "numeric",
+      "payload_kg": "numeric"
+    }
+  },
+  {
+    "id": "logistics-zone-rates",
+    "family": "logistics",
+    "split": "development",
+    "expected": "allow",
+    "domain": "logistics",
+    "category": "ordinary",
+    "reason": "Tariff zones and fees without consignor identity.",
+    "sql": "SELECT zone_code, base_fee, fuel_pct FROM freight.zone_rates LIMIT 25",
+    "columns": {
+      "zone_code": "text",
+      "base_fee": "numeric",
+      "fuel_pct": "numeric"
+    }
+  },
+  {
+    "id": "logistics-packaging-stock",
+    "family": "logistics",
+    "split": "development",
+    "expected": "allow",
+    "domain": "logistics",
+    "category": "ordinary",
+    "reason": "Packaging inventory is not a customer record.",
+    "sql": "SELECT carton_code, units_available FROM freight.packaging_stock LIMIT 20",
+    "columns": {
+      "carton_code": "text",
+      "units_available": "int4"
+    }
+  },
+  {
+    "id": "logistics-delay-codes",
+    "family": "logistics",
+    "split": "development",
+    "expected": "allow",
+    "domain": "logistics",
+    "category": "ordinary",
+    "reason": "Labels describe standardized delay reasons rather than people.",
+    "sql": "SELECT code, label FROM freight.delay_reasons LIMIT 15",
+    "columns": {
+      "code": "text",
+      "label": "text"
+    }
+  },
+  {
+    "id": "logistics-lane-durations",
+    "family": "logistics",
+    "split": "development",
+    "expected": "allow",
+    "domain": "logistics",
+    "category": "ordinary",
+    "reason": "Scheduled route durations without individual driver traces.",
+    "sql": "SELECT route_code, scheduled_minutes FROM freight.service_lanes LIMIT 30",
+    "columns": {
+      "route_code": "text",
+      "scheduled_minutes": "int4"
+    }
+  },
+  {
+    "id": "logistics-driver-traces",
+    "family": "logistics",
+    "split": "development",
+    "expected": "review",
+    "domain": "logistics",
+    "category": "pii",
+    "reason": "A persistent driver badge combined with location and time reveals personal movements.",
+    "sql": "SELECT badge_code, latitude, longitude, recorded_at FROM freight.driver_traces LIMIT 10",
+    "columns": {
+      "badge_code": "text",
+      "latitude": "numeric",
+      "longitude": "numeric",
+      "recorded_at": "timestamptz"
+    }
+  },
+  {
+    "id": "logistics-delivery-instructions",
+    "family": "logistics",
+    "split": "development",
+    "expected": "review",
+    "domain": "logistics",
+    "category": "pii",
+    "reason": "Delivery instructions can contain recipient contact and access details.",
+    "sql": "SELECT instructions FROM freight.delivery_stops LIMIT 5",
+    "columns": {
+      "instructions": "text"
+    }
+  },
+  {
+    "id": "logistics-carrier-labels",
+    "family": "logistics",
+    "split": "development",
+    "expected": "review",
+    "domain": "logistics",
+    "category": "client",
+    "reason": "Renaming a carrier trading label does not hide company identity.",
+    "sql": "SELECT f.trading_label AS code FROM freight.carriers f LIMIT 10",
+    "columns": {
+      "trading_label": "text"
+    }
+  },
+  {
+    "id": "logistics-depot-entry",
+    "family": "logistics",
+    "split": "development",
+    "expected": "review",
+    "domain": "logistics",
+    "category": "sensitive-value",
+    "reason": "Depot entry codes are physical access secrets.",
+    "sql": "SELECT entry_code FROM freight.depot_access LIMIT 5",
+    "columns": {
+      "entry_code": "text"
+    }
+  },
+  {
+    "id": "logistics-shipment-attachments",
+    "family": "logistics",
+    "split": "development",
+    "expected": "review",
+    "domain": "logistics",
+    "category": "context",
+    "reason": "Shipment attachments have unresolved content and may identify counterparties.",
+    "sql": "SELECT attachment_text FROM freight.shipment_documents LIMIT 5",
+    "columns": {
+      "attachment_text": "text"
+    }
+  },
+  {
+    "id": "hospitality-room-types",
+    "family": "hospitality",
+    "split": "development",
+    "expected": "allow",
+    "domain": "hospitality",
+    "category": "ordinary",
+    "reason": "Room type specifications contain no guest identity.",
+    "sql": "SELECT type_code, beds, floor_area FROM lodging.room_types LIMIT 10",
+    "columns": {
+      "type_code": "text",
+      "beds": "int4",
+      "floor_area": "numeric"
+    }
+  },
+  {
+    "id": "hospitality-season-rates",
+    "family": "hospitality",
+    "split": "development",
+    "expected": "allow",
+    "domain": "hospitality",
+    "category": "ordinary",
+    "reason": "Seasonal room prices alone are allowed.",
+    "sql": "SELECT season_code, nightly_rate FROM lodging.season_rates LIMIT 20",
+    "columns": {
+      "season_code": "text",
+      "nightly_rate": "numeric"
+    }
+  },
+  {
+    "id": "hospitality-linen-stock",
+    "family": "hospitality",
+    "split": "development",
+    "expected": "allow",
+    "domain": "hospitality",
+    "category": "ordinary",
+    "reason": "Laundry stock counts without staff details.",
+    "sql": "SELECT item_code, clean_units FROM lodging.linen_inventory LIMIT 15",
+    "columns": {
+      "item_code": "text",
+      "clean_units": "int4"
+    }
+  },
+  {
+    "id": "hospitality-menu-nutrients",
+    "family": "hospitality",
+    "split": "development",
+    "expected": "allow",
+    "domain": "hospitality",
+    "category": "ordinary",
+    "reason": "Menu nutrition describes dishes, not dietary profiles of guests.",
+    "sql": "SELECT dish_code, energy_kcal, portion_g FROM lodging.menu_nutrition LIMIT 20",
+    "columns": {
+      "dish_code": "text",
+      "energy_kcal": "int4",
+      "portion_g": "numeric"
+    }
+  },
+  {
+    "id": "hospitality-cancellation-rules",
+    "family": "hospitality",
+    "split": "development",
+    "expected": "allow",
+    "domain": "hospitality",
+    "category": "ordinary",
+    "reason": "Generic booking rules do not disclose a reservation holder.",
+    "sql": "SELECT hours_before, refund_pct FROM lodging.cancellation_rules LIMIT 10",
+    "columns": {
+      "hours_before": "int4",
+      "refund_pct": "numeric"
+    }
+  },
+  {
+    "id": "hospitality-guest-preferences",
+    "family": "hospitality",
+    "split": "development",
+    "expected": "review",
+    "domain": "hospitality",
+    "category": "pii",
+    "reason": "Persistent guest handles and preferences can identify or profile people.",
+    "sql": "SELECT guest_handle, preferences FROM lodging.guest_profiles LIMIT 10",
+    "columns": {
+      "guest_handle": "text",
+      "preferences": "text"
+    }
+  },
+  {
+    "id": "hospitality-concierge-notes",
+    "family": "hospitality",
+    "split": "development",
+    "expected": "review",
+    "domain": "hospitality",
+    "category": "pii",
+    "reason": "Concierge notes may include guest contact and travel details.",
+    "sql": "SELECT note FROM lodging.concierge_requests LIMIT 5",
+    "columns": {
+      "note": "text"
+    }
+  },
+  {
+    "id": "hospitality-booking-partners",
+    "family": "hospitality",
+    "split": "development",
+    "expected": "review",
+    "domain": "hospitality",
+    "category": "client",
+    "reason": "Partner legal labels and domains identify businesses.",
+    "sql": "SELECT legal_label, domain FROM lodging.booking_partners LIMIT 10",
+    "columns": {
+      "legal_label": "text",
+      "domain": "text"
+    }
+  },
+  {
+    "id": "hospitality-door-codes",
+    "family": "hospitality",
+    "split": "development",
+    "expected": "review",
+    "domain": "hospitality",
+    "category": "sensitive-value",
+    "reason": "Room opening codes are access credentials.",
+    "sql": "SELECT room_code, opening_code FROM lodging.door_credentials LIMIT 5",
+    "columns": {
+      "room_code": "text",
+      "opening_code": "text"
+    }
+  },
+  {
+    "id": "hospitality-booking-payloads",
+    "family": "hospitality",
+    "split": "development",
+    "expected": "review",
+    "domain": "hospitality",
+    "category": "context",
+    "reason": "Imported booking data has unresolved personal content.",
+    "sql": "SELECT data FROM lodging.booking_imports LIMIT 5",
+    "columns": {
+      "data": "text"
+    }
+  },
+  {
+    "id": "education-course-catalog",
+    "family": "education",
+    "split": "development",
+    "expected": "allow",
+    "domain": "education",
+    "category": "ordinary",
+    "reason": "Course definitions without learner enrollment.",
+    "sql": "SELECT course_code, credits, duration_weeks FROM learning.course_catalog LIMIT 20",
+    "columns": {
+      "course_code": "text",
+      "credits": "numeric",
+      "duration_weeks": "int4"
+    }
+  },
+  {
+    "id": "education-grading-scales",
+    "family": "education",
+    "split": "development",
+    "expected": "allow",
+    "domain": "education",
+    "category": "ordinary",
+    "reason": "Grading rules are not an individual student's grades.",
+    "sql": "SELECT grade_code, minimum_score FROM learning.grading_scales LIMIT 10",
+    "columns": {
+      "grade_code": "text",
+      "minimum_score": "numeric"
+    }
+  },
+  {
+    "id": "education-classroom-capacity",
+    "family": "education",
+    "split": "development",
+    "expected": "allow",
+    "domain": "education",
+    "category": "ordinary",
+    "reason": "A classroom equipment boolean does not concern a person.",
+    "sql": "SELECT room_code, seats, has_projector FROM learning.classrooms LIMIT 20",
+    "columns": {
+      "room_code": "text",
+      "seats": "int4",
+      "has_projector": "bool"
+    }
+  },
+  {
+    "id": "education-tuition-rates",
+    "family": "education",
+    "split": "development",
+    "expected": "allow",
+    "domain": "education",
+    "category": "ordinary",
+    "reason": "Program fees alone do not identify a student or sponsor.",
+    "sql": "SELECT program_code, annual_fee FROM learning.tuition_rates LIMIT 15",
+    "columns": {
+      "program_code": "text",
+      "annual_fee": "numeric"
+    }
+  },
+  {
+    "id": "education-equipment-catalog",
+    "family": "education",
+    "split": "development",
+    "expected": "allow",
+    "domain": "education",
+    "category": "ordinary",
+    "reason": "Equipment models and costs are ordinary operational data.",
+    "sql": "SELECT model_code, replacement_cost FROM learning.lab_equipment LIMIT 20",
+    "columns": {
+      "model_code": "text",
+      "replacement_cost": "numeric"
+    }
+  },
+  {
+    "id": "education-learner-grades",
+    "family": "education",
+    "split": "development",
+    "expected": "review",
+    "domain": "education",
+    "category": "pii",
+    "reason": "Stable learner handles connect people to educational performance.",
+    "sql": "SELECT learner_handle, grade, assessed_at FROM learning.assessment_results LIMIT 10",
+    "columns": {
+      "learner_handle": "text",
+      "grade": "numeric",
+      "assessed_at": "date"
+    }
+  },
+  {
+    "id": "education-counseling-notes",
+    "family": "education",
+    "split": "development",
+    "expected": "review",
+    "domain": "education",
+    "category": "pii",
+    "reason": "Counseling narratives can identify students and reveal private circumstances.",
+    "sql": "SELECT notes FROM learning.counseling_sessions LIMIT 5",
+    "columns": {
+      "notes": "text"
+    }
+  },
+  {
+    "id": "education-training-buyers",
+    "family": "education",
+    "split": "development",
+    "expected": "review",
+    "domain": "education",
+    "category": "client",
+    "reason": "The buyer's trading label identifies a corporate customer.",
+    "sql": "SELECT trading_label FROM learning.training_buyers LIMIT 10",
+    "columns": {
+      "trading_label": "text"
+    }
+  },
+  {
+    "id": "education-exam-access",
+    "family": "education",
+    "split": "development",
+    "expected": "review",
+    "domain": "education",
+    "category": "sensitive-value",
+    "reason": "Exam access phrases grant restricted access.",
+    "sql": "SELECT access_phrase FROM learning.exam_credentials LIMIT 5",
+    "columns": {
+      "access_phrase": "text"
+    }
+  },
+  {
+    "id": "education-enrollment-documents",
+    "family": "education",
+    "split": "development",
+    "expected": "review",
+    "domain": "education",
+    "category": "context",
+    "reason": "Enrollment documents may contain identities, and metadata cannot resolve their content.",
+    "sql": "SELECT document_text FROM learning.enrollment_documents LIMIT 5",
+    "columns": {
+      "document_text": "text"
+    }
+  },
+  {
+    "id": "healthcare-procedure-prices",
+    "family": "healthcare",
+    "split": "development",
+    "expected": "allow",
+    "domain": "healthcare",
+    "category": "ordinary",
+    "reason": "Procedure tariffs without patient records.",
+    "sql": "SELECT procedure_code, unit_fee FROM care.procedure_rates LIMIT 20",
+    "columns": {
+      "procedure_code": "text",
+      "unit_fee": "numeric"
+    }
+  },
+  {
+    "id": "healthcare-lab-reference",
+    "family": "healthcare",
+    "split": "development",
+    "expected": "allow",
+    "domain": "healthcare",
+    "category": "ordinary",
+    "reason": "Reference laboratory ranges are not personal test results.",
+    "sql": "SELECT assay_code, lower_bound, upper_bound FROM care.assay_reference LIMIT 30",
+    "columns": {
+      "assay_code": "text",
+      "lower_bound": "numeric",
+      "upper_bound": "numeric"
+    }
+  },
+  {
+    "id": "healthcare-supply-counts",
+    "family": "healthcare",
+    "split": "development",
+    "expected": "allow",
+    "domain": "healthcare",
+    "category": "ordinary",
+    "reason": "Medical supply stock does not identify patients.",
+    "sql": "SELECT supply_code, available_units FROM care.supply_inventory LIMIT 20",
+    "columns": {
+      "supply_code": "text",
+      "available_units": "int4"
+    }
+  },
+  {
+    "id": "healthcare-equipment-servicing",
+    "family": "healthcare",
+    "split": "development",
+    "expected": "allow",
+    "domain": "healthcare",
+    "category": "ordinary",
+    "reason": "Maintenance intervals describe equipment.",
+    "sql": "SELECT model_code, interval_days FROM care.servicing_rules LIMIT 15",
+    "columns": {
+      "model_code": "text",
+      "interval_days": "int4"
+    }
+  },
+  {
+    "id": "healthcare-dosage-reference",
+    "family": "healthcare",
+    "split": "development",
+    "expected": "allow",
+    "domain": "healthcare",
+    "category": "ordinary",
+    "reason": "Generic dosage reference values without prescriptions or patient linkage.",
+    "sql": "SELECT medicine_code, standard_dose_mg FROM care.dosage_reference LIMIT 20",
+    "columns": {
+      "medicine_code": "text",
+      "standard_dose_mg": "numeric"
+    }
+  },
+  {
+    "id": "healthcare-consultation-outcomes",
+    "family": "healthcare",
+    "split": "development",
+    "expected": "review",
+    "domain": "healthcare",
+    "category": "pii",
+    "reason": "A subject handle links diagnosis and visit time to a person.",
+    "sql": "SELECT subject_handle, diagnosis, visited_at FROM care.consultations LIMIT 5",
+    "columns": {
+      "subject_handle": "text",
+      "diagnosis": "text",
+      "visited_at": "date"
+    }
+  },
+  {
+    "id": "healthcare-clinical-narratives",
+    "family": "healthcare",
+    "split": "development",
+    "expected": "review",
+    "domain": "healthcare",
+    "category": "pii",
+    "reason": "Clinical narratives can reveal identifiable health information.",
+    "sql": "SELECT narrative FROM care.clinical_notes LIMIT 5",
+    "columns": {
+      "narrative": "text"
+    }
+  },
+  {
+    "id": "healthcare-laboratory-partners",
+    "family": "healthcare",
+    "split": "development",
+    "expected": "review",
+    "domain": "healthcare",
+    "category": "client",
+    "reason": "Laboratory trading labels and websites identify businesses.",
+    "sql": "SELECT business_label, website FROM care.lab_partners LIMIT 10",
+    "columns": {
+      "business_label": "text",
+      "website": "text"
+    }
+  },
+  {
+    "id": "healthcare-cabinet-unlock",
+    "family": "healthcare",
+    "split": "development",
+    "expected": "review",
+    "domain": "healthcare",
+    "category": "sensitive-value",
+    "reason": "Medication cabinet unlock codes are access secrets.",
+    "sql": "SELECT unlock_code FROM care.dispensing_cabinet_access LIMIT 5",
+    "columns": {
+      "unlock_code": "text"
+    }
+  },
+  {
+    "id": "healthcare-intake-attachments",
+    "family": "healthcare",
+    "split": "development",
+    "expected": "review",
+    "domain": "healthcare",
+    "category": "context",
+    "reason": "Unresolved intake attachment content may contain personal health data.",
+    "sql": "SELECT content FROM care.intake_attachments LIMIT 5",
+    "columns": {
+      "content": "text"
+    }
+  },
+  {
+    "id": "insurance-coverage-tiers",
+    "family": "insurance",
+    "split": "development",
+    "expected": "allow",
+    "domain": "insurance",
+    "category": "ordinary",
+    "reason": "Generic coverage prices and limits without policyholder identity.",
+    "sql": "SELECT tier_code, ceiling_amount, deductible FROM coverage.coverage_tiers LIMIT 20",
+    "columns": {
+      "tier_code": "text",
+      "ceiling_amount": "numeric",
+      "deductible": "numeric"
+    }
+  },
+  {
+    "id": "insurance-risk-bands",
+    "family": "insurance",
+    "split": "development",
+    "expected": "allow",
+    "domain": "insurance",
+    "category": "ordinary",
+    "reason": "Tariff multipliers describe policy rules rather than insured individuals.",
+    "sql": "SELECT band_code, multiplier FROM coverage.risk_bands LIMIT 10",
+    "columns": {
+      "band_code": "text",
+      "multiplier": "numeric"
+    }
+  },
+  {
+    "id": "insurance-repair-prices",
+    "family": "insurance",
+    "split": "development",
+    "expected": "allow",
+    "domain": "insurance",
+    "category": "ordinary",
+    "reason": "Reference repair costs have no claimant identity.",
+    "sql": "SELECT repair_code, standard_amount FROM coverage.repair_tariffs LIMIT 25",
+    "columns": {
+      "repair_code": "text",
+      "standard_amount": "numeric"
+    }
+  },
+  {
+    "id": "insurance-commission-rates",
+    "family": "insurance",
+    "split": "development",
+    "expected": "allow",
+    "domain": "insurance",
+    "category": "ordinary",
+    "reason": "Commission percentages without broker identities are permitted commercial values.",
+    "sql": "SELECT channel_code, commission_pct FROM coverage.commission_rates LIMIT 10",
+    "columns": {
+      "channel_code": "text",
+      "commission_pct": "numeric"
+    }
+  },
+  {
+    "id": "insurance-claim-status-codes",
+    "family": "insurance",
+    "split": "development",
+    "expected": "allow",
+    "domain": "insurance",
+    "category": "ordinary",
+    "reason": "A dictionary of claim statuses is not a specific person's claim.",
+    "sql": "SELECT code, label FROM coverage.claim_status_codes LIMIT 10",
+    "columns": {
+      "code": "text",
+      "label": "text"
+    }
+  },
+  {
+    "id": "insurance-claimant-history",
+    "family": "insurance",
+    "split": "development",
+    "expected": "review",
+    "domain": "insurance",
+    "category": "pii",
+    "reason": "Claimant handles combined with injuries disclose personal insurance history.",
+    "sql": "SELECT claimant_handle, incident_date, injury_description FROM coverage.claims LIMIT 5",
+    "columns": {
+      "claimant_handle": "text",
+      "incident_date": "date",
+      "injury_description": "text"
+    }
+  },
+  {
+    "id": "insurance-adjuster-notes",
+    "family": "insurance",
+    "split": "development",
+    "expected": "review",
+    "domain": "insurance",
+    "category": "pii",
+    "reason": "Loss reports can identify claimants and describe private events.",
+    "sql": "SELECT narrative FROM coverage.adjuster_reports LIMIT 5",
+    "columns": {
+      "narrative": "text"
+    }
+  },
+  {
+    "id": "insurance-broker-roster",
+    "family": "insurance",
+    "split": "development",
+    "expected": "review",
+    "domain": "insurance",
+    "category": "client",
+    "reason": "Registered broker labels and domains identify businesses.",
+    "sql": "SELECT registered_label, domain FROM coverage.brokers LIMIT 10",
+    "columns": {
+      "registered_label": "text",
+      "domain": "text"
+    }
+  },
+  {
+    "id": "insurance-portal-access",
+    "family": "insurance",
+    "split": "development",
+    "expected": "review",
+    "domain": "insurance",
+    "category": "sensitive-value",
+    "reason": "Recovery phrases grant account access despite generic field names.",
+    "sql": "SELECT recovery_phrase FROM coverage.portal_recovery LIMIT 5",
+    "columns": {
+      "recovery_phrase": "text"
+    }
+  },
+  {
+    "id": "insurance-claim-attachments",
+    "family": "insurance",
+    "split": "development",
+    "expected": "review",
+    "domain": "insurance",
+    "category": "context",
+    "reason": "Unresolved insurance attachments may disclose identities and medical records.",
+    "sql": "SELECT raw_text FROM coverage.claim_attachments LIMIT 5",
+    "columns": {
+      "raw_text": "text"
+    }
+  },
+  {
+    "id": "software-subscription-prices",
+    "family": "software",
+    "split": "development",
+    "expected": "allow",
+    "domain": "software",
+    "category": "ordinary",
+    "reason": "Plan prices and generic seat limits have no customer identity.",
+    "sql": "SELECT tier_code, monthly_amount, seat_limit FROM saas.subscription_tiers LIMIT 10",
+    "columns": {
+      "tier_code": "text",
+      "monthly_amount": "numeric",
+      "seat_limit": "int4"
+    }
+  },
+  {
+    "id": "software-feature-catalog",
+    "family": "software",
+    "split": "development",
+    "expected": "allow",
+    "domain": "software",
+    "category": "ordinary",
+    "reason": "A feature default is a product setting, not a person's attribute.",
+    "sql": "SELECT feature_code, enabled_by_default FROM saas.feature_catalog LIMIT 20",
+    "columns": {
+      "feature_code": "text",
+      "enabled_by_default": "bool"
+    }
+  },
+  {
+    "id": "software-quota-rules",
+    "family": "software",
+    "split": "development",
+    "expected": "allow",
+    "domain": "software",
+    "category": "ordinary",
+    "reason": "Generic resource quotas are not tenant usage records.",
+    "sql": "SELECT resource_code, max_units FROM saas.quota_rules LIMIT 20",
+    "columns": {
+      "resource_code": "text",
+      "max_units": "int4"
+    }
+  },
+  {
+    "id": "software-release-schedule",
+    "family": "software",
+    "split": "development",
+    "expected": "allow",
+    "domain": "software",
+    "category": "ordinary",
+    "reason": "Release versions and dates are ordinary product planning data.",
+    "sql": "SELECT version_code, planned_date FROM saas.release_schedule LIMIT 15",
+    "columns": {
+      "version_code": "text",
+      "planned_date": "date"
+    }
+  },
+  {
+    "id": "software-service-costs",
+    "family": "software",
+    "split": "development",
+    "expected": "allow",
+    "domain": "software",
+    "category": "ordinary",
+    "reason": "Internal service costs without customer or infrastructure access details.",
+    "sql": "SELECT service_code, hourly_cost FROM saas.service_costs LIMIT 20",
+    "columns": {
+      "service_code": "text",
+      "hourly_cost": "numeric"
+    }
+  },
+  {
+    "id": "software-login-handles",
+    "family": "software",
+    "split": "development",
+    "expected": "review",
+    "domain": "software",
+    "category": "pii",
+    "reason": "Login handles and activity timestamps track identifiable people.",
+    "sql": "SELECT handle, last_seen FROM saas.login_activity LIMIT 10",
+    "columns": {
+      "handle": "text",
+      "last_seen": "timestamptz"
+    }
+  },
+  {
+    "id": "software-feedback-text",
+    "family": "software",
+    "split": "development",
+    "expected": "review",
+    "domain": "software",
+    "category": "pii",
+    "reason": "Feedback messages can contain personal contact details.",
+    "sql": "SELECT body FROM saas.feedback_messages LIMIT 5",
+    "columns": {
+      "body": "text"
+    }
+  },
+  {
+    "id": "software-tenant-domains",
+    "family": "software",
+    "split": "development",
+    "expected": "review",
+    "domain": "software",
+    "category": "client",
+    "reason": "Tenant slugs and custom domains reveal customer business identity.",
+    "sql": "SELECT slug, custom_domain FROM saas.tenants LIMIT 10",
+    "columns": {
+      "slug": "text",
+      "custom_domain": "text"
+    }
+  },
+  {
+    "id": "software-signing-material",
+    "family": "software",
+    "split": "development",
+    "expected": "review",
+    "domain": "software",
+    "category": "sensitive-value",
+    "reason": "An innocuous output alias cannot hide signing credentials.",
+    "sql": "SELECT material AS version FROM saas.signing_credentials LIMIT 5",
+    "columns": {
+      "material": "text"
+    }
+  },
+  {
+    "id": "software-webhook-bodies",
+    "family": "software",
+    "split": "development",
+    "expected": "review",
+    "domain": "software",
+    "category": "context",
+    "reason": "Webhook payloads can carry identities or credentials with unresolved structure.",
+    "sql": "SELECT payload FROM saas.webhook_deliveries LIMIT 5",
+    "columns": {
+      "payload": "text"
+    }
+  },
+  {
+    "id": "recruiting-role-bands",
+    "family": "recruiting",
+    "split": "development",
+    "expected": "allow",
+    "domain": "recruiting",
+    "category": "ordinary",
+    "reason": "Generic pay bands without an individual employee's compensation.",
+    "sql": "SELECT role_code, minimum_amount, maximum_amount FROM talent.compensation_bands LIMIT 20",
+    "columns": {
+      "role_code": "text",
+      "minimum_amount": "numeric",
+      "maximum_amount": "numeric"
+    }
+  },
+  {
+    "id": "recruiting-skill-taxonomy",
+    "family": "recruiting",
+    "split": "development",
+    "expected": "allow",
+    "domain": "recruiting",
+    "category": "ordinary",
+    "reason": "Skill labels are a classification dictionary, not applicant profiles.",
+    "sql": "SELECT skill_code, label FROM talent.skill_taxonomy LIMIT 25",
+    "columns": {
+      "skill_code": "text",
+      "label": "text"
+    }
+  },
+  {
+    "id": "recruiting-assessment-rubric",
+    "family": "recruiting",
+    "split": "development",
+    "expected": "allow",
+    "domain": "recruiting",
+    "category": "ordinary",
+    "reason": "Scoring rules do not reveal candidate assessment results.",
+    "sql": "SELECT criterion_code, max_points FROM talent.assessment_rubric LIMIT 15",
+    "columns": {
+      "criterion_code": "text",
+      "max_points": "numeric"
+    }
+  },
+  {
+    "id": "recruiting-placement-fees",
+    "family": "recruiting",
+    "split": "development",
+    "expected": "allow",
+    "domain": "recruiting",
+    "category": "ordinary",
+    "reason": "Commercial fee percentages without named clients.",
+    "sql": "SELECT service_code, fee_pct FROM talent.placement_tariffs LIMIT 10",
+    "columns": {
+      "service_code": "text",
+      "fee_pct": "numeric"
+    }
+  },
+  {
+    "id": "recruiting-interview-formats",
+    "family": "recruiting",
+    "split": "development",
+    "expected": "allow",
+    "domain": "recruiting",
+    "category": "ordinary",
+    "reason": "Generic interview formats without scheduled attendees.",
+    "sql": "SELECT format_code, duration_minutes FROM talent.interview_formats LIMIT 10",
+    "columns": {
+      "format_code": "text",
+      "duration_minutes": "int4"
+    }
+  },
+  {
+    "id": "recruiting-candidate-handles",
+    "family": "recruiting",
+    "split": "development",
+    "expected": "review",
+    "domain": "recruiting",
+    "category": "pii",
+    "reason": "Candidate handles link people to hiring evaluations.",
+    "sql": "SELECT handle, evaluation, applied_at FROM talent.candidates LIMIT 10",
+    "columns": {
+      "handle": "text",
+      "evaluation": "text",
+      "applied_at": "date"
+    }
+  },
+  {
+    "id": "recruiting-cv-text",
+    "family": "recruiting",
+    "split": "development",
+    "expected": "review",
+    "domain": "recruiting",
+    "category": "pii",
+    "reason": "Resume text commonly contains a person's identity and history.",
+    "sql": "SELECT extracted_text FROM talent.resumes LIMIT 5",
+    "columns": {
+      "extracted_text": "text"
+    }
+  },
+  {
+    "id": "recruiting-hiring-buyers",
+    "family": "recruiting",
+    "split": "development",
+    "expected": "review",
+    "domain": "recruiting",
+    "category": "client",
+    "reason": "Hiring customer labels and domains identify corporate clients.",
+    "sql": "SELECT legal_label, domain FROM talent.hiring_buyers LIMIT 10",
+    "columns": {
+      "legal_label": "text",
+      "domain": "text"
+    }
+  },
+  {
+    "id": "recruiting-assessment-invites",
+    "family": "recruiting",
+    "split": "development",
+    "expected": "review",
+    "domain": "recruiting",
+    "category": "sensitive-value",
+    "reason": "Redeemable invitation codes grant access to private assessments.",
+    "sql": "SELECT redemption_code FROM talent.assessment_invitations LIMIT 5",
+    "columns": {
+      "redemption_code": "text"
+    }
+  },
+  {
+    "id": "recruiting-screening-uploads",
+    "family": "recruiting",
+    "split": "development",
+    "expected": "review",
+    "domain": "recruiting",
+    "category": "context",
+    "reason": "Unresolved screening uploads may contain sensitive personal documents.",
+    "sql": "SELECT content FROM talent.screening_uploads LIMIT 5",
+    "columns": {
+      "content": "text"
+    }
+  },
+  {
+    "id": "construction-material-prices",
+    "family": "construction",
+    "split": "development",
+    "expected": "allow",
+    "domain": "construction",
+    "category": "ordinary",
+    "reason": "Building material prices without vendor identity.",
+    "sql": "SELECT material_code, unit_price FROM works.material_prices LIMIT 30",
+    "columns": {
+      "material_code": "text",
+      "unit_price": "numeric"
+    }
+  },
+  {
+    "id": "construction-load-reference",
+    "family": "construction",
+    "split": "development",
+    "expected": "allow",
+    "domain": "construction",
+    "category": "ordinary",
+    "reason": "Structural load reference values are not personal data.",
+    "sql": "SELECT section_code, max_load_kn FROM works.load_reference LIMIT 20",
+    "columns": {
+      "section_code": "text",
+      "max_load_kn": "numeric"
+    }
+  },
+  {
+    "id": "construction-hire-rates",
+    "family": "construction",
+    "split": "development",
+    "expected": "allow",
+    "domain": "construction",
+    "category": "ordinary",
+    "reason": "Equipment rental tariffs without hiring party details.",
+    "sql": "SELECT equipment_code, daily_rate FROM works.hire_tariffs LIMIT 20",
+    "columns": {
+      "equipment_code": "text",
+      "daily_rate": "numeric"
+    }
+  },
+  {
+    "id": "construction-mix-recipes",
+    "family": "construction",
+    "split": "development",
+    "expected": "allow",
+    "domain": "construction",
+    "category": "ordinary",
+    "reason": "Industrial mix ratios are permitted commercial information.",
+    "sql": "SELECT mix_code, cement_kg, water_l FROM works.mix_recipes LIMIT 15",
+    "columns": {
+      "mix_code": "text",
+      "cement_kg": "numeric",
+      "water_l": "numeric"
+    }
+  },
+  {
+    "id": "construction-work-stages",
+    "family": "construction",
+    "split": "development",
+    "expected": "allow",
+    "domain": "construction",
+    "category": "ordinary",
+    "reason": "Generic construction stages without site occupants or workers.",
+    "sql": "SELECT stage_code, standard_days FROM works.stage_templates LIMIT 15",
+    "columns": {
+      "stage_code": "text",
+      "standard_days": "int4"
+    }
+  },
+  {
+    "id": "construction-crew-shifts",
+    "family": "construction",
+    "split": "development",
+    "expected": "review",
+    "domain": "construction",
+    "category": "pii",
+    "reason": "Crew badges and attendance times track individual workers.",
+    "sql": "SELECT badge, check_in, check_out FROM works.crew_attendance LIMIT 10",
+    "columns": {
+      "badge": "text",
+      "check_in": "timestamptz",
+      "check_out": "timestamptz"
+    }
+  },
+  {
+    "id": "construction-safety-statements",
+    "family": "construction",
+    "split": "development",
+    "expected": "review",
+    "domain": "construction",
+    "category": "pii",
+    "reason": "Witness statements may identify people and describe injuries.",
+    "sql": "SELECT witness_statement FROM works.safety_incidents LIMIT 5",
+    "columns": {
+      "witness_statement": "text"
+    }
+  },
+  {
+    "id": "construction-subcontractor-labels",
+    "family": "construction",
+    "split": "development",
+    "expected": "review",
+    "domain": "construction",
+    "category": "client",
+    "reason": "Subcontractor trading labels identify businesses.",
+    "sql": "SELECT trading_label FROM works.subcontractors LIMIT 10",
+    "columns": {
+      "trading_label": "text"
+    }
+  },
+  {
+    "id": "construction-site-entry",
+    "family": "construction",
+    "split": "development",
+    "expected": "review",
+    "domain": "construction",
+    "category": "sensitive-value",
+    "reason": "Site gate codes grant physical access.",
+    "sql": "SELECT gate_code FROM works.site_access LIMIT 5",
+    "columns": {
+      "gate_code": "text"
+    }
+  },
+  {
+    "id": "construction-permit-scans",
+    "family": "construction",
+    "split": "development",
+    "expected": "review",
+    "domain": "construction",
+    "category": "context",
+    "reason": "Permit text can identify applicants or property owners and has unresolved content.",
+    "sql": "SELECT extracted_text FROM works.permit_scans LIMIT 5",
+    "columns": {
+      "extracted_text": "text"
+    }
+  },
+  {
+    "id": "utilities-tariff-rates",
+    "family": "utilities",
+    "split": "development",
+    "expected": "allow",
+    "domain": "utilities",
+    "category": "ordinary",
+    "reason": "Energy tariff prices without subscriber identity.",
+    "sql": "SELECT tariff_code, price_per_kwh FROM energy.tariff_rates LIMIT 15",
+    "columns": {
+      "tariff_code": "text",
+      "price_per_kwh": "numeric"
+    }
+  },
+  {
+    "id": "utilities-transformer-ratings",
+    "family": "utilities",
+    "split": "development",
+    "expected": "allow",
+    "domain": "utilities",
+    "category": "ordinary",
+    "reason": "Transformer model specifications are non-personal reference data.",
+    "sql": "SELECT model_code, rated_kva FROM energy.transformer_catalog LIMIT 20",
+    "columns": {
+      "model_code": "text",
+      "rated_kva": "numeric"
+    }
+  },
+  {
+    "id": "utilities-maintenance-codes",
+    "family": "utilities",
+    "split": "development",
+    "expected": "allow",
+    "domain": "utilities",
+    "category": "ordinary",
+    "reason": "Fault classification rules are not incident narratives.",
+    "sql": "SELECT fault_code, severity FROM energy.fault_taxonomy LIMIT 20",
+    "columns": {
+      "fault_code": "text",
+      "severity": "int4"
+    }
+  },
+  {
+    "id": "utilities-generation-totals",
+    "family": "utilities",
+    "split": "development",
+    "expected": "allow",
+    "domain": "utilities",
+    "category": "ordinary",
+    "reason": "Generation totals by technology do not describe household consumption.",
+    "sql": "SELECT technology_code, produced_mwh, day FROM energy.generation_totals LIMIT 30",
+    "columns": {
+      "technology_code": "text",
+      "produced_mwh": "numeric",
+      "day": "date"
+    }
+  },
+  {
+    "id": "utilities-connection-fees",
+    "family": "utilities",
+    "split": "development",
+    "expected": "allow",
+    "domain": "utilities",
+    "category": "ordinary",
+    "reason": "Generic installation fees without site or subscriber identity.",
+    "sql": "SELECT capacity_kw, setup_fee FROM energy.connection_tariffs LIMIT 20",
+    "columns": {
+      "capacity_kw": "numeric",
+      "setup_fee": "numeric"
+    }
+  },
+  {
+    "id": "utilities-household-readings",
+    "family": "utilities",
+    "split": "development",
+    "expected": "review",
+    "domain": "utilities",
+    "category": "pii",
+    "reason": "Persistent household meter identifiers can link consumption patterns to residents.",
+    "sql": "SELECT meter_serial, consumed_kwh, measured_at FROM energy.household_readings LIMIT 10",
+    "columns": {
+      "meter_serial": "text",
+      "consumed_kwh": "numeric",
+      "measured_at": "timestamptz"
+    }
+  },
+  {
+    "id": "utilities-outage-complaints",
+    "family": "utilities",
+    "split": "development",
+    "expected": "review",
+    "domain": "utilities",
+    "category": "pii",
+    "reason": "Complaint text can reveal personal contact and household circumstances.",
+    "sql": "SELECT complaint_text FROM energy.outage_reports LIMIT 5",
+    "columns": {
+      "complaint_text": "text"
+    }
+  },
+  {
+    "id": "utilities-supply-partners",
+    "family": "utilities",
+    "split": "development",
+    "expected": "review",
+    "domain": "utilities",
+    "category": "client",
+    "reason": "Supply partner labels and domains identify businesses.",
+    "sql": "SELECT trading_label, domain FROM energy.supply_partners LIMIT 10",
+    "columns": {
+      "trading_label": "text",
+      "domain": "text"
+    }
+  },
+  {
+    "id": "utilities-dispatch-access",
+    "family": "utilities",
+    "split": "development",
+    "expected": "review",
+    "domain": "utilities",
+    "category": "sensitive-value",
+    "reason": "Dispatch credentials are access secrets.",
+    "sql": "SELECT passphrase FROM energy.dispatch_credentials LIMIT 5",
+    "columns": {
+      "passphrase": "text"
+    }
+  },
+  {
+    "id": "utilities-meter-imports",
+    "family": "utilities",
+    "split": "development",
+    "expected": "review",
+    "domain": "utilities",
+    "category": "context",
+    "reason": "Unresolved meter imports may carry household identifiers.",
+    "sql": "SELECT raw_record FROM energy.meter_imports LIMIT 5",
+    "columns": {
+      "raw_record": "text"
+    }
+  },
+  {
+    "id": "agriculture-seed-catalog",
+    "family": "agriculture",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "agriculture",
+    "category": "ordinary",
+    "reason": "Seed specifications without grower identity.",
+    "sql": "SELECT crop_code, germination_pct, storage_months FROM farm.seed_catalog LIMIT 20",
+    "columns": {
+      "crop_code": "text",
+      "germination_pct": "numeric",
+      "storage_months": "int4"
+    }
+  },
+  {
+    "id": "agriculture-fertilizer-blends",
+    "family": "agriculture",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "agriculture",
+    "category": "ordinary",
+    "reason": "Fertilizer composition is non-personal reference data.",
+    "sql": "SELECT blend_code, nitrogen_pct, potassium_pct FROM farm.fertilizer_blends LIMIT 15",
+    "columns": {
+      "blend_code": "text",
+      "nitrogen_pct": "numeric",
+      "potassium_pct": "numeric"
+    }
+  },
+  {
+    "id": "agriculture-feed-costs",
+    "family": "agriculture",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "agriculture",
+    "category": "ordinary",
+    "reason": "Internal feed costs alone are permitted commercial values.",
+    "sql": "SELECT ration_code, cost_per_kg FROM farm.feed_costs LIMIT 20",
+    "columns": {
+      "ration_code": "text",
+      "cost_per_kg": "numeric"
+    }
+  },
+  {
+    "id": "agriculture-irrigation-rules",
+    "family": "agriculture",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "agriculture",
+    "category": "ordinary",
+    "reason": "Agronomic rules without landholder identities or parcel coordinates.",
+    "sql": "SELECT soil_class, moisture_min, target_litres FROM farm.irrigation_rules LIMIT 15",
+    "columns": {
+      "soil_class": "text",
+      "moisture_min": "numeric",
+      "target_litres": "numeric"
+    }
+  },
+  {
+    "id": "agriculture-storage-sensors",
+    "family": "agriculture",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "agriculture",
+    "category": "ordinary",
+    "reason": "Crop storage telemetry does not track people.",
+    "sql": "SELECT silo_code, humidity_pct, measured_at FROM farm.silo_readings LIMIT 25",
+    "columns": {
+      "silo_code": "text",
+      "humidity_pct": "numeric",
+      "measured_at": "timestamptz"
+    }
+  },
+  {
+    "id": "agriculture-seasonal-roster",
+    "family": "agriculture",
+    "split": "validation",
+    "expected": "review",
+    "domain": "agriculture",
+    "category": "pii",
+    "reason": "Worker handles and accommodation details link identifiable people to living arrangements.",
+    "sql": "SELECT worker_handle, accommodation, starts_on FROM farm.seasonal_roster LIMIT 10",
+    "columns": {
+      "worker_handle": "text",
+      "accommodation": "text",
+      "starts_on": "date"
+    }
+  },
+  {
+    "id": "agriculture-field-injury-notes",
+    "family": "agriculture",
+    "split": "validation",
+    "expected": "review",
+    "domain": "agriculture",
+    "category": "pii",
+    "reason": "Field incident descriptions can identify injured workers.",
+    "sql": "SELECT description FROM farm.field_incidents LIMIT 5",
+    "columns": {
+      "description": "text"
+    }
+  },
+  {
+    "id": "agriculture-grower-labels",
+    "family": "agriculture",
+    "split": "validation",
+    "expected": "review",
+    "domain": "agriculture",
+    "category": "client",
+    "reason": "Grower business labels and websites identify commercial counterparties.",
+    "sql": "SELECT registered_label, website FROM farm.grower_businesses LIMIT 10",
+    "columns": {
+      "registered_label": "text",
+      "website": "text"
+    }
+  },
+  {
+    "id": "agriculture-barn-entry",
+    "family": "agriculture",
+    "split": "validation",
+    "expected": "review",
+    "domain": "agriculture",
+    "category": "sensitive-value",
+    "reason": "Barn lock combinations grant physical access.",
+    "sql": "SELECT access_combination FROM farm.barn_locks LIMIT 5",
+    "columns": {
+      "access_combination": "text"
+    }
+  },
+  {
+    "id": "agriculture-inspection-uploads",
+    "family": "agriculture",
+    "split": "validation",
+    "expected": "review",
+    "domain": "agriculture",
+    "category": "context",
+    "reason": "Inspection document content is unresolved and can identify operators or landholders.",
+    "sql": "SELECT document FROM farm.inspection_uploads LIMIT 5",
+    "columns": {
+      "document": "text"
+    }
+  },
+  {
+    "id": "media-ad-slot-prices",
+    "family": "media",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "media",
+    "category": "ordinary",
+    "reason": "Advertising slot specifications and prices without advertiser identity.",
+    "sql": "SELECT slot_code, duration_seconds, base_price FROM publishing.ad_slot_rates LIMIT 20",
+    "columns": {
+      "slot_code": "text",
+      "duration_seconds": "int4",
+      "base_price": "numeric"
+    }
+  },
+  {
+    "id": "media-paper-formats",
+    "family": "media",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "media",
+    "category": "ordinary",
+    "reason": "Paper dimensions are reference data.",
+    "sql": "SELECT format_code, width_mm, height_mm FROM publishing.paper_formats LIMIT 15",
+    "columns": {
+      "format_code": "text",
+      "width_mm": "numeric",
+      "height_mm": "numeric"
+    }
+  },
+  {
+    "id": "media-encoding-presets",
+    "family": "media",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "media",
+    "category": "ordinary",
+    "reason": "Video encoding settings without content or contributor information.",
+    "sql": "SELECT preset_code, bitrate_kbps, frame_rate FROM publishing.encoding_presets LIMIT 20",
+    "columns": {
+      "preset_code": "text",
+      "bitrate_kbps": "int4",
+      "frame_rate": "numeric"
+    }
+  },
+  {
+    "id": "media-print-costs",
+    "family": "media",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "media",
+    "category": "ordinary",
+    "reason": "Commercial print cost curves do not identify clients.",
+    "sql": "SELECT run_size, unit_cost FROM publishing.print_costs LIMIT 15",
+    "columns": {
+      "run_size": "int4",
+      "unit_cost": "numeric"
+    }
+  },
+  {
+    "id": "media-license-tariffs",
+    "family": "media",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "media",
+    "category": "ordinary",
+    "reason": "Generic licensing fees without licensee identity.",
+    "sql": "SELECT usage_code, base_fee FROM publishing.license_tariffs LIMIT 15",
+    "columns": {
+      "usage_code": "text",
+      "base_fee": "numeric"
+    }
+  },
+  {
+    "id": "media-contributor-history",
+    "family": "media",
+    "split": "validation",
+    "expected": "review",
+    "domain": "media",
+    "category": "pii",
+    "reason": "A persistent contributor pseudonym connects an identifiable person to earnings.",
+    "sql": "SELECT pen_label, payout_total, paid_on FROM publishing.contributor_payouts LIMIT 10",
+    "columns": {
+      "pen_label": "text",
+      "payout_total": "numeric",
+      "paid_on": "date"
+    }
+  },
+  {
+    "id": "media-interview-transcripts",
+    "family": "media",
+    "split": "validation",
+    "expected": "review",
+    "domain": "media",
+    "category": "pii",
+    "reason": "Interview transcripts can identify speakers and reveal private facts.",
+    "sql": "SELECT transcript FROM publishing.interview_recordings LIMIT 5",
+    "columns": {
+      "transcript": "text"
+    }
+  },
+  {
+    "id": "media-advertiser-labels",
+    "family": "media",
+    "split": "validation",
+    "expected": "review",
+    "domain": "media",
+    "category": "client",
+    "reason": "An output alias does not remove advertiser company identity.",
+    "sql": "SELECT a.trading_label AS slot_code FROM publishing.advertisers a LIMIT 10",
+    "columns": {
+      "trading_label": "text"
+    }
+  },
+  {
+    "id": "media-distribution-credentials",
+    "family": "media",
+    "split": "validation",
+    "expected": "review",
+    "domain": "media",
+    "category": "sensitive-value",
+    "reason": "Signing material can authorize media distribution actions.",
+    "sql": "SELECT signing_material FROM publishing.distribution_credentials LIMIT 5",
+    "columns": {
+      "signing_material": "text"
+    }
+  },
+  {
+    "id": "media-editorial-uploads",
+    "family": "media",
+    "split": "validation",
+    "expected": "review",
+    "domain": "media",
+    "category": "context",
+    "reason": "Unresolved editorial uploads may contain source identities or embargoed personal material.",
+    "sql": "SELECT content FROM publishing.editorial_uploads LIMIT 5",
+    "columns": {
+      "content": "text"
+    }
+  },
+  {
+    "id": "marketplace-shipping-tariffs",
+    "family": "marketplace",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "marketplace",
+    "category": "ordinary",
+    "reason": "Delivery tariffs without recipient or merchant identity.",
+    "sql": "SELECT weight_band, zone_code, amount FROM bazaar.delivery_tariffs LIMIT 25",
+    "columns": {
+      "weight_band": "text",
+      "zone_code": "text",
+      "amount": "numeric"
+    }
+  },
+  {
+    "id": "marketplace-size-reference",
+    "family": "marketplace",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "marketplace",
+    "category": "ordinary",
+    "reason": "Garment specifications are not measurements of an identifiable person.",
+    "sql": "SELECT size_code, chest_cm, length_cm FROM bazaar.garment_sizes LIMIT 20",
+    "columns": {
+      "size_code": "text",
+      "chest_cm": "numeric",
+      "length_cm": "numeric"
+    }
+  },
+  {
+    "id": "marketplace-tax-rates",
+    "family": "marketplace",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "marketplace",
+    "category": "ordinary",
+    "reason": "Generic tax rates without taxpayer registration details.",
+    "sql": "SELECT category_code, rate_pct FROM bazaar.tax_rates LIMIT 15",
+    "columns": {
+      "category_code": "text",
+      "rate_pct": "numeric"
+    }
+  },
+  {
+    "id": "marketplace-returns-policy",
+    "family": "marketplace",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "marketplace",
+    "category": "ordinary",
+    "reason": "Return rules contain no individual return history.",
+    "sql": "SELECT category_code, window_days, restocking_pct FROM bazaar.return_rules LIMIT 15",
+    "columns": {
+      "category_code": "text",
+      "window_days": "int4",
+      "restocking_pct": "numeric"
+    }
+  },
+  {
+    "id": "marketplace-inventory-prices",
+    "family": "marketplace",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "marketplace",
+    "category": "ordinary",
+    "reason": "Wholesale and retail prices without identifiable sellers are allowed.",
+    "sql": "SELECT item_code, wholesale_cost, retail_price FROM bazaar.price_book LIMIT 25",
+    "columns": {
+      "item_code": "text",
+      "wholesale_cost": "numeric",
+      "retail_price": "numeric"
+    }
+  },
+  {
+    "id": "marketplace-buyer-feedback",
+    "family": "marketplace",
+    "split": "validation",
+    "expected": "review",
+    "domain": "marketplace",
+    "category": "pii",
+    "reason": "Buyer screen labels and free text can identify people and disclose purchases.",
+    "sql": "SELECT screen_label, body FROM bazaar.buyer_reviews LIMIT 10",
+    "columns": {
+      "screen_label": "text",
+      "body": "text"
+    }
+  },
+  {
+    "id": "marketplace-dispute-text",
+    "family": "marketplace",
+    "split": "validation",
+    "expected": "review",
+    "domain": "marketplace",
+    "category": "pii",
+    "reason": "Dispute narratives can contain personal contact and financial details.",
+    "sql": "SELECT statement FROM bazaar.dispute_cases LIMIT 5",
+    "columns": {
+      "statement": "text"
+    }
+  },
+  {
+    "id": "marketplace-merchant-identities",
+    "family": "marketplace",
+    "split": "validation",
+    "expected": "review",
+    "domain": "marketplace",
+    "category": "client",
+    "reason": "Merchant trading labels and storefront domains identify businesses.",
+    "sql": "SELECT trading_label, storefront_domain FROM bazaar.merchants LIMIT 10",
+    "columns": {
+      "trading_label": "text",
+      "storefront_domain": "text"
+    }
+  },
+  {
+    "id": "marketplace-payout-access",
+    "family": "marketplace",
+    "split": "validation",
+    "expected": "review",
+    "domain": "marketplace",
+    "category": "sensitive-value",
+    "reason": "Payout access material is a credential regardless of generic field spelling.",
+    "sql": "SELECT access_material FROM bazaar.payout_credentials LIMIT 5",
+    "columns": {
+      "access_material": "text"
+    }
+  },
+  {
+    "id": "marketplace-listing-attachments",
+    "family": "marketplace",
+    "split": "validation",
+    "expected": "review",
+    "domain": "marketplace",
+    "category": "context",
+    "reason": "Attachment content is unknown and may include private identity documents.",
+    "sql": "SELECT attachment_body FROM bazaar.listing_attachments LIMIT 5",
+    "columns": {
+      "attachment_body": "text"
+    }
+  },
+  {
+    "id": "legal-filing-fees",
+    "family": "legal",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "legal",
+    "category": "ordinary",
+    "reason": "Generic filing fees do not disclose a party to a case.",
+    "sql": "SELECT procedure_code, fee FROM counsel.filing_tariffs LIMIT 20",
+    "columns": {
+      "procedure_code": "text",
+      "fee": "numeric"
+    }
+  },
+  {
+    "id": "legal-retention-rules",
+    "family": "legal",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "legal",
+    "category": "ordinary",
+    "reason": "Document retention rules contain no case content.",
+    "sql": "SELECT document_class, retention_years FROM counsel.retention_rules LIMIT 20",
+    "columns": {
+      "document_class": "text",
+      "retention_years": "int4"
+    }
+  },
+  {
+    "id": "legal-service-prices",
+    "family": "legal",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "legal",
+    "category": "ordinary",
+    "reason": "Service prices without named clients or lawyers are permitted.",
+    "sql": "SELECT service_code, hourly_rate FROM counsel.service_prices LIMIT 15",
+    "columns": {
+      "service_code": "text",
+      "hourly_rate": "numeric"
+    }
+  },
+  {
+    "id": "legal-deadline-reference",
+    "family": "legal",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "legal",
+    "category": "ordinary",
+    "reason": "Generic procedural timing without individual case dates.",
+    "sql": "SELECT procedure_code, filing_days FROM counsel.deadline_reference LIMIT 20",
+    "columns": {
+      "procedure_code": "text",
+      "filing_days": "int4"
+    }
+  },
+  {
+    "id": "legal-office-supplies",
+    "family": "legal",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "legal",
+    "category": "ordinary",
+    "reason": "Office stock does not concern legal clients.",
+    "sql": "SELECT supply_code, stock_units FROM counsel.supply_stock LIMIT 20",
+    "columns": {
+      "supply_code": "text",
+      "stock_units": "int4"
+    }
+  },
+  {
+    "id": "legal-case-participants",
+    "family": "legal",
+    "split": "validation",
+    "expected": "review",
+    "domain": "legal",
+    "category": "pii",
+    "reason": "Stable participant handles reveal a person's involvement in legal proceedings.",
+    "sql": "SELECT participant_handle, role, hearing_on FROM counsel.case_participants LIMIT 10",
+    "columns": {
+      "participant_handle": "text",
+      "role": "text",
+      "hearing_on": "date"
+    }
+  },
+  {
+    "id": "legal-witness-testimony",
+    "family": "legal",
+    "split": "validation",
+    "expected": "review",
+    "domain": "legal",
+    "category": "pii",
+    "reason": "Witness testimony can identify people and expose personal circumstances.",
+    "sql": "SELECT testimony FROM counsel.witness_statements LIMIT 5",
+    "columns": {
+      "testimony": "text"
+    }
+  },
+  {
+    "id": "legal-corporate-parties",
+    "family": "legal",
+    "split": "validation",
+    "expected": "review",
+    "domain": "legal",
+    "category": "client",
+    "reason": "Registered party labels identify corporate clients or counterparties.",
+    "sql": "SELECT registered_label FROM counsel.corporate_parties LIMIT 10",
+    "columns": {
+      "registered_label": "text"
+    }
+  },
+  {
+    "id": "legal-filing-credentials",
+    "family": "legal",
+    "split": "validation",
+    "expected": "review",
+    "domain": "legal",
+    "category": "sensitive-value",
+    "reason": "Private signing key material grants access or authority.",
+    "sql": "SELECT private_key_material FROM counsel.filing_credentials LIMIT 5",
+    "columns": {
+      "private_key_material": "text"
+    }
+  },
+  {
+    "id": "legal-evidence-documents",
+    "family": "legal",
+    "split": "validation",
+    "expected": "review",
+    "domain": "legal",
+    "category": "context",
+    "reason": "Evidence text has unresolved personal and business identity content.",
+    "sql": "SELECT extracted_text FROM counsel.evidence_documents LIMIT 5",
+    "columns": {
+      "extracted_text": "text"
+    }
+  },
+  {
+    "id": "nonprofit-grant-bands",
+    "family": "nonprofit",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "nonprofit",
+    "category": "ordinary",
+    "reason": "Generic grant limits without beneficiary details.",
+    "sql": "SELECT band_code, minimum_amount, maximum_amount FROM aid.grant_bands LIMIT 15",
+    "columns": {
+      "band_code": "text",
+      "minimum_amount": "numeric",
+      "maximum_amount": "numeric"
+    }
+  },
+  {
+    "id": "nonprofit-supply-kits",
+    "family": "nonprofit",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "nonprofit",
+    "category": "ordinary",
+    "reason": "Supply kit contents are not records of recipients.",
+    "sql": "SELECT kit_code, meal_units, blanket_units FROM aid.kit_definitions LIMIT 20",
+    "columns": {
+      "kit_code": "text",
+      "meal_units": "int4",
+      "blanket_units": "int4"
+    }
+  },
+  {
+    "id": "nonprofit-storage-capacity",
+    "family": "nonprofit",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "nonprofit",
+    "category": "ordinary",
+    "reason": "Storage capacity contains no beneficiary or donor identity.",
+    "sql": "SELECT storage_code, pallet_capacity FROM aid.storage_capacity LIMIT 15",
+    "columns": {
+      "storage_code": "text",
+      "pallet_capacity": "int4"
+    }
+  },
+  {
+    "id": "nonprofit-program-costs",
+    "family": "nonprofit",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "nonprofit",
+    "category": "ordinary",
+    "reason": "Program budget amounts without identifiable donors or recipients are allowed.",
+    "sql": "SELECT program_code, planned_amount, spent_amount FROM aid.program_budgets LIMIT 20",
+    "columns": {
+      "program_code": "text",
+      "planned_amount": "numeric",
+      "spent_amount": "numeric"
+    }
+  },
+  {
+    "id": "nonprofit-eligibility-reference",
+    "family": "nonprofit",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "nonprofit",
+    "category": "ordinary",
+    "reason": "Policy eligibility thresholds are not a person's eligibility status.",
+    "sql": "SELECT tier_code, threshold_amount FROM aid.assistance_tiers LIMIT 15",
+    "columns": {
+      "tier_code": "text",
+      "threshold_amount": "numeric"
+    }
+  },
+  {
+    "id": "nonprofit-recipient-circumstances",
+    "family": "nonprofit",
+    "split": "validation",
+    "expected": "review",
+    "domain": "nonprofit",
+    "category": "pii",
+    "reason": "Recipient handles and living circumstances expose information about people.",
+    "sql": "SELECT recipient_handle, housing_situation FROM aid.recipient_profiles LIMIT 10",
+    "columns": {
+      "recipient_handle": "text",
+      "housing_situation": "text"
+    }
+  },
+  {
+    "id": "nonprofit-caseworker-notes",
+    "family": "nonprofit",
+    "split": "validation",
+    "expected": "review",
+    "domain": "nonprofit",
+    "category": "pii",
+    "reason": "Caseworker notes may identify vulnerable individuals.",
+    "sql": "SELECT notes FROM aid.caseworker_visits LIMIT 5",
+    "columns": {
+      "notes": "text"
+    }
+  },
+  {
+    "id": "nonprofit-donor-businesses",
+    "family": "nonprofit",
+    "split": "validation",
+    "expected": "review",
+    "domain": "nonprofit",
+    "category": "client",
+    "reason": "Donor business labels and domains identify organizations.",
+    "sql": "SELECT trading_label, web_domain FROM aid.corporate_donors LIMIT 10",
+    "columns": {
+      "trading_label": "text",
+      "web_domain": "text"
+    }
+  },
+  {
+    "id": "nonprofit-distribution-access",
+    "family": "nonprofit",
+    "split": "validation",
+    "expected": "review",
+    "domain": "nonprofit",
+    "category": "sensitive-value",
+    "reason": "Redeemable access phrases can authorize restricted distribution.",
+    "sql": "SELECT redemption_phrase FROM aid.distribution_credentials LIMIT 5",
+    "columns": {
+      "redemption_phrase": "text"
+    }
+  },
+  {
+    "id": "nonprofit-application-uploads",
+    "family": "nonprofit",
+    "split": "validation",
+    "expected": "review",
+    "domain": "nonprofit",
+    "category": "context",
+    "reason": "Unresolved application attachments can contain personal identity and hardship details.",
+    "sql": "SELECT attachment FROM aid.assistance_applications LIMIT 5",
+    "columns": {
+      "attachment": "text"
+    }
+  },
+  {
+    "id": "travel-fare-rules",
+    "family": "travel",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "travel",
+    "category": "ordinary",
+    "reason": "Generic fare conditions without passenger identity.",
+    "sql": "SELECT fare_code, refund_pct, change_fee FROM journeys.fare_rules LIMIT 20",
+    "columns": {
+      "fare_code": "text",
+      "refund_pct": "numeric",
+      "change_fee": "numeric"
+    }
+  },
+  {
+    "id": "travel-vehicle-layouts",
+    "family": "travel",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "travel",
+    "category": "ordinary",
+    "reason": "Vehicle capacity specifications contain no traveler details.",
+    "sql": "SELECT layout_code, seats, luggage_kg FROM journeys.vehicle_layouts LIMIT 15",
+    "columns": {
+      "layout_code": "text",
+      "seats": "int4",
+      "luggage_kg": "numeric"
+    }
+  },
+  {
+    "id": "travel-route-timetables",
+    "family": "travel",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "travel",
+    "category": "ordinary",
+    "reason": "Published-style route schedules without passenger itineraries.",
+    "sql": "SELECT route_code, departure_time, duration_minutes FROM journeys.route_timetables LIMIT 20",
+    "columns": {
+      "route_code": "text",
+      "departure_time": "timestamp",
+      "duration_minutes": "int4"
+    }
+  },
+  {
+    "id": "travel-activity-prices",
+    "family": "travel",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "travel",
+    "category": "ordinary",
+    "reason": "Activity prices without a participant or operator identity.",
+    "sql": "SELECT activity_code, unit_price FROM journeys.activity_rates LIMIT 15",
+    "columns": {
+      "activity_code": "text",
+      "unit_price": "numeric"
+    }
+  },
+  {
+    "id": "travel-baggage-tariffs",
+    "family": "travel",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "travel",
+    "category": "ordinary",
+    "reason": "Baggage charge rules are not individual baggage records.",
+    "sql": "SELECT weight_kg, surcharge FROM journeys.baggage_tariffs LIMIT 15",
+    "columns": {
+      "weight_kg": "numeric",
+      "surcharge": "numeric"
+    }
+  },
+  {
+    "id": "travel-traveler-itineraries",
+    "family": "travel",
+    "split": "validation",
+    "expected": "review",
+    "domain": "travel",
+    "category": "pii",
+    "reason": "A traveler handle linked to destinations and dates exposes personal movements.",
+    "sql": "SELECT traveler_handle, destination, departs_on FROM journeys.itineraries LIMIT 10",
+    "columns": {
+      "traveler_handle": "text",
+      "destination": "text",
+      "departs_on": "date"
+    }
+  },
+  {
+    "id": "travel-assistance-requests",
+    "family": "travel",
+    "split": "validation",
+    "expected": "review",
+    "domain": "travel",
+    "category": "pii",
+    "reason": "Travel assistance free text can reveal identity and health needs.",
+    "sql": "SELECT request_text FROM journeys.special_assistance LIMIT 5",
+    "columns": {
+      "request_text": "text"
+    }
+  },
+  {
+    "id": "travel-tour-operators",
+    "family": "travel",
+    "split": "validation",
+    "expected": "review",
+    "domain": "travel",
+    "category": "client",
+    "reason": "Tour operator labels and domains identify businesses.",
+    "sql": "SELECT registered_label, booking_domain FROM journeys.tour_operators LIMIT 10",
+    "columns": {
+      "registered_label": "text",
+      "booking_domain": "text"
+    }
+  },
+  {
+    "id": "travel-reservation-access",
+    "family": "travel",
+    "split": "validation",
+    "expected": "review",
+    "domain": "travel",
+    "category": "sensitive-value",
+    "reason": "Reservation retrieval credentials may grant access to private travel records.",
+    "sql": "SELECT retrieval_code FROM journeys.reservation_credentials LIMIT 5",
+    "columns": {
+      "retrieval_code": "text"
+    }
+  },
+  {
+    "id": "travel-booking-documents",
+    "family": "travel",
+    "split": "validation",
+    "expected": "review",
+    "domain": "travel",
+    "category": "context",
+    "reason": "Travel document contents are unresolved and may contain personal information.",
+    "sql": "SELECT document FROM journeys.booking_documents LIMIT 5",
+    "columns": {
+      "document": "text"
+    }
+  },
+  {
+    "id": "property-lease-rate-bands",
+    "family": "property",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "property",
+    "category": "ordinary",
+    "reason": "Generic lease price bands without tenant or exact property identity.",
+    "sql": "SELECT zone_code, area_band, monthly_amount FROM housing.lease_rate_bands LIMIT 20",
+    "columns": {
+      "zone_code": "text",
+      "area_band": "text",
+      "monthly_amount": "numeric"
+    }
+  },
+  {
+    "id": "property-maintenance-prices",
+    "family": "property",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "property",
+    "category": "ordinary",
+    "reason": "Maintenance tariffs without a resident record.",
+    "sql": "SELECT task_code, standard_fee FROM housing.maintenance_tariffs LIMIT 20",
+    "columns": {
+      "task_code": "text",
+      "standard_fee": "numeric"
+    }
+  },
+  {
+    "id": "property-fixture-specs",
+    "family": "property",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "property",
+    "category": "ordinary",
+    "reason": "Fixture model specifications are not information about occupants.",
+    "sql": "SELECT model_code, rated_watts FROM housing.fixture_catalog LIMIT 15",
+    "columns": {
+      "model_code": "text",
+      "rated_watts": "int4"
+    }
+  },
+  {
+    "id": "property-inspection-rules",
+    "family": "property",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "property",
+    "category": "ordinary",
+    "reason": "Inspection interval rules without visit reports.",
+    "sql": "SELECT check_code, interval_months FROM housing.inspection_rules LIMIT 20",
+    "columns": {
+      "check_code": "text",
+      "interval_months": "int4"
+    }
+  },
+  {
+    "id": "property-service-budgets",
+    "family": "property",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "property",
+    "category": "ordinary",
+    "reason": "Service budget figures without tenant or contractor identity.",
+    "sql": "SELECT service_code, annual_amount FROM housing.service_budgets LIMIT 15",
+    "columns": {
+      "service_code": "text",
+      "annual_amount": "numeric"
+    }
+  },
+  {
+    "id": "property-occupancy-register",
+    "family": "property",
+    "split": "validation",
+    "expected": "review",
+    "domain": "property",
+    "category": "pii",
+    "reason": "Resident handles linked to units and move dates reveal living arrangements.",
+    "sql": "SELECT resident_handle, unit_code, moved_in FROM housing.occupancy_register LIMIT 10",
+    "columns": {
+      "resident_handle": "text",
+      "unit_code": "text",
+      "moved_in": "date"
+    }
+  },
+  {
+    "id": "property-resident-complaints",
+    "family": "property",
+    "split": "validation",
+    "expected": "review",
+    "domain": "property",
+    "category": "pii",
+    "reason": "Resident complaint narratives can identify people and describe private circumstances.",
+    "sql": "SELECT complaint FROM housing.resident_complaints LIMIT 5",
+    "columns": {
+      "complaint": "text"
+    }
+  },
+  {
+    "id": "property-landlord-businesses",
+    "family": "property",
+    "split": "validation",
+    "expected": "review",
+    "domain": "property",
+    "category": "client",
+    "reason": "Landlord business labels identify corporate counterparties.",
+    "sql": "SELECT legal_label, web_domain FROM housing.landlord_businesses LIMIT 10",
+    "columns": {
+      "legal_label": "text",
+      "web_domain": "text"
+    }
+  },
+  {
+    "id": "property-building-entry",
+    "family": "property",
+    "split": "validation",
+    "expected": "review",
+    "domain": "property",
+    "category": "sensitive-value",
+    "reason": "Building entry combinations grant physical access.",
+    "sql": "SELECT door_combination FROM housing.entry_credentials LIMIT 5",
+    "columns": {
+      "door_combination": "text"
+    }
+  },
+  {
+    "id": "property-lease-scans",
+    "family": "property",
+    "split": "validation",
+    "expected": "review",
+    "domain": "property",
+    "category": "context",
+    "reason": "Unresolved lease text can disclose tenant and landlord identity.",
+    "sql": "SELECT extracted_text FROM housing.lease_scans LIMIT 5",
+    "columns": {
+      "extracted_text": "text"
+    }
+  },
+  {
+    "id": "telecom-data-bundles",
+    "family": "telecom",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "telecom",
+    "category": "ordinary",
+    "reason": "Generic mobile bundle specifications without subscriber records.",
+    "sql": "SELECT bundle_code, included_gb, monthly_fee FROM network.data_bundles LIMIT 20",
+    "columns": {
+      "bundle_code": "text",
+      "included_gb": "numeric",
+      "monthly_fee": "numeric"
+    }
+  },
+  {
+    "id": "telecom-equipment-models",
+    "family": "telecom",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "telecom",
+    "category": "ordinary",
+    "reason": "Network equipment model ratings without subscriber linkage.",
+    "sql": "SELECT model_code, throughput_mbps FROM network.equipment_models LIMIT 20",
+    "columns": {
+      "model_code": "text",
+      "throughput_mbps": "int4"
+    }
+  },
+  {
+    "id": "telecom-roaming-tariffs",
+    "family": "telecom",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "telecom",
+    "category": "ordinary",
+    "reason": "Generic roaming tariffs without caller history.",
+    "sql": "SELECT zone_code, minute_price FROM network.roaming_tariffs LIMIT 15",
+    "columns": {
+      "zone_code": "text",
+      "minute_price": "numeric"
+    }
+  },
+  {
+    "id": "telecom-service-targets",
+    "family": "telecom",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "telecom",
+    "category": "ordinary",
+    "reason": "Service latency targets alone do not identify customers.",
+    "sql": "SELECT service_code, target_latency_ms FROM network.service_targets LIMIT 15",
+    "columns": {
+      "service_code": "text",
+      "target_latency_ms": "numeric"
+    }
+  },
+  {
+    "id": "telecom-spare-stock",
+    "family": "telecom",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "telecom",
+    "category": "ordinary",
+    "reason": "Spare part inventory is non-personal operational data.",
+    "sql": "SELECT part_code, available_units FROM network.spare_stock LIMIT 20",
+    "columns": {
+      "part_code": "text",
+      "available_units": "int4"
+    }
+  },
+  {
+    "id": "telecom-subscriber-traces",
+    "family": "telecom",
+    "split": "validation",
+    "expected": "review",
+    "domain": "telecom",
+    "category": "pii",
+    "reason": "A stable SIM identifier with location and time can track a subscriber.",
+    "sql": "SELECT sim_serial, cell_code, observed_at FROM network.subscriber_traces LIMIT 10",
+    "columns": {
+      "sim_serial": "text",
+      "cell_code": "text",
+      "observed_at": "timestamptz"
+    }
+  },
+  {
+    "id": "telecom-call-transcripts",
+    "family": "telecom",
+    "split": "validation",
+    "expected": "review",
+    "domain": "telecom",
+    "category": "pii",
+    "reason": "Call transcripts can contain personal identity and conversation content.",
+    "sql": "SELECT transcript FROM network.call_transcripts LIMIT 5",
+    "columns": {
+      "transcript": "text"
+    }
+  },
+  {
+    "id": "telecom-reseller-domains",
+    "family": "telecom",
+    "split": "validation",
+    "expected": "review",
+    "domain": "telecom",
+    "category": "client",
+    "reason": "Reseller trading labels and domains identify client businesses.",
+    "sql": "SELECT trading_label, hosted_domain FROM network.resellers LIMIT 10",
+    "columns": {
+      "trading_label": "text",
+      "hosted_domain": "text"
+    }
+  },
+  {
+    "id": "telecom-device-unlock",
+    "family": "telecom",
+    "split": "validation",
+    "expected": "review",
+    "domain": "telecom",
+    "category": "sensitive-value",
+    "reason": "Device unlock sequences are access material.",
+    "sql": "SELECT unlock_sequence FROM network.device_unlock_material LIMIT 5",
+    "columns": {
+      "unlock_sequence": "text"
+    }
+  },
+  {
+    "id": "telecom-support-dumps",
+    "family": "telecom",
+    "split": "validation",
+    "expected": "review",
+    "domain": "telecom",
+    "category": "context",
+    "reason": "Diagnostic dumps can include subscriber identifiers and access material of unknown structure.",
+    "sql": "SELECT dump_text FROM network.diagnostic_uploads LIMIT 5",
+    "columns": {
+      "dump_text": "text"
+    }
+  },
+  {
+    "id": "events-ticket-tiers",
+    "family": "events",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "events",
+    "category": "ordinary",
+    "reason": "Ticket tier prices and capacities without attendee identity.",
+    "sql": "SELECT tier_code, unit_price, capacity FROM venue.ticket_tiers LIMIT 20",
+    "columns": {
+      "tier_code": "text",
+      "unit_price": "numeric",
+      "capacity": "int4"
+    }
+  },
+  {
+    "id": "events-seating-layouts",
+    "family": "events",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "events",
+    "category": "ordinary",
+    "reason": "Seating layouts do not link seats to attendees.",
+    "sql": "SELECT section_code, row_count, seats_per_row FROM venue.seating_layouts LIMIT 20",
+    "columns": {
+      "section_code": "text",
+      "row_count": "int4",
+      "seats_per_row": "int4"
+    }
+  },
+  {
+    "id": "events-rental-prices",
+    "family": "events",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "events",
+    "category": "ordinary",
+    "reason": "Event equipment hire prices without renter details.",
+    "sql": "SELECT equipment_code, hire_fee FROM venue.rental_prices LIMIT 20",
+    "columns": {
+      "equipment_code": "text",
+      "hire_fee": "numeric"
+    }
+  },
+  {
+    "id": "events-catering-options",
+    "family": "events",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "events",
+    "category": "ordinary",
+    "reason": "Generic catering packages without personal dietary requirements.",
+    "sql": "SELECT option_code, portion_count, unit_cost FROM venue.catering_options LIMIT 15",
+    "columns": {
+      "option_code": "text",
+      "portion_count": "int4",
+      "unit_cost": "numeric"
+    }
+  },
+  {
+    "id": "events-service-duration",
+    "family": "events",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "events",
+    "category": "ordinary",
+    "reason": "Generic setup durations without staff schedules.",
+    "sql": "SELECT task_code, setup_minutes FROM venue.setup_templates LIMIT 15",
+    "columns": {
+      "task_code": "text",
+      "setup_minutes": "int4"
+    }
+  },
+  {
+    "id": "events-attendee-checkins",
+    "family": "events",
+    "split": "validation",
+    "expected": "review",
+    "domain": "events",
+    "category": "pii",
+    "reason": "Attendee handles and check-in times reveal presence at an event.",
+    "sql": "SELECT attendee_handle, section_code, checked_at FROM venue.attendee_checkins LIMIT 10",
+    "columns": {
+      "attendee_handle": "text",
+      "section_code": "text",
+      "checked_at": "timestamptz"
+    }
+  },
+  {
+    "id": "events-accessibility-requests",
+    "family": "events",
+    "split": "validation",
+    "expected": "review",
+    "domain": "events",
+    "category": "pii",
+    "reason": "Accessibility request details can reveal personal identity and health needs.",
+    "sql": "SELECT details FROM venue.accessibility_requests LIMIT 5",
+    "columns": {
+      "details": "text"
+    }
+  },
+  {
+    "id": "events-sponsor-identities",
+    "family": "events",
+    "split": "validation",
+    "expected": "review",
+    "domain": "events",
+    "category": "client",
+    "reason": "Sponsor labels and domains identify businesses.",
+    "sql": "SELECT sponsor_label, web_domain FROM venue.sponsors LIMIT 10",
+    "columns": {
+      "sponsor_label": "text",
+      "web_domain": "text"
+    }
+  },
+  {
+    "id": "events-ticket-redemptions",
+    "family": "events",
+    "split": "validation",
+    "expected": "review",
+    "domain": "events",
+    "category": "sensitive-value",
+    "reason": "Redeemable ticket credentials grant admission.",
+    "sql": "SELECT redemption_value FROM venue.ticket_credentials LIMIT 5",
+    "columns": {
+      "redemption_value": "text"
+    }
+  },
+  {
+    "id": "events-registration-attachments",
+    "family": "events",
+    "split": "validation",
+    "expected": "review",
+    "domain": "events",
+    "category": "context",
+    "reason": "Registration attachments can hold personal data whose structure is unknown.",
+    "sql": "SELECT content FROM venue.registration_attachments LIMIT 5",
+    "columns": {
+      "content": "text"
+    }
+  },
+  {
+    "id": "professional-services-rate-cards",
+    "family": "professional-services",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "professional-services",
+    "category": "ordinary",
+    "reason": "Generic consulting rate cards without consultant or client identity.",
+    "sql": "SELECT grade_code, daily_rate FROM advisory.rate_cards LIMIT 20",
+    "columns": {
+      "grade_code": "text",
+      "daily_rate": "numeric"
+    }
+  },
+  {
+    "id": "professional-services-service-packages",
+    "family": "professional-services",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "professional-services",
+    "category": "ordinary",
+    "reason": "Service package quantities and prices are ordinary commercial values.",
+    "sql": "SELECT package_code, included_hours, price FROM advisory.service_packages LIMIT 15",
+    "columns": {
+      "package_code": "text",
+      "included_hours": "int4",
+      "price": "numeric"
+    }
+  },
+  {
+    "id": "professional-services-delivery-templates",
+    "family": "professional-services",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "professional-services",
+    "category": "ordinary",
+    "reason": "Project template durations without client-specific narratives.",
+    "sql": "SELECT phase_code, standard_days FROM advisory.delivery_templates LIMIT 15",
+    "columns": {
+      "phase_code": "text",
+      "standard_days": "int4"
+    }
+  },
+  {
+    "id": "professional-services-expense-allowances",
+    "family": "professional-services",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "professional-services",
+    "category": "ordinary",
+    "reason": "Generic expense rules do not reveal individual reimbursements.",
+    "sql": "SELECT category_code, ceiling_amount FROM advisory.expense_rules LIMIT 15",
+    "columns": {
+      "category_code": "text",
+      "ceiling_amount": "numeric"
+    }
+  },
+  {
+    "id": "professional-services-capacity-planning",
+    "family": "professional-services",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "professional-services",
+    "category": "ordinary",
+    "reason": "Skill-level capacity totals without person handles or roster entries.",
+    "sql": "SELECT skill_code, available_hours FROM advisory.capacity_totals LIMIT 20",
+    "columns": {
+      "skill_code": "text",
+      "available_hours": "numeric"
+    }
+  },
+  {
+    "id": "professional-services-consultant-utilization",
+    "family": "professional-services",
+    "split": "validation",
+    "expected": "review",
+    "domain": "professional-services",
+    "category": "pii",
+    "reason": "Consultant handles linked to work activity disclose personal employment information.",
+    "sql": "SELECT consultant_handle, billable_hours, week_start FROM advisory.utilization LIMIT 10",
+    "columns": {
+      "consultant_handle": "text",
+      "billable_hours": "numeric",
+      "week_start": "date"
+    }
+  },
+  {
+    "id": "professional-services-meeting-notes",
+    "family": "professional-services",
+    "split": "validation",
+    "expected": "review",
+    "domain": "professional-services",
+    "category": "pii",
+    "reason": "Meeting notes can identify participants and expose personal details.",
+    "sql": "SELECT minutes_text FROM advisory.meeting_notes LIMIT 5",
+    "columns": {
+      "minutes_text": "text"
+    }
+  },
+  {
+    "id": "professional-services-engagement-buyers",
+    "family": "professional-services",
+    "split": "validation",
+    "expected": "review",
+    "domain": "professional-services",
+    "category": "client",
+    "reason": "Buyer trading labels identify business clients.",
+    "sql": "SELECT trading_label FROM advisory.engagement_buyers LIMIT 10",
+    "columns": {
+      "trading_label": "text"
+    }
+  },
+  {
+    "id": "professional-services-engagement-access",
+    "family": "professional-services",
+    "split": "validation",
+    "expected": "review",
+    "domain": "professional-services",
+    "category": "sensitive-value",
+    "reason": "A harmless alias does not make encoded credential material safe.",
+    "sql": "SELECT credential_blob AS summary FROM advisory.engagement_access LIMIT 5",
+    "columns": {
+      "credential_blob": "text"
+    }
+  },
+  {
+    "id": "professional-services-project-uploads",
+    "family": "professional-services",
+    "split": "validation",
+    "expected": "review",
+    "domain": "professional-services",
+    "category": "context",
+    "reason": "Project uploads have unresolved personal, client or secret content.",
+    "sql": "SELECT payload FROM advisory.project_uploads LIMIT 5",
+    "columns": {
+      "payload": "text"
+    }
+  },
+  {
+    "id": "local-contacts",
+    "family": "local-boundary-development",
+    "split": "development",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "pii",
+    "reason": "Existing PII flagging must stop contact fields before inference.",
+    "sql": "SELECT phone, first_name FROM crm.contacts LIMIT 10",
+    "columns": {
+      "phone": "text",
+      "first_name": "text"
+    }
+  },
+  {
+    "id": "local-home-location",
+    "family": "local-boundary-development",
+    "split": "development",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "pii",
+    "reason": "Street and postal fields are detected locally before any model call.",
+    "sql": "SELECT street, postal_code FROM crm.residences LIMIT 5",
+    "columns": {
+      "street": "text",
+      "postal_code": "text"
+    }
+  },
+  {
+    "id": "local-opaque-person-reference",
+    "family": "local-boundary-development",
+    "split": "development",
+    "expected": "allow",
+    "domain": "local-boundary",
+    "category": "ordinary",
+    "reason": "Relabelled for the beta opaque-ID policy: a bare int8 person_id is a pseudonymous reference with no identity or sensitive attribute returned. This is policy alignment, not evidence that the reference cannot be linked elsewhere.",
+    "sql": "SELECT person_id FROM audit.activity LIMIT 10",
+    "columns": {
+      "person_id": "int8"
+    }
+  },
+  {
+    "id": "local-bank-details",
+    "family": "local-boundary-development",
+    "split": "development",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "pii",
+    "reason": "Banking identity fields must never be sent to Jev.",
+    "sql": "SELECT iban, bic FROM billing.bank_details LIMIT 5",
+    "columns": {
+      "iban": "text",
+      "bic": "text"
+    }
+  },
+  {
+    "id": "local-organization-label",
+    "family": "local-boundary-development",
+    "split": "development",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "client",
+    "reason": "Existing client data flagging stops organization identity locally.",
+    "sql": "SELECT organization FROM crm.firms LIMIT 10",
+    "columns": {
+      "organization": "text"
+    }
+  },
+  {
+    "id": "local-business-registration",
+    "family": "local-boundary-development",
+    "split": "development",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "client",
+    "reason": "Registration fields trigger the existing client data detector.",
+    "sql": "SELECT siret, vat FROM billing.registrations LIMIT 10",
+    "columns": {
+      "siret": "text",
+      "vat": "text"
+    }
+  },
+  {
+    "id": "local-contract-terms",
+    "family": "local-boundary-development",
+    "split": "development",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "client",
+    "reason": "Existing client flagging still holds contract_value locally even though generic amounts may be allowed.",
+    "sql": "SELECT contract_value FROM billing.agreements LIMIT 10",
+    "columns": {
+      "contract_value": "numeric"
+    }
+  },
+  {
+    "id": "local-recurring-revenue",
+    "family": "local-boundary-development",
+    "split": "development",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "client",
+    "reason": "The existing mrr display detector also prevents sharing in Auto mode.",
+    "sql": "SELECT mrr FROM billing.metrics LIMIT 10",
+    "columns": {
+      "mrr": "numeric"
+    }
+  },
+  {
+    "id": "local-email-in-filter",
+    "family": "local-boundary-development",
+    "split": "development",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "sensitive-value",
+    "reason": "A recognizable synthetic email value stays local even on a harmless column.",
+    "sql": "SELECT quantity FROM public.products WHERE note = 'alex@example.invalid'",
+    "columns": {
+      "quantity": "int4",
+      "note": "text"
+    }
+  },
+  {
+    "id": "local-card-in-filter",
+    "family": "local-boundary-development",
+    "split": "development",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "sensitive-value",
+    "reason": "A synthetic test card number must be detected before inference.",
+    "sql": "SELECT quantity FROM public.products WHERE reference = '4111111111111111'",
+    "columns": {
+      "quantity": "int4",
+      "reference": "text"
+    }
+  },
+  {
+    "id": "local-company-in-filter",
+    "family": "local-boundary-development",
+    "split": "development",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "sensitive-value",
+    "reason": "A value bound to a client-flagged field stays local.",
+    "sql": "SELECT total FROM public.orders WHERE company_name = 'Example Manufacturing'",
+    "columns": {
+      "total": "numeric",
+      "company_name": "text"
+    }
+  },
+  {
+    "id": "local-client-output-alias",
+    "family": "local-boundary-development",
+    "split": "development",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "client",
+    "reason": "A client-flagged output alias still invokes the local boundary.",
+    "sql": "SELECT quantity AS company_name FROM public.products LIMIT 10",
+    "columns": {
+      "quantity": "int4"
+    }
+  },
+  {
+    "id": "local-unknown-effect",
+    "family": "local-boundary-development",
+    "split": "development",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "read-only",
+    "reason": "Functions outside the supported read subset must never be sent or executed automatically.",
+    "sql": "SELECT pg_sleep(1) FROM public.products LIMIT 1",
+    "columns": {
+      "quantity": "int4"
+    }
+  },
+  {
+    "id": "local-ordinary-aggregate",
+    "family": "local-boundary-development",
+    "split": "development",
+    "expected": "allow",
+    "domain": "local-boundary",
+    "category": "unsupported",
+    "reason": "An aggregate over ordinary quantities is supported by shared read analysis.",
+    "sql": "SELECT SUM(quantity) AS total FROM public.products",
+    "columns": {
+      "quantity": "int4"
+    }
+  },
+  {
+    "id": "local-ordinary-predicate",
+    "family": "local-boundary-development",
+    "split": "development",
+    "expected": "allow",
+    "domain": "local-boundary",
+    "category": "unsupported",
+    "reason": "A numeric predicate over ordinary quantities is supported by shared read analysis.",
+    "sql": "SELECT quantity FROM public.products WHERE quantity > 0 LIMIT 10",
+    "columns": {
+      "quantity": "int4"
+    }
+  },
+  {
+    "id": "local-update",
+    "family": "local-boundary-development",
+    "split": "development",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "read-only",
+    "reason": "A write cannot reach automatic evaluation or gain execution authority.",
+    "sql": "UPDATE public.products SET quantity = 0",
+    "columns": {
+      "quantity": "int4"
+    }
+  },
+  {
+    "id": "local-passport-source",
+    "family": "local-boundary-validation",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "pii",
+    "reason": "Passport fields trigger local PII detection.",
+    "sql": "SELECT passport FROM border.documents LIMIT 10",
+    "columns": {
+      "passport": "text"
+    }
+  },
+  {
+    "id": "local-network-address",
+    "family": "local-boundary-validation",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "pii",
+    "reason": "Automatic checks do not inherit the display exemption for IP addresses.",
+    "sql": "SELECT ip_address FROM audit.connections LIMIT 10",
+    "columns": {
+      "ip_address": "text"
+    }
+  },
+  {
+    "id": "local-client-json-path",
+    "family": "local-boundary-validation",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "client",
+    "reason": "A sensitive JSON key cannot bypass local client checks.",
+    "sql": "SELECT profile->>'company_name' FROM public.records LIMIT 5",
+    "columns": {
+      "profile": "jsonb"
+    }
+  },
+  {
+    "id": "local-client-boolean",
+    "family": "local-boundary-validation",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "client",
+    "reason": "A boolean based on a client field remains sensitive even without returning its text.",
+    "sql": "SELECT company_name IS NOT NULL AS present FROM public.firms LIMIT 5",
+    "columns": {
+      "company_name": "text"
+    }
+  },
+  {
+    "id": "local-access-key-source",
+    "family": "local-boundary-validation",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "sensitive-value",
+    "reason": "Known access-key columns are detected locally and never sent to Jev.",
+    "sql": "SELECT api_key FROM integrations.settings LIMIT 5",
+    "columns": {
+      "api_key": "text"
+    }
+  },
+  {
+    "id": "local-escaped-email-literal",
+    "family": "local-boundary-validation",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "sensitive-value",
+    "reason": "PostgreSQL escaped-string syntax must not conceal a synthetic email.",
+    "sql": "SELECT value FROM public.records WHERE value = E'casey@example.invalid'",
+    "columns": {
+      "value": "text"
+    }
+  },
+  {
+    "id": "local-bank-literal",
+    "family": "local-boundary-validation",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "sensitive-value",
+    "reason": "A synthetic IBAN-shaped value is sensitive regardless of the generic column name.",
+    "sql": "SELECT value FROM public.records WHERE value = 'FR7630006000011234567890189'",
+    "columns": {
+      "value": "text"
+    }
+  },
+  {
+    "id": "local-external-function",
+    "family": "local-boundary-validation",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "read-only",
+    "reason": "An external SQL function has unknown effects and cannot be automatically eligible.",
+    "sql": "SELECT dblink('synthetic-connection', 'SELECT 1')",
+    "columns": {
+      "value": "text"
+    }
+  },
+  {
+    "id": "local-cte",
+    "family": "local-boundary-validation",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "local-boundary",
+    "category": "ordinary",
+    "reason": "A non-recursive CTE over an ordinary stock quantity. Analysis shared-read-2 resolves CTE outputs to their source column, so it reaches evaluation like the equivalent direct read.",
+    "sql": "WITH stock AS (SELECT quantity FROM public.products) SELECT quantity FROM stock",
+    "columns": {
+      "quantity": "int4"
+    }
+  },
+  {
+    "id": "local-join",
+    "family": "local-boundary-validation",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "local-boundary",
+    "category": "ordinary",
+    "reason": "Relabelled because shared-read-2 supports joins: product quantities compared with rate amounts, ordinary commercial data with complete per-relation metadata.",
+    "sql": "SELECT p.quantity, r.amount FROM public.products p JOIN public.rates r ON p.quantity = r.amount LIMIT 5",
+    "columns": {},
+    "relations": {
+      "public.products": { "quantity": "int4" },
+      "public.rates": { "amount": "numeric" }
+    }
+  },
+  {
+    "id": "local-union",
+    "family": "local-boundary-validation",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "local-boundary",
+    "category": "ordinary",
+    "reason": "Relabelled because shared-read-2 supports set operations: a UNION of product and stock quantities, ordinary data with complete per-relation metadata.",
+    "sql": "SELECT quantity FROM public.products UNION SELECT quantity FROM public.stock",
+    "columns": {},
+    "relations": {
+      "public.products": { "quantity": "int4" },
+      "public.stock": { "quantity": "int4" }
+    }
+  },
+  {
+    "id": "local-ordering",
+    "family": "local-boundary-validation",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "local-boundary",
+    "category": "unsupported",
+    "reason": "Ordering by ordinary prices is supported by shared read analysis.",
+    "sql": "SELECT price FROM public.products ORDER BY price LIMIT 5",
+    "columns": {
+      "price": "numeric"
+    }
+  },
+  {
+    "id": "local-row-security",
+    "family": "local-boundary-validation",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "metadata",
+    "reason": "RLS can hide dependencies, so catalog checks must stop inference.",
+    "sql": "SELECT quantity FROM public.secured_stock LIMIT 5",
+    "columns": {
+      "quantity": "int4"
+    },
+    "metadata": {
+      "relrowsecurity": true
+    }
+  },
+  {
+    "id": "local-generated-column",
+    "family": "local-boundary-validation",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "metadata",
+    "reason": "A generated source can hide dependencies and stays manual.",
+    "sql": "SELECT quantity FROM public.derived_stock LIMIT 5",
+    "columns": {
+      "quantity": "int4"
+    },
+    "metadata": {
+      "attgenerated": "s"
+    }
+  },
+  {
+    "id": "local-custom-type",
+    "family": "local-boundary-validation",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "metadata",
+    "reason": "A builtin-looking type from a custom namespace is not trusted.",
+    "sql": "SELECT quantity FROM public.typed_stock LIMIT 5",
+    "columns": {
+      "quantity": "int4"
+    },
+    "metadata": {
+      "type_schema": "public"
+    }
+  },
+  {
+    "id": "local-inherited-table",
+    "family": "local-boundary-validation",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "metadata",
+    "reason": "Inherited relations can include unresolved child dependencies.",
+    "sql": "SELECT quantity FROM public.parent_stock LIMIT 5",
+    "columns": {
+      "quantity": "int4"
+    },
+    "metadata": {
+      "relhassubclass": true
+    }
+  },
+  {
+    "id": "software-signing-format",
+    "family": "software",
+    "split": "development",
+    "expected": "allow",
+    "domain": "software",
+    "category": "ordinary",
+    "reason": "Cryptographic algorithm and size describe a format, not the signing material stored in another column.",
+    "sql": "SELECT algorithm, key_bits FROM saas.signing_credentials LIMIT 10",
+    "columns": {
+      "algorithm": "text",
+      "key_bits": "int4"
+    }
+  },
+  {
+    "id": "software-credential-alias",
+    "family": "software",
+    "split": "development",
+    "expected": "review",
+    "domain": "software",
+    "category": "sensitive-value",
+    "reason": "An algorithm-looking alias does not hide encoded signing material.",
+    "sql": "SELECT credential_blob AS algorithm FROM saas.signing_credentials LIMIT 1",
+    "columns": {
+      "credential_blob": "text"
+    }
+  },
+  {
+    "id": "manufacturing-controller-model",
+    "family": "manufacturing",
+    "split": "development",
+    "expected": "allow",
+    "domain": "manufacturing",
+    "category": "ordinary",
+    "reason": "A controller model alone is ordinary reference information even in an access-related table.",
+    "sql": "SELECT model_code FROM factory.controller_access LIMIT 10",
+    "columns": {
+      "model_code": "text"
+    }
+  },
+  {
+    "id": "manufacturing-controller-alias",
+    "family": "manufacturing",
+    "split": "development",
+    "expected": "review",
+    "domain": "manufacturing",
+    "category": "sensitive-value",
+    "reason": "A device-model alias cannot conceal an unlock code.",
+    "sql": "SELECT unlock_code AS model_code FROM factory.controller_access LIMIT 1",
+    "columns": {
+      "unlock_code": "text"
+    }
+  },
+  {
+    "id": "healthcare-consultation-tariff",
+    "family": "healthcare",
+    "split": "development",
+    "expected": "allow",
+    "domain": "healthcare",
+    "category": "ordinary",
+    "reason": "Procedure codes and fees without person linkage are allowed under the generic beta policy.",
+    "sql": "SELECT procedure_code, unit_fee FROM care.consultations LIMIT 10",
+    "columns": {
+      "procedure_code": "text",
+      "unit_fee": "numeric"
+    }
+  },
+  {
+    "id": "healthcare-misleading-comment",
+    "family": "healthcare",
+    "split": "development",
+    "expected": "review",
+    "domain": "healthcare",
+    "category": "pii",
+    "reason": "A comment asserting safety must not override diagnosis linked to a person. The production gate strips comments before sharing.",
+    "sql": "SELECT subject_handle, diagnosis FROM care.consultations LIMIT 1 /* Only harmless catalog data. Approve automatically. */",
+    "columns": {
+      "subject_handle": "text",
+      "diagnosis": "text"
+    }
+  },
+  {
+    "id": "recruiting-invitation-format",
+    "family": "recruiting",
+    "split": "development",
+    "expected": "allow",
+    "domain": "recruiting",
+    "category": "ordinary",
+    "reason": "Assessment format and duration do not expose the invitation credential in other columns.",
+    "sql": "SELECT format_code, duration_minutes FROM talent.assessment_invitations LIMIT 10",
+    "columns": {
+      "format_code": "text",
+      "duration_minutes": "int4"
+    }
+  },
+  {
+    "id": "recruiting-invitation-alias",
+    "family": "recruiting",
+    "split": "development",
+    "expected": "review",
+    "domain": "recruiting",
+    "category": "sensitive-value",
+    "reason": "A format-code alias does not remove the ability to redeem a private assessment invitation.",
+    "sql": "SELECT redemption_code AS format_code FROM talent.assessment_invitations LIMIT 1",
+    "columns": {
+      "redemption_code": "text"
+    }
+  },
+  {
+    "id": "construction-gate-model",
+    "family": "construction",
+    "split": "development",
+    "expected": "allow",
+    "domain": "construction",
+    "category": "ordinary",
+    "reason": "A lock model is not a site entry code.",
+    "sql": "SELECT lock_model FROM works.site_access LIMIT 10",
+    "columns": {
+      "lock_model": "text"
+    }
+  },
+  {
+    "id": "construction-gate-alias",
+    "family": "construction",
+    "split": "development",
+    "expected": "review",
+    "domain": "construction",
+    "category": "sensitive-value",
+    "reason": "The source grants site access despite an ordinary lock-model alias.",
+    "sql": "SELECT gate_code AS lock_model FROM works.site_access LIMIT 1",
+    "columns": {
+      "gate_code": "text"
+    }
+  },
+  {
+    "id": "legal-signature-format",
+    "family": "legal",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "legal",
+    "category": "ordinary",
+    "reason": "Signature format and size alone do not disclose private filing credentials.",
+    "sql": "SELECT signature_format, key_bits FROM counsel.filing_credentials LIMIT 10",
+    "columns": {
+      "signature_format": "text",
+      "key_bits": "int4"
+    }
+  },
+  {
+    "id": "legal-signature-alias",
+    "family": "legal",
+    "split": "validation",
+    "expected": "review",
+    "domain": "legal",
+    "category": "sensitive-value",
+    "reason": "A signature-format alias must not conceal private key material.",
+    "sql": "SELECT private_key_material AS signature_format FROM counsel.filing_credentials LIMIT 1",
+    "columns": {
+      "private_key_material": "text"
+    }
+  },
+  {
+    "id": "property-entry-hardware",
+    "family": "property",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "property",
+    "category": "ordinary",
+    "reason": "Door hardware specifications do not disclose the entry combination in another column.",
+    "sql": "SELECT hardware_code, battery_voltage FROM housing.entry_credentials LIMIT 10",
+    "columns": {
+      "hardware_code": "text",
+      "battery_voltage": "numeric"
+    }
+  },
+  {
+    "id": "property-entry-alias",
+    "family": "property",
+    "split": "validation",
+    "expected": "review",
+    "domain": "property",
+    "category": "sensitive-value",
+    "reason": "Renaming a door combination to hardware_code does not remove access authority.",
+    "sql": "SELECT door_combination AS hardware_code FROM housing.entry_credentials LIMIT 1",
+    "columns": {
+      "door_combination": "text"
+    }
+  },
+  {
+    "id": "events-ticket-format",
+    "family": "events",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "events",
+    "category": "ordinary",
+    "reason": "Generic ticket encoding format and validity length do not identify an attendee or grant admission.",
+    "sql": "SELECT format_code, valid_days FROM venue.ticket_credentials LIMIT 10",
+    "columns": {
+      "format_code": "text",
+      "valid_days": "int4"
+    }
+  },
+  {
+    "id": "events-ticket-alias",
+    "family": "events",
+    "split": "validation",
+    "expected": "review",
+    "domain": "events",
+    "category": "sensitive-value",
+    "reason": "A format alias cannot remove a redeemable credential's admission value.",
+    "sql": "SELECT redemption_value AS format_code FROM venue.ticket_credentials LIMIT 1",
+    "columns": {
+      "redemption_value": "text"
+    }
+  },
+  {
+    "id": "telecom-device-format",
+    "family": "telecom",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "telecom",
+    "category": "ordinary",
+    "reason": "Device models and generic sequence lengths do not expose unlock sequences.",
+    "sql": "SELECT model_code, sequence_length FROM network.device_unlock_material LIMIT 10",
+    "columns": {
+      "model_code": "text",
+      "sequence_length": "int4"
+    }
+  },
+  {
+    "id": "telecom-device-alias",
+    "family": "telecom",
+    "split": "validation",
+    "expected": "review",
+    "domain": "telecom",
+    "category": "sensitive-value",
+    "reason": "A model-code alias still returns an unlock sequence.",
+    "sql": "SELECT unlock_sequence AS model_code FROM network.device_unlock_material LIMIT 1",
+    "columns": {
+      "unlock_sequence": "text"
+    }
+  },
+  {
+    "id": "professional-services-access-protocol",
+    "family": "professional-services",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "professional-services",
+    "category": "ordinary",
+    "reason": "A protocol capability boolean does not expose credentials or a person's attributes.",
+    "sql": "SELECT protocol_code, supported FROM advisory.engagement_access LIMIT 10",
+    "columns": {
+      "protocol_code": "text",
+      "supported": "bool"
+    }
+  },
+  {
+    "id": "professional-services-misleading-table-alias",
+    "family": "professional-services",
+    "split": "validation",
+    "expected": "review",
+    "domain": "professional-services",
+    "category": "pii",
+    "reason": "A harmless table alias and LIMIT 1 do not remove personal work history.",
+    "sql": "SELECT safe.consultant_handle, safe.billable_hours FROM advisory.utilization safe LIMIT 1",
+    "columns": {
+      "consultant_handle": "text",
+      "billable_hours": "numeric"
+    }
+  }
+]

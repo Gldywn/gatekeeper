@@ -1,18 +1,20 @@
 # Security
 
-Gatekeeper puts a human approval in front of every SQL statement an AI agent proposes,
+Gatekeeper requires human approval by default for SQL statements an AI agent proposes,
 and runs the approved statement through Beekeeper Studio's existing connection so the
 agent never holds credentials. This document states what that guarantees, where the
 trust boundaries are, and the limitations worth knowing before you rely on it.
 
 ## Threat model
 
-Gatekeeper is designed for one job: an agent can *propose* SQL, but only a human can
-*run* it, on a connection the human controls. The agent is treated as untrusted input.
+Agents propose SQL on a connection the human controls. The agent is treated as untrusted
+input. Explicitly enabled Auto mode beta delegates approval of a restricted read subset
+to deterministic checks and an additional evaluator. See [Auto mode](docs/AUTO-MODE.md).
 
-- **The human approval is the security boundary.** Every statement, including a read, is
-  approved by a human click on its visible SQL text, before it runs. Nothing an agent
-  sends executes on its own.
+- **Human approval is the default boundary.** Auto mode is an explicit, ephemeral
+  delegation that permits eligible reads without another click. Writes always require
+  human approval. Confirming Write or Destructive disables Auto mode before arming that
+  execution mode. Cancelling the confirmation preserves the current mode.
 - **The agent never holds credentials.** Queries run through Beekeeper's already
   authenticated connection. For a hard backstop, point Beekeeper at a read replica or a
   role with only the privileges you are willing to approve.
@@ -22,8 +24,8 @@ Gatekeeper is designed for one job: an agent can *propose* SQL, but only a human
 
 ## Access modes
 
-Every query is approved by a human click; the *armed mode* decides which risk classes
-that click is allowed to approve.
+Execution mode decides which risk classes can run. Manual approval is required unless
+Auto mode is explicitly enabled and its stricter read-only conditions all pass.
 
 - **Read** (default): only reads can be approved.
 - **Write**: an `INSERT` / `UPDATE` can be approved, with a second confirmation by default.
@@ -85,8 +87,9 @@ That token protects the broker from *other users* and from remote callers. It do
 create a boundary between the agent and the gate when both run as the **same OS user**: any
 process running as that user can read the token file and call the broker. Such a process
 could read other sessions' proposals and the audit feed (which carries raw SQL), post
-fabricated results, or spoof the connection snapshot. It still **cannot make SQL execute**,
-because only the plugin, driven by a human click, runs queries. If you need the agent and
+fabricated results, or spoof the connection snapshot. Only the plugin executes SQL, after
+human approval or an active Auto mode decision. A same-user process can also spoof broker
+evaluation replies; Auto mode does not establish a new same-user security boundary. If you need the agent and
 the gate isolated, run them under different OS users. Hardening this into a separate
 plugin-side secret is planned for a later release.
 
@@ -127,11 +130,16 @@ itself is in neither the URL nor the prompt.
   carries `truncated` and the true `rowCount`, and the human sees the cap in the history
   row.
 - **Cleartext local store.** Proposals live in a SQLite database under `~/.gatekeeper`
-  (`0700`). Until retention, that database holds the raw SQL of each proposal (which can
-  contain PII literals), and, for the approved-result window, the returned rows and any
-  engine error. It is local and owner-only, but it is not encrypted at rest by Gatekeeper.
-- **Retention.** Approved result rows are stripped 10 minutes after the decision.
-  Terminal requests, the audit log, and dead sessions are dropped after 24 hours.
+  (`0700`). That database holds proposal SQL, intent and engine errors, which can contain
+  personal data. Returned rows and fields remain for the approved-result window. The
+  database is local and owner-only, but it is not encrypted at rest by Gatekeeper.
+- **Retention.** Approved result rows and fields are stripped 10 minutes after the
+  decision. Decided requests remain indefinitely with SQL, intent, state, timestamps,
+  referenced session metadata, Auto mode attribution and available `rowCount` and
+  `affectedRows` scalars. Technical lifecycle events in `audit` and inactive sessions
+  unreferenced by any request expire after 24 hours. The Audit Trail currently displays
+  only the latest 200 entries for the connection. There is no pagination or manual
+  deletion feature yet. Previously deleted requests and purged counts cannot be recovered.
 - **Engine errors.** A failed query's engine error is returned to the agent and recorded
   in the audit trail. Engine errors can echo fragments of the query or schema; treat them
   as query-derived data, not as a trusted channel.

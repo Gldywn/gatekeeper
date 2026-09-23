@@ -1,4 +1,10 @@
-import type { AuditEntry, GatekeeperRequest, RequestState, SessionMeta } from "./types.js";
+import type {
+  ActivityEntry,
+  AuditEntry,
+  GatekeeperRequest,
+  RequestState,
+  SessionMeta,
+} from "./types.js";
 
 export interface RawRow {
   id: string;
@@ -95,17 +101,19 @@ export function toAudit(raw: RawAudit): AuditEntry {
   };
 }
 
-// Pull ONLY scalar outcome facts from a stored result: the rejection reason, the
-// failure error, or an approved row *count*. It never returns row contents, so the
-// activity feed can explain an outcome without ever surfacing the data it read.
+export function knownCount(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
 export function outcomeFacts(
   state: RequestState,
   resultJson: string | null,
-): { reason: string | null; error: string | null; rowCount: number | null } {
-  const facts: { reason: string | null; error: string | null; rowCount: number | null } = {
+): Pick<ActivityEntry, "reason" | "error" | "rowCount" | "affectedRows"> {
+  const facts: Pick<ActivityEntry, "reason" | "error" | "rowCount" | "affectedRows"> = {
     reason: null,
     error: null,
     rowCount: null,
+    affectedRows: null,
   };
   if (resultJson === null) {
     return facts;
@@ -128,11 +136,8 @@ export function outcomeFacts(
     // A scalar count only, never the elements. Prefer the stored true count (the plugin
     // may have capped the forwarded rows), falling back to the array length.
     facts.rowCount =
-      typeof result.rowCount === "number"
-        ? result.rowCount
-        : Array.isArray(result.rows)
-          ? result.rows.length
-          : null;
+      knownCount(result.rowCount) ?? (Array.isArray(result.rows) ? result.rows.length : null);
+    facts.affectedRows = knownCount(result.affectedRows);
   }
   return facts;
 }

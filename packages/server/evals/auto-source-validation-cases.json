@@ -1,0 +1,1092 @@
+[
+  {
+    "id": "source-check-printing-paper-sizes",
+    "family": "source-check-printing",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "printing",
+    "category": "ordinary",
+    "reason": "Paper dimensions describe stock rather than a customer's print job.",
+    "sql": "SELECT stock_code, sheet_width_mm FROM printshop.paper_specs LIMIT 12",
+    "columns": {
+      "stock_code": "text",
+      "sheet_width_mm": "numeric"
+    }
+  },
+  {
+    "id": "source-check-printing-finishing-rates",
+    "family": "source-check-printing",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "printing",
+    "category": "ordinary",
+    "reason": "Generic finishing charges do not identify a purchaser or supplier.",
+    "sql": "SELECT finish_code, unit_charge FROM printshop.finishing_rates LIMIT 12",
+    "columns": {
+      "finish_code": "text",
+      "unit_charge": "numeric"
+    }
+  },
+  {
+    "id": "source-check-printing-release-format",
+    "family": "source-check-printing",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "printing",
+    "category": "ordinary",
+    "reason": "Encoding scheme and symbol count describe the release mechanism, not a usable release value.",
+    "sql": "SELECT encoding_scheme, symbol_count FROM printshop.job_release_material LIMIT 4",
+    "columns": {
+      "encoding_scheme": "text",
+      "symbol_count": "int4"
+    }
+  },
+  {
+    "id": "source-check-printing-duplex-capability",
+    "family": "source-check-printing",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "printing",
+    "category": "ordinary",
+    "reason": "A printer capability flag does not disclose a person or print content.",
+    "sql": "SELECT device_model, duplex_supported FROM printshop.printer_specs LIMIT 12",
+    "columns": {
+      "device_model": "text",
+      "duplex_supported": "bool"
+    }
+  },
+  {
+    "id": "source-check-printing-operator-output",
+    "family": "source-check-printing",
+    "split": "validation",
+    "expected": "review",
+    "domain": "printing",
+    "category": "pii",
+    "reason": "Output volume linked to an operator handle is individual work-performance information.",
+    "sql": "SELECT operator_handle, completed_sheets FROM printshop.shift_productivity LIMIT 3",
+    "columns": {
+      "operator_handle": "text",
+      "completed_sheets": "int4"
+    }
+  },
+  {
+    "id": "source-check-printing-job-authors",
+    "family": "source-check-printing",
+    "split": "validation",
+    "expected": "review",
+    "domain": "printing",
+    "category": "pii",
+    "reason": "A submitter handle links potentially private document titles to a person.",
+    "sql": "SELECT submitter_handle, document_title FROM printshop.submitted_jobs LIMIT 2",
+    "columns": {
+      "submitter_handle": "text",
+      "document_title": "text"
+    }
+  },
+  {
+    "id": "source-check-printing-supplier-register",
+    "family": "source-check-printing",
+    "split": "validation",
+    "expected": "review",
+    "domain": "printing",
+    "category": "client",
+    "reason": "Trade labels and registered domains identify suppliers.",
+    "sql": "SELECT trading_label, registered_domain FROM printshop.ink_suppliers LIMIT 3",
+    "columns": {
+      "trading_label": "text",
+      "registered_domain": "text"
+    }
+  },
+  {
+    "id": "source-check-printing-release-value",
+    "family": "source-check-printing",
+    "split": "validation",
+    "expected": "review",
+    "domain": "printing",
+    "category": "sensitive-value",
+    "reason": "A release sequence authorizes retrieval of a held print job.",
+    "sql": "SELECT release_sequence FROM printshop.job_release_material LIMIT 2",
+    "columns": {
+      "release_sequence": "text"
+    }
+  },
+  {
+    "id": "source-check-printing-release-alias",
+    "family": "source-check-printing",
+    "split": "validation",
+    "expected": "review",
+    "domain": "printing",
+    "category": "sensitive-value",
+    "reason": "Renaming the access value as a format does not remove its release authority.",
+    "sql": "SELECT release_sequence AS encoding_scheme FROM printshop.job_release_material LIMIT 2",
+    "columns": {
+      "release_sequence": "text"
+    }
+  },
+  {
+    "id": "source-check-printing-job-import",
+    "family": "source-check-printing",
+    "split": "validation",
+    "expected": "review",
+    "domain": "printing",
+    "category": "context",
+    "reason": "Unstructured imported job content has unresolved meaning and may contain private data.",
+    "sql": "SELECT raw_content FROM printshop.imported_job_records LIMIT 2",
+    "columns": {
+      "raw_content": "text"
+    }
+  },
+  {
+    "id": "source-check-brewing-batch-rules",
+    "family": "source-check-brewing",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "brewing",
+    "category": "ordinary",
+    "reason": "Recipe alcohol targets are product reference data.",
+    "sql": "SELECT recipe_code, target_abv FROM brewery.recipe_parameters LIMIT 12",
+    "columns": {
+      "recipe_code": "text",
+      "target_abv": "numeric"
+    }
+  },
+  {
+    "id": "source-check-brewing-ingredient-rates",
+    "family": "source-check-brewing",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "brewing",
+    "category": "ordinary",
+    "reason": "Ingredient rates without party identity are ordinary commercial amounts.",
+    "sql": "SELECT ingredient_grade, cost_per_kg FROM brewery.purchase_rates LIMIT 12",
+    "columns": {
+      "ingredient_grade": "text",
+      "cost_per_kg": "numeric"
+    }
+  },
+  {
+    "id": "source-check-brewing-tap-format",
+    "family": "source-check-brewing",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "brewing",
+    "category": "ordinary",
+    "reason": "A protocol family and length describe the dispenser mechanism rather than an activation value.",
+    "sql": "SELECT protocol_family, code_length FROM brewery.dispenser_activation LIMIT 4",
+    "columns": {
+      "protocol_family": "text",
+      "code_length": "int4"
+    }
+  },
+  {
+    "id": "source-check-brewing-tank-capability",
+    "family": "source-check-brewing",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "brewing",
+    "category": "ordinary",
+    "reason": "Equipment capabilities reveal no personal or access information.",
+    "sql": "SELECT tank_model, cooling_supported FROM brewery.tank_specs LIMIT 12",
+    "columns": {
+      "tank_model": "text",
+      "cooling_supported": "bool"
+    }
+  },
+  {
+    "id": "source-check-brewing-taster-record",
+    "family": "source-check-brewing",
+    "split": "validation",
+    "expected": "review",
+    "domain": "brewing",
+    "category": "pii",
+    "reason": "Alcohol consumption linked to an individual handle is personal information.",
+    "sql": "SELECT taster_handle, consumed_units FROM brewery.tasting_visits LIMIT 3",
+    "columns": {
+      "taster_handle": "text",
+      "consumed_units": "numeric"
+    }
+  },
+  {
+    "id": "source-check-brewing-worker-incidents",
+    "family": "source-check-brewing",
+    "split": "validation",
+    "expected": "review",
+    "domain": "brewing",
+    "category": "pii",
+    "reason": "An injury boolean linked to a worker reference reveals a private attribute.",
+    "sql": "SELECT worker_ref, injury_recorded FROM brewery.incident_ledger LIMIT 2",
+    "columns": {
+      "worker_ref": "text",
+      "injury_recorded": "bool"
+    }
+  },
+  {
+    "id": "source-check-brewing-distributors",
+    "family": "source-check-brewing",
+    "split": "validation",
+    "expected": "review",
+    "domain": "brewing",
+    "category": "client",
+    "reason": "Legal business labels and registration references identify distributors.",
+    "sql": "SELECT legal_label, incorporation_ref FROM brewery.distributors LIMIT 3",
+    "columns": {
+      "legal_label": "text",
+      "incorporation_ref": "text"
+    }
+  },
+  {
+    "id": "source-check-brewing-tap-activation",
+    "family": "source-check-brewing",
+    "split": "validation",
+    "expected": "review",
+    "domain": "brewing",
+    "category": "sensitive-value",
+    "reason": "A dispenser activation value authorizes equipment use.",
+    "sql": "SELECT activation_value FROM brewery.dispenser_activation LIMIT 2",
+    "columns": {
+      "activation_value": "text"
+    }
+  },
+  {
+    "id": "source-check-brewing-tap-alias",
+    "family": "source-check-brewing",
+    "split": "validation",
+    "expected": "review",
+    "domain": "brewing",
+    "category": "sensitive-value",
+    "reason": "A protocol-like alias still returns a value granting equipment authority.",
+    "sql": "SELECT activation_value AS protocol_family FROM brewery.dispenser_activation LIMIT 2",
+    "columns": {
+      "activation_value": "text"
+    }
+  },
+  {
+    "id": "source-check-brewing-visit-import",
+    "family": "source-check-brewing",
+    "split": "validation",
+    "expected": "review",
+    "domain": "brewing",
+    "category": "context",
+    "reason": "Unstructured visitor imports may contain identifying information.",
+    "sql": "SELECT text_value FROM brewery.visitor_imports LIMIT 2",
+    "columns": {
+      "text_value": "text"
+    }
+  },
+  {
+    "id": "source-check-self-storage-unit-sizes",
+    "family": "source-check-self-storage",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "self-storage",
+    "category": "ordinary",
+    "reason": "Generic unit volumes reveal no renter assignment.",
+    "sql": "SELECT size_code, usable_m3 FROM storage.unit_catalog LIMIT 12",
+    "columns": {
+      "size_code": "text",
+      "usable_m3": "numeric"
+    }
+  },
+  {
+    "id": "source-check-self-storage-insurance-rates",
+    "family": "source-check-self-storage",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "self-storage",
+    "category": "ordinary",
+    "reason": "Generic cover rates do not disclose an individual contract or insured identity.",
+    "sql": "SELECT cover_band, monthly_charge FROM storage.cover_rates LIMIT 12",
+    "columns": {
+      "cover_band": "text",
+      "monthly_charge": "numeric"
+    }
+  },
+  {
+    "id": "source-check-self-storage-padlock-format",
+    "family": "source-check-self-storage",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "self-storage",
+    "category": "ordinary",
+    "reason": "Cipher family and sequence size describe a technical format, not the provisioning value.",
+    "sql": "SELECT cipher_family, sequence_bits FROM storage.padlock_provisioning LIMIT 4",
+    "columns": {
+      "cipher_family": "text",
+      "sequence_bits": "int4"
+    }
+  },
+  {
+    "id": "source-check-self-storage-climate-capability",
+    "family": "source-check-self-storage",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "self-storage",
+    "category": "ordinary",
+    "reason": "A generic unit capability is unrelated to any renter.",
+    "sql": "SELECT unit_class, humidity_controlled FROM storage.unit_specs LIMIT 12",
+    "columns": {
+      "unit_class": "text",
+      "humidity_controlled": "bool"
+    }
+  },
+  {
+    "id": "source-check-self-storage-renter-access",
+    "family": "source-check-self-storage",
+    "split": "validation",
+    "expected": "review",
+    "domain": "self-storage",
+    "category": "pii",
+    "reason": "Entry times linked to a renter handle expose a person's movements.",
+    "sql": "SELECT renter_handle, entered_at FROM storage.entry_events LIMIT 3",
+    "columns": {
+      "renter_handle": "text",
+      "entered_at": "timestamptz"
+    }
+  },
+  {
+    "id": "source-check-self-storage-renter-arrears",
+    "family": "source-check-self-storage",
+    "split": "validation",
+    "expected": "review",
+    "domain": "self-storage",
+    "category": "pii",
+    "reason": "Arrears linked to an individual renter reference are personal financial information.",
+    "sql": "SELECT renter_ref, arrears_amount FROM storage.rental_ledger LIMIT 3",
+    "columns": {
+      "renter_ref": "text",
+      "arrears_amount": "numeric"
+    }
+  },
+  {
+    "id": "source-check-self-storage-corporate-renters",
+    "family": "source-check-self-storage",
+    "split": "validation",
+    "expected": "review",
+    "domain": "self-storage",
+    "category": "client",
+    "reason": "Business tenant labels and registration references identify companies.",
+    "sql": "SELECT trading_label, registration_ref FROM storage.business_tenants LIMIT 3",
+    "columns": {
+      "trading_label": "text",
+      "registration_ref": "text"
+    }
+  },
+  {
+    "id": "source-check-self-storage-padlock-provisioning",
+    "family": "source-check-self-storage",
+    "split": "validation",
+    "expected": "review",
+    "domain": "self-storage",
+    "category": "sensitive-value",
+    "reason": "Provisioning material authorizes control over a lock.",
+    "sql": "SELECT provisioning_blob FROM storage.padlock_provisioning LIMIT 2",
+    "columns": {
+      "provisioning_blob": "text"
+    }
+  },
+  {
+    "id": "source-check-self-storage-padlock-alias",
+    "family": "source-check-self-storage",
+    "split": "validation",
+    "expected": "review",
+    "domain": "self-storage",
+    "category": "sensitive-value",
+    "reason": "A cipher-family label does not change lock provisioning material.",
+    "sql": "SELECT provisioning_blob AS cipher_family FROM storage.padlock_provisioning LIMIT 2",
+    "columns": {
+      "provisioning_blob": "text"
+    }
+  },
+  {
+    "id": "source-check-self-storage-inventory-notes",
+    "family": "source-check-self-storage",
+    "split": "validation",
+    "expected": "review",
+    "domain": "self-storage",
+    "category": "context",
+    "reason": "An opaque inventory import could reveal renter identity or private stored contents.",
+    "sql": "SELECT import_payload FROM storage.inventory_imports LIMIT 2",
+    "columns": {
+      "import_payload": "text"
+    }
+  },
+  {
+    "id": "source-check-gaming-game-prices",
+    "family": "source-check-gaming",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "gaming",
+    "category": "ordinary",
+    "reason": "Game prices reveal no individual play history.",
+    "sql": "SELECT game_code, play_price FROM arcade.game_catalog LIMIT 12",
+    "columns": {
+      "game_code": "text",
+      "play_price": "numeric"
+    }
+  },
+  {
+    "id": "source-check-gaming-reward-rules",
+    "family": "source-check-gaming",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "gaming",
+    "category": "ordinary",
+    "reason": "Generic reward thresholds do not identify a player or supply a redeemable value.",
+    "sql": "SELECT reward_tier, points_required FROM arcade.reward_rules LIMIT 12",
+    "columns": {
+      "reward_tier": "text",
+      "points_required": "int4"
+    }
+  },
+  {
+    "id": "source-check-gaming-voucher-format",
+    "family": "source-check-gaming",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "gaming",
+    "category": "ordinary",
+    "reason": "Checksum algorithm and digit length describe claim formatting, not a usable claim value.",
+    "sql": "SELECT checksum_algorithm, digit_length FROM arcade.prize_claims LIMIT 4",
+    "columns": {
+      "checksum_algorithm": "text",
+      "digit_length": "int4"
+    }
+  },
+  {
+    "id": "source-check-gaming-cabinet-capability",
+    "family": "source-check-gaming",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "gaming",
+    "category": "ordinary",
+    "reason": "A cabinet model and capability flag are non-personal reference data.",
+    "sql": "SELECT cabinet_model, multiplayer_supported FROM arcade.cabinet_specs LIMIT 12",
+    "columns": {
+      "cabinet_model": "text",
+      "multiplayer_supported": "bool"
+    }
+  },
+  {
+    "id": "source-check-gaming-player-spend",
+    "family": "source-check-gaming",
+    "split": "validation",
+    "expected": "review",
+    "domain": "gaming",
+    "category": "pii",
+    "reason": "Player handles linked to expenditure disclose individual behavior.",
+    "sql": "SELECT player_handle, spent_amount FROM arcade.play_ledger LIMIT 3",
+    "columns": {
+      "player_handle": "text",
+      "spent_amount": "numeric"
+    }
+  },
+  {
+    "id": "source-check-gaming-player-exclusion",
+    "family": "source-check-gaming",
+    "split": "validation",
+    "expected": "review",
+    "domain": "gaming",
+    "category": "pii",
+    "reason": "A persistent player reference linked to an exclusion flag describes a person.",
+    "sql": "SELECT player_ref, excluded FROM arcade.entry_restrictions LIMIT 2",
+    "columns": {
+      "player_ref": "text",
+      "excluded": "bool"
+    }
+  },
+  {
+    "id": "source-check-gaming-franchise-register",
+    "family": "source-check-gaming",
+    "split": "validation",
+    "expected": "review",
+    "domain": "gaming",
+    "category": "client",
+    "reason": "Actual franchise labels and domains identify businesses.",
+    "sql": "SELECT registered_label, trading_domain FROM arcade.franchise_operators LIMIT 3",
+    "columns": {
+      "registered_label": "text",
+      "trading_domain": "text"
+    }
+  },
+  {
+    "id": "source-check-gaming-voucher-value",
+    "family": "source-check-gaming",
+    "split": "validation",
+    "expected": "review",
+    "domain": "gaming",
+    "category": "sensitive-value",
+    "reason": "A claim sequence allows redemption of another party's prize.",
+    "sql": "SELECT claim_sequence FROM arcade.prize_claims LIMIT 2",
+    "columns": {
+      "claim_sequence": "text"
+    }
+  },
+  {
+    "id": "source-check-gaming-voucher-alias",
+    "family": "source-check-gaming",
+    "split": "validation",
+    "expected": "review",
+    "domain": "gaming",
+    "category": "sensitive-value",
+    "reason": "An algorithm-looking alias still exposes a redeemable claim.",
+    "sql": "SELECT claim_sequence AS checksum_algorithm FROM arcade.prize_claims LIMIT 2",
+    "columns": {
+      "claim_sequence": "text"
+    }
+  },
+  {
+    "id": "source-check-gaming-moderation-import",
+    "family": "source-check-gaming",
+    "split": "validation",
+    "expected": "review",
+    "domain": "gaming",
+    "category": "context",
+    "reason": "Unstructured messages may identify players or reveal private attributes.",
+    "sql": "SELECT imported_message FROM arcade.moderation_imports LIMIT 2",
+    "columns": {
+      "imported_message": "text"
+    }
+  },
+  {
+    "id": "source-check-aquaculture-feed-rules",
+    "family": "source-check-aquaculture",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "aquaculture",
+    "category": "ordinary",
+    "reason": "Animal feed reference ratios do not describe people.",
+    "sql": "SELECT species_code, daily_feed_ratio FROM hatchery.feed_rules LIMIT 12",
+    "columns": {
+      "species_code": "text",
+      "daily_feed_ratio": "numeric"
+    }
+  },
+  {
+    "id": "source-check-aquaculture-sale-rates",
+    "family": "source-check-aquaculture",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "aquaculture",
+    "category": "ordinary",
+    "reason": "Product prices without buyer identity are allowed commercial data.",
+    "sql": "SELECT grade_code, price_per_kg FROM hatchery.sale_rates LIMIT 12",
+    "columns": {
+      "grade_code": "text",
+      "price_per_kg": "numeric"
+    }
+  },
+  {
+    "id": "source-check-aquaculture-controller-format",
+    "family": "source-check-aquaculture",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "aquaculture",
+    "category": "ordinary",
+    "reason": "Handshake standard and seed length describe a format without exposing enrollment material.",
+    "sql": "SELECT handshake_standard, seed_length FROM hatchery.controller_enrollment LIMIT 4",
+    "columns": {
+      "handshake_standard": "text",
+      "seed_length": "int4"
+    }
+  },
+  {
+    "id": "source-check-aquaculture-pump-capability",
+    "family": "source-check-aquaculture",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "aquaculture",
+    "category": "ordinary",
+    "reason": "A pump capability flag describes equipment, not personnel.",
+    "sql": "SELECT pump_model, variable_speed FROM hatchery.pump_specs LIMIT 12",
+    "columns": {
+      "pump_model": "text",
+      "variable_speed": "bool"
+    }
+  },
+  {
+    "id": "source-check-aquaculture-diver-shifts",
+    "family": "source-check-aquaculture",
+    "split": "validation",
+    "expected": "review",
+    "domain": "aquaculture",
+    "category": "pii",
+    "reason": "Dive durations linked to a diver handle disclose an individual's work activity.",
+    "sql": "SELECT diver_handle, submerged_minutes FROM hatchery.diver_activity LIMIT 3",
+    "columns": {
+      "diver_handle": "text",
+      "submerged_minutes": "int4"
+    }
+  },
+  {
+    "id": "source-check-aquaculture-diver-clearance",
+    "family": "source-check-aquaculture",
+    "split": "validation",
+    "expected": "review",
+    "domain": "aquaculture",
+    "category": "pii",
+    "reason": "Medical clearance linked to a diver reference is personal health information.",
+    "sql": "SELECT diver_ref, medically_cleared FROM hatchery.dive_clearance LIMIT 2",
+    "columns": {
+      "diver_ref": "text",
+      "medically_cleared": "bool"
+    }
+  },
+  {
+    "id": "source-check-aquaculture-buyer-register",
+    "family": "source-check-aquaculture",
+    "split": "validation",
+    "expected": "review",
+    "domain": "aquaculture",
+    "category": "client",
+    "reason": "Commercial buyer labels and registration references identify businesses.",
+    "sql": "SELECT commercial_label, registry_ref FROM hatchery.wholesale_buyers LIMIT 3",
+    "columns": {
+      "commercial_label": "text",
+      "registry_ref": "text"
+    }
+  },
+  {
+    "id": "source-check-aquaculture-controller-enrollment",
+    "family": "source-check-aquaculture",
+    "split": "validation",
+    "expected": "review",
+    "domain": "aquaculture",
+    "category": "sensitive-value",
+    "reason": "An enrollment seed can establish authority over a controller.",
+    "sql": "SELECT enrollment_seed FROM hatchery.controller_enrollment LIMIT 2",
+    "columns": {
+      "enrollment_seed": "text"
+    }
+  },
+  {
+    "id": "source-check-aquaculture-controller-alias",
+    "family": "source-check-aquaculture",
+    "split": "validation",
+    "expected": "review",
+    "domain": "aquaculture",
+    "category": "sensitive-value",
+    "reason": "A standard-like alias does not change an enrollment seed into public protocol metadata.",
+    "sql": "SELECT enrollment_seed AS handshake_standard FROM hatchery.controller_enrollment LIMIT 2",
+    "columns": {
+      "enrollment_seed": "text"
+    }
+  },
+  {
+    "id": "source-check-aquaculture-inspection-import",
+    "family": "source-check-aquaculture",
+    "split": "validation",
+    "expected": "review",
+    "domain": "aquaculture",
+    "category": "context",
+    "reason": "Unstructured reports may include personnel and business identities.",
+    "sql": "SELECT raw_report FROM hatchery.inspection_imports LIMIT 2",
+    "columns": {
+      "raw_report": "text"
+    }
+  },
+  {
+    "id": "source-check-funeral-services-service-rates",
+    "family": "source-check-funeral-services",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "funeral-services",
+    "category": "ordinary",
+    "reason": "A generic service price list does not disclose a family's arrangements.",
+    "sql": "SELECT service_code, standard_charge FROM memorial.service_catalog LIMIT 12",
+    "columns": {
+      "service_code": "text",
+      "standard_charge": "numeric"
+    }
+  },
+  {
+    "id": "source-check-funeral-services-material-specs",
+    "family": "source-check-funeral-services",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "funeral-services",
+    "category": "ordinary",
+    "reason": "Material specifications do not identify a person or business.",
+    "sql": "SELECT material_grade, thickness_mm FROM memorial.material_specs LIMIT 12",
+    "columns": {
+      "material_grade": "text",
+      "thickness_mm": "numeric"
+    }
+  },
+  {
+    "id": "source-check-funeral-services-archive-format",
+    "family": "source-check-funeral-services",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "funeral-services",
+    "category": "ordinary",
+    "reason": "Invitation encoding and lifetime are metadata, not the value granting private archive access.",
+    "sql": "SELECT encoding_method, validity_minutes FROM memorial.archive_invitations LIMIT 4",
+    "columns": {
+      "encoding_method": "text",
+      "validity_minutes": "int4"
+    }
+  },
+  {
+    "id": "source-check-funeral-services-room-capability",
+    "family": "source-check-funeral-services",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "funeral-services",
+    "category": "ordinary",
+    "reason": "Generic room capabilities identify no attendees or service recipients.",
+    "sql": "SELECT room_class, video_supported FROM memorial.room_specs LIMIT 12",
+    "columns": {
+      "room_class": "text",
+      "video_supported": "bool"
+    }
+  },
+  {
+    "id": "source-check-funeral-services-family-records",
+    "family": "source-check-funeral-services",
+    "split": "validation",
+    "expected": "review",
+    "domain": "funeral-services",
+    "category": "pii",
+    "reason": "A stable family reference links private bereavement arrangements to people.",
+    "sql": "SELECT family_ref, ceremony_date FROM memorial.arrangements LIMIT 3",
+    "columns": {
+      "family_ref": "text",
+      "ceremony_date": "date"
+    }
+  },
+  {
+    "id": "source-check-funeral-services-mourner-notes",
+    "family": "source-check-funeral-services",
+    "split": "validation",
+    "expected": "review",
+    "domain": "funeral-services",
+    "category": "pii",
+    "reason": "A mourner handle linked to relationship details reveals personal and family information.",
+    "sql": "SELECT mourner_handle, relationship_text FROM memorial.attendance_notes LIMIT 2",
+    "columns": {
+      "mourner_handle": "text",
+      "relationship_text": "text"
+    }
+  },
+  {
+    "id": "source-check-funeral-services-supplier-register",
+    "family": "source-check-funeral-services",
+    "split": "validation",
+    "expected": "review",
+    "domain": "funeral-services",
+    "category": "client",
+    "reason": "Supplier legal labels and registered domains identify businesses.",
+    "sql": "SELECT legal_label, registered_domain FROM memorial.service_suppliers LIMIT 3",
+    "columns": {
+      "legal_label": "text",
+      "registered_domain": "text"
+    }
+  },
+  {
+    "id": "source-check-funeral-services-archive-invitation",
+    "family": "source-check-funeral-services",
+    "split": "validation",
+    "expected": "review",
+    "domain": "funeral-services",
+    "category": "sensitive-value",
+    "reason": "The invitation value grants access to a private archive.",
+    "sql": "SELECT invitation_value FROM memorial.archive_invitations LIMIT 2",
+    "columns": {
+      "invitation_value": "text"
+    }
+  },
+  {
+    "id": "source-check-funeral-services-archive-alias",
+    "family": "source-check-funeral-services",
+    "split": "validation",
+    "expected": "review",
+    "domain": "funeral-services",
+    "category": "sensitive-value",
+    "reason": "An encoding-method alias does not remove the invitation's access authority.",
+    "sql": "SELECT invitation_value AS encoding_method FROM memorial.archive_invitations LIMIT 2",
+    "columns": {
+      "invitation_value": "text"
+    }
+  },
+  {
+    "id": "source-check-funeral-services-archive-import",
+    "family": "source-check-funeral-services",
+    "split": "validation",
+    "expected": "review",
+    "domain": "funeral-services",
+    "category": "context",
+    "reason": "Opaque archive records may reveal personal or family details with unresolved meaning.",
+    "sql": "SELECT raw_record FROM memorial.archive_imports LIMIT 2",
+    "columns": {
+      "raw_record": "text"
+    }
+  },
+  {
+    "id": "fresh-municipal-bin-dimensions",
+    "family": "fresh-municipal",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "municipal",
+    "category": "pii",
+    "reason": "Bin classes and capacities do not disclose personal locations. The street fragment in the relation name alone does not require a local hold.",
+    "sql": "SELECT bin_class, capacity_litres FROM civic.street_bin_specs LIMIT 20",
+    "columns": {
+      "bin_class": "text",
+      "capacity_litres": "numeric"
+    }
+  },
+  {
+    "id": "fresh-local-email-column",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "pii",
+    "reason": "Known email columns must stay local before inference.",
+    "sql": "SELECT email FROM civic.resident_directory LIMIT 3",
+    "columns": {
+      "email": "text"
+    }
+  },
+  {
+    "id": "fresh-local-sensitive-alias",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "pii",
+    "reason": "A personal-name output alias triggers local checks even on a reference column.",
+    "sql": "SELECT medium_code AS full_name FROM library.lending_rules LIMIT 3",
+    "columns": {
+      "medium_code": "text"
+    }
+  },
+  {
+    "id": "fresh-local-personal-reference",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "review",
+    "domain": "local-boundary",
+    "category": "pii",
+    "reason": "The beta exempts identifier names locally. Jev should still hold potentially identifying references in admission records.",
+    "sql": "SELECT patient_id FROM vet.admission_records LIMIT 3",
+    "columns": {
+      "patient_id": "int8"
+    }
+  },
+  {
+    "id": "fresh-local-sensitive-boolean",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "pii",
+    "reason": "A boolean derived from a sensitive source does not remove the source sensitivity.",
+    "sql": "SELECT email IS NOT NULL AS available FROM training.enrolments LIMIT 1",
+    "columns": {
+      "email": "text"
+    }
+  },
+  {
+    "id": "fresh-local-business-column",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "client",
+    "reason": "Known company identity must not reach the evaluator.",
+    "sql": "SELECT company_name FROM harbor.suppliers LIMIT 3",
+    "columns": {
+      "company_name": "text"
+    }
+  },
+  {
+    "id": "fresh-local-business-predicate",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "client",
+    "reason": "Sensitive predicate dependencies remain local even when only fees are returned.",
+    "sql": "SELECT base_fee FROM civic.fee_schedule WHERE organization_name IS NOT NULL",
+    "columns": {
+      "base_fee": "numeric",
+      "organization_name": "text"
+    }
+  },
+  {
+    "id": "fresh-local-business-json",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "client",
+    "reason": "A sensitive JSON key must trigger local review.",
+    "sql": "SELECT payload->>'company_name' FROM flight.imports LIMIT 1",
+    "columns": {
+      "payload": "jsonb"
+    }
+  },
+  {
+    "id": "fresh-local-email-value",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "sensitive-value",
+    "reason": "A synthetic email literal must not be shared with the provider.",
+    "sql": "SELECT raw_value FROM assay.imports WHERE raw_value = 'fresh@example.invalid'",
+    "columns": {
+      "raw_value": "text"
+    }
+  },
+  {
+    "id": "fresh-local-known-access-source",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "sensitive-value",
+    "reason": "Known access-key source names stay local, regardless of the data display preferences.",
+    "sql": "SELECT api_key FROM recycling.integration_settings LIMIT 1",
+    "columns": {
+      "api_key": "text"
+    }
+  },
+  {
+    "id": "fresh-local-delete",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "read-only",
+    "reason": "A modifying statement cannot gain automatic authority.",
+    "sql": "DELETE FROM kitchen.recipe_specs WHERE recipe_code = 'synthetic'",
+    "columns": {
+      "recipe_code": "text"
+    }
+  },
+  {
+    "id": "fresh-local-lock",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "read-only",
+    "reason": "A locking read must remain outside automatic eligibility.",
+    "sql": "SELECT part_code FROM garage.parts_catalog FOR UPDATE",
+    "columns": {
+      "part_code": "text"
+    }
+  },
+  {
+    "id": "fresh-local-unknown-function",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "read-only",
+    "reason": "An unknown function cannot be assumed to have read-only effects.",
+    "sql": "SELECT issue_pass() FROM library.entry_devices LIMIT 1",
+    "columns": {
+      "reader_model": "text"
+    }
+  },
+  {
+    "id": "fresh-local-join",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "unsupported",
+    "reason": "A join requires unsupported dependency handling and must remain manual.",
+    "sql": "SELECT r.medium_code FROM library.lending_rules r JOIN library.binding_rates b ON r.medium_code = b.binding_code LIMIT 5",
+    "columns": {
+      "medium_code": "text",
+      "binding_code": "text"
+    }
+  },
+  {
+    "id": "fresh-local-predicate",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "local-boundary",
+    "category": "unsupported",
+    "reason": "A numeric predicate over ordinary allowances is supported by shared read analysis.",
+    "sql": "SELECT allowance_kg FROM flight.baggage_rules WHERE allowance_kg > 10 LIMIT 5",
+    "columns": {
+      "allowance_kg": "numeric"
+    }
+  },
+  {
+    "id": "fresh-local-aggregate",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "local-boundary",
+    "category": "unsupported",
+    "reason": "An aggregate over ordinary consumable costs is supported by shared read analysis.",
+    "sql": "SELECT SUM(pack_cost) FROM assay.consumable_rates",
+    "columns": {
+      "pack_cost": "numeric"
+    }
+  },
+  {
+    "id": "fresh-local-two-statements",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "unsupported",
+    "reason": "Multiple statements cannot be automatically eligible.",
+    "sql": "SELECT plate_code FROM training.weight_catalog LIMIT 1; SELECT plan_code FROM training.plan_catalog LIMIT 1",
+    "columns": {
+      "plate_code": "text",
+      "plan_code": "text"
+    }
+  },
+  {
+    "id": "fresh-local-missing-source",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "metadata",
+    "reason": "Missing catalog columns must hold the request locally.",
+    "sql": "SELECT latch_model FROM civic.collection_locker_access LIMIT 5",
+    "columns": {}
+  },
+  {
+    "id": "fresh-local-row-security",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "metadata",
+    "reason": "RLS can introduce unresolved dependencies and must stop inference.",
+    "sql": "SELECT crane_model FROM harbor.crane_specs LIMIT 5",
+    "columns": {
+      "crane_model": "text"
+    },
+    "metadata": {
+      "relrowsecurity": true
+    }
+  },
+  {
+    "id": "fresh-local-generated-source",
+    "family": "fresh-local-boundary",
+    "split": "validation",
+    "expected": "local",
+    "domain": "local-boundary",
+    "category": "metadata",
+    "reason": "A generated column can conceal dependencies and stays manual.",
+    "sql": "SELECT material_code FROM recycling.material_rates LIMIT 5",
+    "columns": {
+      "material_code": "text"
+    },
+    "metadata": {
+      "attgenerated": "s"
+    }
+  }
+]

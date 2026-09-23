@@ -18,9 +18,11 @@ the Gatekeeper plugin inside Beekeeper Studio shows the SQL to a human, who appr
 rejects it. On approval the query runs on the connection Beekeeper already holds and the rows
 flow back to the agent.
 
-The agent never holds database credentials, and nothing runs without a human approving it
-first. Reads are the default; a write runs only under an ephemeral mode a human arms in the
-plugin.
+The agent never holds database credentials. Approval is manual by default. A human can
+explicitly enable Auto mode beta in the plugin for a restricted PostgreSQL read subset,
+using local checks and TypeSafe's pinned Jev evaluator. The API key and evaluator controls
+are plugin-only, never MCP tools. Writes always require a human to arm the corresponding
+ephemeral Execution mode and approve the query.
 
 ## This package is one of three pieces
 

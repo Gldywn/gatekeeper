@@ -1,3 +1,4 @@
+import { prepareSql } from "./identifiers";
 import { parser } from "./sql-parser";
 
 export interface SchemaContext {
@@ -6,6 +7,7 @@ export interface SchemaContext {
   client: string[];
   literals: string[];
   star: boolean;
+  analysis?: import("./read-analysis").ReadSnapshot;
 }
 
 export interface TableRef {
@@ -52,7 +54,7 @@ const PII_FRAGMENTS = [
 ];
 
 // A column is an identifier when it ends in an id suffix (id, user_id, addressId).
-const IDENTIFIER = /(?:^id|_id|Id|ID)$/;
+export const IDENTIFIER = /(?:^id|_id|Id|ID)$/;
 // Short names whose substring is too common to match; flagged only on an exact,
 // separator-stripped match (pin is a security code).
 const EXACT = new Set(["pin"]);
@@ -317,8 +319,15 @@ export interface ParsedQuery {
 // skip annotation rather than show something wrong.
 export function analyzeSql(sql: string, dialect: string): ParsedQuery | null {
   try {
-    const { tableList, columnList, ast } = parser.parse(sql, { database: dialect });
-    const refs = tableList.map(parseTableRef).filter((ref): ref is TableRef => ref !== null);
+    const input = prepareSql(sql, dialect);
+    const { tableList, columnList, ast } = parser.parse(input.sql, { database: dialect });
+    const refs = tableList
+      .map(parseTableRef)
+      .filter((ref): ref is TableRef => ref !== null)
+      .map((ref) => ({
+        schema: ref.schema === null ? null : input.name(ref.schema),
+        name: input.name(ref.name),
+      }));
     let star = false;
     const columns: string[] = [];
     for (const entry of columnList) {
@@ -328,13 +337,13 @@ export function analyzeSql(sql: string, dialect: string): ParsedQuery | null {
         continue;
       }
       if (name) {
-        columns.push(name);
+        columns.push(input.name(name));
       }
     }
     return {
       tables: dedupeRefs(refs),
       columns: unique(columns),
-      aliases: outputAliases(ast),
+      aliases: outputAliases(input.restoreAst(ast)),
       jsonKeys: jsonKeys(ast),
       star,
     };
@@ -406,8 +415,11 @@ export function analyzeTableOps(
 ): { writes: string[]; reads: string[]; writeOp: string | null } | null {
   let tableList: string[];
   let ast: unknown;
+  let input: ReturnType<typeof prepareSql>;
   try {
-    ({ tableList, ast } = parser.parse(sql, { database: dialect }));
+    input = prepareSql(sql, dialect);
+    ({ tableList, ast } = parser.parse(input.sql, { database: dialect }));
+    ast = input.restoreAst(ast);
   } catch {
     return null;
   }
@@ -420,6 +432,8 @@ export function analyzeTableOps(
     if (!ref) {
       continue;
     }
+    ref.name = input.name(ref.name);
+    if (ref.schema !== null) ref.schema = input.name(ref.schema);
     if (op === "select") {
       reads.push(ref);
     } else {
@@ -500,6 +514,7 @@ const COMPARISON_OPS = new Set([
 ]);
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const IBAN_RE = /^[A-Za-z]{2}\d{2}[A-Za-z0-9]{10,30}$/;
+const CARD_LIKE_RE = /^\d{13,19}$/;
 
 // A column name as the parser spells it: a plain string, a value node, or a nested
 // expr, depending on the dialect and on whether the identifier was quoted.
@@ -584,12 +599,13 @@ function hasSensitiveColumn(node: unknown): boolean {
 
 // String literals that expose a sensitive value in the query text itself: a value
 // bound to a PII/client column (WHERE company_name = 'ACME', SET company_name = 'ACME',
-// an inserted row), or one whose shape is itself PII (an email or IBAN). Render-only,
-// like the column flags.
+// an inserted row), or one whose shape is itself sensitive. Display and sharing checks
+// consume the same detection, before display preferences are applied.
 export function sensitiveLiterals(sql: string, dialect: string): string[] {
   let ast: unknown;
   try {
-    ast = parser.astify(sql, { database: dialect });
+    const input = prepareSql(sql, dialect);
+    ast = input.restoreAst(parser.astify(input.sql, { database: dialect }));
   } catch {
     return [];
   }
@@ -605,7 +621,11 @@ export function sensitiveLiterals(sql: string, dialect: string): string[] {
   };
   walk(ast, (n) => {
     for (const value of literalValues(n)) {
-      if (EMAIL_RE.test(value) || IBAN_RE.test(value)) {
+      if (
+        EMAIL_RE.test(value) ||
+        IBAN_RE.test(value) ||
+        CARD_LIKE_RE.test(value.replace(/[ -]/g, ""))
+      ) {
         add(value);
       }
     }
@@ -647,4 +667,17 @@ export function sensitiveLiterals(sql: string, dialect: string): string[] {
     }
   });
   return [...found];
+}
+
+/** Local sensitive-name screening for every source, alias and JSON key sent for evaluation. */
+export function sensitiveReference(name: string): boolean {
+  // ponytail: beta exempts ID names, stronger identifier checks need relation context.
+  if (IDENTIFIER.test(name)) return false;
+  return (
+    looksLikePii(name) ||
+    looksLikeClientData(name) ||
+    /^(?:ip|ipaddress|ipv4address|ipv6address)$/i.test(name.replace(/_/g, "")) ||
+    /(?:^|_)ip(?:_|$)/i.test(name) ||
+    (/(?:^|_)name(?:_|$)/i.test(name) && name !== "product_name")
+  );
 }

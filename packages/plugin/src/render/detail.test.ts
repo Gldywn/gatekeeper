@@ -53,7 +53,7 @@ describe("render/detail", () => {
     // The outcome lives in the tinted recessed well: header (icon + word + meta), then the
     // grid host Tabulator mounts into (render/grid.ts), and the row-count footer.
     expect(html).toContain(
-      '<div class="detail-rail approved"><div class="detail-oc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span class="detail-oc-title">Approved</span><span class="detail-oc-meta">2 rows</span></div><div class="detail-oc-body" id="detail-grid"><div class="gk-grid" data-result-grid></div><div class="grid-foot"><span class="rc"><b>2</b> rows</span>',
+      '<div class="detail-rail approved"><div class="detail-oc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span class="detail-oc-title">Approved</span><span class="detail-oc-meta">2 rows returned</span></div><div class="detail-oc-body" id="detail-grid"><div class="gk-grid" data-result-grid></div><div class="grid-foot"><span class="rc"><b>2</b> rows</span>',
     );
     // Copy (Markdown) and Export (CSV, JSON) sit to the right of the row count.
     expect(html).toContain('<span class="grid-foot-actions"><span class="flyout-wrap">');
@@ -90,9 +90,9 @@ describe("render/detail", () => {
       result: { fields: [], rows: [], rowCount: 0, truncated: false },
     });
     expect(html).toContain('<div class="detail-rail approved">');
-    expect(html).toContain('<span class="detail-oc-meta">0 rows</span>');
+    expect(html).toContain('<span class="detail-oc-meta">0 rows returned</span>');
     expect(html).toContain(
-      '<div class="detail-oc-body"><div class="detail-oc-msg">The query ran and returned no rows.</div></div>',
+      '<div class="detail-oc-body"><div class="detail-oc-msg">The query returned no rows.</div></div>',
     );
   });
 
@@ -102,9 +102,9 @@ describe("render/detail", () => {
       note: "42 rows",
       result: { fields: [{ name: "id" }], rows: [], rowCount: 42, truncated: true },
     });
-    expect(html).toContain('<span class="detail-oc-meta">42 rows</span>');
+    expect(html).toContain('<span class="detail-oc-meta">42 rows returned</span>');
     expect(html).toContain(
-      '<div class="detail-oc-msg">42 rows returned, no longer held in memory.</div>',
+      '<div class="detail-oc-msg">The rows this query returned are no longer held in memory.</div>',
     );
   });
 
@@ -150,6 +150,54 @@ describe("render/detail", () => {
     expect(html).toContain('<span class="detail-oc-title">Expired</span>');
     expect(html).toContain(
       '<div class="detail-oc-msg">The proposal timed out before a decision. Nothing ran against the database.</div>',
+    );
+  });
+
+  it("tells a write's changed rows apart from the rows it returned", () => {
+    // An UPDATE without RETURNING: the count that matters is what it changed, and the
+    // zero returned is a fact, not the answer to "how many rows did this touch".
+    const write = detailHtml({
+      ...item,
+      note: "3 rows changed",
+      result: { fields: [], rows: [], rowCount: 0, affectedRows: 3, truncated: false },
+    });
+    expect(write).toContain('<span class="detail-oc-meta">3 rows changed · 0 rows returned</span>');
+    expect(write).toContain('<div class="detail-oc-msg">The query returned no rows.</div>');
+
+    // A write that matched nothing: a known zero is an answer and stays on screen.
+    const none = detailHtml({
+      ...item,
+      note: "0 rows changed",
+      result: { fields: [], rows: [], rowCount: 0, affectedRows: 0, truncated: false },
+    });
+    expect(none).toContain("0 rows changed");
+
+    // UPDATE ... RETURNING: both counts are known and both are shown, rows and all.
+    const returning = detailHtml({
+      ...item,
+      note: "2 rows changed",
+      result: {
+        fields: [{ name: "id" }],
+        rows: [{ id: 1 }, { id: 2 }],
+        rowCount: 2,
+        affectedRows: 2,
+        truncated: false,
+      },
+    });
+    expect(returning).toContain(
+      '<span class="detail-oc-meta">2 rows changed · 2 rows returned</span>',
+    );
+    expect(returning).toContain('id="detail-grid"');
+
+    // An unreported count is unknown: the read says what it returned and nothing else.
+    expect(detailHtml(item)).not.toContain("changed");
+  });
+
+  it("says a count was never recorded rather than inventing a zero", () => {
+    const html = detailHtml({ ...item, note: "approved", result: undefined });
+    expect(html).toContain('<span class="detail-oc-meta"></span>');
+    expect(html).toContain(
+      '<div class="detail-oc-msg">The query ran. No count was recorded.</div>',
     );
   });
 });

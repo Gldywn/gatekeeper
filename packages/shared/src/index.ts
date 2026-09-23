@@ -53,7 +53,7 @@ export interface Proposal {
   session: SessionMeta | null;
 }
 
-// PII-safe audit record served by GET /activity: never result rows, only a scalar count.
+// Host-side audit record served by GET /activity: SQL and metadata, never result rows.
 export interface ActivityEntry {
   id: string;
   createdAt: number;
@@ -68,7 +68,58 @@ export interface ActivityEntry {
   reason: string | null;
   error: string | null;
   rowCount: number | null;
+  affectedRows: number | null;
+  approval?: ApprovalAttribution;
+  evaluation?: AutoEvaluation;
+  autoHold?: AutoHold;
 }
+
+export interface AutoHold {
+  /** The plugin attempted provider submission, not proof of provider receipt. */
+  sent: boolean;
+  reason: string;
+}
+
+export interface EvaluationInput {
+  dialect: "postgresql";
+  sql: string;
+  // output: the value is returned or shapes a returned value. control: it filters, joins,
+  // groups or orders. Both remain privacy-relevant.
+  dependencies: {
+    schema: string;
+    table: string;
+    column: string;
+    type: string;
+    usage: "output" | "control" | "both";
+  }[];
+  /** String and numeric values were replaced with stable positional parameters for sharing only. */
+  withheldLiterals?: true;
+}
+
+export interface AutoEvaluation {
+  provider: "typesafe";
+  model: "jev-1.13.0";
+  policy:
+    | "auto-beta-1"
+    | "auto-beta-2"
+    | "auto-beta-3"
+    | "auto-beta-4"
+    | "auto-beta-5"
+    | "auto-beta-6";
+  evaluatedAt: number;
+  sqlDigest: string;
+  eligible: boolean;
+  reasons: string[];
+  probabilities: Record<string, number>;
+}
+
+export interface ApprovalAttribution {
+  source: "human" | "automatic";
+  evaluation?: AutoEvaluation;
+}
+
+/** What TypeSafe said about an API key: accepted, refused (401/403), or not reachable. */
+export type KeyStatus = "valid" | "invalid" | "unavailable";
 
 // The plugin POSTs ConnectionInput; the server stamps capturedAt and serves/stores the
 // ConnectionSnapshot. Never carries host, user, or credentials; informational only.

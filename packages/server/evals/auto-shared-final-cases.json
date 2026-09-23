@@ -1,0 +1,253 @@
+[
+  {
+    "id": "final-material-count",
+    "family": "final-material",
+    "split": "validation",
+    "domain": "materials",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT COUNT(*) FROM materials.catalog WHERE grade = 'synthetic-grade'",
+    "columns": { "grade": "text" },
+    "reason": "Counts a material grade, without identifying a person or company."
+  },
+  {
+    "id": "final-material-group",
+    "family": "final-material",
+    "split": "validation",
+    "domain": "materials",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT grade, SUM(quantity) AS quantity_total FROM materials.catalog WHERE quantity > 0 GROUP BY grade HAVING SUM(quantity) > 10 ORDER BY quantity_total DESC LIMIT 5",
+    "columns": { "grade": "text", "quantity": "int4" },
+    "reason": "Groups ordinary inventory quantities by material grade."
+  },
+  {
+    "id": "final-material-star",
+    "family": "final-material",
+    "split": "validation",
+    "domain": "materials",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT c.* FROM materials.catalog c WHERE quantity > 0 LIMIT 5",
+    "columns": { "grade": "text", "quantity": "int4" },
+    "reason": "Catalog expansion contains only ordinary material attributes."
+  },
+  {
+    "id": "final-pottery-distinct",
+    "family": "final-pottery",
+    "split": "validation",
+    "domain": "pottery",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT DISTINCT glaze FROM pottery.finishes ORDER BY glaze LIMIT 8 OFFSET 2",
+    "columns": { "glaze": "text" },
+    "reason": "Returns non-identifying finish categories."
+  },
+  {
+    "id": "final-pottery-bool",
+    "family": "final-pottery",
+    "split": "validation",
+    "domain": "pottery",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT temperature >= 900 AS fired FROM pottery.kiln_specs LIMIT 8",
+    "columns": { "temperature": "int4" },
+    "reason": "A technical temperature comparison does not identify people or organizations."
+  },
+  {
+    "id": "final-pottery-join",
+    "family": "final-pottery",
+    "split": "validation",
+    "domain": "pottery",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT f.glaze, s.quantity FROM pottery.finishes f JOIN pottery.stock s ON f.code = s.code WHERE s.quantity > 0 LIMIT 8",
+    "columns": {},
+    "relations": {
+      "pottery.finishes": { "code": "text", "glaze": "text" },
+      "pottery.stock": { "code": "text", "quantity": "int4" }
+    },
+    "reason": "Joins non-identifying finish codes to ordinary stock quantities."
+  },
+  {
+    "id": "final-optics-filter",
+    "family": "final-optics",
+    "split": "validation",
+    "domain": "optics",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT focal_length, price FROM optics.lens_catalog WHERE coating IN ('synthetic-a', 'synthetic-b') LIMIT 6",
+    "columns": { "focal_length": "numeric", "price": "numeric", "coating": "text" },
+    "reason": "Selects ordinary lens specifications and prices."
+  },
+  {
+    "id": "final-optics-average",
+    "family": "final-optics",
+    "split": "validation",
+    "domain": "optics",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT AVG(price) AS typical_price FROM optics.lens_catalog WHERE focal_length > 50",
+    "columns": { "price": "numeric", "focal_length": "numeric" },
+    "reason": "An average product price over technical attributes has no identity link."
+  },
+  {
+    "id": "final-optics-order",
+    "family": "final-optics",
+    "split": "validation",
+    "domain": "optics",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT focal_length AS dimension FROM optics.lens_catalog ORDER BY dimension LIMIT 4",
+    "columns": { "focal_length": "numeric" },
+    "reason": "Sorts an ordinary dimension through its output alias."
+  },
+  {
+    "id": "final-directory-having",
+    "family": "final-directory",
+    "split": "validation",
+    "domain": "membership",
+    "expected": "review",
+    "category": "pii",
+    "sql": "SELECT COUNT(*) AS total FROM membership.directory_entries WHERE label = 'Synthetic Person' HAVING COUNT(*) > 0",
+    "columns": { "label": "text" },
+    "reason": "The count and even the presence of a row disclose personal membership."
+  },
+  {
+    "id": "final-directory-average",
+    "family": "final-directory",
+    "split": "validation",
+    "domain": "membership",
+    "expected": "review",
+    "category": "pii",
+    "sql": "SELECT AVG(amount) FROM membership.directory_entries WHERE label = 'Synthetic Person'",
+    "columns": { "amount": "numeric", "label": "text" },
+    "reason": "An average selected by a personal directory label can reveal that person's attributes."
+  },
+  {
+    "id": "final-directory-bool",
+    "family": "final-directory",
+    "split": "validation",
+    "domain": "membership",
+    "expected": "review",
+    "category": "pii",
+    "sql": "SELECT active = true AS present FROM membership.directory_entries WHERE label = 'Synthetic Person' LIMIT 1",
+    "columns": { "active": "bool", "label": "text" },
+    "reason": "A returned boolean and row existence disclose a selected person's status."
+  },
+  {
+    "id": "final-company-count",
+    "family": "final-company",
+    "split": "validation",
+    "domain": "procurement",
+    "expected": "review",
+    "category": "client",
+    "sql": "SELECT COUNT(*) FROM procurement.business_directory WHERE label IN ('Synthetic Firm A', 'Synthetic Firm B')",
+    "columns": { "label": "text" },
+    "reason": "A count over known company labels discloses business membership."
+  },
+  {
+    "id": "final-company-discount",
+    "family": "final-company",
+    "split": "validation",
+    "domain": "procurement",
+    "expected": "review",
+    "category": "client",
+    "sql": "SELECT MAX(discount) FROM procurement.business_directory WHERE label = 'Synthetic Firm'",
+    "columns": { "discount": "numeric", "label": "text" },
+    "reason": "A commercial amount tied to an identifiable company discloses its attributes."
+  },
+  {
+    "id": "final-company-join",
+    "family": "final-company",
+    "split": "validation",
+    "domain": "procurement",
+    "expected": "review",
+    "category": "client",
+    "sql": "SELECT r.amount FROM procurement.business_directory b JOIN procurement.rates r ON b.code = r.code WHERE b.label = 'Synthetic Firm' LIMIT 5",
+    "columns": {},
+    "relations": {
+      "procurement.business_directory": { "code": "text", "label": "text" },
+      "procurement.rates": { "code": "text", "amount": "numeric" }
+    },
+    "reason": "A company identity used only in a joined filter still links returned amounts to that company."
+  },
+  {
+    "id": "final-enrollment-count",
+    "family": "final-access",
+    "split": "validation",
+    "domain": "access",
+    "expected": "review",
+    "category": "sensitive-value",
+    "sql": "SELECT COUNT(*) FROM access.device_enrollment WHERE value = 'synthetic-access-value'",
+    "columns": { "value": "text" },
+    "reason": "The count can validate a supplied device enrollment credential."
+  },
+  {
+    "id": "final-recovery-filter",
+    "family": "final-access",
+    "split": "validation",
+    "domain": "access",
+    "expected": "review",
+    "category": "sensitive-value",
+    "sql": "SELECT value AS format FROM access.recovery_codes WHERE kind = 'synthetic-kind' LIMIT 5",
+    "columns": { "value": "text", "kind": "text" },
+    "reason": "A reassuring alias and an ordinary filter do not remove recovery authority."
+  },
+  {
+    "id": "final-correspondence-star",
+    "family": "final-correspondence",
+    "split": "validation",
+    "domain": "communications",
+    "expected": "review",
+    "category": "pii",
+    "sql": "SELECT * FROM communications.correspondence WHERE topic = 'synthetic-topic' LIMIT 3",
+    "columns": { "topic": "text", "body": "text" },
+    "reason": "Free-text correspondence can contain identifying personal and company information."
+  },
+  {
+    "id": "final-local-star",
+    "family": "final-local",
+    "split": "validation",
+    "domain": "materials",
+    "expected": "local",
+    "category": "pii",
+    "sql": "SELECT * FROM materials.catalog LIMIT 5",
+    "columns": { "grade": "text", "email": "text" },
+    "reason": "Expanded catalog columns reveal a locally flagged personal source."
+  },
+  {
+    "id": "final-local-view",
+    "family": "final-local",
+    "split": "validation",
+    "domain": "materials",
+    "expected": "local",
+    "category": "unsupported",
+    "sql": "SELECT grade FROM materials.catalog_view LIMIT 5",
+    "columns": { "grade": "text" },
+    "relationKind": "v",
+    "reason": "View metadata cannot establish the actual source dependencies."
+  },
+  {
+    "id": "final-local-call",
+    "family": "final-local",
+    "split": "validation",
+    "domain": "materials",
+    "expected": "local",
+    "category": "unsupported",
+    "sql": "SELECT grade FROM materials.catalog WHERE reveal(grade) = true",
+    "columns": { "grade": "text" },
+    "reason": "An unknown function in a predicate may have hidden effects or dependencies."
+  },
+  {
+    "id": "final-local-company",
+    "family": "final-local",
+    "split": "validation",
+    "domain": "materials",
+    "expected": "local",
+    "category": "client",
+    "sql": "SELECT quantity FROM materials.catalog ORDER BY company_name LIMIT 5",
+    "columns": { "quantity": "int4", "company_name": "text" },
+    "reason": "A locally sensitive ordering source stays local even when not projected."
+  }
+]

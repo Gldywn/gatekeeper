@@ -28,8 +28,16 @@ values in `style.css` are only fallbacks for a standalone preview.
 
 `--amber` is the primary action and the "held" state, nothing decorative.
 Green means approved, red means rejected or blocked, blue means executing.
-Never introduce a colour that is not one of these, and never use amber as a
-generic highlight.
+`--auto`, an electric cyan kept brighter and greener than `--exec`, means Auto mode
+and nothing else. It never gets a component of its own: the active state is the
+armed chip in cyan, the entry is the Schema access hint with a cyan dot, and the
+card note and history glyph reuse theirs.
+
+Feature hints (Schema access, Auto mode) share one shape: an icon with a pulsing
+dot while off, and a popover on hover or keyboard focus with one direct action,
+filled to enable and tinted to disable. Clicking the icon opens its Settings section,
+so the popover carries no Settings link. Explanations stay short there, full detail
+lives in Settings.
 
 ## Type: two roles
 

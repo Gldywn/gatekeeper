@@ -2,7 +2,7 @@ import { connectionScopeKey } from "../connection.js";
 import { logAudit } from "./audit.js";
 import { getConnection } from "./connection.js";
 import { digest, isUniqueViolation, OPEN_STATES, type StoreContext, token } from "./db.js";
-import { type RawRow, toRequest } from "./rows.js";
+import { knownCount, type RawRow, toRequest } from "./rows.js";
 import { type GatekeeperRequest, type Outcome, type RequestState, StoreError } from "./types.js";
 
 // `created` is false when an idempotency key replayed an existing proposal. The
@@ -197,7 +197,25 @@ export function renewLease(
 }
 
 /** Mark execution started (before runQuery) so a crash is recoverable. */
-export function markExecuting(ctx: StoreContext, id: string, leaseId: string): GatekeeperRequest {
+export function recordEvaluation(
+  ctx: StoreContext,
+  id: string,
+  leaseId: string,
+  evaluation: import("@gatekeeper/shared").AutoEvaluation,
+): void {
+  const row = requireLease(ctx, id, leaseId);
+  if (row.state !== "leased") throw new StoreError("INVALID_STATE", "Not awaiting approval");
+  ctx.db
+    .prepare("UPDATE requests SET policy_json = ? WHERE id = ?")
+    .run(JSON.stringify({ ...((row.policy as object) ?? {}), evaluation }), id);
+}
+
+export function markExecuting(
+  ctx: StoreContext,
+  id: string,
+  leaseId: string,
+  approval?: import("@gatekeeper/shared").ApprovalAttribution,
+): GatekeeperRequest {
   const row = requireLease(ctx, id, leaseId);
   if (row.state !== "leased") {
     throw new StoreError("INVALID_STATE", `Cannot execute from state ${row.state}`);
@@ -206,10 +224,18 @@ export function markExecuting(ctx: StoreContext, id: string, leaseId: string): G
   ctx.db.transaction(() => {
     const info = ctx.db
       .prepare(
-        `UPDATE requests SET state = 'executing'
+        `UPDATE requests SET state = 'executing', policy_json = ?
              WHERE id = ? AND lease_id = ? AND state = 'leased' AND lease_expires_at >= ?`,
       )
-      .run(id, leaseId, now);
+      .run(
+        JSON.stringify({
+          ...((row.policy as object) ?? {}),
+          approval: approval ?? { source: "human" },
+        }),
+        id,
+        leaseId,
+        now,
+      );
     if (info.changes !== 1) {
       throw new StoreError("LEASE_CONFLICT", `Request ${id} changed concurrently`);
     }
@@ -223,14 +249,33 @@ export function markExecuting(ctx: StoreContext, id: string, leaseId: string): G
   return { ...row, state: "executing" };
 }
 
+// Only the executing plugin calls this when its final checks stopped SQL before runQuery.
+export function withdrawExecution(ctx: StoreContext, id: string, leaseId: string): void {
+  const row = requireLease(ctx, id, leaseId);
+  if (row.state !== "executing") throw new StoreError("INVALID_STATE", "Not executing");
+  ctx.db
+    .prepare(
+      "UPDATE requests SET state = 'leased' WHERE id = ? AND lease_id = ? AND state = 'executing'",
+    )
+    .run(id, leaseId);
+  logAudit(ctx, {
+    requestId: id,
+    event: "execution_withdrawn",
+    fromState: "executing",
+    toState: "leased",
+  });
+}
+
 /** Resolve a leased/executing request to its terminal state. */
 export function resolve(
   ctx: StoreContext,
   id: string,
   leaseId: string,
   outcome: Outcome,
+  autoHold?: import("@gatekeeper/shared").AutoHold,
 ): GatekeeperRequest {
   const row = requireLease(ctx, id, leaseId);
+  const policy = autoHold ? { ...((row.policy as object) ?? {}), autoHold } : row.policy;
   const state: RequestState =
     outcome.status === "approved"
       ? "approved"
@@ -253,10 +298,18 @@ export function resolve(
   ctx.db.transaction(() => {
     const info = ctx.db
       .prepare(
-        `UPDATE requests SET state = ?, result_json = ?, decided_at = ?, lease_id = NULL, lease_expires_at = NULL
+        `UPDATE requests SET state = ?, result_json = ?, policy_json = ?, decided_at = ?, lease_id = NULL, lease_expires_at = NULL
              WHERE id = ? AND lease_id = ? AND state IN ('leased', 'executing') AND lease_expires_at >= ?`,
       )
-      .run(state, JSON.stringify(result), now, id, leaseId, now);
+      .run(
+        state,
+        JSON.stringify(result),
+        policy == null ? null : JSON.stringify(policy),
+        now,
+        id,
+        leaseId,
+        now,
+      );
     if (info.changes !== 1) {
       throw new StoreError("LEASE_CONFLICT", `Request ${id} changed concurrently`);
     }
@@ -273,7 +326,7 @@ export function resolve(
             : outcome.error,
     });
   })();
-  return { ...row, state, result, decidedAt: now, leaseId: null, leaseExpiresAt: null };
+  return { ...row, state, result, policy, decidedAt: now, leaseId: null, leaseExpiresAt: null };
 }
 
 /** Withdraw a request the agent no longer wants (owner-checked). */
@@ -397,33 +450,53 @@ export function sweep(ctx: StoreContext): void {
       toState: "expired",
     });
   }
-  // Strip approved result rows once their retention window passes. The audit
-  // trail already recorded the decision and row count, so no PII lingers and
-  // the request stays queryable as an approved-but-purged terminal.
-  const stripped = ctx.db
-    .prepare(
-      `UPDATE requests SET result_json = ?
-           WHERE state = 'approved' AND decided_at IS NOT NULL AND decided_at < ?
-             AND result_json LIKE '{"rows":%' RETURNING id`,
-    )
-    .all(JSON.stringify({ purged: true }), now - ctx.resultTtl) as { id: string }[];
-  for (const row of stripped) {
-    logAudit(ctx, {
-      requestId: row.id,
-      event: "result_purged",
-      fromState: "approved",
-      toState: "approved",
-    });
-  }
+  // Read scalar metadata only. Purging data must not erase the decision's counts,
+  // and a transaction prevents another broker from recording the same purge twice.
+  ctx.db.transaction(() => {
+    const expiredResults = ctx.db
+      .prepare(`
+      SELECT id, json_extract(result_json, '$.rowCount') AS row_count,
+        json_extract(result_json, '$.affectedRows') AS affected_rows,
+        CASE WHEN json_type(result_json, '$.rows') = 'array'
+          THEN json_array_length(result_json, '$.rows') END AS returned_count
+      FROM requests WHERE state = 'approved' AND decided_at IS NOT NULL AND decided_at < ?
+        AND result_json GLOB '{"rows":*'
+    `)
+      .all(now - ctx.resultTtl) as {
+      id: string;
+      row_count: unknown;
+      affected_rows: unknown;
+      returned_count: unknown;
+    }[];
+    const update = ctx.db.prepare("UPDATE requests SET result_json = ? WHERE id = ?");
+    for (const row of expiredResults) {
+      const rowCount = knownCount(row.row_count) ?? knownCount(row.returned_count);
+      const affectedRows = knownCount(row.affected_rows);
+      update.run(
+        JSON.stringify({
+          purged: true,
+          ...(rowCount !== null ? { rowCount } : {}),
+          ...(affectedRows !== null ? { affectedRows } : {}),
+        }),
+        row.id,
+      );
+      logAudit(ctx, {
+        requestId: row.id,
+        event: "result_purged",
+        fromState: "approved",
+        toState: "approved",
+      });
+    }
+  })();
 
-  // Retention: drop terminal requests, old audit rows, and dead sessions so a
-  // long-lived database stays bounded.
+  // Human-facing history is indefinite. Only technical events and sessions that
+  // cannot supply attribution to any retained request are eligible for cleanup.
   const cutoff = now - ctx.retention;
-  ctx.db
-    .prepare("DELETE FROM requests WHERE decided_at IS NOT NULL AND decided_at < ?")
-    .run(cutoff);
   ctx.db.prepare("DELETE FROM audit WHERE ts < ?").run(cutoff);
-  ctx.db.prepare("DELETE FROM sessions WHERE last_seen < ?").run(cutoff);
+  ctx.db
+    .prepare(`DELETE FROM sessions WHERE last_seen < ?
+    AND NOT EXISTS (SELECT 1 FROM requests WHERE requests.session_id = sessions.session_id)`)
+    .run(cutoff);
 }
 
 export function requireLease(ctx: StoreContext, id: string, leaseId: string): GatekeeperRequest {

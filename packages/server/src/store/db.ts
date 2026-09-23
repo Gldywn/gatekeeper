@@ -16,7 +16,7 @@ export interface StoreContext {
   maxPending: number;
   /** How long an approved result is retained before its rows are stripped. */
   resultTtl: number;
-  /** How long terminal rows, old audit, and dead sessions are kept. */
+  /** How long technical audit events and unreferenced inactive sessions are kept. */
   retention: number;
   /** How long a session may be idle before the roster stops listing it. */
   rosterIdleTtl: number;
@@ -134,6 +134,18 @@ export function migrate(db: Database.Database): void {
       // already present
     }
   }
+  // Apply after legacy columns have been migrated. The purge index contains only
+  // results still holding rows, so each sweep skips the growing retained history.
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_requests_activity
+      ON requests(connection, decided_at DESC, id DESC) WHERE decided_at IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_requests_result_purge
+      ON requests(state, decided_at) WHERE state = 'approved' AND decided_at IS NOT NULL
+        AND result_json GLOB '{"rows":*';
+    CREATE INDEX IF NOT EXISTS idx_requests_session ON requests(session_id);
+    CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit(ts);
+    CREATE INDEX IF NOT EXISTS idx_sessions_last_seen ON sessions(last_seen);
+  `);
 }
 
 export function token(prefix: string): string {

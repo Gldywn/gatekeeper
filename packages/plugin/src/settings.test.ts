@@ -53,8 +53,12 @@ describe("settings/filterSchema", () => {
     expect(filterSchema(full, defaultSettings())).toEqual(full);
   });
 
-  it("drops the whole annotation when schema annotation is off", () => {
-    expect(filterSchema(full, { ...defaultSettings(), schemaAnnotation: false })).toBeNull();
+  it("keeps annotating whatever an older stored blob asked for (2026-09-21 decision)", () => {
+    // schemaAnnotation was removed as a setting; a false left in storage cannot bring it
+    // back, and the three display preferences keep their own effect.
+    const stored = normalizeSettings({ schemaAnnotation: false, piiFlagging: false });
+    expect("schemaAnnotation" in stored).toBe(false);
+    expect(filterSchema(full, stored)).toEqual({ ...full, pii: [] });
   });
 
   it("blanks each detection axis independently", () => {

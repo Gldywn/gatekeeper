@@ -112,6 +112,57 @@ describe("getQueryResult", () => {
     });
   });
 
+  it.each([
+    { sql: "SELECT a FROM t", rowCount: 25, affectedRows: undefined },
+    { sql: "UPDATE t SET a = 1", rowCount: 0, affectedRows: 3 },
+    { sql: "DELETE FROM t WHERE false", rowCount: 0, affectedRows: 0 },
+    { sql: "UPDATE t SET a = 1 RETURNING a", rowCount: 3, affectedRows: 3 },
+  ])(
+    "keeps counts available after result purging for $sql",
+    async ({ sql, rowCount, affectedRows }) => {
+      let now = 1000;
+      const store = new RequestStore({ now: () => now });
+      try {
+        const request = store.submit({ sessionId: "s1", sql });
+        const claimed = store.claimNext("plugin", 1000)!;
+        store.resolve(request.id, claimed.leaseId!, {
+          status: "approved",
+          rows: rowCount ? [{ a: "synthetic result value" }] : [],
+          fields: [{ name: "a" }],
+          rowCount,
+          affectedRows,
+          truncated: rowCount > 1,
+        });
+        now += 10 * 60_000 + 1;
+        store.sweep();
+        const read = await getQueryResult(store, "s1", request.id, 0);
+        expect(read.terminal).toEqual({
+          status: "approved",
+          purged: true,
+          rows: [],
+          fields: [],
+          rowCount,
+          ...(affectedRows !== undefined ? { affectedRows } : {}),
+        });
+        expect(store.get(request.id)?.result).toEqual({
+          purged: true,
+          rowCount,
+          ...(affectedRows !== undefined ? { affectedRows } : {}),
+        });
+        expect(store.listActivity(null)[0]).toMatchObject({
+          rowCount,
+          affectedRows: affectedRows ?? null,
+        });
+        store.sweep();
+        expect(
+          store.readAudit(request.id).filter((entry) => entry.event === "result_purged"),
+        ).toHaveLength(1);
+      } finally {
+        store.close();
+      }
+    },
+  );
+
   it("waits and returns once the request resolves during the wait", async () => {
     const store = fresh();
     const ticket = submitQuery(store, { sessionId: "s1", sql: "SELECT 1" });

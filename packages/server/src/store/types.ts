@@ -101,6 +101,10 @@ export interface ActivityEntry {
   reason: string | null;
   error: string | null;
   rowCount: number | null;
+  affectedRows: number | null;
+  approval?: import("@gatekeeper/shared").ApprovalAttribution;
+  evaluation?: import("@gatekeeper/shared").AutoEvaluation;
+  autoHold?: import("@gatekeeper/shared").AutoHold;
 }
 
 export interface StoreOptions {
@@ -114,7 +118,7 @@ export interface StoreOptions {
   maxPendingPerSession?: number;
   /** How long an approved result is retained before its rows are stripped. */
   resultTtlMs?: number;
-  /** How long terminal rows, old audit, and dead sessions are kept. */
+  /** How long technical audit events and unreferenced inactive sessions are kept. */
   retentionMs?: number;
   /** How long a session may be idle before the roster stops listing it. */
   rosterIdleTtlMs?: number;

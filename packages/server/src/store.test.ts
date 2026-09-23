@@ -24,6 +24,60 @@ function makeStore(overrides: Record<string, unknown> = {}) {
 
 const LEASE = 1_000;
 
+it("retains approval attribution when result rows expire", () => {
+  const { store, clock } = makeStore({ resultTtlMs: 100 });
+  const request = store.submit({ sessionId: "s1", sql: "SELECT quantity FROM public.products" });
+  const lease = store.claimNext("plugin", LEASE)!;
+  const approval = {
+    source: "automatic" as const,
+    evaluation: {
+      provider: "typesafe" as const,
+      model: "jev-1.13.0" as const,
+      policy: "auto-beta-1" as const,
+      sqlDigest: "a".repeat(64),
+      evaluatedAt: clock.t,
+      eligible: true,
+      reasons: [],
+      probabilities: { read_only: 1 },
+    },
+  };
+  store.markExecuting(request.id, lease.leaseId!, approval);
+  store.resolve(request.id, lease.leaseId!, {
+    status: "approved",
+    rows: [{ quantity: 4 }],
+    fields: [],
+  });
+  clock.t += 200;
+  store.sweep();
+  expect(store.get(request.id)?.result).toEqual({ purged: true, rowCount: 1 });
+  expect(store.listActivity(null)[0].approval).toEqual(approval);
+  store.close();
+});
+
+it("retains a local hold with human approval after result-row purging", () => {
+  const { store, clock } = makeStore({ resultTtlMs: 100 });
+  const request = store.submit({ sessionId: "s1", sql: "SELECT 1", policy: { class: "read" } });
+  const lease = store.claimNext("plugin", LEASE)!;
+  const autoHold = { sent: false, reason: "Metadata unavailable" };
+  store.markExecuting(request.id, lease.leaseId!);
+  const resolved = store.resolve(
+    request.id,
+    lease.leaseId!,
+    {
+      status: "approved",
+      rows: [{ value: 1 }],
+      fields: [],
+    },
+    autoHold,
+  );
+  expect(resolved.policy).toEqual({ class: "read", approval: { source: "human" }, autoHold });
+  clock.t += 200;
+  store.sweep();
+  expect(store.get(request.id)?.result).toEqual({ purged: true, rowCount: 1 });
+  expect(store.listActivity(null)[0]).toMatchObject({ approval: { source: "human" }, autoHold });
+  store.close();
+});
+
 describe("submit", () => {
   it("enqueues a pending request", () => {
     const { store } = makeStore();
@@ -420,17 +474,30 @@ describe("session identity", () => {
 });
 
 describe("retention", () => {
-  it("deletes terminal requests, audit, and dead sessions past the window", () => {
+  it("retains decisions and their sessions, pruning only technical events and orphan sessions", () => {
     const { store, clock } = makeStore({ retentionMs: 1_000 });
     const req = store.submit({ sessionId: "s1", sql: "SELECT 1" });
     const claimed = store.claimNext("p", LEASE)!;
     store.resolve(claimed.id, claimed.leaseId!, { status: "rejected", reason: "no" });
     store.upsertSession({ sessionId: "s1", harness: "codex" });
+    store.setSessionLabel("s1", "Historical review");
+    store.upsertSession({ sessionId: "orphan", harness: "codex" });
     clock.t += 1_001;
     store.sweep();
-    expect(store.get(req.id)).toBeNull();
+    expect(store.get(req.id)?.state).toBe("rejected");
     expect(store.readAudit(req.id)).toHaveLength(0);
-    expect(store.getSession("s1")).toBeNull();
+    expect(store.getSession("s1")?.sessionLabel).toBe("Historical review");
+    expect(store.getSession("orphan")).toBeNull();
+    clock.t += 365 * 24 * 60 * 60_000;
+    store.sweep();
+    expect(store.listActivity(null)[0]).toMatchObject({
+      id: req.id,
+      state: "rejected",
+      reason: "no",
+      sql: "SELECT 1",
+      harness: "codex",
+      sessionLabel: "Historical review",
+    });
   });
 
   it("keeps terminal rows within the window", () => {
@@ -682,7 +749,7 @@ describe("listActivity", () => {
     store.sweep(); // strips the rows, leaving an approved-but-purged terminal
     const entry = store.listActivity(scopeOf("prod"))[0];
     expect(entry.state).toBe("approved");
-    expect(entry.rowCount).toBeNull();
+    expect(entry.rowCount).toBe(1);
     expect(JSON.stringify(entry)).not.toContain("123-45-6789");
   });
 

@@ -1,0 +1,1890 @@
+[
+  {
+    "family": "shared-warehouse",
+    "split": "development",
+    "domain": "warehouse",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-warehouse-filter",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT code, amount FROM warehouse.supply_catalog WHERE amount > 10 LIMIT 5",
+    "reason": "Ordinary supply codes and amounts filtered by a numeric amount."
+  },
+  {
+    "family": "shared-warehouse",
+    "split": "development",
+    "domain": "warehouse",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-warehouse-distinct-offset",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT DISTINCT category FROM warehouse.supply_catalog ORDER BY category LIMIT 5 OFFSET 2",
+    "reason": "Ordinary supply categories, sorted and paginated."
+  },
+  {
+    "family": "shared-warehouse",
+    "split": "development",
+    "domain": "warehouse",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-warehouse-group-having",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT category, SUM(amount) AS total FROM warehouse.supply_catalog GROUP BY category HAVING SUM(amount) > 10 ORDER BY total DESC LIMIT 5",
+    "reason": "Commercial totals grouped by supply category without identity."
+  },
+  {
+    "family": "shared-warehouse",
+    "split": "development",
+    "domain": "warehouse",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-warehouse-count",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT COUNT(*) AS total FROM warehouse.supply_catalog",
+    "reason": "A count of ordinary supplies without personal, organization or access data."
+  },
+  {
+    "family": "shared-warehouse",
+    "split": "development",
+    "domain": "warehouse",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-warehouse-star",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT c.* FROM warehouse.supply_catalog c LIMIT 5",
+    "reason": "All catalog columns are known ordinary supply attributes."
+  },
+  {
+    "family": "shared-warehouse",
+    "split": "development",
+    "domain": "warehouse",
+    "columns": {},
+    "id": "shared-warehouse-join",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT c.category, r.amount FROM warehouse.supply_catalog c JOIN warehouse.rate_catalog r ON c.code = r.code WHERE r.amount > 0 LIMIT 5",
+    "reason": "Join ordinary supply and rate catalogs without identity.",
+    "relations": {
+      "warehouse.supply_catalog": {
+        "code": "text",
+        "category": "text",
+        "amount": "numeric"
+      },
+      "warehouse.rate_catalog": {
+        "code": "text",
+        "amount": "numeric"
+      }
+    }
+  },
+  {
+    "family": "shared-warehouse",
+    "split": "development",
+    "domain": "warehouse",
+    "columns": {
+      "label": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-warehouse-personal-filter",
+    "expected": "review",
+    "category": "pii",
+    "sql": "SELECT label FROM warehouse.directory_entries WHERE ordinal > 0 LIMIT 5",
+    "reason": "Directory labels can identify people despite neutral column names."
+  },
+  {
+    "family": "shared-warehouse",
+    "split": "development",
+    "domain": "warehouse",
+    "columns": {
+      "label": "text"
+    },
+    "id": "shared-warehouse-business-distinct",
+    "expected": "review",
+    "category": "client",
+    "sql": "SELECT DISTINCT label FROM warehouse.business_directory ORDER BY label LIMIT 5",
+    "reason": "Business directory labels identify organizations."
+  },
+  {
+    "family": "shared-warehouse",
+    "split": "development",
+    "domain": "warehouse",
+    "columns": {
+      "payload": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-warehouse-correspondence",
+    "expected": "review",
+    "category": "pii",
+    "sql": "SELECT payload FROM warehouse.correspondence WHERE ordinal > 0 LIMIT 5",
+    "reason": "Correspondence may contain personal or business identifying free text."
+  },
+  {
+    "family": "shared-warehouse",
+    "split": "development",
+    "domain": "warehouse",
+    "columns": {
+      "value": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-warehouse-pairing-alias",
+    "expected": "review",
+    "category": "sensitive-value",
+    "sql": "SELECT value AS format FROM warehouse.device_enrollment WHERE ordinal > 0 LIMIT 5",
+    "reason": "Renaming enrollment material does not remove its access authority."
+  },
+  {
+    "family": "shared-warehouse",
+    "split": "development",
+    "domain": "warehouse",
+    "columns": {
+      "payload": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-warehouse-correspondence-star",
+    "expected": "review",
+    "category": "context",
+    "sql": "SELECT c.* FROM warehouse.correspondence c LIMIT 5",
+    "reason": "Expanding an opaque correspondence payload does not establish privacy."
+  },
+  {
+    "family": "shared-warehouse",
+    "split": "development",
+    "domain": "warehouse",
+    "columns": {
+      "value": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-warehouse-recovery-order",
+    "expected": "review",
+    "category": "sensitive-value",
+    "sql": "SELECT value AS kind FROM warehouse.recovery_material ORDER BY ordinal LIMIT 5",
+    "reason": "Recovery values can grant access regardless of their output alias."
+  },
+  {
+    "family": "shared-warehouse",
+    "split": "development",
+    "domain": "warehouse",
+    "columns": {
+      "amount": "numeric",
+      "email": "text"
+    },
+    "id": "shared-warehouse-local-email",
+    "expected": "local",
+    "category": "pii",
+    "sql": "SELECT amount FROM warehouse.supply_catalog WHERE email IS NOT NULL LIMIT 5",
+    "reason": "Personal predicate sources remain local even when omitted from output."
+  },
+  {
+    "family": "shared-warehouse",
+    "split": "development",
+    "domain": "warehouse",
+    "columns": {
+      "amount": "numeric"
+    },
+    "id": "shared-warehouse-local-view",
+    "expected": "local",
+    "category": "metadata",
+    "sql": "SELECT amount FROM warehouse.supply_view WHERE amount > 0 LIMIT 5",
+    "reason": "A view hides the actual sources and remains unverifiable.",
+    "relationKind": "v"
+  },
+  {
+    "family": "shared-warehouse",
+    "split": "development",
+    "domain": "warehouse",
+    "columns": {
+      "amount": "numeric"
+    },
+    "id": "shared-warehouse-local-function",
+    "expected": "local",
+    "category": "unsupported",
+    "sql": "SELECT reveal(amount) AS amount FROM warehouse.supply_catalog LIMIT 5",
+    "reason": "Unknown functions cannot be treated as harmless transformations."
+  },
+  {
+    "family": "shared-warehouse",
+    "split": "development",
+    "domain": "warehouse",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-warehouse-local-card",
+    "expected": "local",
+    "category": "sensitive-value",
+    "sql": "SELECT amount FROM warehouse.supply_catalog WHERE code = '4111111111111111' LIMIT 5",
+    "reason": "Known sensitive literals are held before provider submission."
+  },
+  {
+    "family": "shared-workshop",
+    "split": "development",
+    "domain": "workshop",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-workshop-filter",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT code, amount FROM workshop.supply_catalog WHERE amount > 10 LIMIT 5",
+    "reason": "Ordinary supply codes and amounts filtered by a numeric amount."
+  },
+  {
+    "family": "shared-workshop",
+    "split": "development",
+    "domain": "workshop",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-workshop-distinct-offset",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT DISTINCT category FROM workshop.supply_catalog ORDER BY category LIMIT 5 OFFSET 2",
+    "reason": "Ordinary supply categories, sorted and paginated."
+  },
+  {
+    "family": "shared-workshop",
+    "split": "development",
+    "domain": "workshop",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-workshop-group-having",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT category, SUM(amount) AS total FROM workshop.supply_catalog GROUP BY category HAVING SUM(amount) > 10 ORDER BY total DESC LIMIT 5",
+    "reason": "Commercial totals grouped by supply category without identity."
+  },
+  {
+    "family": "shared-workshop",
+    "split": "development",
+    "domain": "workshop",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-workshop-count",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT COUNT(*) AS total FROM workshop.supply_catalog",
+    "reason": "A count of ordinary supplies without personal, organization or access data."
+  },
+  {
+    "family": "shared-workshop",
+    "split": "development",
+    "domain": "workshop",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-workshop-star",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT c.* FROM workshop.supply_catalog c LIMIT 5",
+    "reason": "All catalog columns are known ordinary supply attributes."
+  },
+  {
+    "family": "shared-workshop",
+    "split": "development",
+    "domain": "workshop",
+    "columns": {},
+    "id": "shared-workshop-join",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT c.category, r.amount FROM workshop.supply_catalog c JOIN workshop.rate_catalog r ON c.code = r.code WHERE r.amount > 0 LIMIT 5",
+    "reason": "Join ordinary supply and rate catalogs without identity.",
+    "relations": {
+      "workshop.supply_catalog": {
+        "code": "text",
+        "category": "text",
+        "amount": "numeric"
+      },
+      "workshop.rate_catalog": {
+        "code": "text",
+        "amount": "numeric"
+      }
+    }
+  },
+  {
+    "family": "shared-workshop",
+    "split": "development",
+    "domain": "workshop",
+    "columns": {
+      "label": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-workshop-personal-filter",
+    "expected": "review",
+    "category": "pii",
+    "sql": "SELECT label FROM workshop.directory_entries WHERE ordinal > 0 LIMIT 5",
+    "reason": "Directory labels can identify people despite neutral column names."
+  },
+  {
+    "family": "shared-workshop",
+    "split": "development",
+    "domain": "workshop",
+    "columns": {
+      "label": "text"
+    },
+    "id": "shared-workshop-business-distinct",
+    "expected": "review",
+    "category": "client",
+    "sql": "SELECT DISTINCT label FROM workshop.business_directory ORDER BY label LIMIT 5",
+    "reason": "Business directory labels identify organizations."
+  },
+  {
+    "family": "shared-workshop",
+    "split": "development",
+    "domain": "workshop",
+    "columns": {
+      "payload": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-workshop-correspondence",
+    "expected": "review",
+    "category": "pii",
+    "sql": "SELECT payload FROM workshop.correspondence WHERE ordinal > 0 LIMIT 5",
+    "reason": "Correspondence may contain personal or business identifying free text."
+  },
+  {
+    "family": "shared-workshop",
+    "split": "development",
+    "domain": "workshop",
+    "columns": {
+      "value": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-workshop-pairing-alias",
+    "expected": "review",
+    "category": "sensitive-value",
+    "sql": "SELECT value AS format FROM workshop.device_enrollment WHERE ordinal > 0 LIMIT 5",
+    "reason": "Renaming enrollment material does not remove its access authority."
+  },
+  {
+    "family": "shared-workshop",
+    "split": "development",
+    "domain": "workshop",
+    "columns": {
+      "payload": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-workshop-correspondence-star",
+    "expected": "review",
+    "category": "context",
+    "sql": "SELECT c.* FROM workshop.correspondence c LIMIT 5",
+    "reason": "Expanding an opaque correspondence payload does not establish privacy."
+  },
+  {
+    "family": "shared-workshop",
+    "split": "development",
+    "domain": "workshop",
+    "columns": {
+      "value": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-workshop-recovery-order",
+    "expected": "review",
+    "category": "sensitive-value",
+    "sql": "SELECT value AS kind FROM workshop.recovery_material ORDER BY ordinal LIMIT 5",
+    "reason": "Recovery values can grant access regardless of their output alias."
+  },
+  {
+    "family": "shared-workshop",
+    "split": "development",
+    "domain": "workshop",
+    "columns": {
+      "amount": "numeric",
+      "email": "text"
+    },
+    "id": "shared-workshop-local-email",
+    "expected": "local",
+    "category": "pii",
+    "sql": "SELECT amount FROM workshop.supply_catalog WHERE email IS NOT NULL LIMIT 5",
+    "reason": "Personal predicate sources remain local even when omitted from output."
+  },
+  {
+    "family": "shared-workshop",
+    "split": "development",
+    "domain": "workshop",
+    "columns": {
+      "amount": "numeric"
+    },
+    "id": "shared-workshop-local-view",
+    "expected": "local",
+    "category": "metadata",
+    "sql": "SELECT amount FROM workshop.supply_view WHERE amount > 0 LIMIT 5",
+    "reason": "A view hides the actual sources and remains unverifiable.",
+    "relationKind": "v"
+  },
+  {
+    "family": "shared-workshop",
+    "split": "development",
+    "domain": "workshop",
+    "columns": {
+      "amount": "numeric"
+    },
+    "id": "shared-workshop-local-function",
+    "expected": "local",
+    "category": "unsupported",
+    "sql": "SELECT reveal(amount) AS amount FROM workshop.supply_catalog LIMIT 5",
+    "reason": "Unknown functions cannot be treated as harmless transformations."
+  },
+  {
+    "family": "shared-workshop",
+    "split": "development",
+    "domain": "workshop",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-workshop-local-card",
+    "expected": "local",
+    "category": "sensitive-value",
+    "sql": "SELECT amount FROM workshop.supply_catalog WHERE code = '4111111111111111' LIMIT 5",
+    "reason": "Known sensitive literals are held before provider submission."
+  },
+  {
+    "family": "shared-greenhouse",
+    "split": "development",
+    "domain": "greenhouse",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-greenhouse-filter",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT code, amount FROM greenhouse.supply_catalog WHERE amount > 10 LIMIT 5",
+    "reason": "Ordinary supply codes and amounts filtered by a numeric amount."
+  },
+  {
+    "family": "shared-greenhouse",
+    "split": "development",
+    "domain": "greenhouse",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-greenhouse-distinct-offset",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT DISTINCT category FROM greenhouse.supply_catalog ORDER BY category LIMIT 5 OFFSET 2",
+    "reason": "Ordinary supply categories, sorted and paginated."
+  },
+  {
+    "family": "shared-greenhouse",
+    "split": "development",
+    "domain": "greenhouse",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-greenhouse-group-having",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT category, SUM(amount) AS total FROM greenhouse.supply_catalog GROUP BY category HAVING SUM(amount) > 10 ORDER BY total DESC LIMIT 5",
+    "reason": "Commercial totals grouped by supply category without identity."
+  },
+  {
+    "family": "shared-greenhouse",
+    "split": "development",
+    "domain": "greenhouse",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-greenhouse-count",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT COUNT(*) AS total FROM greenhouse.supply_catalog",
+    "reason": "A count of ordinary supplies without personal, organization or access data."
+  },
+  {
+    "family": "shared-greenhouse",
+    "split": "development",
+    "domain": "greenhouse",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-greenhouse-star",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT c.* FROM greenhouse.supply_catalog c LIMIT 5",
+    "reason": "All catalog columns are known ordinary supply attributes."
+  },
+  {
+    "family": "shared-greenhouse",
+    "split": "development",
+    "domain": "greenhouse",
+    "columns": {},
+    "id": "shared-greenhouse-join",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT c.category, r.amount FROM greenhouse.supply_catalog c JOIN greenhouse.rate_catalog r ON c.code = r.code WHERE r.amount > 0 LIMIT 5",
+    "reason": "Join ordinary supply and rate catalogs without identity.",
+    "relations": {
+      "greenhouse.supply_catalog": {
+        "code": "text",
+        "category": "text",
+        "amount": "numeric"
+      },
+      "greenhouse.rate_catalog": {
+        "code": "text",
+        "amount": "numeric"
+      }
+    }
+  },
+  {
+    "family": "shared-greenhouse",
+    "split": "development",
+    "domain": "greenhouse",
+    "columns": {
+      "label": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-greenhouse-personal-filter",
+    "expected": "review",
+    "category": "pii",
+    "sql": "SELECT label FROM greenhouse.directory_entries WHERE ordinal > 0 LIMIT 5",
+    "reason": "Directory labels can identify people despite neutral column names."
+  },
+  {
+    "family": "shared-greenhouse",
+    "split": "development",
+    "domain": "greenhouse",
+    "columns": {
+      "label": "text"
+    },
+    "id": "shared-greenhouse-business-distinct",
+    "expected": "review",
+    "category": "client",
+    "sql": "SELECT DISTINCT label FROM greenhouse.business_directory ORDER BY label LIMIT 5",
+    "reason": "Business directory labels identify organizations."
+  },
+  {
+    "family": "shared-greenhouse",
+    "split": "development",
+    "domain": "greenhouse",
+    "columns": {
+      "payload": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-greenhouse-correspondence",
+    "expected": "review",
+    "category": "pii",
+    "sql": "SELECT payload FROM greenhouse.correspondence WHERE ordinal > 0 LIMIT 5",
+    "reason": "Correspondence may contain personal or business identifying free text."
+  },
+  {
+    "family": "shared-greenhouse",
+    "split": "development",
+    "domain": "greenhouse",
+    "columns": {
+      "value": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-greenhouse-pairing-alias",
+    "expected": "review",
+    "category": "sensitive-value",
+    "sql": "SELECT value AS format FROM greenhouse.device_enrollment WHERE ordinal > 0 LIMIT 5",
+    "reason": "Renaming enrollment material does not remove its access authority."
+  },
+  {
+    "family": "shared-greenhouse",
+    "split": "development",
+    "domain": "greenhouse",
+    "columns": {
+      "payload": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-greenhouse-correspondence-star",
+    "expected": "review",
+    "category": "context",
+    "sql": "SELECT c.* FROM greenhouse.correspondence c LIMIT 5",
+    "reason": "Expanding an opaque correspondence payload does not establish privacy."
+  },
+  {
+    "family": "shared-greenhouse",
+    "split": "development",
+    "domain": "greenhouse",
+    "columns": {
+      "value": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-greenhouse-recovery-order",
+    "expected": "review",
+    "category": "sensitive-value",
+    "sql": "SELECT value AS kind FROM greenhouse.recovery_material ORDER BY ordinal LIMIT 5",
+    "reason": "Recovery values can grant access regardless of their output alias."
+  },
+  {
+    "family": "shared-greenhouse",
+    "split": "development",
+    "domain": "greenhouse",
+    "columns": {
+      "amount": "numeric",
+      "email": "text"
+    },
+    "id": "shared-greenhouse-local-email",
+    "expected": "local",
+    "category": "pii",
+    "sql": "SELECT amount FROM greenhouse.supply_catalog WHERE email IS NOT NULL LIMIT 5",
+    "reason": "Personal predicate sources remain local even when omitted from output."
+  },
+  {
+    "family": "shared-greenhouse",
+    "split": "development",
+    "domain": "greenhouse",
+    "columns": {
+      "amount": "numeric"
+    },
+    "id": "shared-greenhouse-local-view",
+    "expected": "local",
+    "category": "metadata",
+    "sql": "SELECT amount FROM greenhouse.supply_view WHERE amount > 0 LIMIT 5",
+    "reason": "A view hides the actual sources and remains unverifiable.",
+    "relationKind": "v"
+  },
+  {
+    "family": "shared-greenhouse",
+    "split": "development",
+    "domain": "greenhouse",
+    "columns": {
+      "amount": "numeric"
+    },
+    "id": "shared-greenhouse-local-function",
+    "expected": "local",
+    "category": "unsupported",
+    "sql": "SELECT reveal(amount) AS amount FROM greenhouse.supply_catalog LIMIT 5",
+    "reason": "Unknown functions cannot be treated as harmless transformations."
+  },
+  {
+    "family": "shared-greenhouse",
+    "split": "development",
+    "domain": "greenhouse",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-greenhouse-local-card",
+    "expected": "local",
+    "category": "sensitive-value",
+    "sql": "SELECT amount FROM greenhouse.supply_catalog WHERE code = '4111111111111111' LIMIT 5",
+    "reason": "Known sensitive literals are held before provider submission."
+  },
+  {
+    "family": "shared-printing",
+    "split": "development",
+    "domain": "printing",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-printing-filter",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT code, amount FROM printing.supply_catalog WHERE amount > 10 LIMIT 5",
+    "reason": "Ordinary supply codes and amounts filtered by a numeric amount."
+  },
+  {
+    "family": "shared-printing",
+    "split": "development",
+    "domain": "printing",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-printing-distinct-offset",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT DISTINCT category FROM printing.supply_catalog ORDER BY category LIMIT 5 OFFSET 2",
+    "reason": "Ordinary supply categories, sorted and paginated."
+  },
+  {
+    "family": "shared-printing",
+    "split": "development",
+    "domain": "printing",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-printing-group-having",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT category, SUM(amount) AS total FROM printing.supply_catalog GROUP BY category HAVING SUM(amount) > 10 ORDER BY total DESC LIMIT 5",
+    "reason": "Commercial totals grouped by supply category without identity."
+  },
+  {
+    "family": "shared-printing",
+    "split": "development",
+    "domain": "printing",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-printing-count",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT COUNT(*) AS total FROM printing.supply_catalog",
+    "reason": "A count of ordinary supplies without personal, organization or access data."
+  },
+  {
+    "family": "shared-printing",
+    "split": "development",
+    "domain": "printing",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-printing-star",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT c.* FROM printing.supply_catalog c LIMIT 5",
+    "reason": "All catalog columns are known ordinary supply attributes."
+  },
+  {
+    "family": "shared-printing",
+    "split": "development",
+    "domain": "printing",
+    "columns": {},
+    "id": "shared-printing-join",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT c.category, r.amount FROM printing.supply_catalog c JOIN printing.rate_catalog r ON c.code = r.code WHERE r.amount > 0 LIMIT 5",
+    "reason": "Join ordinary supply and rate catalogs without identity.",
+    "relations": {
+      "printing.supply_catalog": {
+        "code": "text",
+        "category": "text",
+        "amount": "numeric"
+      },
+      "printing.rate_catalog": {
+        "code": "text",
+        "amount": "numeric"
+      }
+    }
+  },
+  {
+    "family": "shared-printing",
+    "split": "development",
+    "domain": "printing",
+    "columns": {
+      "label": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-printing-personal-filter",
+    "expected": "review",
+    "category": "pii",
+    "sql": "SELECT label FROM printing.directory_entries WHERE ordinal > 0 LIMIT 5",
+    "reason": "Directory labels can identify people despite neutral column names."
+  },
+  {
+    "family": "shared-printing",
+    "split": "development",
+    "domain": "printing",
+    "columns": {
+      "label": "text"
+    },
+    "id": "shared-printing-business-distinct",
+    "expected": "review",
+    "category": "client",
+    "sql": "SELECT DISTINCT label FROM printing.business_directory ORDER BY label LIMIT 5",
+    "reason": "Business directory labels identify organizations."
+  },
+  {
+    "family": "shared-printing",
+    "split": "development",
+    "domain": "printing",
+    "columns": {
+      "payload": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-printing-correspondence",
+    "expected": "review",
+    "category": "pii",
+    "sql": "SELECT payload FROM printing.correspondence WHERE ordinal > 0 LIMIT 5",
+    "reason": "Correspondence may contain personal or business identifying free text."
+  },
+  {
+    "family": "shared-printing",
+    "split": "development",
+    "domain": "printing",
+    "columns": {
+      "value": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-printing-pairing-alias",
+    "expected": "review",
+    "category": "sensitive-value",
+    "sql": "SELECT value AS format FROM printing.device_enrollment WHERE ordinal > 0 LIMIT 5",
+    "reason": "Renaming enrollment material does not remove its access authority."
+  },
+  {
+    "family": "shared-printing",
+    "split": "development",
+    "domain": "printing",
+    "columns": {
+      "payload": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-printing-correspondence-star",
+    "expected": "review",
+    "category": "context",
+    "sql": "SELECT c.* FROM printing.correspondence c LIMIT 5",
+    "reason": "Expanding an opaque correspondence payload does not establish privacy."
+  },
+  {
+    "family": "shared-printing",
+    "split": "development",
+    "domain": "printing",
+    "columns": {
+      "value": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-printing-recovery-order",
+    "expected": "review",
+    "category": "sensitive-value",
+    "sql": "SELECT value AS kind FROM printing.recovery_material ORDER BY ordinal LIMIT 5",
+    "reason": "Recovery values can grant access regardless of their output alias."
+  },
+  {
+    "family": "shared-printing",
+    "split": "development",
+    "domain": "printing",
+    "columns": {
+      "amount": "numeric",
+      "email": "text"
+    },
+    "id": "shared-printing-local-email",
+    "expected": "local",
+    "category": "pii",
+    "sql": "SELECT amount FROM printing.supply_catalog WHERE email IS NOT NULL LIMIT 5",
+    "reason": "Personal predicate sources remain local even when omitted from output."
+  },
+  {
+    "family": "shared-printing",
+    "split": "development",
+    "domain": "printing",
+    "columns": {
+      "amount": "numeric"
+    },
+    "id": "shared-printing-local-view",
+    "expected": "local",
+    "category": "metadata",
+    "sql": "SELECT amount FROM printing.supply_view WHERE amount > 0 LIMIT 5",
+    "reason": "A view hides the actual sources and remains unverifiable.",
+    "relationKind": "v"
+  },
+  {
+    "family": "shared-printing",
+    "split": "development",
+    "domain": "printing",
+    "columns": {
+      "amount": "numeric"
+    },
+    "id": "shared-printing-local-function",
+    "expected": "local",
+    "category": "unsupported",
+    "sql": "SELECT reveal(amount) AS amount FROM printing.supply_catalog LIMIT 5",
+    "reason": "Unknown functions cannot be treated as harmless transformations."
+  },
+  {
+    "family": "shared-printing",
+    "split": "development",
+    "domain": "printing",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-printing-local-card",
+    "expected": "local",
+    "category": "sensitive-value",
+    "sql": "SELECT amount FROM printing.supply_catalog WHERE code = '4111111111111111' LIMIT 5",
+    "reason": "Known sensitive literals are held before provider submission."
+  },
+  {
+    "family": "shared-brewery",
+    "split": "validation",
+    "domain": "brewery",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-brewery-filter",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT code, amount FROM brewery.supply_catalog WHERE amount > 10 LIMIT 5",
+    "reason": "Ordinary supply codes and amounts filtered by a numeric amount."
+  },
+  {
+    "family": "shared-brewery",
+    "split": "validation",
+    "domain": "brewery",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-brewery-distinct-offset",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT DISTINCT category FROM brewery.supply_catalog ORDER BY category LIMIT 5 OFFSET 2",
+    "reason": "Ordinary supply categories, sorted and paginated."
+  },
+  {
+    "family": "shared-brewery",
+    "split": "validation",
+    "domain": "brewery",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-brewery-group-having",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT category, SUM(amount) AS total FROM brewery.supply_catalog GROUP BY category HAVING SUM(amount) > 10 ORDER BY total DESC LIMIT 5",
+    "reason": "Commercial totals grouped by supply category without identity."
+  },
+  {
+    "family": "shared-brewery",
+    "split": "validation",
+    "domain": "brewery",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-brewery-count",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT COUNT(*) AS total FROM brewery.supply_catalog",
+    "reason": "A count of ordinary supplies without personal, organization or access data."
+  },
+  {
+    "family": "shared-brewery",
+    "split": "validation",
+    "domain": "brewery",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-brewery-star",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT c.* FROM brewery.supply_catalog c LIMIT 5",
+    "reason": "All catalog columns are known ordinary supply attributes."
+  },
+  {
+    "family": "shared-brewery",
+    "split": "validation",
+    "domain": "brewery",
+    "columns": {},
+    "id": "shared-brewery-join",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT c.category, r.amount FROM brewery.supply_catalog c JOIN brewery.rate_catalog r ON c.code = r.code WHERE r.amount > 0 LIMIT 5",
+    "reason": "Join ordinary supply and rate catalogs without identity.",
+    "relations": {
+      "brewery.supply_catalog": {
+        "code": "text",
+        "category": "text",
+        "amount": "numeric"
+      },
+      "brewery.rate_catalog": {
+        "code": "text",
+        "amount": "numeric"
+      }
+    }
+  },
+  {
+    "family": "shared-brewery",
+    "split": "validation",
+    "domain": "brewery",
+    "columns": {
+      "label": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-brewery-personal-filter",
+    "expected": "review",
+    "category": "pii",
+    "sql": "SELECT label FROM brewery.directory_entries WHERE ordinal > 0 LIMIT 5",
+    "reason": "Directory labels can identify people despite neutral column names."
+  },
+  {
+    "family": "shared-brewery",
+    "split": "validation",
+    "domain": "brewery",
+    "columns": {
+      "label": "text"
+    },
+    "id": "shared-brewery-business-distinct",
+    "expected": "review",
+    "category": "client",
+    "sql": "SELECT DISTINCT label FROM brewery.business_directory ORDER BY label LIMIT 5",
+    "reason": "Business directory labels identify organizations."
+  },
+  {
+    "family": "shared-brewery",
+    "split": "validation",
+    "domain": "brewery",
+    "columns": {
+      "payload": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-brewery-correspondence",
+    "expected": "review",
+    "category": "pii",
+    "sql": "SELECT payload FROM brewery.correspondence WHERE ordinal > 0 LIMIT 5",
+    "reason": "Correspondence may contain personal or business identifying free text."
+  },
+  {
+    "family": "shared-brewery",
+    "split": "validation",
+    "domain": "brewery",
+    "columns": {
+      "value": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-brewery-pairing-alias",
+    "expected": "review",
+    "category": "sensitive-value",
+    "sql": "SELECT value AS format FROM brewery.device_enrollment WHERE ordinal > 0 LIMIT 5",
+    "reason": "Renaming enrollment material does not remove its access authority."
+  },
+  {
+    "family": "shared-brewery",
+    "split": "validation",
+    "domain": "brewery",
+    "columns": {
+      "payload": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-brewery-correspondence-star",
+    "expected": "review",
+    "category": "context",
+    "sql": "SELECT c.* FROM brewery.correspondence c LIMIT 5",
+    "reason": "Expanding an opaque correspondence payload does not establish privacy."
+  },
+  {
+    "family": "shared-brewery",
+    "split": "validation",
+    "domain": "brewery",
+    "columns": {
+      "value": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-brewery-recovery-order",
+    "expected": "review",
+    "category": "sensitive-value",
+    "sql": "SELECT value AS kind FROM brewery.recovery_material ORDER BY ordinal LIMIT 5",
+    "reason": "Recovery values can grant access regardless of their output alias."
+  },
+  {
+    "family": "shared-brewery",
+    "split": "validation",
+    "domain": "brewery",
+    "columns": {
+      "amount": "numeric",
+      "email": "text"
+    },
+    "id": "shared-brewery-local-email",
+    "expected": "local",
+    "category": "pii",
+    "sql": "SELECT amount FROM brewery.supply_catalog WHERE email IS NOT NULL LIMIT 5",
+    "reason": "Personal predicate sources remain local even when omitted from output."
+  },
+  {
+    "family": "shared-brewery",
+    "split": "validation",
+    "domain": "brewery",
+    "columns": {
+      "amount": "numeric"
+    },
+    "id": "shared-brewery-local-view",
+    "expected": "local",
+    "category": "metadata",
+    "sql": "SELECT amount FROM brewery.supply_view WHERE amount > 0 LIMIT 5",
+    "reason": "A view hides the actual sources and remains unverifiable.",
+    "relationKind": "v"
+  },
+  {
+    "family": "shared-brewery",
+    "split": "validation",
+    "domain": "brewery",
+    "columns": {
+      "amount": "numeric"
+    },
+    "id": "shared-brewery-local-function",
+    "expected": "local",
+    "category": "unsupported",
+    "sql": "SELECT reveal(amount) AS amount FROM brewery.supply_catalog LIMIT 5",
+    "reason": "Unknown functions cannot be treated as harmless transformations."
+  },
+  {
+    "family": "shared-brewery",
+    "split": "validation",
+    "domain": "brewery",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-brewery-local-card",
+    "expected": "local",
+    "category": "sensitive-value",
+    "sql": "SELECT amount FROM brewery.supply_catalog WHERE code = '4111111111111111' LIMIT 5",
+    "reason": "Known sensitive literals are held before provider submission."
+  },
+  {
+    "family": "shared-marina",
+    "split": "validation",
+    "domain": "marina",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-marina-filter",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT code, amount FROM marina.supply_catalog WHERE amount > 10 LIMIT 5",
+    "reason": "Ordinary supply codes and amounts filtered by a numeric amount."
+  },
+  {
+    "family": "shared-marina",
+    "split": "validation",
+    "domain": "marina",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-marina-distinct-offset",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT DISTINCT category FROM marina.supply_catalog ORDER BY category LIMIT 5 OFFSET 2",
+    "reason": "Ordinary supply categories, sorted and paginated."
+  },
+  {
+    "family": "shared-marina",
+    "split": "validation",
+    "domain": "marina",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-marina-group-having",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT category, SUM(amount) AS total FROM marina.supply_catalog GROUP BY category HAVING SUM(amount) > 10 ORDER BY total DESC LIMIT 5",
+    "reason": "Commercial totals grouped by supply category without identity."
+  },
+  {
+    "family": "shared-marina",
+    "split": "validation",
+    "domain": "marina",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-marina-count",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT COUNT(*) AS total FROM marina.supply_catalog",
+    "reason": "A count of ordinary supplies without personal, organization or access data."
+  },
+  {
+    "family": "shared-marina",
+    "split": "validation",
+    "domain": "marina",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-marina-star",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT c.* FROM marina.supply_catalog c LIMIT 5",
+    "reason": "All catalog columns are known ordinary supply attributes."
+  },
+  {
+    "family": "shared-marina",
+    "split": "validation",
+    "domain": "marina",
+    "columns": {},
+    "id": "shared-marina-join",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT c.category, r.amount FROM marina.supply_catalog c JOIN marina.rate_catalog r ON c.code = r.code WHERE r.amount > 0 LIMIT 5",
+    "reason": "Join ordinary supply and rate catalogs without identity.",
+    "relations": {
+      "marina.supply_catalog": {
+        "code": "text",
+        "category": "text",
+        "amount": "numeric"
+      },
+      "marina.rate_catalog": {
+        "code": "text",
+        "amount": "numeric"
+      }
+    }
+  },
+  {
+    "family": "shared-marina",
+    "split": "validation",
+    "domain": "marina",
+    "columns": {
+      "label": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-marina-personal-filter",
+    "expected": "review",
+    "category": "pii",
+    "sql": "SELECT label FROM marina.directory_entries WHERE ordinal > 0 LIMIT 5",
+    "reason": "Directory labels can identify people despite neutral column names."
+  },
+  {
+    "family": "shared-marina",
+    "split": "validation",
+    "domain": "marina",
+    "columns": {
+      "label": "text"
+    },
+    "id": "shared-marina-business-distinct",
+    "expected": "review",
+    "category": "client",
+    "sql": "SELECT DISTINCT label FROM marina.business_directory ORDER BY label LIMIT 5",
+    "reason": "Business directory labels identify organizations."
+  },
+  {
+    "family": "shared-marina",
+    "split": "validation",
+    "domain": "marina",
+    "columns": {
+      "payload": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-marina-correspondence",
+    "expected": "review",
+    "category": "pii",
+    "sql": "SELECT payload FROM marina.correspondence WHERE ordinal > 0 LIMIT 5",
+    "reason": "Correspondence may contain personal or business identifying free text."
+  },
+  {
+    "family": "shared-marina",
+    "split": "validation",
+    "domain": "marina",
+    "columns": {
+      "value": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-marina-pairing-alias",
+    "expected": "review",
+    "category": "sensitive-value",
+    "sql": "SELECT value AS format FROM marina.device_enrollment WHERE ordinal > 0 LIMIT 5",
+    "reason": "Renaming enrollment material does not remove its access authority."
+  },
+  {
+    "family": "shared-marina",
+    "split": "validation",
+    "domain": "marina",
+    "columns": {
+      "payload": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-marina-correspondence-star",
+    "expected": "review",
+    "category": "context",
+    "sql": "SELECT c.* FROM marina.correspondence c LIMIT 5",
+    "reason": "Expanding an opaque correspondence payload does not establish privacy."
+  },
+  {
+    "family": "shared-marina",
+    "split": "validation",
+    "domain": "marina",
+    "columns": {
+      "value": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-marina-recovery-order",
+    "expected": "review",
+    "category": "sensitive-value",
+    "sql": "SELECT value AS kind FROM marina.recovery_material ORDER BY ordinal LIMIT 5",
+    "reason": "Recovery values can grant access regardless of their output alias."
+  },
+  {
+    "family": "shared-marina",
+    "split": "validation",
+    "domain": "marina",
+    "columns": {
+      "amount": "numeric",
+      "email": "text"
+    },
+    "id": "shared-marina-local-email",
+    "expected": "local",
+    "category": "pii",
+    "sql": "SELECT amount FROM marina.supply_catalog WHERE email IS NOT NULL LIMIT 5",
+    "reason": "Personal predicate sources remain local even when omitted from output."
+  },
+  {
+    "family": "shared-marina",
+    "split": "validation",
+    "domain": "marina",
+    "columns": {
+      "amount": "numeric"
+    },
+    "id": "shared-marina-local-view",
+    "expected": "local",
+    "category": "metadata",
+    "sql": "SELECT amount FROM marina.supply_view WHERE amount > 0 LIMIT 5",
+    "reason": "A view hides the actual sources and remains unverifiable.",
+    "relationKind": "v"
+  },
+  {
+    "family": "shared-marina",
+    "split": "validation",
+    "domain": "marina",
+    "columns": {
+      "amount": "numeric"
+    },
+    "id": "shared-marina-local-function",
+    "expected": "local",
+    "category": "unsupported",
+    "sql": "SELECT reveal(amount) AS amount FROM marina.supply_catalog LIMIT 5",
+    "reason": "Unknown functions cannot be treated as harmless transformations."
+  },
+  {
+    "family": "shared-marina",
+    "split": "validation",
+    "domain": "marina",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-marina-local-card",
+    "expected": "local",
+    "category": "sensitive-value",
+    "sql": "SELECT amount FROM marina.supply_catalog WHERE code = '4111111111111111' LIMIT 5",
+    "reason": "Known sensitive literals are held before provider submission."
+  },
+  {
+    "family": "shared-museum",
+    "split": "validation",
+    "domain": "museum",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-museum-filter",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT code, amount FROM museum.supply_catalog WHERE amount > 10 LIMIT 5",
+    "reason": "Ordinary supply codes and amounts filtered by a numeric amount."
+  },
+  {
+    "family": "shared-museum",
+    "split": "validation",
+    "domain": "museum",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-museum-distinct-offset",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT DISTINCT category FROM museum.supply_catalog ORDER BY category LIMIT 5 OFFSET 2",
+    "reason": "Ordinary supply categories, sorted and paginated."
+  },
+  {
+    "family": "shared-museum",
+    "split": "validation",
+    "domain": "museum",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-museum-group-having",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT category, SUM(amount) AS total FROM museum.supply_catalog GROUP BY category HAVING SUM(amount) > 10 ORDER BY total DESC LIMIT 5",
+    "reason": "Commercial totals grouped by supply category without identity."
+  },
+  {
+    "family": "shared-museum",
+    "split": "validation",
+    "domain": "museum",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-museum-count",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT COUNT(*) AS total FROM museum.supply_catalog",
+    "reason": "A count of ordinary supplies without personal, organization or access data."
+  },
+  {
+    "family": "shared-museum",
+    "split": "validation",
+    "domain": "museum",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-museum-star",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT c.* FROM museum.supply_catalog c LIMIT 5",
+    "reason": "All catalog columns are known ordinary supply attributes."
+  },
+  {
+    "family": "shared-museum",
+    "split": "validation",
+    "domain": "museum",
+    "columns": {},
+    "id": "shared-museum-join",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT c.category, r.amount FROM museum.supply_catalog c JOIN museum.rate_catalog r ON c.code = r.code WHERE r.amount > 0 LIMIT 5",
+    "reason": "Join ordinary supply and rate catalogs without identity.",
+    "relations": {
+      "museum.supply_catalog": {
+        "code": "text",
+        "category": "text",
+        "amount": "numeric"
+      },
+      "museum.rate_catalog": {
+        "code": "text",
+        "amount": "numeric"
+      }
+    }
+  },
+  {
+    "family": "shared-museum",
+    "split": "validation",
+    "domain": "museum",
+    "columns": {
+      "label": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-museum-personal-filter",
+    "expected": "review",
+    "category": "pii",
+    "sql": "SELECT label FROM museum.directory_entries WHERE ordinal > 0 LIMIT 5",
+    "reason": "Directory labels can identify people despite neutral column names."
+  },
+  {
+    "family": "shared-museum",
+    "split": "validation",
+    "domain": "museum",
+    "columns": {
+      "label": "text"
+    },
+    "id": "shared-museum-business-distinct",
+    "expected": "review",
+    "category": "client",
+    "sql": "SELECT DISTINCT label FROM museum.business_directory ORDER BY label LIMIT 5",
+    "reason": "Business directory labels identify organizations."
+  },
+  {
+    "family": "shared-museum",
+    "split": "validation",
+    "domain": "museum",
+    "columns": {
+      "payload": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-museum-correspondence",
+    "expected": "review",
+    "category": "pii",
+    "sql": "SELECT payload FROM museum.correspondence WHERE ordinal > 0 LIMIT 5",
+    "reason": "Correspondence may contain personal or business identifying free text."
+  },
+  {
+    "family": "shared-museum",
+    "split": "validation",
+    "domain": "museum",
+    "columns": {
+      "value": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-museum-pairing-alias",
+    "expected": "review",
+    "category": "sensitive-value",
+    "sql": "SELECT value AS format FROM museum.device_enrollment WHERE ordinal > 0 LIMIT 5",
+    "reason": "Renaming enrollment material does not remove its access authority."
+  },
+  {
+    "family": "shared-museum",
+    "split": "validation",
+    "domain": "museum",
+    "columns": {
+      "payload": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-museum-correspondence-star",
+    "expected": "review",
+    "category": "context",
+    "sql": "SELECT c.* FROM museum.correspondence c LIMIT 5",
+    "reason": "Expanding an opaque correspondence payload does not establish privacy."
+  },
+  {
+    "family": "shared-museum",
+    "split": "validation",
+    "domain": "museum",
+    "columns": {
+      "value": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-museum-recovery-order",
+    "expected": "review",
+    "category": "sensitive-value",
+    "sql": "SELECT value AS kind FROM museum.recovery_material ORDER BY ordinal LIMIT 5",
+    "reason": "Recovery values can grant access regardless of their output alias."
+  },
+  {
+    "family": "shared-museum",
+    "split": "validation",
+    "domain": "museum",
+    "columns": {
+      "amount": "numeric",
+      "email": "text"
+    },
+    "id": "shared-museum-local-email",
+    "expected": "local",
+    "category": "pii",
+    "sql": "SELECT amount FROM museum.supply_catalog WHERE email IS NOT NULL LIMIT 5",
+    "reason": "Personal predicate sources remain local even when omitted from output."
+  },
+  {
+    "family": "shared-museum",
+    "split": "validation",
+    "domain": "museum",
+    "columns": {
+      "amount": "numeric"
+    },
+    "id": "shared-museum-local-view",
+    "expected": "local",
+    "category": "metadata",
+    "sql": "SELECT amount FROM museum.supply_view WHERE amount > 0 LIMIT 5",
+    "reason": "A view hides the actual sources and remains unverifiable.",
+    "relationKind": "v"
+  },
+  {
+    "family": "shared-museum",
+    "split": "validation",
+    "domain": "museum",
+    "columns": {
+      "amount": "numeric"
+    },
+    "id": "shared-museum-local-function",
+    "expected": "local",
+    "category": "unsupported",
+    "sql": "SELECT reveal(amount) AS amount FROM museum.supply_catalog LIMIT 5",
+    "reason": "Unknown functions cannot be treated as harmless transformations."
+  },
+  {
+    "family": "shared-museum",
+    "split": "validation",
+    "domain": "museum",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-museum-local-card",
+    "expected": "local",
+    "category": "sensitive-value",
+    "sql": "SELECT amount FROM museum.supply_catalog WHERE code = '4111111111111111' LIMIT 5",
+    "reason": "Known sensitive literals are held before provider submission."
+  },
+  {
+    "family": "shared-textile",
+    "split": "validation",
+    "domain": "textile",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-textile-filter",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT code, amount FROM textile.supply_catalog WHERE amount > 10 LIMIT 5",
+    "reason": "Ordinary supply codes and amounts filtered by a numeric amount."
+  },
+  {
+    "family": "shared-textile",
+    "split": "validation",
+    "domain": "textile",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-textile-distinct-offset",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT DISTINCT category FROM textile.supply_catalog ORDER BY category LIMIT 5 OFFSET 2",
+    "reason": "Ordinary supply categories, sorted and paginated."
+  },
+  {
+    "family": "shared-textile",
+    "split": "validation",
+    "domain": "textile",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-textile-group-having",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT category, SUM(amount) AS total FROM textile.supply_catalog GROUP BY category HAVING SUM(amount) > 10 ORDER BY total DESC LIMIT 5",
+    "reason": "Commercial totals grouped by supply category without identity."
+  },
+  {
+    "family": "shared-textile",
+    "split": "validation",
+    "domain": "textile",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-textile-count",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT COUNT(*) AS total FROM textile.supply_catalog",
+    "reason": "A count of ordinary supplies without personal, organization or access data."
+  },
+  {
+    "family": "shared-textile",
+    "split": "validation",
+    "domain": "textile",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-textile-star",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT c.* FROM textile.supply_catalog c LIMIT 5",
+    "reason": "All catalog columns are known ordinary supply attributes."
+  },
+  {
+    "family": "shared-textile",
+    "split": "validation",
+    "domain": "textile",
+    "columns": {},
+    "id": "shared-textile-join",
+    "expected": "allow",
+    "category": "ordinary",
+    "sql": "SELECT c.category, r.amount FROM textile.supply_catalog c JOIN textile.rate_catalog r ON c.code = r.code WHERE r.amount > 0 LIMIT 5",
+    "reason": "Join ordinary supply and rate catalogs without identity.",
+    "relations": {
+      "textile.supply_catalog": {
+        "code": "text",
+        "category": "text",
+        "amount": "numeric"
+      },
+      "textile.rate_catalog": {
+        "code": "text",
+        "amount": "numeric"
+      }
+    }
+  },
+  {
+    "family": "shared-textile",
+    "split": "validation",
+    "domain": "textile",
+    "columns": {
+      "label": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-textile-personal-filter",
+    "expected": "review",
+    "category": "pii",
+    "sql": "SELECT label FROM textile.directory_entries WHERE ordinal > 0 LIMIT 5",
+    "reason": "Directory labels can identify people despite neutral column names."
+  },
+  {
+    "family": "shared-textile",
+    "split": "validation",
+    "domain": "textile",
+    "columns": {
+      "label": "text"
+    },
+    "id": "shared-textile-business-distinct",
+    "expected": "review",
+    "category": "client",
+    "sql": "SELECT DISTINCT label FROM textile.business_directory ORDER BY label LIMIT 5",
+    "reason": "Business directory labels identify organizations."
+  },
+  {
+    "family": "shared-textile",
+    "split": "validation",
+    "domain": "textile",
+    "columns": {
+      "payload": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-textile-correspondence",
+    "expected": "review",
+    "category": "pii",
+    "sql": "SELECT payload FROM textile.correspondence WHERE ordinal > 0 LIMIT 5",
+    "reason": "Correspondence may contain personal or business identifying free text."
+  },
+  {
+    "family": "shared-textile",
+    "split": "validation",
+    "domain": "textile",
+    "columns": {
+      "value": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-textile-pairing-alias",
+    "expected": "review",
+    "category": "sensitive-value",
+    "sql": "SELECT value AS format FROM textile.device_enrollment WHERE ordinal > 0 LIMIT 5",
+    "reason": "Renaming enrollment material does not remove its access authority."
+  },
+  {
+    "family": "shared-textile",
+    "split": "validation",
+    "domain": "textile",
+    "columns": {
+      "payload": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-textile-correspondence-star",
+    "expected": "review",
+    "category": "context",
+    "sql": "SELECT c.* FROM textile.correspondence c LIMIT 5",
+    "reason": "Expanding an opaque correspondence payload does not establish privacy."
+  },
+  {
+    "family": "shared-textile",
+    "split": "validation",
+    "domain": "textile",
+    "columns": {
+      "value": "text",
+      "ordinal": "int4"
+    },
+    "id": "shared-textile-recovery-order",
+    "expected": "review",
+    "category": "sensitive-value",
+    "sql": "SELECT value AS kind FROM textile.recovery_material ORDER BY ordinal LIMIT 5",
+    "reason": "Recovery values can grant access regardless of their output alias."
+  },
+  {
+    "family": "shared-textile",
+    "split": "validation",
+    "domain": "textile",
+    "columns": {
+      "amount": "numeric",
+      "email": "text"
+    },
+    "id": "shared-textile-local-email",
+    "expected": "local",
+    "category": "pii",
+    "sql": "SELECT amount FROM textile.supply_catalog WHERE email IS NOT NULL LIMIT 5",
+    "reason": "Personal predicate sources remain local even when omitted from output."
+  },
+  {
+    "family": "shared-textile",
+    "split": "validation",
+    "domain": "textile",
+    "columns": {
+      "amount": "numeric"
+    },
+    "id": "shared-textile-local-view",
+    "expected": "local",
+    "category": "metadata",
+    "sql": "SELECT amount FROM textile.supply_view WHERE amount > 0 LIMIT 5",
+    "reason": "A view hides the actual sources and remains unverifiable.",
+    "relationKind": "v"
+  },
+  {
+    "family": "shared-textile",
+    "split": "validation",
+    "domain": "textile",
+    "columns": {
+      "amount": "numeric"
+    },
+    "id": "shared-textile-local-function",
+    "expected": "local",
+    "category": "unsupported",
+    "sql": "SELECT reveal(amount) AS amount FROM textile.supply_catalog LIMIT 5",
+    "reason": "Unknown functions cannot be treated as harmless transformations."
+  },
+  {
+    "family": "shared-textile",
+    "split": "validation",
+    "domain": "textile",
+    "columns": {
+      "code": "text",
+      "category": "text",
+      "amount": "numeric"
+    },
+    "id": "shared-textile-local-card",
+    "expected": "local",
+    "category": "sensitive-value",
+    "sql": "SELECT amount FROM textile.supply_catalog WHERE code = '4111111111111111' LIMIT 5",
+    "reason": "Known sensitive literals are held before provider submission."
+  }
+]

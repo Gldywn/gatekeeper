@@ -22,7 +22,8 @@ pnpm test        # server + plugin test suites (vitest)
 pnpm lint        # biome check
 pnpm format      # biome format --write
 pnpm ci          # typecheck + build + test
-pnpm dev         # test databases + Vite with hot reload inside Beekeeper Studio
+pnpm dev         # test databases + Vite hot reload + Gatekeeper server with watch
+pnpm dev:server  # take over the broker and restart the server on source changes
 pnpm dev:link    # symlink Beekeeper's plugin + the agent skill at this checkout (builds first)
 pnpm dev:unlink  # remove those dev symlinks
 pnpm dev:status  # show what points where (plugin, skill, broker, token)
@@ -35,6 +36,20 @@ pnpm db:down     # stop them (add -- -v to wipe the data)
 
 The repo ships its dev wiring, so a clone is ready without hand-editing config:
 
+- **Full development:** `pnpm run dev` waits for the test databases, then uses pnpm's
+  parallel runner to start Vite and the Gatekeeper server watcher together. Keep this
+  terminal open. Stop any separately launched Vite instance first. Server takeover
+  stops other detected Gatekeeper instances and may require reconnecting agent MCP
+  sessions. The terminal server serves the plugin's broker requests, while each agent
+  still needs its own configured MCP connection.
+- **Server, live:** run `pnpm run dev:server` from the checkout you want to test.
+  It stops other detected Gatekeeper servers and watchers, then runs the local TypeScript
+  sources with the installed `tsx watch`. Saving an imported source file restarts the
+  server without a build. Keep the terminal open. Existing MCP connections may need
+  reconnecting after takeover or restart. A client configured with `dev-server.mjs`
+  takes control again when reconnected, replacing this watcher with its configured run.
+  This command does not start Vite or change the plugin link. It fails if process
+  discovery is blocked or the broker port remains occupied. See [tsx watch](https://tsx.is/watch-mode).
 - **Claude Code and OpenCode** read the committed `.mcp.json` / `opencode.jsonc` when you run
   the agent inside the repo, spawning your local build automatically (Claude Code prompts
   once to trust the workspace). Both launch `scripts/dev-server.mjs`, which first kills any
@@ -46,13 +61,17 @@ The repo ships its dev wiring, so a clone is ready without hand-editing config:
   `packages/server/dist/index.js`.
 - **Plugin:** `pnpm dev:link` symlinks `packages/plugin/` into Beekeeper's plugins folder, so
   a rebuild is picked up without reinstalling. Run it from any checkout or worktree; it
-  targets that one. To also symlink the skill for live editing, list agent skills dirs in a
+  targets that one. An installed release in the slot is moved to
+  `gatekeeper-plugin.pre-dev` next to the plugins folder (outside it, so Beekeeper never sees
+  two `gatekeeper` plugins) and put back by `dev:unlink`, so switching between the release
+  and your checkout is one command each way. To also symlink the skill for live editing, list agent skills dirs in a
   gitignored `.dev-skills` at the repo root (one path per line), or set
   `GATEKEEPER_SKILLS_DIRS` to override; a real folder at a target is moved aside to
   `gatekeeper.pre-dev` and restored on `dev:unlink`. With neither, `dev:link` leaves skills
   alone.
-- **Plugin UI, live:** `pnpm dev` brings up the test databases, then starts Vite with hot
-  reload inside Beekeeper Studio, so UI work needs no `pnpm build` at all. The manifest keeps
+- **Plugin UI, live:** `pnpm dev` starts Vite alongside the server watcher after the test
+  databases are ready. Vite provides hot reload inside Beekeeper Studio, so UI work needs
+  no `pnpm build` at all. The manifest keeps
   pointing at `dist/index.html`; in dev the Vite plugin rewrites that file into a shim whose
   assets resolve to `http://localhost:<port>`, with the HMR client injected. A CSS edit lands
   without even reloading the tab. Caveat: that shim stays on disk when the dev server stops,
@@ -64,6 +83,9 @@ The repo ships its dev wiring, so a clone is ready without hand-editing config:
   use `gatekeeper_test` as database, user, and password. `pnpm db:down` stops them, keeping
   the volumes; add `-- -v` to wipe the data too. `pnpm dev` runs `db:up` first, so use
   `pnpm --filter @gatekeeper/plugin dev` to start Vite alone when Docker is not running.
+- **Auto mode catalog fixture:** `test-db/auto-catalog/` holds SQL applied by hand in
+  Beekeeper to the synthetic Postgres database, never run automatically. It backs the
+  human-driven "Real catalog check" in [Auto mode](AUTO-MODE.md). `cleanup.sql` removes it.
 
 ## Editing the agent skill
 

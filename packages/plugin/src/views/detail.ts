@@ -72,7 +72,7 @@ export class DetailView {
   // annotation under the detail SQL and light the sensitive columns in the query text.
   private async annotateDetail(item: HistItem): Promise<void> {
     const settings = this.settings();
-    const raw = settings.schemaAnnotation ? await this.annotator.schemaFor(item.sql) : null;
+    const raw = await this.annotator.schemaFor(item.sql);
     if (this.detailItem?.id !== item.id) {
       return;
     }
