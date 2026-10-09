@@ -18,6 +18,7 @@ import {
   claimNext,
   get,
   getForSession,
+  hasWaiting,
   listInflight,
   listSessionRequests,
   markExecuting,
@@ -148,6 +149,11 @@ export class RequestStore {
 
   get(id: string): GatekeeperRequest | null {
     return get(this.ctx, id);
+  }
+
+  /** True while any live proposal still waits for a decision, whatever its connection. */
+  hasWaiting(): boolean {
+    return hasWaiting(this.ctx);
   }
 
   getForSession(id: string, sessionId: string): GatekeeperRequest {

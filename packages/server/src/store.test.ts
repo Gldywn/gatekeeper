@@ -895,6 +895,27 @@ describe("alert cooldown", () => {
   });
 });
 
+describe("hasWaiting", () => {
+  it("detects pending and leased proposals, excluding executing ones", () => {
+    const { store } = makeStore();
+    expect(store.hasWaiting()).toBe(false);
+    store.submit({ sessionId: "s1", sql: "SELECT 1" });
+    expect(store.hasWaiting()).toBe(true);
+    const lease = store.claimNext("plugin", LEASE)!;
+    expect(store.hasWaiting()).toBe(true);
+    store.markExecuting(lease.id, lease.leaseId!);
+    expect(store.hasWaiting()).toBe(false);
+  });
+
+  // Reads do not sweep, so the row still says pending once its TTL has passed.
+  it("ignores an expired proposal still marked pending", () => {
+    const { store, clock } = makeStore();
+    store.submit({ sessionId: "s1", sql: "SELECT 1" });
+    clock.t += 10_000;
+    expect(store.hasWaiting()).toBe(false);
+  });
+});
+
 describe("submitNew", () => {
   it("reports a fresh proposal as created, so it can raise an alert", () => {
     const { store } = makeStore();

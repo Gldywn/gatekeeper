@@ -356,6 +356,18 @@ export function cancel(ctx: StoreContext, id: string, sessionId: string): Gateke
   return { ...row, state: "cancelled", decidedAt: now, leaseId: null, leaseExpiresAt: null };
 }
 
+// Checks expiry itself because reads do not sweep: an expired row still marked pending
+// waits for nobody.
+export function hasWaiting(ctx: StoreContext): boolean {
+  return (
+    ctx.db
+      .prepare(
+        "SELECT 1 FROM requests WHERE state IN ('pending', 'leased') AND expires_at > ? LIMIT 1",
+      )
+      .get(ctx.now()) !== undefined
+  );
+}
+
 export function get(ctx: StoreContext, id: string): GatekeeperRequest | null {
   const row = ctx.db.prepare("SELECT * FROM requests WHERE id = ?").get(id) as RawRow | undefined;
   return row ? toRequest(row) : null;

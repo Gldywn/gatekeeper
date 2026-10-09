@@ -322,6 +322,49 @@ describe("notify", () => {
   });
 });
 
+const COMPLETE =
+  "/System/Library/PrivateFrameworks/ToneLibrary.framework/Versions/A/Resources/AlertTones/Modern/Complete.m4r";
+
+describe("notifyAuto", () => {
+  it("plays the Auto sound alone, with no banner and no registration", async () => {
+    for (const mode of ["both", "sound"] as const) {
+      const { calls, notifier } = harness({ mode });
+      notifier.notifyAuto();
+      await settle();
+      expect(calls).toEqual([{ cmd: "afplay", args: [COMPLETE], timeoutMs: NOTIFY_TIMEOUT_MS }]);
+    }
+  });
+
+  it("stays silent in banner mode, when switched off, and off macOS", async () => {
+    for (const overrides of [
+      { mode: "banner" as const },
+      { mode: "off" as const },
+      { platform: "linux" },
+    ]) {
+      const { calls, notifier } = harness(overrides);
+      notifier.notifyAuto();
+      await settle();
+      expect(calls).toEqual([]);
+    }
+  });
+
+  it("falls back to a public system sound when the chosen one fails to play", async () => {
+    const calls: Call[] = [];
+    const { notifier } = harness({
+      run: async (cmd, args, timeoutMs) => {
+        calls.push({ cmd, args, timeoutMs });
+        if (args[0] === COMPLETE) {
+          throw new Error("AudioFileOpen failed");
+        }
+        return { stdout: "" };
+      },
+    });
+    notifier.notifyAuto();
+    await settle();
+    expect(calls.map((c) => c.args[0])).toEqual([COMPLETE, "/System/Library/Sounds/Hero.aiff"]);
+  });
+});
+
 describe("probe", () => {
   it("asks the helper for the grant at startup and stays quiet when it holds", async () => {
     const { calls, logs, notifier } = harness();

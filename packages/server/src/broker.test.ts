@@ -2,7 +2,7 @@ import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createBroker } from "./broker.js";
-import { PAIRING_CODE_TTL_MS, PAIRING_IDLE_MS } from "./config.js";
+import { NOTIFY_COOLDOWN_MS, PAIRING_CODE_TTL_MS, PAIRING_IDLE_MS } from "./config.js";
 import { connectionScopeKey } from "./connection.js";
 import { EvaluationError } from "./evaluator.js";
 import { RequestStore } from "./store.js";
@@ -24,6 +24,7 @@ let server: ReturnType<typeof createBroker>;
 let port = 0;
 const evaluator = vi.fn();
 const keyChecker = vi.fn();
+const notifyAuto = vi.fn();
 
 function call(
   method: string,
@@ -67,7 +68,13 @@ beforeEach(async () => {
   store = new RequestStore();
   evaluator.mockReset();
   keyChecker.mockReset();
-  server = createBroker(store, "plug_test", TOKEN, evaluator, keyChecker);
+  notifyAuto.mockReset();
+  server = createBroker(store, "plug_test", TOKEN, evaluator, keyChecker, {
+    active: true,
+    probe: () => {},
+    notify: () => {},
+    notifyAuto,
+  });
   await new Promise<void>((resolve) => {
     server.listen(0, "127.0.0.1", resolve);
   });
@@ -211,6 +218,8 @@ describe("plugin-only automatic evaluation", () => {
         body: { id: body.id, leaseId: body.leaseId, status: "approved", rows: [], fields: [] },
       });
       expect(store.listActivity(body.scope)[0].approval).toEqual({ source: "human", evaluation });
+      // A human approval that kept its evaluation is still a human one.
+      expect(notifyAuto).not.toHaveBeenCalled();
     },
   );
   it.each([false, true])(
@@ -334,6 +343,83 @@ describe("plugin-only automatic evaluation", () => {
       ).status,
     ).toBe(200);
     expect(store.get(body.id)?.state).toBe("leased");
+  });
+});
+
+describe("the Auto mode sound", () => {
+  // Attribution is set at the store level: what the broker accepts on /executing is
+  // covered above, this block only covers what /result does with it.
+  function executing(source: "automatic" | "human", sql = "SELECT 1") {
+    const { request } = store.submitNew({ sessionId: "s1", sql });
+    const lease = store.claimNext("plug_test", 30_000)!;
+    expect(lease.id).toBe(request.id);
+    store.markExecuting(lease.id, lease.leaseId!, { source });
+    return { id: lease.id, leaseId: lease.leaseId! };
+  }
+  function finish(held: { id: string; leaseId: string }, extra: Record<string, unknown> = {}) {
+    return call("POST", "/result", {
+      token: TOKEN,
+      body: { ...held, status: "approved", rows: [], fields: [], ...extra },
+    });
+  }
+
+  it("plays once an Auto approval has run, without spending the submission alert", async () => {
+    expect((await finish(executing("automatic"))).status).toBe(200);
+    expect(notifyAuto).toHaveBeenCalledOnce();
+    expect(store.claimAlert(NOTIFY_COOLDOWN_MS)).toBe(true);
+  });
+
+  it("stays silent for a human approval and for an Auto query that failed", async () => {
+    const human = executing("human");
+    const failed = executing("automatic", "SELECT 2");
+    expect((await finish(human)).status).toBe(200);
+    expect((await finish(failed, { error: "relation does not exist" })).status).toBe(200);
+    expect(store.get(human.id)?.state).toBe("approved");
+    expect(store.get(failed.id)?.state).toBe("failed");
+    expect(notifyAuto).not.toHaveBeenCalled();
+  });
+
+  // Next to a proposal still awaiting approval, the Auto sound would read as an all-clear.
+  it("stays silent while another proposal awaits approval", async () => {
+    const auto = executing("automatic");
+    store.submit({ sessionId: "s1", sql: "SELECT 2" });
+    expect((await finish(auto)).status).toBe(200);
+    expect(notifyAuto).not.toHaveBeenCalled();
+  });
+
+  it("plays once for a burst, since an executing proposal awaits nobody", async () => {
+    const first = executing("automatic");
+    const second = executing("automatic", "SELECT 2");
+    expect((await finish(first)).status).toBe(200);
+    expect(notifyAuto).toHaveBeenCalledOnce();
+    expect((await finish(second)).status).toBe(200);
+    expect(notifyAuto).toHaveBeenCalledOnce();
+  });
+
+  // The store keeps its own clock, so moving Date.now moves only the broker's cooldown.
+  it("has its own cooldown, independent of the submission alert's", async () => {
+    expect(store.claimAlert(NOTIFY_COOLDOWN_MS)).toBe(true);
+    const start = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(start);
+    try {
+      await finish(executing("automatic"));
+      clock.mockReturnValue(start + NOTIFY_COOLDOWN_MS - 1);
+      await finish(executing("automatic", "SELECT 2"));
+      clock.mockReturnValue(start + NOTIFY_COOLDOWN_MS);
+      await finish(executing("automatic", "SELECT 3"));
+    } finally {
+      clock.mockRestore();
+    }
+    expect(notifyAuto).toHaveBeenCalledTimes(2);
+  });
+
+  it("still accepts the result when the sound fails", async () => {
+    notifyAuto.mockImplementation(() => {
+      throw new Error("boom");
+    });
+    const held = executing("automatic");
+    expect((await finish(held)).status).toBe(200);
+    expect(store.get(held.id)?.state).toBe("approved");
   });
 });
 
