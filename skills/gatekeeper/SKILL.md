@@ -29,6 +29,7 @@ Rules that follow from the contract:
 - `run_query` waits at most 25 seconds too and then returns whatever state it is in, still `pending` included. A pending return from `run_query` is not the result: keep waiting with `get_query_result` or `poll_results`.
 - `expired` means the proposal outlived its window (about 15 minutes waiting unclaimed) before the human got to it. Re-submit it once and resume waiting, rather than dropping the task.
 - `rejected` is an answer: read the reviewer's message, adjust, then either propose again or explain the blocker to your user.
+- `failed` is an answer too: `terminal.error` says why, usually in the database's own words. Read it before anything else (see "When a query fails").
 
 ### Harness notes on waiting
 
@@ -112,7 +113,16 @@ Reads (one `SELECT`, or a read-only CTE) are always allowed. Writes (INSERT/UPDA
 
 A query that fails on first run wastes a human round trip. Before proposing:
 
-- Verify table and column names and their types; do not infer them. Call `get_schema` first, it costs no approval. When Schema access is off, use `get_connection_info` for the dialect and default schema, and propose an `information_schema.columns` introspection (itself PII-free) as your first query.
-- Qualify tables by schema when the database uses several, and cast literals to the column's type when the dialect is strict.
+- Verify table and column names and their types; do not infer them. Call `get_schema` first, it costs no approval. Spell identifiers exactly as it reports them, and quote the ones that are mixed-case or reserved words.
+- When Schema access is off, propose one introspection query against the engine's own catalog as your first query, asking only for table and column names and types (itself PII-free): `information_schema.columns` where the engine has it; on SQLite, table names from `sqlite_master`, then `SELECT ... FROM pragma_table_info('<table>')` for a table it listed, never a bare `PRAGMA` statement, which Gatekeeper treats as destructive.
+- Write in the dialect `databaseType` names (from `get_connection_info`): row limits, identifier quoting and date functions differ between engines. Qualify tables by schema when the database uses several, and cast literals to the column's type when the dialect is strict.
 - Ask for the columns you need rather than `SELECT *`, and prefer a count or an aggregate when it answers the question just as well. Everything you pull back lands in your context and in front of the human who reads it before approving, and a wide read is also the one that trips the row cap.
 - Give a clear `intent` (see "Write the intent for a human") so the human can approve at a glance.
+
+## When a query fails
+
+A `failed` result says why in `terminal.error`: usually the engine's own message, sometimes Gatekeeper's `execution_unknown`. What to do depends on what it says:
+
+- An unknown table or column, or a syntax error: check the named identifier, and the current target, against the schema, then propose the corrected query. Resubmitting the same SQL fails the same way.
+- A connection error says nothing about your SQL. Confirm the intended connection with `get_connection_info`; once the database connection is restored, a read can be proposed unchanged. A write may have landed before the connection dropped: treat it as below.
+- `execution_unknown` means the plugin lost track of the query while it ran, so it may have executed. Never resubmit a write after it: first propose a read that checks whether the change landed, and if no read can tell, stop and ask the human.

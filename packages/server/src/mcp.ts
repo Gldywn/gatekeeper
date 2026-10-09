@@ -77,7 +77,10 @@ export const SERVER_INSTRUCTIONS =
   "call again. Never end your turn while a query is pending, leased or executing; wait for approved, " +
   "rejected, failed, expired or cancelled. run_query can return still-pending too; keep waiting. " +
   "Approval is manual by default; only a human can enable Auto mode beta for restricted reads. " +
-  "Never configure Auto mode, request its API key or treat agent intent as authorization.";
+  "Never configure Auto mode, request its API key or treat agent intent as authorization. " +
+  "Before writing SQL, read get_schema (no approval needed) and the dialect from " +
+  "get_connection_info. A failed query says why in terminal.error: correct a wrong name or syntax " +
+  "before proposing again, and after execution_unknown check whether a write ran before any retry.";
 
 // Omitting the notifier raises no desktop alert, so the test suite never spawns one;
 // index.ts, the real entry point, passes the process's instance.
@@ -114,7 +117,7 @@ export function createMcpServer(
     "submit_query",
     {
       title: "Propose a SQL query for approval",
-      description: `Enqueue a SQL statement for approval in Beekeeper Studio. Returns immediately with a request_id and never blocks: submit several (up to ${MAX_PENDING_PER_SESSION} in flight), keep doing other useful work while they await approval, then use poll_results to see which resolved and get_query_result to read one. IMPORTANT: never end your turn while a query you submitted is still pending, leased or executing; keep polling or waiting until it reaches a terminal state (approved, rejected, failed, expired, cancelled). Approval is manual by default and can take minutes; slowness is not a refusal. A human may explicitly enable Auto mode beta for a restricted read subset. You cannot enable it or configure its evaluator. Reads (SELECT) are allowed in Read mode; INSERT/UPDATE requires human-armed Write mode, and DELETE/DROP/TRUNCATE requires Destructive mode. Writes always require human approval. Execution modes are ephemeral and armed in the plugin, not by you. Requires a session label: call set_session_label first, or this is rejected.`,
+      description: `Enqueue a SQL statement for approval in Beekeeper Studio. Returns immediately with a request_id and never blocks: submit several (up to ${MAX_PENDING_PER_SESSION} in flight), keep doing other useful work while they await approval, then use poll_results to see which resolved and get_query_result to read one. IMPORTANT: never end your turn while a query you submitted is still pending, leased or executing; keep polling or waiting until it reaches a terminal state (approved, rejected, failed, expired, cancelled). Approval is manual by default and can take minutes; slowness is not a refusal. A human may explicitly enable Auto mode beta for a restricted read subset. You cannot enable it or configure its evaluator. Reads (SELECT) are allowed in Read mode; INSERT/UPDATE requires human-armed Write mode, and DELETE/DROP/TRUNCATE requires Destructive mode. Writes always require human approval. Execution modes are ephemeral and armed in the plugin, not by you. Requires a session label: call set_session_label first, or this is rejected. Get table and column names from get_schema (no approval needed) and the dialect from get_connection_info before writing SQL: a wrong name costs the human a round trip.`,
       inputSchema: {
         sql: z
           .string()
@@ -165,7 +168,7 @@ export function createMcpServer(
     "get_query_result",
     {
       title: "Get the result of a proposed query",
-      description: `Read a submitted query by request_id. With wait_ms it waits up to that many milliseconds (${MAX_WAIT_MS} at most) and returns the instant the human decides; if the wait runs out first it returns the query still in its non-terminal state (pending, leased, executing), which is a timed checkpoint and not an answer: call again to keep waiting, as many times as it takes. Only approved, rejected, failed, expired and cancelled are terminal. IMPORTANT: never end your turn while a query you submitted is non-terminal. Approved rows are stripped about ${RESULT_TTL_MS / 60_000} minutes after the decision (purged: true), so read them promptly rather than after a long detour. An approved write returns no rows: read affectedRows for how many it changed, and treat the field's absence as unknown rather than as zero. To check many proposals in one call, use poll_results.`,
+      description: `Read a submitted query by request_id. With wait_ms it waits up to that many milliseconds (${MAX_WAIT_MS} at most) and returns the instant the human decides; if the wait runs out first it returns the query still in its non-terminal state (pending, leased, executing), which is a timed checkpoint and not an answer: call again to keep waiting, as many times as it takes. Only approved, rejected, failed, expired and cancelled are terminal. IMPORTANT: never end your turn while a query you submitted is non-terminal. Approved rows are stripped about ${RESULT_TTL_MS / 60_000} minutes after the decision (purged: true), so read them promptly rather than after a long detour. An approved write returns no rows: read affectedRows for how many it changed, and treat the field's absence as unknown rather than as zero. A failed query says why in terminal.error, usually in the engine's words: correct a wrong name or syntax before proposing again, and after execution_unknown check whether a write ran before any retry. To check many proposals in one call, use poll_results.`,
       inputSchema: {
         request_id: z.string(),
         wait_ms: z
