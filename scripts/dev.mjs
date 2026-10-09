@@ -199,10 +199,42 @@ function link() {
   );
 }
 
+// A repo-build server outlives unlink and keeps the broker port, so a published
+// plugin keeps talking to dev code. Published servers (gatekeeper-mcp-server) are
+// left alone: a non-owner retries the port and takes over once the dev one exits.
+function stopDevServers() {
+  const out = spawnSync("ps", ["-axo", "pid=,command="], { encoding: "utf8" }).stdout || "";
+  let stopped = 0;
+  for (const line of out.split("\n")) {
+    const m = line.match(/^\s*(\d+)\s+(.*)$/);
+    if (!m || !/\bnode\b/.test(m[2])) continue;
+    if (!/gatekeeper[^\s]*[/\\]server[/\\](?:dist[/\\]index\.js|src[/\\]index\.ts)/.test(m[2]))
+      continue;
+    const pid = Number(m[1]);
+    if (dry) {
+      console.log(`· would stop dev server ${pid}: ${m[2]}`);
+      continue;
+    }
+    try {
+      process.kill(pid, "SIGTERM");
+      stopped++;
+      console.log(`· stopped dev server ${pid}: ${m[2]}`);
+    } catch (err) {
+      console.log(`· could not stop dev server ${pid}: ${err.message}`);
+    }
+  }
+  if (stopped) {
+    console.log(
+      "  The agent sessions that launched them lost their Gatekeeper tools: restart them.",
+    );
+  }
+}
+
 function unlink() {
   unlinkOne("plugin", pluginSlot(), pluginBackup());
   for (const dir of skillDirs())
     unlinkOne("skill", join(dir, "gatekeeper"), skillBackup(join(dir, "gatekeeper")));
+  stopDevServers();
   console.log("\n✓ Dev symlinks removed. Restart Beekeeper and the agent session.");
   console.log(
     "  A slot with no stashed copy stays empty: re-install from published (Plugin Manager / npx skills add). MCP config is committed, nothing to undo.",

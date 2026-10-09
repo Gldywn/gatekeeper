@@ -69,6 +69,20 @@ Either of the last two needs **an agent session restart** to take effect. The fi
 
 **Mismatch worth flagging:** a pinned server at one version and a plugin at another. They ship together and are meant to match, so if you bumped one, bump the other.
 
+### Stop every running server
+
+A config change does nothing to the servers already running, and they are the ones that matter. Every agent session launches its own server, but only one of them owns the broker port (`127.0.0.1:9999`) that the plugin talks to, and it keeps it until it exits. An old server from one forgotten session, or a dev build from a Gatekeeper checkout, keeps answering the new plugin with old code. The symptom is a plugin that refuses a newer feature (for example "Restart the Gatekeeper server to use Auto mode. It predates this plugin."), however many times the current session is restarted.
+
+So once anything was updated, stop them all, this session's included:
+
+```bash
+ps -axo pid=,command= | grep -E 'gatekeeper-mcp-server|gatekeeper[^ ]*/server/(dist/index\.js|src/index\.ts)' | grep -v grep
+kill <pid> ...                                              # every node pid listed above
+lsof -nP -iTCP:9999 -sTCP:LISTEN                            # empty: nothing left on the port
+```
+
+Every session that used Gatekeeper loses its tools until it restarts, which is the point: the next launch starts the updated server. If the harness refuses the `kill`, do not work around it; hand the human the exact command with the pids. On Windows, hand over the same step as closing every agent session instead.
+
 ## Piece 3: the skills
 
 All three skills carry the Gatekeeper release version in their frontmatter. Use `skills list` to locate each installed `SKILL.md`, then compare its `version` with the latest release. Before this alignment, `gatekeeper` used `1.4.0` and the other two used `1.0.1`. Treat those as older even though their numbers are higher than `0.3.0`. A lower release version needs an update. The same number means the skill belongs to that release, but does not prove that an installation from a moving branch has identical contents.
@@ -95,7 +109,7 @@ Gatekeeper, latest release <version>
 
 Your turn
 1. Restart Beekeeper Studio to load the new plugin.
-2. Restart this agent session.
+2. Restart every agent session that uses Gatekeeper, not only this one. Their servers were stopped, and the broker port is shared.
 
 Your pairing is untouched, no new code needed.
 ```
