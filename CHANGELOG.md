@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/Gldywn/gatekeeper/compare/v0.3.1...v0.3.2) (2026-10-09)
+
+
+### Bug Fixes
+
+* stop stale Gatekeeper servers on dev unlink and update ([#44](https://github.com/Gldywn/gatekeeper/issues/44)) ([5f5a0e4](https://github.com/Gldywn/gatekeeper/commit/5f5a0e4a968078f1585276a81c5588fee66c9570))
+
 ## [0.3.1](https://github.com/Gldywn/gatekeeper/compare/v0.3.0...v0.3.1) (2026-09-23)
 
 
