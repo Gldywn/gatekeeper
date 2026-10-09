@@ -2,12 +2,17 @@
 // tool: the notification is credited to a bundle identity, so `Bundle.main` must
 // resolve to this .app.
 
+import AppKit
 import Foundation
 import UserNotifications
 
 // A backstop under the caller's own timeout, generous because the first run waits for a
 // human to answer the permission dialog.
 let TIMEOUT_SECONDS = 90.0
+
+// Fixed rather than read from the notification, so the click handler interprets nothing a
+// banner carries.
+let BEEKEEPER = "io.beekeeperstudio.desktop"
 
 enum Exit: Int32 {
   case delivered = 0
@@ -93,6 +98,18 @@ case "post":
         finish(settings.authorizationStatus == .authorized ? .delivered : .notAuthorized)
       }
     }
+  }
+
+// A click on a banner relaunches this bundle through LaunchServices with no arguments, and
+// Beekeeper offers no way to select a plugin tab, so bringing the app forward is the most a
+// click can do.
+case _ where CommandLine.arguments.count == 1:
+  guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: BEEKEEPER) else {
+    finish(.failed)
+  }
+  NSWorkspace.shared.openApplication(at: app, configuration: NSWorkspace.OpenConfiguration()) {
+    _, error in
+    finish(error == nil ? .delivered : .failed)
   }
 
 default:

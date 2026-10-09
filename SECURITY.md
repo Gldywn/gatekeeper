@@ -165,7 +165,9 @@ itself is in neither the URL nor the prompt.
 - **The macOS notification helper.** The package ships one executable, a small signed
   `.app` built from `packages/server/notifier/main.swift` in CI. It is ad-hoc signed, which
   carries no Team ID, so another ad-hoc binary claiming the same bundle identifier could
-  post notifications under this name once you have granted the permission.
+  post notifications under this name once you have granted the permission. A click on a
+  banner relaunches the helper without arguments, and the shipped helper then opens Beekeeper
+  Studio by its fixed bundle identifier, interpreting nothing from the notification.
 
 ## Reporting a vulnerability
 
