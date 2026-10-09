@@ -25,7 +25,7 @@ pnpm ci          # typecheck + build + test
 pnpm dev         # test databases + Vite hot reload + Gatekeeper server with watch
 pnpm dev:server  # take over the broker and restart the server on source changes
 pnpm dev:link    # symlink Beekeeper's plugin + the agent skill at this checkout (builds first)
-pnpm dev:unlink  # remove those dev symlinks
+pnpm dev:unlink  # remove those dev symlinks and stop repo-build servers
 pnpm dev:status  # show what points where (plugin, skill, broker, token)
 pnpm dev:reset   # clear the pairing token (add -- --all to also wipe the results DB)
 pnpm db:up       # start the Postgres and MySQL test containers
