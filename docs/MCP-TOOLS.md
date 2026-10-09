@@ -27,12 +27,26 @@ instead of running.
 - `get_connection_info()` -> snapshot. Non-sensitive context about the connected database
   (dialect, database, schema, read-only, the human's armed mode, captured-at). Never includes
   host, user, or credentials; informational only.
-- `get_schema()` -> structure. The connected database's schemas, tables, and columns (with
-  types and keys) so the agent can write valid SQL. Never returns row data, default values,
-  view/function bodies, or comments. Engine catalogs are left out, since they dwarf the
-  database's own tables, and the ones skipped come back in `excludedSchemas`. An agent that
-  needs one reads it by proposing a normal query against it. Available only while the human
-  has Schema access on for the connection; otherwise it reports unavailable.
+- `get_schema({ schema?, tables? })` -> structure. The connected database's schemas, tables,
+  and columns (with types and keys), plus its `databaseType`, database and default schema, so
+  the agent can write valid SQL. Never returns row data, default values, view/function bodies,
+  or comments. Engine catalogs are left out, since they dwarf the database's own tables, and
+  the ones skipped come back in `excludedSchemas`. An agent that needs one reads it by
+  proposing a normal query against it. Available only while the human has Schema access on
+  for the connection; otherwise it reports unavailable.
+
+  Responses are bounded to 40,000 serialized characters to keep their context cost down; a
+  larger selection returns an index or partial detail. With no argument it returns every
+  table (`mode: "detail"`) when they fit, otherwise an index of `{ schema, name, columnCount }`
+  (`mode: "index"`). `schema` and `tables` are exact matches on the names it reports (`tables`
+  matches in every schema unless `schema` is set); requested tables come back in detail as far
+  as they fit, and `matched`, `returned` and `hint` say what was left out or not found. An index
+  that is itself over budget lists only some tables and says so; past that ceiling the agent
+  narrows with `schema` or uses an introspection query. `complete: false`, or a table marked
+  `incomplete`, means part of the tables or columns could not be read or was cut by a size cap,
+  and `null` means an older plugin did not say. Keys are best effort: a missing key is not proof
+  there is none. `collectedAt` is when the server received the collected structure;
+  `capturedAt` is the plugin's last heartbeat.
 
 ## The ticket shape
 

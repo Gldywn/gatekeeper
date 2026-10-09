@@ -11,6 +11,7 @@ import {
   PAIRING_IDLE_MS,
   RESULT_TTL_MS,
 } from "./config.js";
+import { connectionScopeKey } from "./connection.js";
 import { createMcpServer, SERVER_INSTRUCTIONS } from "./mcp.js";
 import { pairingUrl } from "./pairing.js";
 import { RequestStore } from "./store.js";
@@ -287,5 +288,52 @@ describe("pairing", () => {
       expect(result.isError).toBe(true);
       expect(text(result)).toMatch(/"pairing_code": "\d{6}"/);
     });
+  });
+});
+
+describe("get_schema", () => {
+  let store: RequestStore;
+  let agent: Client;
+
+  beforeEach(async () => {
+    store = new RequestStore();
+    store.markPaired();
+    const conn = { connectionName: "prod", databaseType: "postgresql", databaseName: "app" };
+    store.setConnection({ ...conn, schema: "public" });
+    store.setSchema({
+      connectionName: "prod",
+      scope: connectionScopeKey(conn),
+      access: true,
+      complete: true,
+      tables: [
+        { schema: "public", name: "users", columns: [{ name: "id", type: "int4" }] },
+        { schema: "public", name: "orders", columns: [{ name: "id", type: "int4" }] },
+      ],
+    });
+    const { server } = createMcpServer(store);
+    agent = new Client({ name: "test", version: "0" });
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverSide), agent.connect(clientSide)]);
+  });
+
+  afterEach(async () => {
+    await agent.close();
+    store.close();
+  });
+
+  it("passes the table filter through the tool and names the dialect", async () => {
+    const result = await agent.callTool({ name: "get_schema", arguments: { tables: ["users"] } });
+    expect(result.isError).toBeFalsy();
+    expect(JSON.parse(text(result))).toMatchObject({
+      mode: "detail",
+      databaseType: "postgresql",
+      matched: 1,
+      tables: [{ schema: "public", name: "users" }],
+    });
+  });
+
+  it("refuses an empty table list rather than answering with nothing", async () => {
+    const result = await agent.callTool({ name: "get_schema", arguments: { tables: [] } });
+    expect(result.isError).toBe(true);
   });
 });
