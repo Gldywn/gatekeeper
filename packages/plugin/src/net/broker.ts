@@ -1,5 +1,6 @@
 import { appStorage } from "@beekeeperstudio/plugin";
 import type {
+  ActivityPage,
   ApprovalAttribution,
   AutoEvaluation,
   ConnectionInput,
@@ -130,12 +131,22 @@ export class BrokerClient {
     return ((await res.json()) as { sessions: SessionRoster[] }).sessions;
   }
 
-  async activity(connectionName?: string): Promise<ActivityEntry[] | null> {
-    const res = await this.request("/activity", { headers: this.connHeader(connectionName) });
+  // One page, newest first; `before` is the last entry already fetched, so the page starts
+  // strictly older than it.
+  async activity(
+    connectionName?: string,
+    before?: Pick<ActivityEntry, "decidedAt" | "id">,
+  ): Promise<ActivityPage | null> {
+    const query = before
+      ? `?before=${before.decidedAt}&beforeId=${encodeURIComponent(before.id)}`
+      : "";
+    const res = await this.request(`/activity${query}`, {
+      headers: this.connHeader(connectionName),
+    });
     if (res.status !== 200) {
       return null;
     }
-    return ((await res.json()) as { activity: ActivityEntry[] }).activity;
+    return (await res.json()) as ActivityPage;
   }
 
   async renew(id: string, leaseId: string): Promise<RenewResult> {

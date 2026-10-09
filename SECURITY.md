@@ -137,9 +137,12 @@ itself is in neither the URL nor the prompt.
   decision. Decided requests remain indefinitely with SQL, intent, state, timestamps,
   referenced session metadata, Auto mode attribution and available `rowCount` and
   `affectedRows` scalars. Technical lifecycle events in `audit` and inactive sessions
-  unreferenced by any request expire after 24 hours. The Audit Trail currently displays
-  only the latest 200 entries for the connection. There is no pagination or manual
-  deletion feature yet. Previously deleted requests and purged counts cannot be recovered.
+  unreferenced by any request expire after 24 hours. The Audit Trail pages through the
+  connection's whole retained history. There is no manual deletion feature yet. Versions
+  up to 0.2.0 deleted decided requests after 24 hours, also when such a server kept running
+  beside a newer one on the same database, so stop every server when upgrading (the
+  `update-gatekeeper` skill does). Requests they deleted and counts they purged cannot be
+  recovered.
 - **Engine errors.** A failed query's engine error is returned to the agent and recorded
   in the audit trail. Engine errors can echo fragments of the query or schema; treat them
   as query-derived data, not as a trusted channel.

@@ -41,6 +41,13 @@ export function readAudit(ctx: StoreContext, requestId?: string): AuditEntry[] {
   return (rows as RawAudit[]).map(toAudit);
 }
 
+/** Where an older page of the activity view starts: strictly after this entry in
+ *  newest-first order. An ordering boundary only; the entry need not still exist. */
+export interface ActivityCursor {
+  decidedAt: number;
+  id: string;
+}
+
 /** Terminal requests for a connection, newest first, for the host-side activity
  *  view. Each entry carries the SQL and metadata plus scalar outcome facts
  *  (reason / error / row count) from result_json, but never the result rows. */
@@ -48,19 +55,23 @@ export function listActivity(
   ctx: StoreContext,
   connection: string | null,
   limit = 200,
+  before?: ActivityCursor,
 ): ActivityEntry[] {
+  // A row-value bound on the index order, in both branches before their LIMIT, so an
+  // older page is an index range seek however deep it is, never an OFFSET scan.
+  const older = before ? "AND (decided_at, id) < (@beforeAt, @beforeId)" : "";
   const rows = ctx.db
     .prepare(
       `WITH recent AS (
          SELECT * FROM (
            SELECT id, decided_at FROM requests
-           WHERE decided_at IS NOT NULL AND connection = @connection
+           WHERE decided_at IS NOT NULL AND connection = @connection ${older}
            ORDER BY decided_at DESC, id DESC LIMIT @limit
          )
          UNION ALL
          SELECT * FROM (
            SELECT id, decided_at FROM requests
-           WHERE decided_at IS NOT NULL AND connection IS NULL
+           WHERE decided_at IS NOT NULL AND connection IS NULL ${older}
            ORDER BY decided_at DESC, id DESC LIMIT @limit
          )
        )
@@ -71,7 +82,11 @@ export function listActivity(
          ORDER BY r.decided_at DESC, r.id DESC
          LIMIT @limit`,
     )
-    .all({ connection, limit }) as {
+    .all({
+      connection,
+      limit,
+      ...(before ? { beforeAt: before.decidedAt, beforeId: before.id } : {}),
+    }) as {
     id: string;
     created_at: number;
     decided_at: number | null;

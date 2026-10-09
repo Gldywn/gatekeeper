@@ -1,7 +1,7 @@
 import type { ConnectionSnapshot } from "./connection.js";
 import type { SchemaSnapshot } from "./schema.js";
 import { claimAlert } from "./store/alerts.js";
-import { listActivity, readAudit } from "./store/audit.js";
+import { type ActivityCursor, listActivity, readAudit } from "./store/audit.js";
 import { getConnection, setConnection } from "./store/connection.js";
 import { createContext, migrate, type StoreContext } from "./store/db.js";
 import {
@@ -49,6 +49,7 @@ import type {
   StoreOptions,
 } from "./store/types.js";
 
+export type { ActivityCursor } from "./store/audit.js";
 export type { PairingCode, PairingLimits, RedeemResult } from "./store/pairing.js";
 export type { SubmitOutcome } from "./store/requests.js";
 export type {
@@ -213,8 +214,8 @@ export class RequestStore {
     return listSessions(this.ctx, connection);
   }
 
-  listActivity(connection: string | null, limit = 200): ActivityEntry[] {
-    return listActivity(this.ctx, connection, limit);
+  listActivity(connection: string | null, limit = 200, before?: ActivityCursor): ActivityEntry[] {
+    return listActivity(this.ctx, connection, limit, before);
   }
 
   listInflight(pluginId: string, connection: string | null): GatekeeperRequest[] {

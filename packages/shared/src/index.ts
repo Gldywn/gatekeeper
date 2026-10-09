@@ -74,6 +74,13 @@ export interface ActivityEntry {
   autoHold?: AutoHold;
 }
 
+// One page of GET /activity, newest first. A broker from before paging sends no `more`:
+// its single page may have been cut, so an absent `more` never means "nothing older".
+export interface ActivityPage {
+  activity: ActivityEntry[];
+  more?: boolean;
+}
+
 export interface AutoHold {
   /** The plugin attempted provider submission, not proof of provider receipt. */
   sent: boolean;

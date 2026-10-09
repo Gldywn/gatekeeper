@@ -12,6 +12,7 @@ import {
   rowsLabel,
 } from "../html";
 import {
+  alertTriangleIcon,
   chevronDown,
   copyIcon,
   downloadIcon,
@@ -43,6 +44,7 @@ export function activityShell(body: string, connChip: string): string {
           <button class="detail-close" type="button" data-close aria-label="Close audit trail">${xIcon}</button>
         </div>
         <div class="act-body">${body}</div>
+        <div class="act-tail" aria-live="polite"></div>
       </div>`;
 }
 
@@ -53,6 +55,8 @@ export function activityDaysHtml(
   activity: ActivityEntry[],
   expanded: Set<string>,
   dialect: string,
+  // false for an older page appended below: it arrives all folded.
+  openNewest = true,
 ): string {
   const days: { key: string; label: string; sessions: Map<string, ActivityEntry[]> }[] = [];
   for (const e of activity) {
@@ -72,7 +76,7 @@ export function activityDaysHtml(
   }
   const today = dayKey(Date.now());
   // Today when present, else the newest day, so exactly one day starts open.
-  const openKey = days.find((d) => d.key === today)?.key ?? days[0]?.key;
+  const openKey = openNewest ? (days.find((d) => d.key === today)?.key ?? days[0]?.key) : null;
   return days
     .map((d) => {
       const total = [...d.sessions.values()].reduce((n, arr) => n + arr.length, 0);
@@ -93,6 +97,22 @@ export function activityDaysHtml(
         </section>`;
     })
     .join("");
+}
+
+// While an older page loads: placeholder day heads shaped like what is coming, so the list
+// keeps reading as a list rather than ending on a status line.
+export function activityTailLoading(): string {
+  const row =
+    '<div class="act-tail-row act-skel" aria-hidden="true"><span class="act-tail-slot"><span class="act-skel-dot"></span></span><span class="act-skel-bar"></span><span class="act-skel-bar"></span></div>';
+  return `<div role="status" aria-label="Loading older days">${row}${row}${row}</div>`;
+}
+
+// A failed page: what is shown stays, and the list ends on this row. `first`: nothing was
+// shown yet. `unreachable`: the broker never answered, rather than answering with an error.
+export function activityTailError(first: boolean, unreachable: boolean): string {
+  const what = first ? "The audit trail did not load." : "Older days did not load.";
+  const why = unreachable ? " The broker did not answer." : "";
+  return `<div class="act-tail-row act-tail-err"><span class="act-tail-slot">${alertTriangleIcon}</span><span class="act-tail-msg">${what}${why}</span><button class="act-retry" type="button" data-act-retry>Retry</button></div>`;
 }
 
 // Cryptic session ids are long; keep a recognisable head and tail so a group still

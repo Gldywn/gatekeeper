@@ -151,3 +151,49 @@ describe("durable audit counts", () => {
     }
   });
 });
+
+describe("activity paging", () => {
+  it("walks the whole retained history once, in order, across tied timestamps", () => {
+    const ctx = createContext({ now: () => 10 ** 12 });
+    try {
+      migrate(ctx.db);
+      const insert = ctx.db.prepare(`INSERT INTO requests
+        (id, created_at, session_id, sql, state, decided_at, result_json, expires_at, connection)
+        VALUES (?, 1, 's1', 'SELECT 1', 'rejected', ?, '{"reason":null}', 3, ?)`);
+      const id = (i: number) => `req_${i.toString(16).padStart(12, "0")}`;
+      ctx.db.transaction(() => {
+        for (let i = 0; i < 450; i++) {
+          // Three rows per timestamp, one per scope, so every page edge cuts a tie.
+          insert.run(id(i), Math.floor(i / 3), [null, "alpha", "beta"][i % 3]);
+        }
+      })();
+      const expected = Array.from({ length: 450 }, (_, i) => i)
+        .filter((i) => i % 3 !== 2)
+        .reverse()
+        .map(id);
+
+      const prepare = vi.spyOn(ctx.db, "prepare");
+      const seen: string[] = [];
+      let page = listActivity(ctx, "alpha", 199);
+      while (page.length) {
+        seen.push(...page.map((e) => e.id));
+        const last = page[page.length - 1];
+        page = listActivity(ctx, "alpha", 199, { decidedAt: last.decidedAt!, id: last.id });
+      }
+      expect(seen).toEqual(expected);
+
+      const cursorSql = prepare.mock.calls
+        .map(([sql]) => sql)
+        .find((s) => s.includes("@beforeAt"))!;
+      prepare.mockRestore();
+      const plan = ctx.db
+        .prepare(`EXPLAIN QUERY PLAN ${cursorSql}`)
+        .all({ connection: "alpha", limit: 199, beforeAt: 100, beforeId: id(300) });
+      expect(
+        JSON.stringify(plan).match(/USING COVERING INDEX idx_requests_activity/g),
+      ).toHaveLength(2);
+    } finally {
+      ctx.db.close();
+    }
+  });
+});

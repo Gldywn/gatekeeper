@@ -1366,6 +1366,10 @@ export class Gatekeeper {
         this.activityView.toggle(sql.getAttribute("data-act-sql")!);
         return;
       }
+      if (target.closest("[data-act-retry]")) {
+        void this.activityView.loadOlder();
+        return;
+      }
       if (target === activity || target.closest("[data-close]")) {
         this.activityView.close();
       }
