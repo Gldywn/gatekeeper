@@ -94,20 +94,25 @@ export function schemaPayload(
     };
   }
   const hints: string[] = [];
+  // The snapshot changes only when the plugin re-collects, so a miss never proves absence.
+  const asOf =
+    head.complete === true ? " in this snapshot." : " in this snapshot, which may be incomplete.";
+  if (schema !== undefined && !snap.tables.some((t) => t.schema === schema)) {
+    hints.push(`The requested schema matches no schema${asOf}`);
+  }
   const missing = names
     ? [...new Set(names)].filter((n) => !matched.some((t) => t.name === n)).length
     : 0;
   if (missing > 0) {
     hints.push(
-      `${missing} requested table name(s) match no table${schema === undefined ? "" : " in the requested schema"}` +
-        (head.complete === true ? "." : " in this snapshot, which may be incomplete."),
+      `${missing} requested table name(s) match no table${schema === undefined ? "" : " in the requested schema"}${asOf} Names are exact and unqualified: pass the schema separately.`,
     );
   }
   const detail = withinBudget(head, matched);
   if (names || detail.length === matched.length) {
     if (detail.length < matched.length) {
       hints.push(
-        `${matched.length - detail.length} matched table(s) did not fit in one response: request them in smaller groups. A table that does not fit alone is too large for get_schema; read its columns with an introspection query.`,
+        `${matched.length - detail.length} matched table(s) did not fit in one response: request them in smaller groups, or narrow with schema when one name matches in several schemas. A table that does not fit alone is too large for get_schema; read its columns with an introspection query.`,
       );
     }
     return response(head, "detail", detail, hints);
@@ -367,7 +372,7 @@ export function createMcpServer(
     {
       title: "Read the connected database's table and column structure",
       description:
-        "Return the structure of the database the plugin is connected to (schemas, tables, columns with types, primary and foreign keys) and its dialect (databaseType), so you can write correct, valid SQL before proposing a query. Needs no approval. With no argument it returns every table when they fit in one response (mode: detail); on a larger database it returns an index of table names and column counts instead (mode: index), and you call again with tables, optionally schema, for the columns you need. complete: false (or null, unknown), or a table marked incomplete, means part of the tables or columns could not be read or was cut, so a missing name there is not proof it does not exist; keys are best effort, so a missing key is not proof either. collectedAt is when the server received the structure. Never returns any row data, default values, view/function bodies, or comments. Engine catalogs (information_schema, pg_*, mysql, performance_schema, sys) are left out because they dwarf the database's own tables, the ones skipped are listed in excludedSchemas, and you can still read any of them by proposing a normal query against it. Available only when the human has turned on Schema access for this connection; otherwise it reports unavailable. Read it once and reuse it.",
+        "Return the structure of the database the plugin is connected to (schemas, tables, columns with types, primary and foreign keys) and its dialect (databaseType), so you can write correct, valid SQL before proposing a query. Needs no approval. With no argument it returns every table when they fit in one response (mode: detail); on a larger database it returns an index of table names and column counts instead (mode: index), and you call again with tables, optionally schema, for the columns you need. complete: false (or null, unknown), or a table marked incomplete, means part of the tables or columns could not be read or was cut, so a missing name there is not proof it does not exist; keys are best effort, so a missing key is not proof either. The structure is as of collectedAt (when the server received it): a table created since, by a migration run outside Beekeeper or a statement just approved, can be missing until the plugin collects again, so after a schema change confirm with an introspection query. Never returns any row data, default values, view/function bodies, or comments. Engine catalogs (information_schema, pg_*, mysql, performance_schema, sys) are left out because they dwarf the database's own tables, the ones skipped are listed in excludedSchemas, and you can still read any of them by proposing a normal query against it. Available only when the human has turned on Schema access for this connection; otherwise it reports unavailable. Read it once and reuse it.",
       inputSchema: {
         schema: z
           .string()
@@ -380,7 +385,7 @@ export function createMcpServer(
           .max(100)
           .optional()
           .describe(
-            "Only these tables, exact names as get_schema reports them (in any schema unless schema is set). Use it after an index response to read their columns.",
+            "Only these tables, exact unqualified names as get_schema reports them (users, not public.users; pass the schema separately), in any schema unless schema is set. Use it after an index response to read their columns.",
           ),
       },
     },

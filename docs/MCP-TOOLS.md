@@ -39,14 +39,17 @@ instead of running.
   larger selection returns an index or partial detail. With no argument it returns every
   table (`mode: "detail"`) when they fit, otherwise an index of `{ schema, name, columnCount }`
   (`mode: "index"`). `schema` and `tables` are exact matches on the names it reports (`tables`
-  matches in every schema unless `schema` is set); requested tables come back in detail as far
-  as they fit, and `matched`, `returned` and `hint` say what was left out or not found. An index
-  that is itself over budget lists only some tables and says so; past that ceiling the agent
-  narrows with `schema` or uses an introspection query. `complete: false`, or a table marked
-  `incomplete`, means part of the tables or columns could not be read or was cut by a size cap,
-  and `null` means an older plugin did not say. Keys are best effort: a missing key is not proof
-  there is none. `collectedAt` is when the server received the collected structure;
-  `capturedAt` is the plugin's last heartbeat.
+  takes unqualified names and matches in every schema unless `schema` is set); requested
+  tables come back in detail as far as they fit, and `matched`, `returned` and `hint` say what
+  was left out or not found. An index that is itself over budget lists only some tables and
+  says so; past that ceiling the agent narrows with `schema` or uses an introspection query.
+  `complete: false`, or a table marked `incomplete`, means part of the tables or columns could
+  not be read or was cut by a size cap, and `null` means an older plugin or server did not say.
+  Keys are best effort: a missing key is not proof there is none. `collectedAt` is when the
+  server received the collected structure; `capturedAt` is the plugin's last heartbeat. The
+  plugin collects again on a connection switch, a Schema access toggle or a `tablesChanged`
+  event from Beekeeper, not on a timer, so a table created since `collectedAt` can be missing;
+  a miss is reported "in this snapshot".
 
 ## The ticket shape
 

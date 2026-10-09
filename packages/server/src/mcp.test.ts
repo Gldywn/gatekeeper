@@ -332,6 +332,28 @@ describe("get_schema", () => {
     });
   });
 
+  // The budget is computed on the payload object; this pins it on the text the client receives.
+  it("keeps the tool output itself within the budget on a large database", async () => {
+    const conn = { connectionName: "prod", databaseType: "postgresql", databaseName: "app" };
+    const columns = Array.from({ length: 20 }, (_, i) => ({ name: `column_${i}`, type: "text" }));
+    store.setSchema({
+      connectionName: "prod",
+      scope: connectionScopeKey(conn),
+      access: true,
+      complete: true,
+      tables: Array.from({ length: 400 }, (_, i) => ({
+        schema: "public",
+        name: `t_${i}`,
+        columns,
+      })),
+    });
+    for (const args of [{}, { tables: Array.from({ length: 100 }, (_, i) => `t_${i}`) }]) {
+      const out = text(await agent.callTool({ name: "get_schema", arguments: args }));
+      expect(JSON.parse(out).returned).toBeGreaterThan(0);
+      expect(out.length).toBeLessThanOrEqual(40_000);
+    }
+  });
+
   it("refuses an empty table list rather than answering with nothing", async () => {
     const result = await agent.callTool({ name: "get_schema", arguments: { tables: [] } });
     expect(result.isError).toBe(true);

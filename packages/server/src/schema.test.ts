@@ -253,11 +253,12 @@ describe("schemaPayload", () => {
 
   it("counts requested names it cannot find, hedged when the snapshot may be incomplete", () => {
     expect(served(many, { tables: ["users", "ghost"] }).hint).toContain(
-      "1 requested table name(s) match no table.",
+      "1 requested table name(s) match no table in this snapshot.",
     );
     expect(served({ ...many, complete: null }, { tables: ["ghost"] }).hint).toContain(
       "may be incomplete",
     );
+    expect(served(many, { tables: ["public.users"] }).hint).toContain("unqualified");
   });
 
   it("switches to an index of names and column counts when the whole schema does not fit", () => {
@@ -338,6 +339,25 @@ describe("schemaPayload", () => {
   it("counts a name found only outside the requested schema as missing, once", () => {
     const res = served(many, { schema: "audit", tables: ["orders", "orders"] });
     expect(res).toMatchObject({ matched: 0, returned: 0 });
-    expect(res.hint).toContain("1 requested table name(s) match no table in the requested schema.");
+    expect(res.hint).toContain(
+      "1 requested table name(s) match no table in the requested schema in this snapshot.",
+    );
+  });
+
+  it("says so when the requested schema matches nothing, instead of an empty silent answer", () => {
+    const res = served(many, { schema: "Public" });
+    expect(res).toMatchObject({ matched: 0, returned: 0 });
+    expect(res.hint).toContain("The requested schema matches no schema in this snapshot.");
+  });
+
+  it("points at the schema filter when one name matches in more schemas than fit", () => {
+    const tenants = {
+      ...snap,
+      complete: true,
+      tables: Array.from({ length: 300 }, (_, i) => table(`tenant_${i}`, "users", 20)),
+    };
+    const res = served(tenants, { tables: ["users"] });
+    expect(res.returned).toBeLessThan(300);
+    expect(res.hint).toContain("narrow with schema when one name matches in several schemas");
   });
 });
