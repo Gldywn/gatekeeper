@@ -1,6 +1,5 @@
 import type { ApprovalAttribution } from "@gatekeeper/shared";
 import { describe, expect, it } from "vitest";
-import { AUTO_POLICY } from "../sql/auto";
 import { activityEntryHtml } from "./activity";
 import { approvalHtml, autoPopHtml, autoSettingsHtml } from "./auto";
 import { modeDropdown } from "./controls";
@@ -74,20 +73,6 @@ describe("Auto mode surfaces", () => {
       new Map(),
     );
     expect(review).toContain("Sensitive source &lt;email&gt;");
-  });
-  it("shows the read_only score without marking it as a refusal", () => {
-    const html = approvalHtml(undefined, {
-      provider: "typesafe",
-      model: "jev-1.13.0",
-      policy: AUTO_POLICY,
-      evaluatedAt: 1,
-      sqlDigest: "a".repeat(64),
-      eligible: false,
-      reasons: ["Potential personal disclosure"],
-      probabilities: { read_only: 0.4, personal_disclosure: 0.5 },
-    });
-    expect(html).toContain('<span class="auto-reason metric">read_only 0.4</span>');
-    expect(html).toContain('<span class="auto-reason metric over">personal_disclosure 0.5</span>');
   });
   it("distinguishes human and automatic history and includes durable details", () => {
     const approval: ApprovalAttribution = {

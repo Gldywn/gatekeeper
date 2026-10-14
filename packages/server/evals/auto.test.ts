@@ -65,9 +65,6 @@ const questions = JSON.parse(
 const projectionQuestions = JSON.parse(
   await readFile(new URL("auto-projection-questions.json", import.meta.url), "utf8"),
 );
-const sharedQuestions = JSON.parse(
-  await readFile(new URL("auto-shared-inference-questions.json", import.meta.url), "utf8"),
-);
 const sourceQuestions = JSON.parse(
   await readFile(new URL("auto-source-questions.json", import.meta.url), "utf8"),
 );
@@ -78,8 +75,8 @@ const selected = (id: string): Case => corpus.find((c) => c.id === id)!;
 const currentQuestions = JSON.parse(
   await readFile(new URL("auto-beta-7-questions.json", import.meta.url), "utf8"),
 );
-const beta5Questions = JSON.parse(
-  await readFile(new URL("auto-beta-5-questions.json", import.meta.url), "utf8"),
+const beta6Questions = JSON.parse(
+  await readFile(new URL("auto-beta-6-questions.json", import.meta.url), "utf8"),
 );
 const productionThresholds = JSON.parse(
   await readFile(new URL("auto-beta-7-thresholds.json", import.meta.url), "utf8"),
@@ -462,20 +459,19 @@ describe("Auto evaluation bench (synthetic, no calibration)", () => {
     expect(() => summarize(partial)).toThrow("Incomplete case list");
   });
 
-  it("pins production to the frozen questions measured live, with read_only never blocking", () => {
+  it("pins production to the questions measured live, without the read-only question", () => {
     const report = prepare(corpus, evaluationQuestions, "development");
     expect(evaluationQuestions).toEqual(currentQuestions);
     // Question digest recorded by the live candidate reports this profile was chosen from.
-    expect(digest(evaluationQuestions)).toBe(
+    // Production asks the same questions verbatim, minus read_only: the local analysis
+    // decides read-only behavior.
+    expect(digest(beta6Questions)).toBe(
       "efc206d53ee44979d566aeb605659ad8a9300cd446e7671befa333b11f726bee",
     );
-    expect(evaluationQuestions).not.toEqual(beta5Questions);
-    expect(evaluationQuestions).not.toEqual(sharedQuestions);
-    expect(productionThresholds).toEqual({
-      ...sourceThresholds,
-      personal_disclosure: 0.2,
-      read_only: 0,
-    });
+    const { read_only: _, ...measured } = beta6Questions;
+    expect(evaluationQuestions).toEqual(measured);
+    const { read_only: __, ...sourceCutoffs } = sourceThresholds;
+    expect(productionThresholds).toEqual({ ...sourceCutoffs, personal_disclosure: 0.2 });
     expect(report.thresholds).toEqual(productionThresholds);
     expect(AUTO_THRESHOLDS).toEqual(productionThresholds);
     expect(PLUGIN_THRESHOLDS).toEqual(productionThresholds);
@@ -484,35 +480,7 @@ describe("Auto evaluation bench (synthetic, no calibration)", () => {
     expect(PLUGIN_POLICY).toBe(AUTO_POLICY);
     expect(report.baselinePolicy).toBe("auto-beta-7");
   });
-  const answering = (values: Record<string, number>) =>
-    vi.stubGlobal(
-      "fetch",
-      async () =>
-        new Response(
-          JSON.stringify({
-            model: AUTO_MODEL,
-            answers: Object.fromEntries(
-              Object.entries(values).map(([id, noul]) => [id, { type: "noul", noul }]),
-            ),
-          }),
-        ),
-    );
-  it.each([0, 1])("read_only %s never blocks on the server or in the plugin", async (readOnly) => {
-    const input = localInput(selected("product-catalog"));
-    if (typeof input === "string") throw new Error(input);
-    answering({ ...productionThresholds, read_only: readOnly });
-    const result = await evaluate(
-      input,
-      "synthetic-key",
-      new AbortController().signal,
-      "a".repeat(64),
-    );
-    expect(result.eligible).toBe(true);
-    expect(result.reasons).toEqual([]);
-    expect(result.probabilities.read_only).toBe(readOnly);
-    expect(currentEvaluation({ ...result, eligible: true, reasons: [] })).toBe(true);
-  });
-  it.each(Object.keys(productionThresholds).filter((axis) => axis !== "read_only"))(
+  it.each(Object.keys(productionThresholds))(
     "server and plugin enforce the retained %s cutoff independently",
     async (axis) => {
       const input = localInput(selected("product-catalog"));
@@ -520,7 +488,18 @@ describe("Auto evaluation bench (synthetic, no calibration)", () => {
       for (const exceeds of [false, true]) {
         const values = { ...productionThresholds };
         if (exceeds) values[axis] += 0.001;
-        answering(values);
+        vi.stubGlobal(
+          "fetch",
+          async () =>
+            new Response(
+              JSON.stringify({
+                model: AUTO_MODEL,
+                answers: Object.fromEntries(
+                  Object.entries(values).map(([id, noul]) => [id, { type: "noul", noul }]),
+                ),
+              }),
+            ),
+        );
         const result = await evaluate(
           input,
           "synthetic-key",

@@ -139,7 +139,6 @@ function evaluation(): AutoEvaluation {
     eligible: true,
     reasons: [],
     probabilities: {
-      read_only: 0.999,
       personal_disclosure: 0.001,
       secret_disclosure: 0.001,
       organization_disclosure: 0.001,

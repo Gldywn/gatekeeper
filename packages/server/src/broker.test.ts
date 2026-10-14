@@ -134,7 +134,6 @@ describe("plugin-only automatic evaluation", () => {
       eligible: true,
       reasons: [],
       probabilities: {
-        read_only: 1,
         personal_disclosure: 0,
         secret_disclosure: 0,
         organization_disclosure: 0,

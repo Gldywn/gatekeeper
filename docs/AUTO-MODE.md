@@ -65,7 +65,7 @@ ORDER BY pi."updatedAt";
 SELECT status, count(*) AS n FROM payment_orchestrator.payment_intent GROUP BY status ORDER BY status;
 ```
 
-Reaching Jev is not approval: its four blocking cutoffs still decide.
+Reaching Jev is not approval: its four cutoffs still decide.
 
 Schema, table, column and alias names follow PostgreSQL quoting rules. Unquoted ASCII
 names fold to lowercase, while quoted names retain their exact case and may contain
@@ -302,29 +302,25 @@ deactivation and applies its own 15-second deadline. There is no retry or provid
 
 The native endpoint is `POST https://api.typesafe.ai/v1/systemone`, using Bearer auth and
 `model`, `state`, `questions`. Model `jev-1.13.0` and policy `auto-beta-7` are pinned.
-Five focused Noul questions are batched: read-only behavior, personal disclosure,
-organization disclosure, access secret disclosure and insufficient context. Noul is a
-probability of yes, not a Choice/Score confidence value. The four blocking conditions
-must all pass:
+Four focused Noul questions are batched: personal disclosure, organization disclosure,
+access secret disclosure and insufficient context. Noul is a probability of yes, not a
+Choice/Score confidence value. All four conditions must pass:
 
 | Axis | Required probability |
 | :--- | :--- |
-| `read_only` | any (recorded, never blocks) |
 | `personal_disclosure` | <= 0.20 |
 | `organization_disclosure` | <= 0.15 |
 | `secret_disclosure` | <= 0.15 |
 | `insufficient_context` | <= 0.45 |
 
-Auto mode's read-only eligibility is decided by the local deterministic analysis. It
-checks the supported SQL expressions, resolves their functions, operators and casts
-against the catalog, and holds unsupported or unresolved queries before calling Jev. Jev's
-valid `read_only` probability is recorded without an approval cutoff. A future database
-engine gets Auto mode only with its own local read-only analysis. The
-`insufficient_context` question still weighs read-only behavior among its risks.
+Jev is not asked about read-only behavior. Auto mode's read-only eligibility is decided by
+the local deterministic analysis: it checks the supported SQL expressions, resolves their
+functions, operators and casts against the catalog, and holds unsupported or unresolved
+queries before calling Jev. A future database engine gets Auto mode only with its own local
+read-only analysis.
 
 Missing, malformed, out-of-range, wrong-model and uncertain answers require manual
-review, including a missing or malformed `read_only` answer. The plugin independently
-checks the same cutoffs before execution. Model concern
+review. The plugin independently checks the same cutoffs before execution. Model concern
 never rejects a manually reviewable request. These are experimental operating cutoffs,
 not calibrated probabilities of privacy loss.
 
@@ -376,7 +372,7 @@ union) were not provider observations and are not part of either figure. Candida
 cover 239 provider observations and 33 local holds after that metadata was added.
 Candidate questions were then compared live on that corpus, `auto-beta-5-cases.json` and `auto-export-cases.json` (synthetic versions of 15
 distinct exported investigations, with inferred catalog types).
-`auto-beta-7` uses the candidate 4 questions with the personal cutoff at 0.20 and no read-only cutoff
+`auto-beta-7` uses the candidate 4 questions without the read-only question, with the personal cutoff at 0.20
 (snapshots `auto-beta-7-questions.json` and `auto-beta-7-thresholds.json`): no expected
 review case auto-approved, 4 unnecessary holds on the full corpus with a weakest review
 margin of 0.17, and 14 of 15 export allows passing. The remaining unnecessary holds are

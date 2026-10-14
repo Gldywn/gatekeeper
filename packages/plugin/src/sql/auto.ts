@@ -2,9 +2,8 @@ import type { AutoEvaluation } from "@gatekeeper/shared";
 
 export const AUTO_MODEL = "jev-1.13.0";
 export const AUTO_POLICY = "auto-beta-7";
+// No read-only axis: the local analysis decides read-only behavior before Jev is called.
 export const AUTO_THRESHOLDS = {
-  // Never blocks: read-only behavior is decided by the local analysis before Jev is called.
-  read_only: 0,
   personal_disclosure: 0.2,
   organization_disclosure: 0.15,
   secret_disclosure: 0.15,
@@ -40,8 +39,6 @@ export function currentEvaluation(e: AutoEvaluation): boolean {
     validEvaluation(e) &&
     e.eligible &&
     e.reasons.length === 0 &&
-    Object.entries(AUTO_THRESHOLDS).every(([id, cutoff]) =>
-      id === "read_only" ? e.probabilities[id] >= cutoff : e.probabilities[id] <= cutoff,
-    )
+    Object.entries(AUTO_THRESHOLDS).every(([id, cutoff]) => e.probabilities[id] <= cutoff)
   );
 }

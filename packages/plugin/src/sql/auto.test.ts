@@ -105,7 +105,6 @@ describe("Auto policy pin", () => {
       eligible: true,
       reasons: [],
       probabilities: {
-        read_only: 0.999,
         personal_disclosure: 0.15,
         organization_disclosure: 0.001,
         secret_disclosure: 0.001,
@@ -113,11 +112,12 @@ describe("Auto policy pin", () => {
       },
     };
     expect(AUTO_POLICY).toBe("auto-beta-7");
+    expect(AUTO_THRESHOLDS).not.toHaveProperty("read_only");
     expect(AUTO_THRESHOLDS.personal_disclosure).toBe(0.2);
     expect(validEvaluation(current)).toBe(true);
     expect(validEvaluation({ ...current, policy: "auto-beta-6" })).toBe(false);
-    // read_only never blocks, but a response without it is still malformed.
-    const { read_only: _, ...withoutReadOnly } = current.probabilities;
-    expect(validEvaluation({ ...current, probabilities: withoutReadOnly })).toBe(false);
+    expect(
+      validEvaluation({ ...current, probabilities: { ...current.probabilities, read_only: 1 } }),
+    ).toBe(false);
   });
 });

@@ -16,7 +16,6 @@ const input = {
   ],
 };
 const ids = [
-  "read_only",
   "personal_disclosure",
   "organization_disclosure",
   "secret_disclosure",
@@ -24,9 +23,7 @@ const ids = [
 ];
 const response = () => ({
   model: AUTO_MODEL,
-  answers: Object.fromEntries(
-    ids.map((id) => [id, { type: "noul", noul: id === "read_only" ? 0.999 : 0.001 }]),
-  ),
+  answers: Object.fromEntries(ids.map((id) => [id, { type: "noul", noul: 0.001 }])),
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -76,7 +73,7 @@ describe("native Jev contract (mocked, not calibration)", () => {
     expect(result.policy).toBe(AUTO_POLICY);
     expect(result).not.toHaveProperty("confidence");
   });
-  it("preserves the five probabilities and their polarity at the experimental cutoffs", async () => {
+  it("preserves the four probabilities at the experimental cutoffs", async () => {
     const body = response();
     for (const [id, cutoff] of Object.entries(AUTO_THRESHOLDS)) body.answers[id].noul = cutoff;
     vi.stubGlobal("fetch", async () => new Response(JSON.stringify(body)));
@@ -89,7 +86,7 @@ describe("native Jev contract (mocked, not calibration)", () => {
     expect(accepted.eligible).toBe(true);
     expect(accepted.probabilities).toEqual(AUTO_THRESHOLDS);
     for (const [id, cutoff] of Object.entries(AUTO_THRESHOLDS))
-      if (id !== "read_only") body.answers[id].noul = cutoff + 0.001;
+      body.answers[id].noul = cutoff + 0.001;
     const held = await evaluate(
       input,
       "synthetic-key",
@@ -98,39 +95,40 @@ describe("native Jev contract (mocked, not calibration)", () => {
     );
     expect(held.eligible).toBe(false);
     expect(held.reasons).toHaveLength(4);
-    expect(held.probabilities.read_only).toBe(0);
     expect(held.probabilities.personal_disclosure).toBeCloseTo(0.201);
   });
-  it.each(ids.filter((id) => id !== "read_only"))(
-    "a concern on %s cannot be averaged away",
-    async (id) => {
-      const body = response();
-      body.answers[id].noul = 0.5;
-      vi.stubGlobal("fetch", async () => new Response(JSON.stringify(body)));
-      const result = await evaluate(
-        input,
-        "synthetic-key",
-        new AbortController().signal,
-        "a".repeat(64),
-      );
-      expect(result.eligible).toBe(false);
-      expect(result.reasons).toHaveLength(1);
-    },
-  );
+  it.each(ids)("a concern on %s cannot be averaged away", async (id) => {
+    const body = response();
+    body.answers[id].noul = 0.5;
+    vi.stubGlobal("fetch", async () => new Response(JSON.stringify(body)));
+    const result = await evaluate(
+      input,
+      "synthetic-key",
+      new AbortController().signal,
+      "a".repeat(64),
+    );
+    expect(result.eligible).toBe(false);
+    expect(result.reasons).toHaveLength(1);
+  });
   it.each([
     {},
     { ...response(), model: "jev-latest" },
     { ...response(), answers: {} },
+    // A stale answer set that still carries read_only is not the current questionnaire.
+    { ...response(), answers: { ...response().answers, read_only: { type: "noul", noul: 1 } } },
     {
       ...response(),
-      answers: Object.fromEntries(
-        Object.entries(response().answers).filter(([id]) => id !== "read_only"),
-      ),
+      answers: { ...response().answers, personal_disclosure: { type: "choice", noul: 1 } },
     },
-    { ...response(), answers: { ...response().answers, read_only: { type: "choice", noul: 1 } } },
-    { ...response(), answers: { ...response().answers, read_only: { type: "noul", noul: 2 } } },
-    { ...response(), answers: { ...response().answers, read_only: { type: "noul", noul: "1" } } },
-  ])("rejects malformed or missing answers", async (body) => {
+    {
+      ...response(),
+      answers: { ...response().answers, personal_disclosure: { type: "noul", noul: 2 } },
+    },
+    {
+      ...response(),
+      answers: { ...response().answers, personal_disclosure: { type: "noul", noul: "1" } },
+    },
+  ])("rejects malformed, missing or extra answers", async (body) => {
     vi.stubGlobal("fetch", async () => new Response(JSON.stringify(body)));
     await expect(
       evaluate(input, "synthetic-key", new AbortController().signal, "a".repeat(64)),
