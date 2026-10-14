@@ -25,6 +25,7 @@ let port = 0;
 const evaluator = vi.fn();
 const keyChecker = vi.fn();
 const notifyAuto = vi.fn();
+const notifier = { active: true, autoActive: true, probe: () => {}, notify: () => {}, notifyAuto };
 
 function call(
   method: string,
@@ -69,12 +70,8 @@ beforeEach(async () => {
   evaluator.mockReset();
   keyChecker.mockReset();
   notifyAuto.mockReset();
-  server = createBroker(store, "plug_test", TOKEN, evaluator, keyChecker, {
-    active: true,
-    probe: () => {},
-    notify: () => {},
-    notifyAuto,
-  });
+  notifier.autoActive = true;
+  server = createBroker(store, "plug_test", TOKEN, evaluator, keyChecker, notifier);
   await new Promise<void>((resolve) => {
     server.listen(0, "127.0.0.1", resolve);
   });
@@ -213,6 +210,7 @@ describe("plugin-only automatic evaluation", () => {
         });
         expect(result.status).toBe(source === "human" ? 200 : 409);
       }
+      store.claimAlert(NOTIFY_COOLDOWN_MS);
       await call("POST", "/result", {
         token: TOKEN,
         body: { id: body.id, leaseId: body.leaseId, status: "approved", rows: [], fields: [] },
@@ -363,13 +361,33 @@ describe("the Auto mode sound", () => {
     });
   }
 
-  it("plays once an Auto approval has run, without spending the submission alert", async () => {
+  // Every case starts the way production does: the submission alert claimed the window.
+  const rang = () => expect(store.claimAlert(NOTIFY_COOLDOWN_MS)).toBe(true);
+
+  it("answers the submission alert once the Auto approval has run", async () => {
+    rang();
     expect((await finish(executing("automatic"))).status).toBe(200);
     expect(notifyAuto).toHaveBeenCalledOnce();
+  });
+
+  // Right after "handled", a proposal swallowed by the burst window would wait unseen.
+  it("reopens the submission window, so the next proposal rings at once", async () => {
+    rang();
+    await finish(executing("automatic"));
     expect(store.claimAlert(NOTIFY_COOLDOWN_MS)).toBe(true);
+    await finish(executing("automatic", "SELECT 2"));
+    expect(notifyAuto).toHaveBeenCalledTimes(2);
+  });
+
+  it("stays silent when no submission alert rang since it last played", async () => {
+    rang();
+    await finish(executing("automatic"));
+    await finish(executing("automatic", "SELECT 2"));
+    expect(notifyAuto).toHaveBeenCalledOnce();
   });
 
   it("stays silent for a human approval and for an Auto query that failed", async () => {
+    rang();
     const human = executing("human");
     const failed = executing("automatic", "SELECT 2");
     expect((await finish(human)).status).toBe(200);
@@ -377,17 +395,21 @@ describe("the Auto mode sound", () => {
     expect(store.get(human.id)?.state).toBe("approved");
     expect(store.get(failed.id)?.state).toBe("failed");
     expect(notifyAuto).not.toHaveBeenCalled();
+    expect(store.claimAlert(NOTIFY_COOLDOWN_MS)).toBe(false);
   });
 
   // Next to a proposal still awaiting approval, the Auto sound would read as an all-clear.
-  it("stays silent while another proposal awaits approval", async () => {
+  it("stays silent while another proposal awaits approval, keeping the window", async () => {
+    rang();
     const auto = executing("automatic");
     store.submit({ sessionId: "s1", sql: "SELECT 2" });
     expect((await finish(auto)).status).toBe(200);
     expect(notifyAuto).not.toHaveBeenCalled();
+    expect(store.claimAlert(NOTIFY_COOLDOWN_MS)).toBe(false);
   });
 
   it("plays once for a burst, since an executing proposal awaits nobody", async () => {
+    rang();
     const first = executing("automatic");
     const second = executing("automatic", "SELECT 2");
     expect((await finish(first)).status).toBe(200);
@@ -396,27 +418,19 @@ describe("the Auto mode sound", () => {
     expect(notifyAuto).toHaveBeenCalledOnce();
   });
 
-  // The store keeps its own clock, so moving Date.now moves only the broker's cooldown.
-  it("has its own cooldown, independent of the submission alert's", async () => {
-    expect(store.claimAlert(NOTIFY_COOLDOWN_MS)).toBe(true);
-    const start = Date.now();
-    const clock = vi.spyOn(Date, "now").mockReturnValue(start);
-    try {
-      await finish(executing("automatic"));
-      clock.mockReturnValue(start + NOTIFY_COOLDOWN_MS - 1);
-      await finish(executing("automatic", "SELECT 2"));
-      clock.mockReturnValue(start + NOTIFY_COOLDOWN_MS);
-      await finish(executing("automatic", "SELECT 3"));
-    } finally {
-      clock.mockRestore();
-    }
-    expect(notifyAuto).toHaveBeenCalledTimes(2);
+  it("leaves the window alone in modes that never play it", async () => {
+    notifier.autoActive = false;
+    rang();
+    await finish(executing("automatic"));
+    expect(notifyAuto).not.toHaveBeenCalled();
+    expect(store.claimAlert(NOTIFY_COOLDOWN_MS)).toBe(false);
   });
 
   it("still accepts the result when the sound fails", async () => {
     notifyAuto.mockImplementation(() => {
       throw new Error("boom");
     });
+    rang();
     const held = executing("automatic");
     expect((await finish(held)).status).toBe(200);
     expect(store.get(held.id)?.state).toBe("approved");

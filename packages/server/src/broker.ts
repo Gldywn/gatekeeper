@@ -7,7 +7,6 @@ import {
   BROKER_HOST,
   brokerPort,
   LEASE_MS,
-  NOTIFY_COOLDOWN_MS,
   PAIRING_ATTEMPT_BURST,
   PAIRING_ATTEMPT_REFILL_MS,
   PAIRING_CODE_TTL_MS,
@@ -60,9 +59,6 @@ interface Broker {
   evaluator: Evaluator;
   keyChecker: KeyChecker;
   notifier?: Notifier;
-  // ponytail: in memory because only the broker owner sees results; a takeover resets it,
-  // costing one extra sound at most.
-  autoSoundAt: number;
   evaluating: boolean;
   evaluations: Map<
     string,
@@ -93,7 +89,6 @@ export function createBroker(
     evaluator,
     keyChecker,
     notifier,
-    autoSoundAt: Number.NEGATIVE_INFINITY,
     evaluating: false,
     evaluations: new Map(),
   };
@@ -536,18 +531,16 @@ function guarded(
 function soundAutoApproval(broker: Broker, request: GatekeeperRequest): void {
   const approval = (request.policy as { approval?: { source?: unknown } } | null)?.approval;
   if (
-    !broker.notifier?.active ||
+    !broker.notifier?.autoActive ||
     request.state !== "approved" ||
     approval?.source !== "automatic"
   ) {
     return;
   }
   try {
-    const now = Date.now();
-    if (now - broker.autoSoundAt < NOTIFY_COOLDOWN_MS || broker.store.hasWaiting()) {
+    if (!broker.store.claimAutoAlert()) {
       return;
     }
-    broker.autoSoundAt = now;
     broker.notifier.notifyAuto();
   } catch {
     // The result is already accepted and answered; a lost sound must not touch it.

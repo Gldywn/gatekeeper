@@ -329,6 +329,7 @@ describe("notifyAuto", () => {
   it("plays the Auto sound alone, with no banner and no registration", async () => {
     for (const mode of ["both", "sound"] as const) {
       const { calls, notifier } = harness({ mode });
+      expect(notifier.autoActive).toBe(true);
       notifier.notifyAuto();
       await settle();
       expect(calls).toEqual([{ cmd: "afplay", args: [COMPLETE], timeoutMs: NOTIFY_TIMEOUT_MS }]);
@@ -342,6 +343,7 @@ describe("notifyAuto", () => {
       { platform: "linux" },
     ]) {
       const { calls, notifier } = harness(overrides);
+      expect(notifier.autoActive).toBe(false);
       notifier.notifyAuto();
       await settle();
       expect(calls).toEqual([]);

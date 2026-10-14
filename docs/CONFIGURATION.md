@@ -23,9 +23,12 @@ desktop. A burst is collapsed into a single alert, and a retried submission rais
 **Auto mode adds a second sound.** The submission alert stays the same with Auto mode on.
 When a query [Auto mode](AUTO-MODE.md) approved runs successfully, the server also plays a
 second, different sound with no banner, as long as no other proposal is awaiting approval at
-that moment. It plays at most once every 10 seconds, independently of the submission alert.
-`both` and `sound` play it, `banner` and `off` do not. The sound lives in a macOS folder Apple
-does not document, so if it fails to play the server plays the system sound Hero instead.
+that moment. It answers a submission alert: it plays only if one rang since it last played,
+and once it has played, the next proposal raises its own alert even inside the burst window.
+`both` and `sound` play it, `banner` and `off` do not. When agents run Gatekeeper with
+different `GATEKEEPER_NOTIFY` values, this sound follows the setting of the one Gatekeeper
+process that serves the plugin, not the agent's. The sound lives in a macOS folder Apple does
+not document, so if it fails to play the server plays the system sound Hero instead.
 
 **The first proposal asks for permission.** macOS shows "Gatekeeper would like to send you
 notifications" the first time, in the middle of an agent session. Allow it, and you never see

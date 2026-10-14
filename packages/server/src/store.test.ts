@@ -895,24 +895,38 @@ describe("alert cooldown", () => {
   });
 });
 
-describe("hasWaiting", () => {
-  it("detects pending and leased proposals, excluding executing ones", () => {
+describe("claimAutoAlert", () => {
+  it("refuses while no submission alert has ever rung", () => {
     const { store } = makeStore();
-    expect(store.hasWaiting()).toBe(false);
+    expect(store.claimAutoAlert()).toBe(false);
+  });
+
+  it("answers one submission alert, then reopens its window", () => {
+    const { store } = makeStore();
+    expect(store.claimAlert(10_000)).toBe(true);
+    expect(store.claimAutoAlert()).toBe(true);
+    expect(store.claimAutoAlert()).toBe(false);
+    expect(store.claimAlert(10_000)).toBe(true);
+  });
+
+  it("refuses while a proposal is pending or leased, not once it executes", () => {
+    const { store } = makeStore();
+    store.claimAlert(10_000);
     store.submit({ sessionId: "s1", sql: "SELECT 1" });
-    expect(store.hasWaiting()).toBe(true);
+    expect(store.claimAutoAlert()).toBe(false);
     const lease = store.claimNext("plugin", LEASE)!;
-    expect(store.hasWaiting()).toBe(true);
+    expect(store.claimAutoAlert()).toBe(false);
     store.markExecuting(lease.id, lease.leaseId!);
-    expect(store.hasWaiting()).toBe(false);
+    expect(store.claimAutoAlert()).toBe(true);
   });
 
   // Reads do not sweep, so the row still says pending once its TTL has passed.
   it("ignores an expired proposal still marked pending", () => {
     const { store, clock } = makeStore();
+    store.claimAlert(10_000);
     store.submit({ sessionId: "s1", sql: "SELECT 1" });
     clock.t += 10_000;
-    expect(store.hasWaiting()).toBe(false);
+    expect(store.claimAutoAlert()).toBe(true);
   });
 });
 

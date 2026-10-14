@@ -257,6 +257,7 @@ describe("submitQuery desktop alert", () => {
         active,
         probe: () => {},
         notify: (l: string | null | undefined) => labels.push(l),
+        autoActive: false,
         notifyAuto: () => {},
       },
       labels,
@@ -311,6 +312,7 @@ describe("submitQuery desktop alert", () => {
       notify: () => {
         throw new Error("boom");
       },
+      autoActive: false,
       notifyAuto: () => {},
     };
     const ticket = submitQuery(store, { sessionId: "s1", sql: "SELECT 1" }, exploding);

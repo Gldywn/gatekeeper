@@ -1,6 +1,6 @@
 import type { ConnectionSnapshot } from "./connection.js";
 import type { SchemaSnapshot } from "./schema.js";
-import { claimAlert } from "./store/alerts.js";
+import { claimAlert, claimAutoAlert } from "./store/alerts.js";
 import { listActivity, readAudit } from "./store/audit.js";
 import { getConnection, setConnection } from "./store/connection.js";
 import { createContext, migrate, type StoreContext } from "./store/db.js";
@@ -18,7 +18,6 @@ import {
   claimNext,
   get,
   getForSession,
-  hasWaiting,
   listInflight,
   listSessionRequests,
   markExecuting,
@@ -102,6 +101,11 @@ export class RequestStore {
     return claimAlert(this.ctx, cooldownMs);
   }
 
+  /** True when an alert rang since the last Auto sound and nothing awaits approval. */
+  claimAutoAlert(): boolean {
+    return claimAutoAlert(this.ctx);
+  }
+
   claimNext(
     pluginId: string,
     leaseMs: number,
@@ -150,12 +154,6 @@ export class RequestStore {
   get(id: string): GatekeeperRequest | null {
     return get(this.ctx, id);
   }
-
-  /** True while any live proposal still waits for a decision, whatever its connection. */
-  hasWaiting(): boolean {
-    return hasWaiting(this.ctx);
-  }
-
   getForSession(id: string, sessionId: string): GatekeeperRequest {
     return getForSession(this.ctx, id, sessionId);
   }

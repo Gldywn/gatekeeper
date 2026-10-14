@@ -104,6 +104,7 @@ export function defaultDeps(): NotifyDeps {
 
 export function createNotifier(deps: NotifyDeps = defaultDeps()) {
   const active = deps.platform === "darwin" && deps.mode !== "off";
+  const autoActive = active && deps.mode !== "banner";
   let registered = false;
   let warned = false;
   let warnedMissing = false;
@@ -171,6 +172,9 @@ export function createNotifier(deps: NotifyDeps = defaultDeps()) {
     /** False when this platform or this configuration raises nothing, so callers can skip the work. */
     active,
 
+    /** False when the Auto mode sound is never played, so callers leave the alert window alone. */
+    autoActive,
+
     /** Report at startup whether banners will actually appear. Never throws. */
     probe(): void {
       if (!active || deps.mode === "sound" || bundleMissing()) {
@@ -201,7 +205,7 @@ export function createNotifier(deps: NotifyDeps = defaultDeps()) {
 
     /** Play the Auto mode approval sound, never a banner. Never throws, never blocks the caller. */
     notifyAuto(): void {
-      if (!active || deps.mode === "banner") {
+      if (!autoActive) {
         return;
       }
       swallow(
