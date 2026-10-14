@@ -95,26 +95,29 @@ describe("Auto mode deterministic boundary", () => {
 });
 
 describe("Auto policy pin", () => {
-  it("keeps an auto-beta-5 decision readable but unable to authorize under auto-beta-6", () => {
+  it("keeps an auto-beta-6 decision readable but unable to authorize under auto-beta-7", () => {
     const current = {
       provider: "typesafe" as const,
       model: "jev-1.13.0",
-      policy: "auto-beta-6" as const,
+      policy: "auto-beta-7" as const,
       evaluatedAt: Date.now(),
       sqlDigest: "a".repeat(64),
       eligible: true,
       reasons: [],
       probabilities: {
-        read_only: 0.999,
         personal_disclosure: 0.15,
         organization_disclosure: 0.001,
         secret_disclosure: 0.001,
         insufficient_context: 0.001,
       },
     };
-    expect(AUTO_POLICY).toBe("auto-beta-6");
+    expect(AUTO_POLICY).toBe("auto-beta-7");
+    expect(AUTO_THRESHOLDS).not.toHaveProperty("read_only");
     expect(AUTO_THRESHOLDS.personal_disclosure).toBe(0.2);
     expect(validEvaluation(current)).toBe(true);
-    expect(validEvaluation({ ...current, policy: "auto-beta-5" })).toBe(false);
+    expect(validEvaluation({ ...current, policy: "auto-beta-6" })).toBe(false);
+    expect(
+      validEvaluation({ ...current, probabilities: { ...current.probabilities, read_only: 1 } }),
+    ).toBe(false);
   });
 });

@@ -92,8 +92,7 @@ export function approvalHtml(
   const axes = Object.entries(e.probabilities)
     .map(([id, value]) => {
       const cutoff = AUTO_THRESHOLDS[id as keyof typeof AUTO_THRESHOLDS];
-      const over =
-        graded && cutoff !== undefined && (id === "read_only" ? value < cutoff : value > cutoff);
+      const over = graded && cutoff !== undefined && value > cutoff;
       return `<span class="auto-reason metric${over ? " over" : ""}">${escapeHtml(id)} ${escapeHtml(String(value))}</span>`;
     })
     .join("");

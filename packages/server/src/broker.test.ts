@@ -108,7 +108,7 @@ describe("plugin-only automatic evaluation", () => {
       scope: connectionScopeKey(conn),
       key: "synthetic-key",
       model: "jev-1.13.0",
-      policy: "auto-beta-6",
+      policy: "auto-beta-7",
       input: {
         dialect: "postgresql",
         sql: "SELECT quantity FROM public.products LIMIT 10",
@@ -128,13 +128,12 @@ describe("plugin-only automatic evaluation", () => {
     return {
       provider: "typesafe",
       model: "jev-1.13.0",
-      policy: "auto-beta-6",
+      policy: "auto-beta-7",
       sqlDigest: digest,
       evaluatedAt: Date.now(),
       eligible: true,
       reasons: [],
       probabilities: {
-        read_only: 1,
         personal_disclosure: 0,
         secret_disclosure: 0,
         organization_disclosure: 0,
