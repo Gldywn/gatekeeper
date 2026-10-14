@@ -26,8 +26,9 @@ import {
   evaluationInput,
   type KeyChecker,
 } from "./evaluator.js";
+import type { Notifier } from "./notify.js";
 import { pairingPage } from "./pairing-page.js";
-import { type Outcome, type RequestStore, StoreError } from "./store.js";
+import { type GatekeeperRequest, type Outcome, type RequestStore, StoreError } from "./store.js";
 
 const CORS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -57,6 +58,7 @@ interface Broker {
   stampedAt: number;
   evaluator: Evaluator;
   keyChecker: KeyChecker;
+  notifier?: Notifier;
   evaluating: boolean;
   evaluations: Map<
     string,
@@ -75,6 +77,7 @@ export function createBroker(
   token: string,
   evaluator: Evaluator = evaluate,
   keyChecker: KeyChecker = checkKey,
+  notifier?: Notifier,
 ): Server {
   const port = brokerPort();
   const broker: Broker = {
@@ -85,6 +88,7 @@ export function createBroker(
     stampedAt: 0,
     evaluator,
     keyChecker,
+    notifier,
     evaluating: false,
     evaluations: new Map(),
   };
@@ -376,8 +380,14 @@ async function handle(broker: Broker, req: IncomingMessage, res: ServerResponse)
       return;
     }
     guarded(res, () => {
-      store.resolve(String(body.id), String(body.leaseId), toOutcome(body), hold.data);
+      const resolved = store.resolve(
+        String(body.id),
+        String(body.leaseId),
+        toOutcome(body),
+        hold.data,
+      );
       send(res, 200, { ok: true });
+      soundAutoApproval(broker, resolved);
     });
     return;
   }
@@ -512,6 +522,28 @@ function guarded(
       return;
     }
     send(res, 500, { error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+// Sounds on the terminal result, not on /executing: the plugin can still withdraw a
+// reservation, and a failed query was not handled for anyone. Skipped while another
+// proposal is still open, where it would read as an all-clear.
+function soundAutoApproval(broker: Broker, request: GatekeeperRequest): void {
+  const approval = (request.policy as { approval?: { source?: unknown } } | null)?.approval;
+  if (
+    !broker.notifier?.autoActive ||
+    request.state !== "approved" ||
+    approval?.source !== "automatic"
+  ) {
+    return;
+  }
+  try {
+    if (!broker.store.claimAutoAlert()) {
+      return;
+    }
+    broker.notifier.notifyAuto();
+  } catch {
+    // The result is already accepted and answered; a lost sound must not touch it.
   }
 }
 
