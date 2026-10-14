@@ -27,6 +27,7 @@ import {
   type KeyChecker,
 } from "./evaluator.js";
 import { pairingPage } from "./pairing-page.js";
+import { sensitivityRecord } from "./store/audit.js";
 import { type ActivityCursor, type Outcome, type RequestStore, StoreError } from "./store.js";
 
 const CORS: Record<string, string> = {
@@ -230,6 +231,8 @@ async function handle(broker: Broker, req: IncomingMessage, res: ServerResponse)
 
   if (req.method === "POST" && url.pathname === "/executing") {
     const body = await readJson(req);
+    // An unreadable record is dropped, never a reason to refuse the decision it rides on.
+    const sensitivity = sensitivityRecord.safeParse(body.sensitivity).data;
     guarded(res, () => {
       const approval =
         body.approval === undefined
@@ -259,7 +262,7 @@ async function handle(broker: Broker, req: IncomingMessage, res: ServerResponse)
           return;
         }
       }
-      store.markExecuting(String(body.id), String(body.leaseId), approval);
+      store.markExecuting(String(body.id), String(body.leaseId), approval, sensitivity);
       broker.evaluations.delete(String(body.id));
       send(res, 200, { ok: true });
     });
@@ -390,8 +393,10 @@ async function handle(broker: Broker, req: IncomingMessage, res: ServerResponse)
       send(res, 400, { error: "Invalid Auto mode hold" });
       return;
     }
+    // An unreadable record is dropped, never a reason to refuse the decision it rides on.
+    const sensitivity = sensitivityRecord.safeParse(body.sensitivity).data;
     guarded(res, () => {
-      store.resolve(String(body.id), String(body.leaseId), toOutcome(body), hold.data);
+      store.resolve(String(body.id), String(body.leaseId), toOutcome(body), hold.data, sensitivity);
       send(res, 200, { ok: true });
     });
     return;
@@ -482,9 +487,6 @@ function exchange(
   );
 }
 
-// The plugin's header carries the composite scope key for the tab making the
-// request; only when it is absent do we fall back to the last-posted snapshot
-// (shared, so it can lag behind a multi-tab caller's real connection).
 // The Audit Trail's older-page cursor: both halves or neither, each given once, in the
 // exact shape the store mints (`token("req")`), so a plugin bug fails loudly as a 400.
 function activityCursor(params: URLSearchParams): ActivityCursor | null | "invalid" {
@@ -502,6 +504,9 @@ function activityCursor(params: URLSearchParams): ActivityCursor | null | "inval
     : "invalid";
 }
 
+// The plugin's header carries the composite scope key for the tab making the
+// request; only when it is absent do we fall back to the last-posted snapshot
+// (shared, so it can lag behind a multi-tab caller's real connection).
 function resolveConnection(store: RequestStore, req: IncomingMessage): string | null {
   const header = req.headers["x-gatekeeper-connection"];
   if (typeof header === "string" && header) {

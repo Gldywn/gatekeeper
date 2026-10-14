@@ -3,18 +3,17 @@ import { dayKey } from "../html";
 import type { BrokerClient } from "../net/broker";
 import {
   activityCsv,
+  activityDayBodyHtml,
   activityDaysHtml,
   activityFlagLabels,
-  activityFlagsHtml,
   activityJson,
   activityMarkdown,
   activityShell,
   activityTailError,
   activityTailLoading,
+  entryFlags,
 } from "../render/activity";
-import { formatSql } from "../sql/format";
-import { highlight } from "../sql/highlight";
-import type { SchemaContext } from "../sql/schema";
+import { textSchema } from "../sql/schema";
 import type { ActivityEntry } from "../types";
 
 // How far below the overlay's fold the list end may sit and still start the next load.
@@ -45,9 +44,6 @@ interface ActivityViewDeps {
   scope: () => string | undefined;
   // The audit-trail head's connection chip, built from the live snapshot by app.ts.
   connChip: () => string;
-  // Host-side schema resolver (app's annotator): null when the SQL won't parse,
-  // undefined when a connection switch invalidated the fetch mid-flight.
-  schemaFor: (sql: string) => Promise<SchemaContext | null | undefined>;
   // The connection dialect, so each entry's read/write/destructive class can be parsed.
   dialect: () => string;
 }
@@ -65,7 +61,6 @@ export class ActivityView {
   private readonly connectionName: () => string;
   private readonly scope: () => string | undefined;
   private readonly connChip: () => string;
-  private readonly schemaFor: (sql: string) => Promise<SchemaContext | null | undefined>;
   private readonly dialect: () => string;
   // Fetched but not shown: the oldest day reached so far, held until a later page (or the
   // end of history) proves it whole, so every day on screen has its full count and export.
@@ -76,8 +71,8 @@ export class ActivityView {
   private loading = false;
   private observer: IntersectionObserver | null = null;
   private frame = 0;
-  // Bumped on every open, close and reset, so a slow page load or flag pass abandons
-  // itself once its feed is gone rather than patching or appending stale rows.
+  // Bumped on every open, close and reset, so a slow page load abandons itself once its
+  // feed is gone rather than appending stale rows.
   private gen = 0;
 
   constructor(deps: ActivityViewDeps) {
@@ -86,7 +81,6 @@ export class ActivityView {
     this.connectionName = deps.connectionName;
     this.scope = deps.scope;
     this.connChip = deps.connChip;
-    this.schemaFor = deps.schemaFor;
     this.dialect = deps.dialect;
   }
 
@@ -107,7 +101,7 @@ export class ActivityView {
   }
 
   close(): void {
-    // Abandon any in-flight load or flag pass; its rows are about to be torn down.
+    // Abandon any in-flight load; its rows are about to be torn down.
     this.stop();
     const panel = this.root.querySelector<HTMLDivElement>("#activity");
     if (panel && !panel.hidden) {
@@ -152,14 +146,14 @@ export class ActivityView {
     let whole: ActivityEntry[] = [];
     try {
       do {
-        const page = await this.broker.activity(
-          this.scope(),
-          this.partial.at(-1) ?? this.activity.at(-1),
-        );
+        const cursor = this.partial.at(-1) ?? this.activity.at(-1);
+        const page = await this.broker.activity(this.scope(), cursor);
         if (gen !== this.gen) {
           return;
         }
-        if (page === null) {
+        // A cursor answered without `more` means a broker that predates paging took the port:
+        // it ignored the cursor and sent its newest page, which must never be appended again.
+        if (page === null || (cursor && typeof page.more !== "boolean")) {
           this.setTail(activityTailError(first, false));
           return;
         }
@@ -191,16 +185,14 @@ export class ActivityView {
       this.activity = entries;
       this.renderActivity();
     } else {
-      // Older whole days only ever go below: what the human has open above stays as is. A new
-      // array, so the flag pass still walking the previous one never reaches these rows.
-      this.activity = [...this.activity, ...entries];
+      // Older whole days only ever go below: what the human has open above stays as is.
+      this.activity.push(...entries);
       this.root
         .querySelector<HTMLElement>("#activity .act-body")
         ?.insertAdjacentHTML(
           "beforeend",
           activityDaysHtml(entries, this.activityExpanded, this.dialect(), false),
         );
-      void this.patchFlags(entries);
     }
     this.setTail("");
     if (this.more === true) {
@@ -265,48 +257,10 @@ export class ActivityView {
       return;
     }
     this.setActivityBody(activityDaysHtml(this.activity, this.activityExpanded, this.dialect()));
-    // The list is on screen now; the sensitivity flags fill in as the schema resolves.
-    void this.patchFlags(this.activity);
   }
 
-  // Flags need the schema, fetched (and cached) per table, so they can't be known at
-  // first render. Resolve them after the fact and patch each row in place, leaving the
-  // day folds and expanded rows the human may already be reading untouched.
-  private async patchFlags(entries: ActivityEntry[]): Promise<void> {
-    const gen = this.gen;
-    for (const e of entries) {
-      const schema = await this.schemaFor(e.sql);
-      // A reopen, a close or a connection switch has superseded this pass.
-      if (gen !== this.gen) {
-        return;
-      }
-      // null: the SQL would not parse. undefined: a switch invalidated the fetch.
-      if (!schema) {
-        continue;
-      }
-      // Light the sensitive columns/values in the SQL, exactly as the pending card and the
-      // detail do, so the audit trail stops dropping the red the schema already knows about.
-      const code = this.root.querySelector<HTMLElement>(
-        `#activity [data-act-sqlbody="${CSS.escape(e.id)}"]`,
-      );
-      if (code) {
-        code.innerHTML = highlight(formatSql(e.sql), schema.pii, schema.client, schema.literals);
-      }
-      const html = activityFlagsHtml(schema);
-      if (!html) {
-        continue;
-      }
-      const el = this.root.querySelector<HTMLElement>(
-        `#activity [data-act-flags="${CSS.escape(e.id)}"]`,
-      );
-      if (el) {
-        el.innerHTML = html;
-      }
-    }
-  }
-
-  // Fold a day open or closed in place: days are pure DOM state, so nothing here
-  // touches the fetched feed or the expanded-row set.
+  // Fold a day open or closed in place. A day that arrived folded has no rows yet: build
+  // them the first time it opens, leaving every other day and expanded row untouched.
   toggleDay(head: HTMLElement): void {
     const day = head.closest<HTMLElement>(".act-day");
     if (!day) {
@@ -314,6 +268,16 @@ export class ActivityView {
     }
     const collapsed = day.classList.toggle("collapsed");
     head.setAttribute("aria-expanded", String(!collapsed));
+    const body = day.querySelector<HTMLElement>(".act-day-body");
+    const key = head.getAttribute("data-day");
+    if (!collapsed && body && !body.childElementCount && key) {
+      body.innerHTML = activityDayBodyHtml(
+        key,
+        this.activity.filter((e) => dayOf(e) === key),
+        this.activityExpanded,
+        this.dialect(),
+      );
+    }
   }
 
   // Toggle a single entry's full SQL in place so expanding one row never rebuilds
@@ -349,18 +313,17 @@ export class ActivityView {
     }
     const day = key.slice(0, sep);
     const sessionId = key.slice(sep + 1);
-    const entries = this.activity.filter(
-      (e) => e.sessionId === sessionId && dayKey(e.decidedAt ?? e.createdAt) === day,
-    );
+    const entries = this.activity.filter((e) => e.sessionId === sessionId && dayOf(e) === day);
     if (!entries.length) {
       return;
     }
-    // Sensitivity flags are not stored on the entry: resolve them from the same cached
-    // schema the row chips use. A parse miss or a mid-flight switch just leaves it blank.
+    // The same flags the row chips show, computed locally before the only await below, so a
+    // connection switch can no longer land between the entries and their labels.
+    const dialect = this.dialect();
     const flags = new Map<string, string[]>();
     for (const e of entries) {
-      const schema = await this.schemaFor(e.sql);
-      const labels = schema ? activityFlagLabels(schema) : [];
+      const found = entryFlags(e, textSchema(e.sql, dialect));
+      const labels = found ? activityFlagLabels(found) : [];
       if (labels.length) {
         flags.set(e.id, labels);
       }

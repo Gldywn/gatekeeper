@@ -2797,13 +2797,13 @@ label.qs-row {
   height: 8px;
   width: 140px;
 }
-.act-skel-bar:first-of-type {
+.act-tail-slot + .act-skel-bar {
   width: 74px;
 }
 .act-skel:nth-child(2) .act-skel-bar {
   width: 124px;
 }
-.act-skel:nth-child(2) .act-skel-bar:first-of-type {
+.act-skel:nth-child(2) .act-tail-slot + .act-skel-bar {
   width: 60px;
 }
 @media (prefers-reduced-motion: no-preference) {

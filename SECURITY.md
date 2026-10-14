@@ -155,6 +155,10 @@ itself is in neither the URL nor the prompt.
   connection scoping) does show the raw SQL, because it is the operator's own review view.
   Its Markdown, CSV, and JSON exports carry the SQL with formula-injection and
   trojan-source guards applied, and never include result rows.
+- Its PII, Value and Client flags never query the connected database. The plugin posts them
+  with the decision as three booleans (`policy_json.sensitivity`), never a table, column or
+  value; requests decided before that, or never shown on a card, are
+  flagged from their SQL text alone, which cannot see the columns behind a `SELECT *`.
 
 ## Supply-chain policy
 

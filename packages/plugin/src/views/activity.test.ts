@@ -91,7 +91,6 @@ function harness() {
     connectionName: () => "conn",
     scope: () => "scope",
     connChip: () => "",
-    schemaFor: async () => null,
     dialect: () => "postgresql",
   });
   const days = () => [...body.innerHTML.matchAll(/data-day="([^"]+)"/g)].map((m) => m[1]);
@@ -279,6 +278,50 @@ describe("ActivityView paging", () => {
     expect(activity.mock.calls[2][1]).toBe(held[1]);
     expect(days()).toEqual(["2026-10-09", "2026-10-08"]);
     expect(tail.innerHTML).toBe("");
+  });
+
+  it("fails, without appending, when a pre-paging broker answers a cursor", async () => {
+    const { view, activity, tail, days } = harness();
+    activity.mockResolvedValueOnce({ activity: [entry(0), entry(1)], more: true });
+    await view.open();
+    // The port passed to an old broker: it ignores the cursor and repeats its newest page.
+    activity.mockResolvedValueOnce({ activity: [entry(0), entry(1)] });
+    await view.loadOlder();
+    expect(days()).toEqual(["2026-10-09"]);
+    expect(tail.innerHTML).toContain("Older days did not load.");
+    expect(tail.innerHTML).toContain("data-act-retry");
+  });
+
+  it("fails the first load too when the port changes hands while a day is held", async () => {
+    const { view, activity, body, tail } = harness();
+    activity
+      .mockResolvedValueOnce({ activity: [entry(0), entry(0)], more: true })
+      .mockResolvedValueOnce({ activity: [entry(0)] });
+    await view.open();
+    expect(body.innerHTML).toBe("");
+    expect(tail.innerHTML).toContain("The audit trail did not load.");
+  });
+
+  it("builds a folded day's rows the first time it opens, and only then", async () => {
+    const { view, activity } = harness();
+    activity.mockResolvedValueOnce({ activity: [entry(0), entry(1)], more: false });
+    await view.open();
+    const body = { childElementCount: 0, innerHTML: "" };
+    // classList.toggle answers "still collapsed?": false means the day just opened.
+    const day = { classList: { toggle: () => false }, querySelector: () => body };
+    const head = {
+      closest: () => day,
+      setAttribute: vi.fn(),
+      getAttribute: () => "2026-10-08",
+    } as unknown as HTMLElement;
+    view.toggleDay(head);
+    expect(body.innerHTML).toContain('data-act="req_000000000002"');
+    expect(body.innerHTML).not.toContain('data-act="req_000000000001"');
+
+    body.childElementCount = 1;
+    body.innerHTML = "kept";
+    view.toggleDay(head);
+    expect(body.innerHTML).toBe("kept");
   });
 
   it("shows a pre-paging broker's single page and never asks it again", async () => {

@@ -72,6 +72,15 @@ export interface ActivityEntry {
   approval?: ApprovalAttribution;
   evaluation?: AutoEvaluation;
   autoHold?: AutoHold;
+  sensitivity?: SensitivityRecord;
+}
+
+// Frozen when the decision is recorded, so the trail never re-queries a schema that has
+// since changed. Presence only; absent means not recorded, never "nothing sensitive".
+export interface SensitivityRecord {
+  pii: boolean;
+  value: boolean;
+  client: boolean;
 }
 
 // One page of GET /activity, newest first. A broker from before paging sends no `more`:

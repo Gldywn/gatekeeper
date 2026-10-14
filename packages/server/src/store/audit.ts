@@ -1,6 +1,16 @@
+import { z } from "zod";
 import type { StoreContext } from "./db.js";
 import { outcomeFacts, type RawAudit, toAudit } from "./rows.js";
 import type { ActivityEntry, AuditEntry, RequestState } from "./types.js";
+
+// Parsed where the plugin posts it and where the trail reads it back, since any broker token
+// holder can write policy_json. Unknown keys are stripped, so nothing but the three flags is
+// ever stored, and a newer plugin's richer record still lands.
+export const sensitivityRecord = z.object({
+  pii: z.boolean(),
+  value: z.boolean(),
+  client: z.boolean(),
+});
 
 export function logAudit(
   ctx: StoreContext,
@@ -102,6 +112,7 @@ export function listActivity(
   }[];
   return rows.map((row) => {
     const facts = outcomeFacts(row.state, row.result_json);
+    const policy = row.policy_json ? JSON.parse(row.policy_json) : undefined;
     return {
       id: row.id,
       createdAt: row.created_at,
@@ -117,9 +128,11 @@ export function listActivity(
       error: facts.error,
       rowCount: facts.rowCount,
       affectedRows: facts.affectedRows,
-      approval: row.policy_json ? JSON.parse(row.policy_json).approval : undefined,
-      evaluation: row.policy_json ? JSON.parse(row.policy_json).evaluation : undefined,
-      autoHold: row.policy_json ? JSON.parse(row.policy_json).autoHold : undefined,
+      approval: policy?.approval,
+      evaluation: policy?.evaluation,
+      autoHold: policy?.autoHold,
+      // A malformed stored record reads as not recorded, never as an all-clear.
+      sensitivity: sensitivityRecord.safeParse(policy?.sensitivity).data,
     };
   });
 }

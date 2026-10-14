@@ -549,3 +549,56 @@ describe("GET /activity paging", () => {
     expect((await call("GET", `/activity${query}`, { token: TOKEN })).status).toBe(400);
   });
 });
+
+describe("sensitivity record on decisions", () => {
+  function claimed() {
+    store.submit({ sessionId: "s1", sql: "SELECT email FROM users" });
+    return store.claimNext("plug_test", 30000)!;
+  }
+
+  it("stores a well-formed record and serves it back in the audit trail", async () => {
+    const c = claimed();
+    const sensitivity = { pii: true, value: false, client: false };
+    const reply = await call("POST", "/executing", {
+      token: TOKEN,
+      body: { id: c.id, leaseId: c.leaseId, sensitivity },
+    });
+    expect(reply.status).toBe(200);
+    await call("POST", "/result", {
+      token: TOKEN,
+      body: { id: c.id, leaseId: c.leaseId, status: "approved", rows: [], fields: [] },
+    });
+    const page = JSON.parse((await call("GET", "/activity", { token: TOKEN })).body);
+    expect(page.activity[0].sensitivity).toEqual(sensitivity);
+  });
+
+  it.each(["/executing", "/result"])(
+    "still records the decision on %s when the record is unreadable",
+    async (path) => {
+      const c = claimed();
+      const reply = await call("POST", path, {
+        token: TOKEN,
+        body: { id: c.id, leaseId: c.leaseId, status: "rejected", sensitivity: { pii: "yes" } },
+      });
+      expect(reply.status).toBe(200);
+      expect(store.get(c.id)?.state).toBe(path === "/executing" ? "executing" : "rejected");
+      expect(JSON.stringify(store.get(c.id)?.policy ?? null)).not.toContain("sensitivity");
+    },
+  );
+
+  it("keeps only the three flags from a newer, richer record", async () => {
+    const c = claimed();
+    await call("POST", "/result", {
+      token: TOKEN,
+      body: {
+        id: c.id,
+        leaseId: c.leaseId,
+        status: "rejected",
+        sensitivity: { pii: true, value: false, client: false, columns: ["email"] },
+      },
+    });
+    expect(store.get(c.id)?.policy).toEqual({
+      sensitivity: { pii: true, value: false, client: false },
+    });
+  });
+});

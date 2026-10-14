@@ -7,6 +7,7 @@ import type {
   EvaluationInput,
   KeyStatus,
   RequestState,
+  SensitivityRecord,
 } from "@gatekeeper/shared";
 import { AUTO_MODEL, AUTO_POLICY } from "../sql/auto";
 import type { ActivityEntry, Proposal, SessionRoster } from "../types";
@@ -167,11 +168,16 @@ export class BrokerClient {
     return { ok: true, leaseExpiresAt };
   }
 
-  async executing(id: string, leaseId: string, approval?: ApprovalAttribution): Promise<boolean> {
+  async executing(
+    id: string,
+    leaseId: string,
+    approval?: ApprovalAttribution,
+    sensitivity?: SensitivityRecord,
+  ): Promise<boolean> {
     const res = await this.request("/executing", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, leaseId, approval }),
+      body: JSON.stringify({ id, leaseId, approval, sensitivity }),
     });
     return res.ok;
   }

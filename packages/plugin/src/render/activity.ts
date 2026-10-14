@@ -1,3 +1,4 @@
+import type { SensitivityRecord } from "@gatekeeper/shared";
 import { csvFormulaGuard, csvQuote } from "../csv";
 import {
   activityLatency,
@@ -29,7 +30,7 @@ import { classifyQuery } from "../sql/classify";
 import { formatSql } from "../sql/format";
 import { highlight } from "../sql/highlight";
 import { visibleControls } from "../sql/sanitize";
-import type { SchemaContext } from "../sql/schema";
+import { type SchemaContext, sensitivityOf, textSchema } from "../sql/schema";
 import type { ActivityEntry } from "../types";
 import { approvalHtml, approvalLabel, autoIcon } from "./auto";
 import { flyoutMenu } from "./controls";
@@ -58,20 +59,15 @@ export function activityDaysHtml(
   // false for an older page appended below: it arrives all folded.
   openNewest = true,
 ): string {
-  const days: { key: string; label: string; sessions: Map<string, ActivityEntry[]> }[] = [];
+  const days: { key: string; label: string; entries: ActivityEntry[] }[] = [];
   for (const e of activity) {
     const ts = e.decidedAt ?? e.createdAt;
     const key = dayKey(ts);
-    let day = days.find((d) => d.key === key);
-    if (!day) {
-      day = { key, label: dayLabel(ts), sessions: new Map() };
-      days.push(day);
-    }
-    const arr = day.sessions.get(e.sessionId);
-    if (arr) {
-      arr.push(e);
+    const day = days.find((d) => d.key === key);
+    if (day) {
+      day.entries.push(e);
     } else {
-      day.sessions.set(e.sessionId, [e]);
+      days.push({ key, label: dayLabel(ts), entries: [e] });
     }
   }
   const today = dayKey(Date.now());
@@ -79,13 +75,13 @@ export function activityDaysHtml(
   const openKey = openNewest ? (days.find((d) => d.key === today)?.key ?? days[0]?.key) : null;
   return days
     .map((d) => {
-      const total = [...d.sessions.values()].reduce((n, arr) => n + arr.length, 0);
-      const sessions = d.sessions.size;
+      const total = d.entries.length;
+      const sessions = new Set(d.entries.map((e) => e.sessionId)).size;
       const collapsed = d.key !== openKey;
       const count = `&middot; ${total} ${total === 1 ? "query" : "queries"} &middot; ${sessions} ${sessions === 1 ? "session" : "sessions"}`;
-      const groups = [...d.sessions.entries()]
-        .map(([sid, entries]) => activityGroupHtml(d.key, sid, entries, expanded, dialect))
-        .join("");
+      // A folded day ships without its rows: the view builds them on first unfold, so a
+      // long prefetched history costs one line per day.
+      const body = collapsed ? "" : activityDayBodyHtml(d.key, d.entries, expanded, dialect);
       return `
         <section class="act-day${collapsed ? " collapsed" : ""}">
           <button class="act-day-head" type="button" data-day="${escapeHtml(d.key)}" aria-expanded="${!collapsed}">
@@ -93,9 +89,30 @@ export function activityDaysHtml(
             <span class="act-day-label">${escapeHtml(d.label)}</span>
             <span class="act-day-count">${count}</span>
           </button>
-          <div class="act-day-body">${groups}</div>
+          <div class="act-day-body">${body}</div>
         </section>`;
     })
+    .join("");
+}
+
+// One day's rows, grouped by session in first-seen (newest-first) order.
+export function activityDayBodyHtml(
+  day: string,
+  entries: ActivityEntry[],
+  expanded: Set<string>,
+  dialect: string,
+): string {
+  const sessions = new Map<string, ActivityEntry[]>();
+  for (const e of entries) {
+    const arr = sessions.get(e.sessionId);
+    if (arr) {
+      arr.push(e);
+    } else {
+      sessions.set(e.sessionId, [e]);
+    }
+  }
+  return [...sessions.entries()]
+    .map(([sid, group]) => activityGroupHtml(day, sid, group, expanded, dialect))
     .join("");
 }
 
@@ -237,6 +254,9 @@ export function activityEntryHtml(
   const counts =
     state === "approved" ? countsLabel({ rowCount: e.rowCount, affectedRows: e.affectedRows }) : "";
   const rows = counts ? ` &middot; ${escapeHtml(counts)}` : "";
+  // Highlighting needs column names, which only the SQL text has; the chips prefer the record.
+  const text = textSchema(e.sql, dialect);
+  const flags = entryFlags(e, text);
   return `
           <div class="act-entry${isExpanded ? " open" : ""}" data-act="${escapeHtml(e.id)}">
             <button class="act-row" type="button" data-act-sql="${escapeHtml(e.id)}" aria-expanded="${isExpanded}">
@@ -244,52 +264,65 @@ export function activityEntryHtml(
               <span class="act-time">${escapeHtml(clockTime(ts))}</span>
               <span class="act-state ${escapeHtml(state)}${e.approval?.source === "automatic" ? " auto" : ""}">${escapeHtml(label)}</span>
               ${riskIcon(cls)}<span class="act-intent">${escapeHtml(headline)}</span>
-              ${autoFlag(e)}<span class="act-flags" data-act-flags="${escapeHtml(e.id)}"></span>
+              ${autoFlag(e)}<span class="act-flags">${flags ? activityFlagsHtml(flags) : ""}</span>
               <span class="act-metric">${escapeHtml(activityMetric(e))}</span>
             </button>
             <div class="act-detail"${isExpanded ? "" : " hidden"}>
               <div class="act-meta">${escapeHtml(e.id)} &middot; ${escapeHtml(new Date(ts).toLocaleString())}${rows}</div>
               ${approvalHtml(e.approval, e.evaluation, e.autoHold)}${note ? `<div class="act-enote ${escapeHtml(state)}">${escapeHtml(note)}</div>` : ""}
-              <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(visibleControls(e.sql))}" aria-label="Copy SQL">${copyIcon}</button><code data-act-sqlbody="${escapeHtml(e.id)}">${highlight(formatSql(e.sql))}</code></pre>
+              <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(visibleControls(e.sql))}" aria-label="Copy SQL">${copyIcon}</button><code>${highlight(formatSql(e.sql), text?.pii, text?.client, text?.literals)}</code></pre>
             </div>
           </div>`;
 }
 
-// The condensed sensitivity flags on a row: presence only, never which columns. Patched
-// in after render because they need the schema, which is fetched and cached per table.
-export function activityFlagsHtml(schema: SchemaContext): string {
+// The decision's recorded flags when the broker sends a well-formed record, else what the
+// SQL text shows. Either way the trail never queries the database it audits.
+export function entryFlags(e: ActivityEntry, text: SchemaContext | null): SensitivityRecord | null {
+  const r = e.sensitivity;
+  if (
+    r &&
+    typeof r.pii === "boolean" &&
+    typeof r.value === "boolean" &&
+    typeof r.client === "boolean"
+  ) {
+    return r;
+  }
+  return text ? sensitivityOf(text) : null;
+}
+
+// The condensed sensitivity flags on a row: presence only, never which columns.
+export function activityFlagsHtml(flags: SensitivityRecord): string {
   let html = "";
-  if (schema.pii.length) {
+  if (flags.pii) {
     html += '<span class="act-flag pii">PII</span>';
   }
-  if (schema.literals.length) {
+  if (flags.value) {
     html += '<span class="act-flag val">Value</span>';
   }
-  if (schema.client.length) {
+  if (flags.client) {
     html += '<span class="act-flag client">Client</span>';
   }
   return html;
 }
 
-// Spelled-out sensitivity labels for the export, from the same schema the row chips
-// read: PII columns, sensitive literals in a filter, and client-confidential columns.
+// Spelled-out sensitivity labels for the export, from the same flags the row chips read.
 // Presence only, never which columns, so the export stays as PII-safe as the trail.
-export function activityFlagLabels(schema: SchemaContext): string[] {
+export function activityFlagLabels(flags: SensitivityRecord): string[] {
   const labels: string[] = [];
-  if (schema.pii.length) {
+  if (flags.pii) {
     labels.push("PII");
   }
-  if (schema.literals.length) {
+  if (flags.value) {
     labels.push("sensitive value");
   }
-  if (schema.client.length) {
+  if (flags.client) {
     labels.push("client-data");
   }
   return labels;
 }
 
-// Per-entry sensitivity labels, resolved host-side by the caller (schema is cached per
-// table) and keyed by entry id. Both exports read this map so markdown and CSV agree.
+// Per-entry sensitivity labels from entryFlags, keyed by entry id. Every export reads this
+// map so markdown, CSV and JSON agree with the row chips.
 export type ActivityFlagMap = ReadonlyMap<string, string[]>;
 
 // CommonMark: a fenced block ends at the first line with at least as many backticks as

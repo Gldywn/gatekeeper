@@ -192,6 +192,29 @@ describe("activity paging", () => {
       expect(
         JSON.stringify(plan).match(/USING COVERING INDEX idx_requests_activity/g),
       ).toHaveLength(2);
+      // A seek, not a filtered scan: both branches bound the index range by the cursor.
+      expect(
+        plan.filter((step) =>
+          String((step as { detail: string }).detail).includes("(decided_at,id)<(?,?)"),
+        ),
+      ).toHaveLength(2);
+    } finally {
+      ctx.db.close();
+    }
+  });
+});
+
+describe("sensitivity record read back", () => {
+  it("reads a malformed stored record as not recorded", () => {
+    const ctx = createContext({ now: () => 10 ** 12 });
+    try {
+      migrate(ctx.db);
+      ctx.db
+        .prepare(`INSERT INTO requests
+          (id, created_at, session_id, sql, state, decided_at, result_json, policy_json, expires_at)
+          VALUES ('req_000000000001', 1, 's1', 'SELECT 1', 'rejected', 2, '{"reason":null}', ?, 3)`)
+        .run(JSON.stringify({ sensitivity: { pii: "yes", value: false, client: false } }));
+      expect(listActivity(ctx, null)[0].sensitivity).toBeUndefined();
     } finally {
       ctx.db.close();
     }
