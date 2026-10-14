@@ -26,24 +26,35 @@ import { type RequestStore, StoreError } from "./store.js";
 // closed, or a lost schema-access-off), so the tool fails closed instead of serving it.
 const SCHEMA_TTL_MS = 3 * 60_000;
 
+// Claude Code moves an MCP result past 50,000 characters into a file the agent then has to
+// page through; staying under it lowers that risk and the context cost, filters do the rest.
+const SCHEMA_BUDGET_CHARS = 40_000;
+// Room kept for the fixed-text hints, so the envelope never pushes the answer over budget.
+const HINT_RESERVE = 1_000;
+
+export interface SchemaFilter {
+  schema?: string;
+  tables?: string[];
+}
+
 // Serve the last-posted structure only when the human has schema access on, only for the
 // connection it was captured against, and only while it is still fresh (see the TTL above).
 export function schemaPayload(
   snap: SchemaSnapshot | null,
   conn: ConnectionSnapshot | null,
   now: number,
+  filter: SchemaFilter = {},
 ): unknown {
   if (!snap?.access) {
     return {
       available: false,
       reason:
-        "Schema access is off for this connection (or not reported yet). Ask the human to turn on Schema access in the Gatekeeper plugin settings.",
+        "Schema access is off for this connection (or not reported yet). Ask the human to turn on Schema access in the Gatekeeper plugin settings; until then, read table and column names with an introspection query against the engine's own catalog.",
     };
   }
   // Serve only while the snapshot's scope still matches the live connection. A switch (even
   // between same-named connections on different databases) or a forged/empty scope fails closed.
-  const scope = conn ? connectionScopeKey(conn) : "";
-  if (!snap.scope || snap.scope !== scope) {
+  if (!conn || !snap.scope || snap.scope !== connectionScopeKey(conn)) {
     return {
       available: false,
       reason: "The reported schema is stale (the connection changed); it will refresh shortly.",
@@ -56,13 +67,98 @@ export function schemaPayload(
         "The schema has not been refreshed recently; the plugin may be closed or Schema access turned off. It returns once the plugin is open with Schema access on.",
     };
   }
-  return {
+  const { schema, tables: names } = filter;
+  const matched = snap.tables.filter(
+    (t) => (schema === undefined || t.schema === schema) && (!names || names.includes(t.name)),
+  );
+  const head = {
     available: true,
     connectionName: snap.connectionName,
+    databaseType: conn.databaseType,
+    databaseName: conn.databaseName,
+    defaultSchema: conn.schema,
     capturedAt: snap.capturedAt,
+    collectedAt: snap.collectedAt ?? null,
+    complete: snap.complete ?? null,
     tableCount: snap.tables.length,
     excludedSchemas: snap.excludedSchemas ?? [],
-    tables: snap.tables,
+    matched: matched.length,
+  };
+  // Only a pathological post (thousands of characters of catalog or schema names) gets here;
+  // refusing beats an answer the budget no longer bounds.
+  if (JSON.stringify(head).length > SCHEMA_BUDGET_CHARS / 2) {
+    return {
+      available: false,
+      reason:
+        "The schema's metadata is too large to serve; read table and column names with an introspection query.",
+    };
+  }
+  const hints: string[] = [];
+  // The snapshot changes only when the plugin re-collects, so a miss never proves absence.
+  const asOf =
+    head.complete === true ? " in this snapshot." : " in this snapshot, which may be incomplete.";
+  if (schema !== undefined && !snap.tables.some((t) => t.schema === schema)) {
+    hints.push(`The requested schema matches no schema${asOf}`);
+  }
+  const missing = names
+    ? [...new Set(names)].filter((n) => !matched.some((t) => t.name === n)).length
+    : 0;
+  if (missing > 0) {
+    hints.push(
+      `${missing} requested table name(s) match no table${schema === undefined ? "" : " in the requested schema"}${asOf} Names are exact and unqualified: pass the schema separately.`,
+    );
+  }
+  const detail = withinBudget(head, matched);
+  if (names || detail.length === matched.length) {
+    if (detail.length < matched.length) {
+      hints.push(
+        `${matched.length - detail.length} matched table(s) did not fit in one response: request them in smaller groups, or narrow with schema when one name matches in several schemas. A table that does not fit alone is too large for get_schema; read its columns with an introspection query.`,
+      );
+    }
+    return response(head, "detail", detail, hints);
+  }
+  const index = withinBudget(
+    head,
+    matched.map((t) => ({
+      schema: t.schema,
+      name: t.name,
+      columnCount: t.columns.length,
+      ...(t.incomplete ? { incomplete: true } : {}),
+    })),
+  );
+  hints.push(
+    "Too large for one response, so this lists tables without columns. Call get_schema with tables (and schema) to read the columns you need.",
+  );
+  if (index.length < matched.length) {
+    hints.push(
+      `Only ${index.length} of ${matched.length} tables are listed: narrow with schema, or list the rest with an introspection query.`,
+    );
+  }
+  return response(head, "index", index, hints);
+}
+
+// Keep whole entries that fit the budget once the envelope and its hints are counted, so
+// the answer stays valid JSON and never ends mid-table.
+function withinBudget<T>(head: object, entries: T[]): T[] {
+  let room = SCHEMA_BUDGET_CHARS - HINT_RESERVE - JSON.stringify({ ...head, tables: [] }).length;
+  const kept: T[] = [];
+  for (const entry of entries) {
+    const size = JSON.stringify(entry).length + 1;
+    if (size <= room) {
+      kept.push(entry);
+      room -= size;
+    }
+  }
+  return kept;
+}
+
+function response(head: object, mode: "detail" | "index", tables: unknown[], hints: string[]) {
+  return {
+    ...head,
+    mode,
+    returned: tables.length,
+    ...(hints.length > 0 ? { hint: hints.join(" ") } : {}),
+    tables,
   };
 }
 
@@ -77,7 +173,10 @@ export const SERVER_INSTRUCTIONS =
   "call again. Never end your turn while a query is pending, leased or executing; wait for approved, " +
   "rejected, failed, expired or cancelled. run_query can return still-pending too; keep waiting. " +
   "Approval is manual by default; only a human can enable Auto mode beta for restricted reads. " +
-  "Never configure Auto mode, request its API key or treat agent intent as authorization.";
+  "Never configure Auto mode, request its API key or treat agent intent as authorization. " +
+  "Before writing SQL, read get_schema (no approval needed) and the dialect from " +
+  "get_connection_info. A failed query says why in terminal.error: correct a wrong name or syntax " +
+  "before proposing again, and after execution_unknown check whether a write ran before any retry.";
 
 // Omitting the notifier raises no desktop alert, so the test suite never spawns one;
 // index.ts, the real entry point, passes the process's instance.
@@ -114,7 +213,7 @@ export function createMcpServer(
     "submit_query",
     {
       title: "Propose a SQL query for approval",
-      description: `Enqueue a SQL statement for approval in Beekeeper Studio. Returns immediately with a request_id and never blocks: submit several (up to ${MAX_PENDING_PER_SESSION} in flight), keep doing other useful work while they await approval, then use poll_results to see which resolved and get_query_result to read one. IMPORTANT: never end your turn while a query you submitted is still pending, leased or executing; keep polling or waiting until it reaches a terminal state (approved, rejected, failed, expired, cancelled). Approval is manual by default and can take minutes; slowness is not a refusal. A human may explicitly enable Auto mode beta for a restricted read subset. You cannot enable it or configure its evaluator. Reads (SELECT) are allowed in Read mode; INSERT/UPDATE requires human-armed Write mode, and DELETE/DROP/TRUNCATE requires Destructive mode. Writes always require human approval. Execution modes are ephemeral and armed in the plugin, not by you. Requires a session label: call set_session_label first, or this is rejected.`,
+      description: `Enqueue a SQL statement for approval in Beekeeper Studio. Returns immediately with a request_id and never blocks: submit several (up to ${MAX_PENDING_PER_SESSION} in flight), keep doing other useful work while they await approval, then use poll_results to see which resolved and get_query_result to read one. IMPORTANT: never end your turn while a query you submitted is still pending, leased or executing; keep polling or waiting until it reaches a terminal state (approved, rejected, failed, expired, cancelled). Approval is manual by default and can take minutes; slowness is not a refusal. A human may explicitly enable Auto mode beta for a restricted read subset. You cannot enable it or configure its evaluator. Reads (SELECT) are allowed in Read mode; INSERT/UPDATE requires human-armed Write mode, and DELETE/DROP/TRUNCATE requires Destructive mode. Writes always require human approval. Execution modes are ephemeral and armed in the plugin, not by you. Requires a session label: call set_session_label first, or this is rejected. Get table and column names from get_schema (no approval needed) and the dialect from get_connection_info before writing SQL: a wrong name costs the human a round trip.`,
       inputSchema: {
         sql: z
           .string()
@@ -165,7 +264,7 @@ export function createMcpServer(
     "get_query_result",
     {
       title: "Get the result of a proposed query",
-      description: `Read a submitted query by request_id. With wait_ms it waits up to that many milliseconds (${MAX_WAIT_MS} at most) and returns the instant the human decides; if the wait runs out first it returns the query still in its non-terminal state (pending, leased, executing), which is a timed checkpoint and not an answer: call again to keep waiting, as many times as it takes. Only approved, rejected, failed, expired and cancelled are terminal. IMPORTANT: never end your turn while a query you submitted is non-terminal. Approved rows are stripped about ${RESULT_TTL_MS / 60_000} minutes after the decision (purged: true), so read them promptly rather than after a long detour. An approved write returns no rows: read affectedRows for how many it changed, and treat the field's absence as unknown rather than as zero. To check many proposals in one call, use poll_results.`,
+      description: `Read a submitted query by request_id. With wait_ms it waits up to that many milliseconds (${MAX_WAIT_MS} at most) and returns the instant the human decides; if the wait runs out first it returns the query still in its non-terminal state (pending, leased, executing), which is a timed checkpoint and not an answer: call again to keep waiting, as many times as it takes. Only approved, rejected, failed, expired and cancelled are terminal. IMPORTANT: never end your turn while a query you submitted is non-terminal. Approved rows are stripped about ${RESULT_TTL_MS / 60_000} minutes after the decision (purged: true), so read them promptly rather than after a long detour. An approved write returns no rows: read affectedRows for how many it changed, and treat the field's absence as unknown rather than as zero. A failed query says why in terminal.error, usually in the engine's words: correct a wrong name or syntax before proposing again, and after execution_unknown check whether a write ran before any retry. To check many proposals in one call, use poll_results.`,
       inputSchema: {
         request_id: z.string(),
         wait_ms: z
@@ -273,17 +372,35 @@ export function createMcpServer(
     {
       title: "Read the connected database's table and column structure",
       description:
-        "Return the structure of the database the plugin is connected to (schemas, tables, columns with types, primary and foreign keys) so you can write correct, valid SQL and refresh your understanding before proposing a query. Never returns any row data, default values, view/function bodies, or comments. Engine catalogs (information_schema, pg_*, mysql, performance_schema, sys) are left out because they dwarf the database's own tables, the ones skipped are listed in excludedSchemas, and you can still read any of them by proposing a normal query against it. Available only when the human has turned on Schema access for this connection; otherwise it reports unavailable. The structure can be large, so read it once and reuse it.",
-      inputSchema: {},
+        "Return the structure of the database the plugin is connected to (schemas, tables, columns with types, primary and foreign keys) and its dialect (databaseType), so you can write correct, valid SQL before proposing a query. Needs no approval. With no argument it returns every table when they fit in one response (mode: detail); on a larger database it returns an index of table names and column counts instead (mode: index), and you call again with tables, optionally schema, for the columns you need. complete: false (or null, unknown), or a table marked incomplete, means part of the tables or columns could not be read or was cut, so a missing name there is not proof it does not exist; keys are best effort, so a missing key is not proof either. The structure is as of collectedAt (when the server received it): a table created since, by a migration run outside Beekeeper or a statement just approved, can be missing until the plugin collects again, so after a schema change confirm with an introspection query. Never returns any row data, default values, view/function bodies, or comments. Engine catalogs (information_schema, pg_*, mysql, performance_schema, sys) are left out because they dwarf the database's own tables, the ones skipped are listed in excludedSchemas, and you can still read any of them by proposing a normal query against it. Available only when the human has turned on Schema access for this connection; otherwise it reports unavailable. Read it once and reuse it.",
+      inputSchema: {
+        schema: z
+          .string()
+          .max(512)
+          .optional()
+          .describe("Only tables in this schema, spelled exactly as get_schema reports it."),
+        tables: z
+          .array(z.string().max(512))
+          .min(1)
+          .max(100)
+          .optional()
+          .describe(
+            "Only these tables, exact unqualified names as get_schema reports them (users, not public.users; pass the schema separately), in any schema unless schema is set. Use it after an index response to read their columns.",
+          ),
+      },
     },
-    async () => {
+    async ({ schema, tables }) => {
       const unpaired = await pairing.check();
       if (unpaired) {
         return unpaired;
       }
       store.upsertSession({ sessionId, ...identity() });
-      const payload = schemaPayload(store.getSchema(), store.getConnection(), Date.now());
-      return { content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }] };
+      const payload = schemaPayload(store.getSchema(), store.getConnection(), Date.now(), {
+        schema,
+        tables,
+      });
+      // Unindented on purpose: the structure is the largest payload an agent reads here.
+      return { content: [{ type: "text" as const, text: JSON.stringify(payload) }] };
     },
   );
 

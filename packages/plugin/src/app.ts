@@ -271,6 +271,7 @@ export class Gatekeeper {
   private tickTimer?: number;
   private schemaTimer?: number;
   private schemaReportTimer?: number;
+  private schemaReportSeq = 0;
   private pollTimer?: number;
   private probeTimer?: number;
   private pollFailures = 0;
@@ -901,13 +902,18 @@ export class Gatekeeper {
     const scope = this.connScopeKey() ?? "";
     const name = this.connectionName;
     const on = this.settingsStore.get().schemaAccess;
+    const seq = ++this.schemaReportSeq;
     try {
       const payload = on
         ? await collectSchema(name, scope, this.conn.databaseType)
         : { connectionName: name, scope, access: false, tables: [], excludedSchemas: [] };
-      // Re-validate after the (possibly slow) collect: a connection switch or a toggle flip
-      // in between must never post a schema for the wrong database, or one without consent.
-      if ((this.connScopeKey() ?? "") !== scope || this.settingsStore.get().schemaAccess !== on) {
+      // Re-validate after the slow collect: a switch, a toggle flip or a newer report since
+      // must not post a wrong-database, unconsented or superseded schema.
+      if (
+        seq !== this.schemaReportSeq ||
+        (this.connScopeKey() ?? "") !== scope ||
+        this.settingsStore.get().schemaAccess !== on
+      ) {
         return;
       }
       await this.broker.postSchema(payload);

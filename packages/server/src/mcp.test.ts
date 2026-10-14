@@ -11,6 +11,7 @@ import {
   PAIRING_IDLE_MS,
   RESULT_TTL_MS,
 } from "./config.js";
+import { connectionScopeKey } from "./connection.js";
 import { createMcpServer, SERVER_INSTRUCTIONS } from "./mcp.js";
 import { pairingUrl } from "./pairing.js";
 import { RequestStore } from "./store.js";
@@ -287,5 +288,74 @@ describe("pairing", () => {
       expect(result.isError).toBe(true);
       expect(text(result)).toMatch(/"pairing_code": "\d{6}"/);
     });
+  });
+});
+
+describe("get_schema", () => {
+  let store: RequestStore;
+  let agent: Client;
+
+  beforeEach(async () => {
+    store = new RequestStore();
+    store.markPaired();
+    const conn = { connectionName: "prod", databaseType: "postgresql", databaseName: "app" };
+    store.setConnection({ ...conn, schema: "public" });
+    store.setSchema({
+      connectionName: "prod",
+      scope: connectionScopeKey(conn),
+      access: true,
+      complete: true,
+      tables: [
+        { schema: "public", name: "users", columns: [{ name: "id", type: "int4" }] },
+        { schema: "public", name: "orders", columns: [{ name: "id", type: "int4" }] },
+      ],
+    });
+    const { server } = createMcpServer(store);
+    agent = new Client({ name: "test", version: "0" });
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverSide), agent.connect(clientSide)]);
+  });
+
+  afterEach(async () => {
+    await agent.close();
+    store.close();
+  });
+
+  it("passes the table filter through the tool and names the dialect", async () => {
+    const result = await agent.callTool({ name: "get_schema", arguments: { tables: ["users"] } });
+    expect(result.isError).toBeFalsy();
+    expect(JSON.parse(text(result))).toMatchObject({
+      mode: "detail",
+      databaseType: "postgresql",
+      matched: 1,
+      tables: [{ schema: "public", name: "users" }],
+    });
+  });
+
+  // The budget is computed on the payload object; this pins it on the text the client receives.
+  it("keeps the tool output itself within the budget on a large database", async () => {
+    const conn = { connectionName: "prod", databaseType: "postgresql", databaseName: "app" };
+    const columns = Array.from({ length: 20 }, (_, i) => ({ name: `column_${i}`, type: "text" }));
+    store.setSchema({
+      connectionName: "prod",
+      scope: connectionScopeKey(conn),
+      access: true,
+      complete: true,
+      tables: Array.from({ length: 400 }, (_, i) => ({
+        schema: "public",
+        name: `t_${i}`,
+        columns,
+      })),
+    });
+    for (const args of [{}, { tables: Array.from({ length: 100 }, (_, i) => `t_${i}`) }]) {
+      const out = text(await agent.callTool({ name: "get_schema", arguments: args }));
+      expect(JSON.parse(out).returned).toBeGreaterThan(0);
+      expect(out.length).toBeLessThanOrEqual(40_000);
+    }
+  });
+
+  it("refuses an empty table list rather than answering with nothing", async () => {
+    const result = await agent.callTool({ name: "get_schema", arguments: { tables: [] } });
+    expect(result.isError).toBe(true);
   });
 });
