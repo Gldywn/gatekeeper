@@ -419,16 +419,23 @@ describe("the Auto mode sound", () => {
   });
 
   // A reservation the plugin withdraws goes back to human review with no new alert.
-  it("waits for an executing proposal, which can still be withdrawn", async () => {
+  it("waits for an automatic execution, which can still be withdrawn", async () => {
     rang();
     const done = executing("automatic");
     const reserved = executing("automatic", "SELECT 2");
-    await finish(done);
+    expect((await finish(done)).status).toBe(200);
     const withdrawn = await call("POST", "/execution/withdraw", { token: TOKEN, body: reserved });
     expect(withdrawn.status).toBe(200);
     expect(store.get(reserved.id)?.state).toBe("leased");
     expect(notifyAuto).not.toHaveBeenCalled();
     expect(store.claimAlert(NOTIFY_COOLDOWN_MS)).toBe(false);
+  });
+
+  it("does not wait for a query a human approved, still running", async () => {
+    rang();
+    executing("human");
+    expect((await finish(executing("automatic", "SELECT 2"))).status).toBe(200);
+    expect(notifyAuto).toHaveBeenCalledOnce();
   });
 
   it("leaves the window alone in modes that never play it", async () => {

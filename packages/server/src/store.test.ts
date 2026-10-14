@@ -909,16 +909,25 @@ describe("claimAutoAlert", () => {
     expect(store.claimAlert(10_000)).toBe(true);
   });
 
-  it("refuses while a proposal is pending, leased or executing", () => {
+  it("refuses while a proposal is pending, leased or executing automatically", () => {
     const { store } = makeStore();
     store.claimAlert(10_000);
     store.submit({ sessionId: "s1", sql: "SELECT 1" });
     expect(store.claimAutoAlert()).toBe(false);
     const lease = store.claimNext("plugin", LEASE)!;
     expect(store.claimAutoAlert()).toBe(false);
-    store.markExecuting(lease.id, lease.leaseId!);
+    store.markExecuting(lease.id, lease.leaseId!, { source: "automatic" });
     expect(store.claimAutoAlert()).toBe(false);
     store.resolve(lease.id, lease.leaseId!, { status: "approved", rows: [], fields: [] });
+    expect(store.claimAutoAlert()).toBe(true);
+  });
+
+  it("does not wait for a query a human approved, however long it runs", () => {
+    const { store } = makeStore();
+    store.claimAlert(10_000);
+    store.submit({ sessionId: "s1", sql: "SELECT 1" });
+    const lease = store.claimNext("plugin", LEASE)!;
+    store.markExecuting(lease.id, lease.leaseId!, { source: "human" });
     expect(store.claimAutoAlert()).toBe(true);
   });
 

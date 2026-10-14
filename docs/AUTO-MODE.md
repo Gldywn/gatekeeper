@@ -411,9 +411,9 @@ and shown in details and Audit Trail. They survive result-row purging and remain
 with the decided request. Older records without attribution are
 not retroactively labelled as human approvals.
 
-On macOS, proposals still raise the submission alert with Auto mode on. When a query it
-approved runs successfully and no other proposal is still waiting or running, the server also
-plays a distinct sound, without a banner. See
+On macOS, Auto mode does not silence the submission alert. When a query it approved runs
+successfully and no other proposal is still waiting for a decision or being run by Auto mode,
+the server also plays a distinct sound, without a banner. See
 [Desktop notifications](CONFIGURATION.md#desktop-notifications-macos).
 
 The plugin can attach `autoHold: { sent: boolean, reason: string }` to `POST /result`
