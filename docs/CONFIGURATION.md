@@ -27,4 +27,7 @@ symptom is a chime with nothing on screen. To change your mind, open System Sett
 Notifications, find **Gatekeeper**, and turn it back on. The server also logs a line to
 stderr on every start where the permission is missing.
 
+**Clicking the banner brings Beekeeper Studio forward**, launching it if needed. It cannot
+switch to the Gatekeeper tab: Beekeeper gives plugins no way to select their own tab.
+
 On Linux and Windows the feature is a no-op, and nothing else changes.
