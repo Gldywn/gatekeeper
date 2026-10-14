@@ -2,9 +2,10 @@ import type { AutoEvaluation, EvaluationInput, KeyStatus } from "@gatekeeper/sha
 import { z } from "zod";
 
 export const AUTO_MODEL = "jev-1.13.0";
-export const AUTO_POLICY = "auto-beta-6";
+export const AUTO_POLICY = "auto-beta-7";
 export const AUTO_THRESHOLDS = {
-  read_only: 0.95,
+  // Never blocks: read-only behavior is decided by the local analysis before Jev is called.
+  read_only: 0,
   personal_disclosure: 0.2,
   organization_disclosure: 0.15,
   secret_disclosure: 0.15,
@@ -25,8 +26,8 @@ export interface NoulQuestion {
   criteria: { true: string; false: string };
 }
 
-// Retained auto-beta-6 profile: the frozen candidate questions measured live on the synthetic
-// bench, identical to evals/auto-beta-6-questions.json (checked by the bench tests).
+// Retained profile: the frozen candidate questions measured live on the synthetic
+// bench, identical to evals/auto-beta-7-questions.json (checked by the bench tests).
 export const evaluationQuestions: Record<string, NoulQuestion> = {
   read_only: {
     type: "noul",
@@ -301,6 +302,7 @@ export const approvalAttribution = z
           "auto-beta-3",
           "auto-beta-4",
           "auto-beta-5",
+          "auto-beta-6",
           AUTO_POLICY,
         ]),
         evaluatedAt: z.number().finite(),

@@ -90,9 +90,9 @@ key or making network calls. Add `--out .orch/auto-evals/dry.json` to save a sna
 All flag paths are repository-relative, even though pnpm executes in the server package.
 New runs never replace existing output files.
 
-Default questions and cutoffs reproduce production `auto-beta-6`, snapshotted in
-[auto-beta-6-questions.json](auto-beta-6-questions.json) and
-[auto-beta-6-thresholds.json](auto-beta-6-thresholds.json); the `auto-beta-5` snapshot
+Default questions and cutoffs reproduce production `auto-beta-7`, snapshotted in
+[auto-beta-7-questions.json](auto-beta-7-questions.json) and
+[auto-beta-7-thresholds.json](auto-beta-7-thresholds.json), where `read_only: 0` never blocks; the `auto-beta-5` snapshot
 stays for older reports. Custom questions
 retain the strict 0.99/0.01 defaults unless an explicit thresholds file is supplied.
 [auto-identity-questions.json](auto-identity-questions.json) is an experimental candidate

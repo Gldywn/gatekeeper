@@ -1,5 +1,5 @@
 {
-  "read_only": 0.95,
+  "read_only": 0,
   "personal_disclosure": 0.2,
   "organization_disclosure": 0.15,
   "secret_disclosure": 0.15,

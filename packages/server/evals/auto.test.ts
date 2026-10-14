@@ -76,13 +76,13 @@ const sourceThresholds = JSON.parse(
 );
 const selected = (id: string): Case => corpus.find((c) => c.id === id)!;
 const currentQuestions = JSON.parse(
-  await readFile(new URL("auto-beta-6-questions.json", import.meta.url), "utf8"),
+  await readFile(new URL("auto-beta-7-questions.json", import.meta.url), "utf8"),
 );
 const beta5Questions = JSON.parse(
   await readFile(new URL("auto-beta-5-questions.json", import.meta.url), "utf8"),
 );
 const productionThresholds = JSON.parse(
-  await readFile(new URL("auto-beta-6-thresholds.json", import.meta.url), "utf8"),
+  await readFile(new URL("auto-beta-7-thresholds.json", import.meta.url), "utf8"),
 );
 const probabilities = Object.fromEntries(
   Object.keys(questions).map((id) => [id, id === "read_only" ? 0.99 : 0.01]),
@@ -143,6 +143,8 @@ describe("Auto evaluation bench (synthetic, no calibration)", () => {
   ])("$id: enforces its expected local/provider boundary", (c) => {
     const input = localInput(c);
     expect(typeof input).toBe(c.expected === "local" ? "string" : "object");
+    // Read-only behavior is decided locally; no labelled case may rely on Jev to hold it.
+    if (c.category === "read-only") expect(c.expected).toBe("local");
     const parsed = analyzeSql(c.sql, "postgresql");
     const names = parsed ? [...parsed.columns, ...parsed.aliases, ...parsed.jsonKeys] : [];
     if (
@@ -460,7 +462,7 @@ describe("Auto evaluation bench (synthetic, no calibration)", () => {
     expect(() => summarize(partial)).toThrow("Incomplete case list");
   });
 
-  it("pins production to the retained auto-beta-6 profile measured live", () => {
+  it("pins production to the frozen questions measured live, with read_only never blocking", () => {
     const report = prepare(corpus, evaluationQuestions, "development");
     expect(evaluationQuestions).toEqual(currentQuestions);
     // Question digest recorded by the live candidate reports this profile was chosen from.
@@ -469,35 +471,56 @@ describe("Auto evaluation bench (synthetic, no calibration)", () => {
     );
     expect(evaluationQuestions).not.toEqual(beta5Questions);
     expect(evaluationQuestions).not.toEqual(sharedQuestions);
-    expect(productionThresholds).toEqual({ ...sourceThresholds, personal_disclosure: 0.2 });
+    expect(productionThresholds).toEqual({
+      ...sourceThresholds,
+      personal_disclosure: 0.2,
+      read_only: 0,
+    });
     expect(report.thresholds).toEqual(productionThresholds);
     expect(AUTO_THRESHOLDS).toEqual(productionThresholds);
     expect(PLUGIN_THRESHOLDS).toEqual(productionThresholds);
     expect(PLUGIN_MODEL).toBe(AUTO_MODEL);
     expect(AUTO_MODEL).toBe("jev-1.13.0");
     expect(PLUGIN_POLICY).toBe(AUTO_POLICY);
-    expect(report.baselinePolicy).toBe("auto-beta-6");
+    expect(report.baselinePolicy).toBe("auto-beta-7");
   });
-  it.each(Object.keys(productionThresholds))(
+  const answering = (values: Record<string, number>) =>
+    vi.stubGlobal(
+      "fetch",
+      async () =>
+        new Response(
+          JSON.stringify({
+            model: AUTO_MODEL,
+            answers: Object.fromEntries(
+              Object.entries(values).map(([id, noul]) => [id, { type: "noul", noul }]),
+            ),
+          }),
+        ),
+    );
+  it.each([0, 1])("read_only %s never blocks on the server or in the plugin", async (readOnly) => {
+    const input = localInput(selected("product-catalog"));
+    if (typeof input === "string") throw new Error(input);
+    answering({ ...productionThresholds, read_only: readOnly });
+    const result = await evaluate(
+      input,
+      "synthetic-key",
+      new AbortController().signal,
+      "a".repeat(64),
+    );
+    expect(result.eligible).toBe(true);
+    expect(result.reasons).toEqual([]);
+    expect(result.probabilities.read_only).toBe(readOnly);
+    expect(currentEvaluation({ ...result, eligible: true, reasons: [] })).toBe(true);
+  });
+  it.each(Object.keys(productionThresholds).filter((axis) => axis !== "read_only"))(
     "server and plugin enforce the retained %s cutoff independently",
     async (axis) => {
       const input = localInput(selected("product-catalog"));
       if (typeof input === "string") throw new Error(input);
       for (const exceeds of [false, true]) {
         const values = { ...productionThresholds };
-        if (exceeds) values[axis] += axis === "read_only" ? -0.001 : 0.001;
-        vi.stubGlobal(
-          "fetch",
-          async () =>
-            new Response(
-              JSON.stringify({
-                model: AUTO_MODEL,
-                answers: Object.fromEntries(
-                  Object.entries(values).map(([id, noul]) => [id, { type: "noul", noul }]),
-                ),
-              }),
-            ),
-        );
+        if (exceeds) values[axis] += 0.001;
+        answering(values);
         const result = await evaluate(
           input,
           "synthetic-key",
@@ -508,7 +531,7 @@ describe("Auto evaluation bench (synthetic, no calibration)", () => {
         expect(currentEvaluation(result)).toBe(!exceeds);
         expect(currentEvaluation({ ...result, eligible: true, reasons: [] })).toBe(!exceeds);
         expect(currentEvaluation({ ...result, policy: "auto-beta-3" })).toBe(false);
-        expect(currentEvaluation({ ...result, policy: "auto-beta-5" })).toBe(false);
+        expect(currentEvaluation({ ...result, policy: "auto-beta-6" })).toBe(false);
         expect(
           currentEvaluation({
             ...result,
@@ -583,6 +606,7 @@ describe("auto-beta-5 broad shapes (prepared, never sent to TypeSafe here)", () 
     expect(typeof input, typeof input === "string" ? input : c.id).toBe(
       c.expected === "local" ? "string" : "object",
     );
+    if (c.category === "read-only") expect(c.expected).toBe("local");
     if (typeof input !== "string") {
       expect(JSON.stringify(input)).not.toMatch(
         /Synthetic (Person|Business)|AUTHORIZED|2026-01-01/,
@@ -617,6 +641,7 @@ describe("exported investigation shapes (synthetic, literals and names replaced)
     expect(typeof input, typeof input === "string" ? input : c.id).toBe(
       c.expected === "local" ? "string" : "object",
     );
+    if (c.category === "read-only") expect(c.expected).toBe("local");
     if (typeof input !== "string") {
       expect(input.sql).not.toMatch(/00000000-0000-4000-8000|BUSINESS|\/graphql|2026-09-19/);
       expect(input.dependencies.length).toBeGreaterThan(0);

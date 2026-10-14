@@ -89,7 +89,7 @@ describe("native Jev contract (mocked, not calibration)", () => {
     expect(accepted.eligible).toBe(true);
     expect(accepted.probabilities).toEqual(AUTO_THRESHOLDS);
     for (const [id, cutoff] of Object.entries(AUTO_THRESHOLDS))
-      body.answers[id].noul = cutoff + (id === "read_only" ? -0.001 : 0.001);
+      if (id !== "read_only") body.answers[id].noul = cutoff + 0.001;
     const held = await evaluate(
       input,
       "synthetic-key",
@@ -97,27 +97,36 @@ describe("native Jev contract (mocked, not calibration)", () => {
       "a".repeat(64),
     );
     expect(held.eligible).toBe(false);
-    expect(held.reasons).toHaveLength(5);
-    expect(held.probabilities.read_only).toBeCloseTo(0.949);
+    expect(held.reasons).toHaveLength(4);
+    expect(held.probabilities.read_only).toBe(0);
     expect(held.probabilities.personal_disclosure).toBeCloseTo(0.201);
   });
-  it.each(ids)("a concern on %s cannot be averaged away", async (id) => {
-    const body = response();
-    body.answers[id].noul = 0.5;
-    vi.stubGlobal("fetch", async () => new Response(JSON.stringify(body)));
-    const result = await evaluate(
-      input,
-      "synthetic-key",
-      new AbortController().signal,
-      "a".repeat(64),
-    );
-    expect(result.eligible).toBe(false);
-    expect(result.reasons).toHaveLength(1);
-  });
+  it.each(ids.filter((id) => id !== "read_only"))(
+    "a concern on %s cannot be averaged away",
+    async (id) => {
+      const body = response();
+      body.answers[id].noul = 0.5;
+      vi.stubGlobal("fetch", async () => new Response(JSON.stringify(body)));
+      const result = await evaluate(
+        input,
+        "synthetic-key",
+        new AbortController().signal,
+        "a".repeat(64),
+      );
+      expect(result.eligible).toBe(false);
+      expect(result.reasons).toHaveLength(1);
+    },
+  );
   it.each([
     {},
     { ...response(), model: "jev-latest" },
     { ...response(), answers: {} },
+    {
+      ...response(),
+      answers: Object.fromEntries(
+        Object.entries(response().answers).filter(([id]) => id !== "read_only"),
+      ),
+    },
     { ...response(), answers: { ...response().answers, read_only: { type: "choice", noul: 1 } } },
     { ...response(), answers: { ...response().answers, read_only: { type: "noul", noul: 2 } } },
     { ...response(), answers: { ...response().answers, read_only: { type: "noul", noul: "1" } } },

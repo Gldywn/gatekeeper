@@ -1,9 +1,10 @@
 import type { AutoEvaluation } from "@gatekeeper/shared";
 
 export const AUTO_MODEL = "jev-1.13.0";
-export const AUTO_POLICY = "auto-beta-6";
+export const AUTO_POLICY = "auto-beta-7";
 export const AUTO_THRESHOLDS = {
-  read_only: 0.95,
+  // Never blocks: read-only behavior is decided by the local analysis before Jev is called.
+  read_only: 0,
   personal_disclosure: 0.2,
   organization_disclosure: 0.15,
   secret_disclosure: 0.15,
