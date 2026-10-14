@@ -101,7 +101,7 @@ export class RequestStore {
     return claimAlert(this.ctx, cooldownMs);
   }
 
-  /** True when an alert rang since the last Auto sound and nothing awaits approval. */
+  /** True when an alert rang since the last Auto sound and no proposal is still open. */
   claimAutoAlert(): boolean {
     return claimAutoAlert(this.ctx);
   }

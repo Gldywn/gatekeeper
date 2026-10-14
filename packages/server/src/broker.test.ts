@@ -408,14 +408,27 @@ describe("the Auto mode sound", () => {
     expect(store.claimAlert(NOTIFY_COOLDOWN_MS)).toBe(false);
   });
 
-  it("plays once for a burst, since an executing proposal awaits nobody", async () => {
+  it("plays once for a burst, after the last one has run", async () => {
     rang();
     const first = executing("automatic");
     const second = executing("automatic", "SELECT 2");
     expect((await finish(first)).status).toBe(200);
-    expect(notifyAuto).toHaveBeenCalledOnce();
+    expect(notifyAuto).not.toHaveBeenCalled();
     expect((await finish(second)).status).toBe(200);
     expect(notifyAuto).toHaveBeenCalledOnce();
+  });
+
+  // A reservation the plugin withdraws goes back to human review with no new alert.
+  it("waits for an executing proposal, which can still be withdrawn", async () => {
+    rang();
+    const done = executing("automatic");
+    const reserved = executing("automatic", "SELECT 2");
+    await finish(done);
+    const withdrawn = await call("POST", "/execution/withdraw", { token: TOKEN, body: reserved });
+    expect(withdrawn.status).toBe(200);
+    expect(store.get(reserved.id)?.state).toBe("leased");
+    expect(notifyAuto).not.toHaveBeenCalled();
+    expect(store.claimAlert(NOTIFY_COOLDOWN_MS)).toBe(false);
   });
 
   it("leaves the window alone in modes that never play it", async () => {

@@ -20,11 +20,13 @@ A pending query nobody notices is a query nobody approves, so on macOS the serve
 notification and plays a sound the moment a proposal arrives, wherever you are on your
 desktop. A burst is collapsed into a single alert, and a retried submission raises none.
 
-**Auto mode adds a second sound.** The submission alert stays the same with Auto mode on.
-When a query [Auto mode](AUTO-MODE.md) approved runs successfully, the server also plays a
-second, different sound with no banner, as long as no other proposal is awaiting approval at
+**Auto mode adds a second sound.** Every proposal still raises the submission alert. When a
+query [Auto mode](AUTO-MODE.md) approved runs successfully, the server also plays a second,
+different sound with no banner, as long as no other proposal is still waiting or running at
 that moment. It answers a submission alert: it plays only if one rang since it last played,
 and once it has played, the next proposal raises its own alert even inside the burst window.
+So an agent sending automatically approved queries one at a time hears an alert and the
+second sound for each, and an alert heard alone means something is left for you.
 `both` and `sound` play it, `banner` and `off` do not. When agents run Gatekeeper with
 different `GATEKEEPER_NOTIFY` values, this sound follows the setting of the one Gatekeeper
 process that serves the plugin, not the agent's. The sound lives in a macOS folder Apple does

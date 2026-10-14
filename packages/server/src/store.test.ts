@@ -909,7 +909,7 @@ describe("claimAutoAlert", () => {
     expect(store.claimAlert(10_000)).toBe(true);
   });
 
-  it("refuses while a proposal is pending or leased, not once it executes", () => {
+  it("refuses while a proposal is pending, leased or executing", () => {
     const { store } = makeStore();
     store.claimAlert(10_000);
     store.submit({ sessionId: "s1", sql: "SELECT 1" });
@@ -917,6 +917,8 @@ describe("claimAutoAlert", () => {
     const lease = store.claimNext("plugin", LEASE)!;
     expect(store.claimAutoAlert()).toBe(false);
     store.markExecuting(lease.id, lease.leaseId!);
+    expect(store.claimAutoAlert()).toBe(false);
+    store.resolve(lease.id, lease.leaseId!, { status: "approved", rows: [], fields: [] });
     expect(store.claimAutoAlert()).toBe(true);
   });
 

@@ -527,7 +527,7 @@ function guarded(
 
 // Sounds on the terminal result, not on /executing: the plugin can still withdraw a
 // reservation, and a failed query was not handled for anyone. Skipped while another
-// proposal awaits approval, where it would read as an all-clear.
+// proposal is still open, where it would read as an all-clear.
 function soundAutoApproval(broker: Broker, request: GatekeeperRequest): void {
   const approval = (request.policy as { approval?: { source?: unknown } } | null)?.approval;
   if (

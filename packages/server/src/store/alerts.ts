@@ -22,11 +22,13 @@ export function claimAlert(ctx: StoreContext, cooldownMs: number): boolean {
 // Resetting to "never alerted" lets the next proposal ring right after "handled". One
 // statement, so a concurrent submission either blocks the sound or rings its own alert.
 export function claimAutoAlert(ctx: StoreContext): boolean {
+  // Executing counts as open: the plugin can still withdraw it back to human review.
   return (
     ctx.db
       .prepare(
         `UPDATE alerts SET last_alert_at = 0 WHERE id = 1 AND last_alert_at != 0
-           AND NOT EXISTS (SELECT 1 FROM requests WHERE state IN ('pending', 'leased') AND expires_at > ?)`,
+           AND NOT EXISTS (SELECT 1 FROM requests
+             WHERE state IN ('pending', 'leased', 'executing') AND expires_at > ?)`,
       )
       .run(ctx.now()).changes === 1
   );
