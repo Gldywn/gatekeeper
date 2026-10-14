@@ -34,7 +34,8 @@ pnpm lint        # Biome
 ```
 
 One package at a time: `pnpm --filter @gatekeeper/plugin test` or
-`pnpm --filter @gatekeeper/server test`.
+`pnpm --filter @gldywn/gatekeeper-mcp-server test` (the server keeps its npm name, so
+`@gatekeeper/server` matches nothing and exits 0 without running a test).
 
 ## Seeing a plugin change in Beekeeper Studio
 
@@ -60,7 +61,8 @@ the dev shim, so run `pnpm build` before testing a real install.
 opens in the repo. It kills every other Gatekeeper server on the machine, including those
 other sessions rely on, so that one build owns the broker port and `~/.gatekeeper/requests.db`.
 Never run it by hand, and tell the user before reconnecting the MCP server. A server change
-reaches the broker only after `pnpm --filter @gatekeeper/server build` and a reconnect.
+reaches the broker only after `pnpm --filter @gldywn/gatekeeper-mcp-server build` and a
+reconnect.
 
 ## Conventions
 
