@@ -11,7 +11,7 @@ import {
   runQuery,
   setTabTitle,
 } from "@beekeeperstudio/plugin";
-import type { AutoEvaluation, AutoHold } from "@gatekeeper/shared";
+import type { AutoEvaluation, AutoHold, SensitivityRecord } from "@gatekeeper/shared";
 import { enter, type Loop, pulse, reveal } from "./anim";
 import { SchemaAnnotator } from "./annotate";
 import { clock, countsLabel, escapeHtml, relAge } from "./html";
@@ -52,6 +52,7 @@ import { highlight } from "./sql/highlight";
 import { modeRank, type RiskMode } from "./sql/mode";
 import { mapDialect } from "./sql/readonly";
 import { type EndpointReadOnly, probeReadOnly } from "./sql/readonly-probe";
+import { sensitivityOf, textSchema } from "./sql/schema";
 import type {
   Card,
   CardState,
@@ -308,10 +309,6 @@ export class Gatekeeper {
         const data = this.connChipData();
         return data ? `<span class="conn-chip">${connChipInner(data)}</span>` : "";
       },
-      // The raw annotator, deliberately not filterSchema: the audit trail is a durable
-      // security record, so it always flags PII/client/values even on a connection whose
-      // detection toggles are off (unlike the pending cards and the detail, which honour them).
-      schemaFor: (sql) => this.annotator.schemaFor(sql),
       dialect: () => this.dialect,
     });
     this.settingsView = new SettingsView({
@@ -1372,6 +1369,10 @@ export class Gatekeeper {
         this.activityView.toggle(sql.getAttribute("data-act-sql")!);
         return;
       }
+      if (target.closest("[data-act-retry]")) {
+        void this.activityView.loadOlder();
+        return;
+      }
       if (target === activity || target.closest("[data-close]")) {
         this.activityView.close();
       }
@@ -2049,9 +2050,9 @@ export class Gatekeeper {
     void this.evaluateNext();
   }
 
-  // Annotate the card with the tables and PII-suspect columns the query touches.
-  // Runs entirely host-side and stores the result on the card only; nothing here
-  // ever reaches the broker, so the agent gains no schema knowledge.
+  // Annotate the card with the tables and PII-suspect columns the query touches. Only the
+  // presence flags derived from it ride the decision to the broker, never a table or column
+  // name, so the agent gains no schema knowledge.
   private async analyzeSchema(card: Card): Promise<void> {
     const settings = this.settingsStore.get();
     const schema = await this.annotator.schemaFor(card.sql);
@@ -2061,6 +2062,11 @@ export class Gatekeeper {
       return;
     }
     card.schema = filterSchema(schema, settings);
+    // Raw, before the display toggles: the audit trail is a durable security record, so it
+    // keeps every flag even on a connection whose detection toggles are off.
+    if (schema) {
+      card.sensitivity = sensitivityOf(schema);
+    }
     this.renderCardSchema(card);
   }
 
@@ -2440,9 +2446,24 @@ export class Gatekeeper {
       : "Blocked: write mode is not armed.";
   }
 
+  // Frozen as the decision is recorded, never awaited: the card's schema analysis if it has
+  // finished, else what the SQL text alone shows (none when it will not parse).
+  private sensitivity(card: Card): SensitivityRecord | undefined {
+    if (card.sensitivity) {
+      return card.sensitivity;
+    }
+    const text = textSchema(card.sql, this.dialect);
+    return text ? sensitivityOf(text) : undefined;
+  }
+
   private async postExecuting(card: Card): Promise<boolean> {
     try {
-      return await this.broker.executing(card.id, card.leaseId, card.approval);
+      return await this.broker.executing(
+        card.id,
+        card.leaseId,
+        card.approval,
+        this.sensitivity(card),
+      );
     } catch (err) {
       log.error(err instanceof Error ? err : String(err));
       return false;
@@ -2466,6 +2487,7 @@ export class Gatekeeper {
       return await this.broker.result(card.id, card.leaseId, {
         ...body,
         autoHold: this.autoHold(card),
+        sensitivity: this.sensitivity(card),
       });
     } catch (err) {
       log.error(err instanceof Error ? err : String(err));

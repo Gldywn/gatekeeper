@@ -215,6 +215,9 @@ export function markExecuting(
   id: string,
   leaseId: string,
   approval?: import("@gatekeeper/shared").ApprovalAttribution,
+  // Replaces any earlier attempt's record, even with none: a withdrawn attempt's analysis
+  // does not describe this approval.
+  sensitivity?: import("@gatekeeper/shared").SensitivityRecord,
 ): GatekeeperRequest {
   const row = requireLease(ctx, id, leaseId);
   if (row.state !== "leased") {
@@ -231,6 +234,7 @@ export function markExecuting(
         JSON.stringify({
           ...((row.policy as object) ?? {}),
           approval: approval ?? { source: "human" },
+          sensitivity,
         }),
         id,
         leaseId,
@@ -273,9 +277,17 @@ export function resolve(
   leaseId: string,
   outcome: Outcome,
   autoHold?: import("@gatekeeper/shared").AutoHold,
+  sensitivity?: import("@gatekeeper/shared").SensitivityRecord,
 ): GatekeeperRequest {
   const row = requireLease(ctx, id, leaseId);
-  const policy = autoHold ? { ...((row.policy as object) ?? {}), autoHold } : row.policy;
+  const prior = row.policy as { sensitivity?: unknown } | null;
+  // While executing, the /executing record describes this approval and later analysis must not
+  // replace it. From leased (a rejection, or after a withdrawn attempt) this result's applies.
+  const replace = row.state !== "executing" && Boolean(sensitivity || prior?.sensitivity);
+  const policy =
+    autoHold || replace
+      ? { ...(prior ?? {}), ...(autoHold ? { autoHold } : {}), ...(replace ? { sensitivity } : {}) }
+      : row.policy;
   const state: RequestState =
     outcome.status === "approved"
       ? "approved"

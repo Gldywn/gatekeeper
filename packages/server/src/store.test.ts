@@ -956,3 +956,55 @@ describe("submitNew", () => {
     expect(again.request.id).toBe(first.request.id);
   });
 });
+
+describe("sensitivity record", () => {
+  const sql = { pii: true, value: false, client: false };
+  const schema = { pii: false, value: true, client: true };
+
+  it("keeps the record frozen at execution when the result brings a later one", () => {
+    const { store } = makeStore();
+    store.submit({ sessionId: "s1", sql: "SELECT email FROM users" });
+    const c = store.claimNext("p", LEASE)!;
+    store.markExecuting(c.id, c.leaseId!, undefined, sql);
+    store.resolve(
+      c.id,
+      c.leaseId!,
+      { status: "approved", rows: [], fields: [] },
+      undefined,
+      schema,
+    );
+    expect(store.listActivity(null)[0].sensitivity).toEqual(sql);
+  });
+
+  it("records a rejection's flags", () => {
+    const { store } = makeStore();
+    store.submit({ sessionId: "s1", sql: "SELECT email FROM users" });
+    const c = store.claimNext("p", LEASE)!;
+    store.resolve(c.id, c.leaseId!, { status: "rejected", reason: "no" }, undefined, schema);
+    expect(store.listActivity(null)[0].sensitivity).toEqual(schema);
+  });
+
+  it.each([
+    ["the rejection's", schema],
+    ["no", undefined],
+  ])("keeps %s record when a withdrawn approval ends in a rejection", (_label, record) => {
+    const { store } = makeStore();
+    store.submit({ sessionId: "s1", sql: "SELECT email FROM users" });
+    const c = store.claimNext("p", LEASE)!;
+    store.markExecuting(c.id, c.leaseId!, undefined, sql);
+    store.withdrawExecution(c.id, c.leaseId!);
+    store.resolve(c.id, c.leaseId!, { status: "rejected", reason: "no" }, undefined, record);
+    expect(store.listActivity(null)[0].sensitivity).toEqual(record);
+  });
+
+  it("drops a withdrawn attempt's record when the next attempt carries none", () => {
+    const { store } = makeStore();
+    store.submit({ sessionId: "s1", sql: "SELECT email FROM users" });
+    const c = store.claimNext("p", LEASE)!;
+    store.markExecuting(c.id, c.leaseId!, undefined, sql);
+    store.withdrawExecution(c.id, c.leaseId!);
+    store.markExecuting(c.id, c.leaseId!);
+    store.resolve(c.id, c.leaseId!, { status: "approved", rows: [], fields: [] });
+    expect(store.listActivity(null)[0].sensitivity).toBeUndefined();
+  });
+});

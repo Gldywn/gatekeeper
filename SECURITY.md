@@ -137,9 +137,12 @@ itself is in neither the URL nor the prompt.
   decision. Decided requests remain indefinitely with SQL, intent, state, timestamps,
   referenced session metadata, Auto mode attribution and available `rowCount` and
   `affectedRows` scalars. Technical lifecycle events in `audit` and inactive sessions
-  unreferenced by any request expire after 24 hours. The Audit Trail currently displays
-  only the latest 200 entries for the connection. There is no pagination or manual
-  deletion feature yet. Previously deleted requests and purged counts cannot be recovered.
+  unreferenced by any request expire after 24 hours. The Audit Trail pages through the
+  connection's whole retained history. There is no manual deletion feature yet. Versions
+  up to 0.2.0 deleted decided requests after 24 hours, also when such a server kept running
+  beside a newer one on the same database, so stop every server when upgrading (the
+  `update-gatekeeper` skill does). Requests they deleted and counts they purged cannot be
+  recovered.
 - **Engine errors.** A failed query's engine error is returned to the agent and recorded
   in the audit trail. Engine errors can echo fragments of the query or schema; treat them
   as query-derived data, not as a trusted channel.
@@ -152,6 +155,10 @@ itself is in neither the URL nor the prompt.
   connection scoping) does show the raw SQL, because it is the operator's own review view.
   Its Markdown, CSV, and JSON exports carry the SQL with formula-injection and
   trojan-source guards applied, and never include result rows.
+- Its PII, Value and Client flags never query the connected database. The plugin posts them
+  with the decision as three booleans (`policy_json.sensitivity`), never a table, column or
+  value; requests decided before that, or never shown on a card, are
+  flagged from their SQL text alone, which cannot see the columns behind a `SELECT *`.
 
 ## Supply-chain policy
 

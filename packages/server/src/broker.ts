@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { isDeepStrictEqual } from "node:util";
-import type { AccessMode, ActivityEntry, Proposal, SessionRoster } from "@gatekeeper/shared";
+import type { AccessMode, ActivityPage, Proposal, SessionRoster } from "@gatekeeper/shared";
 import { z } from "zod";
 import {
   BROKER_HOST,
@@ -28,7 +28,14 @@ import {
 } from "./evaluator.js";
 import type { Notifier } from "./notify.js";
 import { pairingPage } from "./pairing-page.js";
-import { type GatekeeperRequest, type Outcome, type RequestStore, StoreError } from "./store.js";
+import { sensitivityRecord } from "./store/audit.js";
+import {
+  type ActivityCursor,
+  type GatekeeperRequest,
+  type Outcome,
+  type RequestStore,
+  StoreError,
+} from "./store.js";
 
 const CORS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -39,6 +46,7 @@ const CORS: Record<string, string> = {
   "Access-Control-Allow-Private-Network": "true",
 };
 const MAX_BODY_BYTES = 32 * 1024 * 1024;
+const ACTIVITY_PAGE = 200;
 const PAIRING_BODY_BYTES = 1024;
 // The plugin polls at 1 Hz; coalesce its presence writes to this cadence.
 const PRESENCE_STAMP_MS = 15_000;
@@ -168,8 +176,22 @@ async function handle(broker: Broker, req: IncomingMessage, res: ServerResponse)
   // connection scoping as /sessions. Never an MCP tool; the SQL it carries can
   // hold PII literals, so no agent-facing surface exposes it.
   if (req.method === "GET" && url.pathname === "/activity") {
-    const activity: ActivityEntry[] = store.listActivity(resolveConnection(store, req));
-    send(res, 200, { activity });
+    const before = activityCursor(url.searchParams);
+    if (before === "invalid") {
+      send(res, 400, { error: "Invalid activity cursor" });
+      return;
+    }
+    // One lookahead row tells the plugin whether anything older exists, without a count.
+    const rows = store.listActivity(
+      resolveConnection(store, req),
+      ACTIVITY_PAGE + 1,
+      before ?? undefined,
+    );
+    const page: ActivityPage = {
+      activity: rows.slice(0, ACTIVITY_PAGE),
+      more: rows.length > ACTIVITY_PAGE,
+    };
+    send(res, 200, page);
     return;
   }
 
@@ -219,6 +241,8 @@ async function handle(broker: Broker, req: IncomingMessage, res: ServerResponse)
 
   if (req.method === "POST" && url.pathname === "/executing") {
     const body = await readJson(req);
+    // An unreadable record is dropped, never a reason to refuse the decision it rides on.
+    const sensitivity = sensitivityRecord.safeParse(body.sensitivity).data;
     guarded(res, () => {
       const approval =
         body.approval === undefined
@@ -248,7 +272,7 @@ async function handle(broker: Broker, req: IncomingMessage, res: ServerResponse)
           return;
         }
       }
-      store.markExecuting(String(body.id), String(body.leaseId), approval);
+      store.markExecuting(String(body.id), String(body.leaseId), approval, sensitivity);
       broker.evaluations.delete(String(body.id));
       send(res, 200, { ok: true });
     });
@@ -379,12 +403,15 @@ async function handle(broker: Broker, req: IncomingMessage, res: ServerResponse)
       send(res, 400, { error: "Invalid Auto mode hold" });
       return;
     }
+    // An unreadable record is dropped, never a reason to refuse the decision it rides on.
+    const sensitivity = sensitivityRecord.safeParse(body.sensitivity).data;
     guarded(res, () => {
       const resolved = store.resolve(
         String(body.id),
         String(body.leaseId),
         toOutcome(body),
         hold.data,
+        sensitivity,
       );
       send(res, 200, { ok: true });
       soundAutoApproval(broker, resolved);
@@ -475,6 +502,23 @@ function exchange(
       ? { error: "no pairing code is active; ask your agent for a new one" }
       : { error: "wrong code" },
   );
+}
+
+// The Audit Trail's older-page cursor: both halves or neither, each given once, in the
+// exact shape the store mints (`token("req")`), so a plugin bug fails loudly as a 400.
+function activityCursor(params: URLSearchParams): ActivityCursor | null | "invalid" {
+  const at = params.getAll("before");
+  const id = params.getAll("beforeId");
+  if (!at.length && !id.length) {
+    return null;
+  }
+  if (at.length !== 1 || id.length !== 1 || !/^\d+$/.test(at[0])) {
+    return "invalid";
+  }
+  const decidedAt = Number(at[0]);
+  return Number.isSafeInteger(decidedAt) && /^req_[0-9a-f]{12}$/.test(id[0])
+    ? { decidedAt, id: id[0] }
+    : "invalid";
 }
 
 // The plugin's header carries the composite scope key for the tab making the

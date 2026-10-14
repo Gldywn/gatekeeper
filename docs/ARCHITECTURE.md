@@ -102,7 +102,16 @@ result contains `purged: true` and any known `rowCount` (returned rows) and `aff
 (changed rows). Late agent reads still receive those scalars. Missing counts remain unknown,
 including for results purged by older versions. A known zero remains zero.
 
-The host-side Audit Trail returns at most 200 entries, scoped to the current connection
-plus unscoped requests. Indexed, bounded reads avoid scanning the retained history.
-Pagination is deferred. A separate partial index covers results awaiting purge. See
+The host-side Audit Trail reads the retained history in pages of 200 entries, scoped to the
+current connection plus unscoped requests. `GET /activity` answers `{ activity, more }`, and
+`?before=<decidedAt>&beforeId=<id>` continues strictly older than that entry, as an index range
+seek in both scopes, so a deep page costs the same as the first. The plugin shows whole days
+only: it holds back the oldest day of a page until a later page or the end of history proves it
+complete, and loads the next days as the list end scrolls into reach. A folded day ships as its
+header only; its rows are built the first time it opens. The PII, Value and Client flags come
+from `policy_json.sensitivity`, three booleans the plugin freezes from its card analysis when
+`/executing` or `/result` records the decision (while the request is executing, a later
+`/result` never overwrites the `/executing` one), or from the SQL text alone when nothing was recorded, so opening the trail
+never queries the connected database. A separate partial index covers results awaiting purge.
+See
 [`SECURITY.md`](../SECURITY.md) for local data handling.

@@ -689,3 +689,35 @@ describe("shared manual/automatic execution authority", () => {
     expect(app.mode).toBe("read");
   });
 });
+
+describe("sensitivity recorded with the decision", () => {
+  it("keeps raw flags on the card even when the display toggles hide them", async () => {
+    const { app, card } = harness();
+    app.renderCardSchema = vi.fn();
+    card.sql = "SELECT email FROM public.users";
+    await app.analyzeSchema(card);
+    expect(card.schema?.pii).toEqual([]);
+    expect(card.sensitivity).toEqual({ pii: true, value: false, client: false });
+  });
+
+  it("falls back to the SQL text when the decision lands before the analysis", async () => {
+    const { app, card } = harness();
+    card.sql = "SELECT email FROM public.users";
+    await app.postExecuting(card);
+    expect(app.broker.executing.mock.calls[0][3]).toEqual({
+      pii: true,
+      value: false,
+      client: false,
+    });
+  });
+
+  it("posts the card's analysis with an approval and with a rejection", async () => {
+    const { app, card } = harness();
+    const recorded = { pii: false, value: true, client: true };
+    card.sensitivity = recorded;
+    await app.postExecuting(card);
+    await app.postResult(card, { status: "rejected" });
+    expect(app.broker.executing.mock.calls[0][3]).toEqual(recorded);
+    expect(app.broker.result.mock.calls[0][2]).toMatchObject({ sensitivity: recorded });
+  });
+});

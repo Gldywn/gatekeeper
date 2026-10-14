@@ -179,6 +179,18 @@ describe("endpoint requests", () => {
     });
   });
 
+  it("activity asks for the page older than the given entry and returns it whole", async () => {
+    const c = client();
+    await c.setToken("secret");
+    const page = { activity: [{ id: "req_00000000000a" }], more: true };
+    fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => page });
+    expect(await c.activity("main-db", { decidedAt: 1700, id: "req_00000000000b" })).toEqual(page);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${URL}/activity?before=1700&beforeId=req_00000000000b`,
+      { headers: { "X-Gatekeeper-Connection": "main-db", Authorization: "Bearer secret" } },
+    );
+  });
+
   it("omits the connection header when no connection name is given", async () => {
     const c = client();
     fetchMock.mockResolvedValue({ ok: false, status: 503, json: async () => ({}) });

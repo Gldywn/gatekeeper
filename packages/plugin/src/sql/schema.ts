@@ -1,3 +1,4 @@
+import type { SensitivityRecord } from "@gatekeeper/shared";
 import { prepareSql } from "./identifiers";
 import { parser } from "./sql-parser";
 
@@ -680,4 +681,28 @@ export function sensitiveReference(name: string): boolean {
     /(?:^|_)ip(?:_|$)/i.test(name) ||
     (/(?:^|_)name(?:_|$)/i.test(name) && name !== "product_name")
   );
+}
+
+// What the statement text alone exposes: no table columns, so a SELECT * shows nothing
+// here. The Audit Trail reads this instead of querying the database it audits.
+export function textSchema(sql: string, dialect: string): SchemaContext | null {
+  const parsed = analyzeSql(sql, dialect);
+  if (!parsed) {
+    return null;
+  }
+  return {
+    tables: parsed.tables.map((t) => (t.schema ? `${t.schema}.${t.name}` : t.name)),
+    pii: piiColumns(parsed, []),
+    client: clientColumns(parsed, []),
+    literals: sensitiveLiterals(sql, dialect),
+    star: parsed.star,
+  };
+}
+
+export function sensitivityOf(schema: SchemaContext): SensitivityRecord {
+  return {
+    pii: schema.pii.length > 0,
+    value: schema.literals.length > 0,
+    client: schema.client.length > 0,
+  };
 }

@@ -42,7 +42,7 @@ export class SchemaAnnotator {
 
   // The tables and sensitive columns a query touches. Returns null when the SQL will
   // not parse, or undefined when a connection switch invalidated the column fetch
-  // mid-flight. Host-side only: nothing here ever reaches the broker.
+  // mid-flight. Host-side only: no table or column name from here ever reaches the broker.
   async schemaFor(sql: string): Promise<SchemaContext | null | undefined> {
     const parsed = analyzeSql(sql, this.deps.dialect());
     if (!parsed) {

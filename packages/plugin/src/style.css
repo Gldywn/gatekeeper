@@ -2757,6 +2757,101 @@ label.qs-row {
   display: none;
 }
 
+/* The list tail (older page loading, or failed): rows in the day-head grammar, same slot,
+   gap, padding and separator, so the list never ends on a widget. */
+.act-tail-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 36px;
+  padding: var(--s2) var(--s1);
+  border-top: 1px solid var(--hi);
+}
+/* Nothing listed yet (first load, or it failed): the tail sits right under the head. */
+.act-body:empty + .act-tail .act-tail-row:first-child {
+  border-top: none;
+}
+.act-tail-slot {
+  display: inline-grid;
+  place-items: center;
+  width: 13px;
+  height: 13px;
+  flex: none;
+  color: var(--muted);
+}
+.act-tail-slot svg {
+  width: 13px;
+  height: 13px;
+}
+.act-skel-dot,
+.act-skel-bar {
+  border-radius: 3px;
+  background: color-mix(in oklch, var(--text) 9%, transparent);
+}
+.act-skel-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+.act-skel-bar {
+  height: 8px;
+  width: 140px;
+}
+.act-tail-slot + .act-skel-bar {
+  width: 74px;
+}
+.act-skel:nth-child(2) .act-skel-bar {
+  width: 124px;
+}
+.act-skel:nth-child(2) .act-tail-slot + .act-skel-bar {
+  width: 60px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .act-skel {
+    animation: act-skel-breathe 1.6s var(--ease-in-out) infinite;
+  }
+  .act-skel:nth-child(2) {
+    animation-delay: 0.15s;
+  }
+  .act-skel:nth-child(3) {
+    animation-delay: 0.3s;
+  }
+}
+@keyframes act-skel-breathe {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.act-tail-msg {
+  font-size: 12px;
+  color: var(--muted);
+}
+/* A quiet text action, like Reject beside Approve: underlined, never a filled button. */
+.act-retry {
+  padding: 0 2px;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklch, var(--text) 35%, transparent);
+  text-underline-offset: 3px;
+}
+.act-retry:hover {
+  text-decoration-color: var(--amber);
+}
+.act-retry:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 1px;
+  border-radius: 3px;
+}
+
 /* Session group: a bordered card, the session task as its hero. */
 .act-group {
   margin: var(--s1) 0 var(--s2);

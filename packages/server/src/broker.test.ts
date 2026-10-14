@@ -626,3 +626,98 @@ describe("liveness probe", () => {
     expect(res.status).toBe(421);
   });
 });
+
+describe("GET /activity paging", () => {
+  function decide(n: number): void {
+    for (let i = 0; i < n; i++) {
+      store.submit({ sessionId: "s1", sql: `SELECT ${i}` });
+      const claimed = store.claimNext("plug_test", 30000)!;
+      store.resolve(claimed.id, claimed.leaseId!, { status: "rejected", reason: "no" });
+    }
+  }
+
+  it("serves the newest 200, says older ones exist, and continues from a cursor", async () => {
+    decide(201);
+    const first = JSON.parse((await call("GET", "/activity", { token: TOKEN })).body);
+    expect(first.activity).toHaveLength(200);
+    expect(first.more).toBe(true);
+    const last = first.activity[199];
+    const next = JSON.parse(
+      (
+        await call("GET", `/activity?before=${last.decidedAt}&beforeId=${last.id}`, {
+          token: TOKEN,
+        })
+      ).body,
+    );
+    expect(next).toMatchObject({ more: false });
+    expect(next.activity).toHaveLength(1);
+    const ids = [...first.activity, ...next.activity].map((e: { id: string }) => e.id);
+    expect(new Set(ids).size).toBe(201);
+  });
+
+  it.each([
+    "?before=1",
+    "?beforeId=req_000000000000",
+    "?before=&beforeId=req_000000000000",
+    "?before=1.5&beforeId=req_000000000000",
+    "?before=-1&beforeId=req_000000000000",
+    "?before=99999999999999999&beforeId=req_000000000000",
+    "?before=1&beforeId=req_00000000000",
+    "?before=1&before=2&beforeId=req_000000000000",
+  ])("rejects the malformed cursor %s", async (query) => {
+    expect((await call("GET", `/activity${query}`, { token: TOKEN })).status).toBe(400);
+  });
+});
+
+describe("sensitivity record on decisions", () => {
+  function claimed() {
+    store.submit({ sessionId: "s1", sql: "SELECT email FROM users" });
+    return store.claimNext("plug_test", 30000)!;
+  }
+
+  it("stores a well-formed record and serves it back in the audit trail", async () => {
+    const c = claimed();
+    const sensitivity = { pii: true, value: false, client: false };
+    const reply = await call("POST", "/executing", {
+      token: TOKEN,
+      body: { id: c.id, leaseId: c.leaseId, sensitivity },
+    });
+    expect(reply.status).toBe(200);
+    await call("POST", "/result", {
+      token: TOKEN,
+      body: { id: c.id, leaseId: c.leaseId, status: "approved", rows: [], fields: [] },
+    });
+    const page = JSON.parse((await call("GET", "/activity", { token: TOKEN })).body);
+    expect(page.activity[0].sensitivity).toEqual(sensitivity);
+  });
+
+  it.each(["/executing", "/result"])(
+    "still records the decision on %s when the record is unreadable",
+    async (path) => {
+      const c = claimed();
+      const reply = await call("POST", path, {
+        token: TOKEN,
+        body: { id: c.id, leaseId: c.leaseId, status: "rejected", sensitivity: { pii: "yes" } },
+      });
+      expect(reply.status).toBe(200);
+      expect(store.get(c.id)?.state).toBe(path === "/executing" ? "executing" : "rejected");
+      expect(JSON.stringify(store.get(c.id)?.policy ?? null)).not.toContain("sensitivity");
+    },
+  );
+
+  it("keeps only the three flags from a newer, richer record", async () => {
+    const c = claimed();
+    await call("POST", "/result", {
+      token: TOKEN,
+      body: {
+        id: c.id,
+        leaseId: c.leaseId,
+        status: "rejected",
+        sensitivity: { pii: true, value: false, client: false, columns: ["email"] },
+      },
+    });
+    expect(store.get(c.id)?.policy).toEqual({
+      sensitivity: { pii: true, value: false, client: false },
+    });
+  });
+});
