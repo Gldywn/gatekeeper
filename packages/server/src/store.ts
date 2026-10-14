@@ -1,6 +1,6 @@
 import type { ConnectionSnapshot } from "./connection.js";
 import type { SchemaSnapshot } from "./schema.js";
-import { claimAlert } from "./store/alerts.js";
+import { claimAlert, claimAutoAlert } from "./store/alerts.js";
 import { type ActivityCursor, listActivity, readAudit } from "./store/audit.js";
 import { getConnection, setConnection } from "./store/connection.js";
 import { createContext, migrate, type StoreContext } from "./store/db.js";
@@ -102,6 +102,11 @@ export class RequestStore {
     return claimAlert(this.ctx, cooldownMs);
   }
 
+  /** True when an alert rang since the last Auto sound and no proposal is still open. */
+  claimAutoAlert(): boolean {
+    return claimAutoAlert(this.ctx);
+  }
+
   claimNext(
     pluginId: string,
     leaseMs: number,
@@ -152,7 +157,6 @@ export class RequestStore {
   get(id: string): GatekeeperRequest | null {
     return get(this.ctx, id);
   }
-
   getForSession(id: string, sessionId: string): GatekeeperRequest {
     return getForSession(this.ctx, id, sessionId);
   }

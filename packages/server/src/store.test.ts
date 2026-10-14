@@ -895,6 +895,52 @@ describe("alert cooldown", () => {
   });
 });
 
+describe("claimAutoAlert", () => {
+  it("refuses while no submission alert has ever rung", () => {
+    const { store } = makeStore();
+    expect(store.claimAutoAlert()).toBe(false);
+  });
+
+  it("answers one submission alert, then reopens its window", () => {
+    const { store } = makeStore();
+    expect(store.claimAlert(10_000)).toBe(true);
+    expect(store.claimAutoAlert()).toBe(true);
+    expect(store.claimAutoAlert()).toBe(false);
+    expect(store.claimAlert(10_000)).toBe(true);
+  });
+
+  it("refuses while a proposal is pending, leased or executing automatically", () => {
+    const { store } = makeStore();
+    store.claimAlert(10_000);
+    store.submit({ sessionId: "s1", sql: "SELECT 1" });
+    expect(store.claimAutoAlert()).toBe(false);
+    const lease = store.claimNext("plugin", LEASE)!;
+    expect(store.claimAutoAlert()).toBe(false);
+    store.markExecuting(lease.id, lease.leaseId!, { source: "automatic" });
+    expect(store.claimAutoAlert()).toBe(false);
+    store.resolve(lease.id, lease.leaseId!, { status: "approved", rows: [], fields: [] });
+    expect(store.claimAutoAlert()).toBe(true);
+  });
+
+  it("does not wait for a query a human approved, however long it runs", () => {
+    const { store } = makeStore();
+    store.claimAlert(10_000);
+    store.submit({ sessionId: "s1", sql: "SELECT 1" });
+    const lease = store.claimNext("plugin", LEASE)!;
+    store.markExecuting(lease.id, lease.leaseId!, { source: "human" });
+    expect(store.claimAutoAlert()).toBe(true);
+  });
+
+  // Reads do not sweep, so the row still says pending once its TTL has passed.
+  it("ignores an expired proposal still marked pending", () => {
+    const { store, clock } = makeStore();
+    store.claimAlert(10_000);
+    store.submit({ sessionId: "s1", sql: "SELECT 1" });
+    clock.t += 10_000;
+    expect(store.claimAutoAlert()).toBe(true);
+  });
+});
+
 describe("submitNew", () => {
   it("reports a fresh proposal as created, so it can raise an alert", () => {
     const { store } = makeStore();

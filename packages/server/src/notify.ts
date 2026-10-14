@@ -6,6 +6,11 @@ import { NOTIFY_PROMPT_TIMEOUT_MS, NOTIFY_TIMEOUT_MS } from "./config.js";
 export type NotifyMode = "both" | "banner" | "sound" | "off";
 
 const SOUND = "/System/Library/Sounds/Glass.aiff";
+// Picked by ear for Auto mode approvals. It lives in a private framework that Apple may
+// move or change, so a public system sound stands in whenever it fails to play.
+const AUTO_SOUND =
+  "/System/Library/PrivateFrameworks/ToneLibrary.framework/Versions/A/Resources/AlertTones/Modern/Complete.m4r";
+const AUTO_SOUND_FALLBACK = "/System/Library/Sounds/Hero.aiff";
 // UNUserNotificationCenter refuses an app LaunchServices has never seen, with no
 // prompt and no way to recover, so registration is a prerequisite and not a polish.
 const LSREGISTER =
@@ -99,6 +104,7 @@ export function defaultDeps(): NotifyDeps {
 
 export function createNotifier(deps: NotifyDeps = defaultDeps()) {
   const active = deps.platform === "darwin" && deps.mode !== "off";
+  const autoActive = active && deps.mode !== "banner";
   let registered = false;
   let warned = false;
   let warnedMissing = false;
@@ -166,6 +172,9 @@ export function createNotifier(deps: NotifyDeps = defaultDeps()) {
     /** False when this platform or this configuration raises nothing, so callers can skip the work. */
     active,
 
+    /** False when the Auto mode sound is never played, so callers leave the alert window alone. */
+    autoActive,
+
     /** Report at startup whether banners will actually appear. Never throws. */
     probe(): void {
       if (!active || deps.mode === "sound" || bundleMissing()) {
@@ -192,6 +201,18 @@ export function createNotifier(deps: NotifyDeps = defaultDeps()) {
       if (deps.mode !== "banner") {
         swallow(deps.run("afplay", [SOUND], NOTIFY_TIMEOUT_MS));
       }
+    },
+
+    /** Play the Auto mode approval sound, never a banner. Never throws, never blocks the caller. */
+    notifyAuto(): void {
+      if (!autoActive) {
+        return;
+      }
+      swallow(
+        deps
+          .run("afplay", [AUTO_SOUND], NOTIFY_TIMEOUT_MS)
+          .catch(() => deps.run("afplay", [AUTO_SOUND_FALLBACK], NOTIFY_TIMEOUT_MS)),
+      );
     },
   };
 }

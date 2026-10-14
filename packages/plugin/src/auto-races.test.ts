@@ -133,13 +133,12 @@ function evaluation(): AutoEvaluation {
   return {
     provider: "typesafe",
     model: "jev-1.13.0",
-    policy: "auto-beta-6",
+    policy: "auto-beta-7",
     evaluatedAt: Date.now(),
     sqlDigest: "a".repeat(64),
     eligible: true,
     reasons: [],
     probabilities: {
-      read_only: 0.999,
       personal_disclosure: 0.001,
       secret_disclosure: 0.001,
       organization_disclosure: 0.001,

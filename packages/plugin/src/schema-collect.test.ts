@@ -139,3 +139,35 @@ describe("collectSchema", () => {
     expect(s.tables.map((t) => t.name)).toEqual(["leftovers"]);
   });
 });
+
+describe("collectSchema completeness", () => {
+  it("reports a full collection as complete", async () => {
+    const s = await collectSchema("prod", "scope", "postgresql");
+    expect(s.complete).toBe(true);
+    expect(s.tables[0].incomplete).toBeUndefined();
+  });
+
+  it("marks a table whose columns could not be read, instead of showing it empty", async () => {
+    vi.mocked(getColumns).mockRejectedValue(new Error("driver says no"));
+    const s = await collectSchema("prod", "scope", "postgresql");
+    expect(s.complete).toBe(false);
+    expect(s.tables[0]).toMatchObject({ name: "users", columns: [], incomplete: true });
+    expect(JSON.stringify(s)).not.toContain("driver says no");
+  });
+
+  it("marks the snapshot incomplete when a schema or table listing fails", async () => {
+    schemas.mockRejectedValue(new Error("no"));
+    expect((await collectSchema("prod", "scope", "postgresql")).complete).toBe(false);
+    schemas.mockResolvedValue(["public"]);
+    tables.mockRejectedValue(new Error("no"));
+    expect((await collectSchema("prod", "scope", "postgresql")).complete).toBe(false);
+  });
+
+  // Engines without key introspection would otherwise flag every table.
+  it("keeps a table complete when only its key listing fails", async () => {
+    vi.mocked(getOutgoingKeys).mockRejectedValue(new Error("unsupported"));
+    const s = await collectSchema("prod", "scope", "postgresql");
+    expect(s.complete).toBe(true);
+    expect(s.tables[0].incomplete).toBeUndefined();
+  });
+});

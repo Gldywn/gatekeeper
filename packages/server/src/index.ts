@@ -85,7 +85,7 @@ async function main(): Promise<void> {
   notifier.probe();
   const { server: mcp, sessionId } = createMcpServer(store, notifier);
 
-  const broker = createBroker(store, pluginId, token);
+  const broker = createBroker(store, pluginId, token, undefined, undefined, notifier);
   const port = brokerPort();
   let brokerOwner = false;
   let shuttingDown = false;
