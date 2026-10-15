@@ -287,8 +287,9 @@ export class Gatekeeper {
   // pending state distinct from a probe that ran and could not confirm.
   private endpointRO: EndpointReadOnly | null = null;
   private endpointProbed = false;
-  // PostgreSQL 10+ and MySQL 8.0.19+ only can be stopped, see sql/stop.ts.
-  private serverVersion: string | null = null;
+  // PostgreSQL 10+ and MySQL 8.0.19+ only can be stopped, see sql/stop.ts. Kept with the
+  // connection it was read on, so a re-probe after a schema change does not blank it.
+  private serverVersion: { of: string; version: string | null } | null = null;
   private renewTimer?: number;
   private tickTimer?: number;
   private schemaTimer?: number;
@@ -721,6 +722,11 @@ export class Gatekeeper {
     return this.conn ? connectionScopeKey(this.conn) : undefined;
   }
 
+  // Which server a probed version belongs to: Beekeeper's connection id plus its scope.
+  private connIdentity(): string {
+    return `${this.conn?.id ?? ""}|${this.connScopeKey() ?? ""}`;
+  }
+
   // No connectionChanged notification exists, so a switch is caught by re-reading
   // getConnectionInfo(): a postMessage round-trip, throttled to ~5s on the tick
   // (a switch is rare) rather than paid every second.
@@ -795,7 +801,6 @@ export class Gatekeeper {
     // The endpoint belongs to the old database; re-probe the new one from scratch.
     this.endpointRO = null;
     this.endpointProbed = false;
-    this.serverVersion = null;
     // Settings are per connection; the overlay now shows a different scope, so close
     // it and reload (which re-syncs the quick-menu switches and the activity trigger).
     this.settingsView.close();
@@ -962,16 +967,17 @@ export class Gatekeeper {
     }
     const gen = this.connGeneration;
     const type = this.conn.databaseType;
-    // A reactivated tab can sit on another server than the one probed before; an unknown
-    // version keeps Stop unavailable until this probe answers.
-    this.serverVersion = null;
+    const identity = this.connIdentity();
     const result = await probeReadOnly(this.dialect, runQuery);
     const version =
       type === "mysql" || type === "postgresql" ? await serverVersion(runQuery) : null;
     if (gen !== this.connGeneration) {
       return;
     }
-    this.serverVersion = version;
+    // A failed re-probe on the same connection must not blank a version already read there.
+    if (version !== null || this.serverVersion?.of !== identity) {
+      this.serverVersion = { of: identity, version };
+    }
     this.endpointRO = result;
     this.endpointProbed = true;
     this.renderConnLabel();
@@ -2438,11 +2444,13 @@ export class Gatekeeper {
       limitMs: (this.settingsStore.get().autoStopMinutes ?? 0) * 60_000,
       ended: false,
     };
+    // A version probed on another connection (a switch, a reactivated tab) counts as unknown.
+    const probed = this.serverVersion;
     const unavailable = stopUnavailable(
       type,
       dbDisplayName(type),
       this.conn?.readOnly ?? false,
-      this.serverVersion,
+      probed?.of === this.connIdentity() ? probed.version : null,
     );
     if (unavailable) {
       run.unavailable = unavailable;

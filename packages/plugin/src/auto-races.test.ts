@@ -85,7 +85,6 @@ function harness() {
     autoDeferred: new Set<string>(),
     autoBusy: false,
     autoRuns: 0,
-    serverVersion: "PostgreSQL 16.2 on x86_64-pc-linux-gnu",
     mode: "read",
     dialect: "postgresql",
     conn: {
@@ -120,6 +119,7 @@ function harness() {
       app.cards = [];
     }),
   });
+  app.serverVersion = { of: app.connIdentity(), version: "PostgreSQL 16.2 on x86_64-pc-linux-gnu" };
   app.annotator = new SchemaAnnotator({
     dialect: () => app.dialect,
     generation: () => app.connGeneration,
@@ -1043,7 +1043,7 @@ describe("stopping a running query", () => {
       readOnlyMode: ro,
     });
     Object.assign(app.conn, { databaseType: type, readOnly: ro });
-    app.serverVersion = "8.4.0";
+    app.serverVersion = { of: app.connIdentity(), version: "8.4.0" };
     const run = deferred<Answer>();
     query.mockReturnValue(run.promise);
     const pending = app.approve(card.id);
@@ -1067,7 +1067,7 @@ describe("stopping a running query", () => {
       readOnlyMode: false,
     });
     Object.assign(app.conn, { databaseType: "mysql" });
-    app.serverVersion = "8.0.36";
+    app.serverVersion = { of: app.connIdentity(), version: "8.0.36" };
     const run = deferred<Answer>();
     const stop = vi.fn(async () => ({
       results: [
@@ -1137,16 +1137,47 @@ describe("stopping a running query", () => {
     const stale = app.probeEndpoint();
     app.onTablesChanged();
     await vi.waitFor(() =>
-      expect(app.serverVersion).toBe("PostgreSQL 16.2 on x86_64-pc-linux-gnu"),
+      expect(app.serverVersion?.version).toBe("PostgreSQL 16.2 on x86_64-pc-linux-gnu"),
     );
     first.resolve(answer({ replica: false }));
     await stale;
     expect(versions).toHaveLength(0);
-    expect(app.serverVersion).toBe("PostgreSQL 16.2 on x86_64-pc-linux-gnu");
+    expect(app.serverVersion?.version).toBe("PostgreSQL 16.2 on x86_64-pc-linux-gnu");
     expect(probes).toBe(2);
   });
 
-  it("forgets a MySQL version probed before the tab was reactivated", async () => {
+  it("keeps the known version while a schema change probes again", async () => {
+    const { app, card } = harness();
+    Object.assign(app, { applyMode: vi.fn(), scheduleSchemaReport: vi.fn() });
+    const probe = deferred<Answer>();
+    const run = deferred<Answer>();
+    query.mockImplementation((sql: string) =>
+      sql.includes("pg_is_in_recovery") ? probe.promise : run.promise,
+    );
+    app.onTablesChanged();
+    const pending = app.approve(card.id);
+    await vi.waitFor(() => expect(card.state).toBe("executing"));
+    expect(card.run.engine).toBe("postgresql");
+    expect(query).toHaveBeenCalledWith(executed(card.sql));
+    run.resolve(answer({ quantity: 3 }));
+    await pending;
+    probe.resolve(answer({ replica: false }));
+  });
+
+  it("keeps the known version when a re-probe on the same connection fails", async () => {
+    const { app } = harness();
+    query.mockImplementation((sql: string) =>
+      Promise.resolve(
+        sql.includes("VERSION()")
+          ? { results: [], error: { message: "connection reset" } }
+          : answer({ replica: false }),
+      ),
+    );
+    await app.probeEndpoint();
+    expect(app.serverVersion?.version).toBe("PostgreSQL 16.2 on x86_64-pc-linux-gnu");
+  });
+
+  it("does not trust a MySQL version probed on another connection", async () => {
     const { app, card } = harness();
     connection.mockResolvedValue({
       id: 1,
@@ -1156,9 +1187,10 @@ describe("stopping a running query", () => {
       defaultSchema: "public",
       readOnlyMode: false,
     });
+    // Probed on connection 2 before the tab went to standby; the host now sits on connection 1.
+    app.serverVersion = { of: app.connIdentity().replace(/^1\|/, "2|"), version: "8.4.0" };
     Object.assign(app.conn, { databaseType: "mysql" });
     app.dialect = "mysql";
-    app.serverVersion = "8.4.0";
     const probe = deferred<Answer>();
     const run = deferred<Answer>();
     query.mockImplementation((sql: string) =>
