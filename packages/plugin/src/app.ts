@@ -34,7 +34,7 @@ import {
 import { BrokerClient } from "./net/broker";
 import { connectionScopeKey } from "./net/scope";
 import { SingleInstance, type SingleInstanceWire } from "./net/singleinstance";
-import { autoIcon, autoPopHtml, SAVED_KEY_MASK } from "./render/auto";
+import { AUTO_APPROVED, autoIcon, autoPopHtml, SAVED_KEY_MASK } from "./render/auto";
 import { ConfirmModal } from "./render/confirm";
 import { connChipInner } from "./render/connchip";
 import { modeDropdown, switchInput } from "./render/controls";
@@ -1691,6 +1691,7 @@ export class Gatekeeper {
       controller.abort();
       if (valid()) this.reviewCard(card, "Evaluation timed out. Approve manually");
     }, 15000);
+    let run: Promise<void> | undefined;
     try {
       card.autoStatus = "Evaluating with Jev";
       this.renderQueue();
@@ -1727,7 +1728,10 @@ export class Gatekeeper {
         );
         return;
       }
-      await this.approve(card.id, false, evaluation);
+      card.autoStatus = AUTO_APPROVED;
+      // approve() reserves the card before its first await, so the finally below frees the
+      // evaluator for the next read while this one executes.
+      run = this.approve(card.id, false, evaluation);
     } catch {
       if (valid()) this.reviewCard(card, "Evaluator or metadata unavailable. Approve manually");
     } finally {
@@ -1737,6 +1741,11 @@ export class Gatekeeper {
       if (card.state === "ready" && card.autoStatus === "Evaluating with Jev")
         this.reviewCard(card, "Evaluation cancelled or authority changed");
       void this.evaluateNext();
+    }
+    try {
+      await run;
+    } catch (err) {
+      log.error(err instanceof Error ? err : String(err));
     }
   }
 
@@ -2235,6 +2244,9 @@ export class Gatekeeper {
       return;
     }
     if (!evaluation && this.autoCard === card) this.autoAbort?.abort();
+    // this.autoAbort moves on to the next read's evaluation once this card is reserved, so
+    // keep the signal of the evaluation that cleared this one.
+    const autoSignal = evaluation ? this.autoAbort?.signal : undefined;
     const gen = this.connGeneration;
     const active = this.activeGen;
     const auto = this.autoGeneration;
@@ -2253,7 +2265,7 @@ export class Gatekeeper {
         (this.autoEnabled &&
           auto === this.autoGeneration &&
           this.mode === "read" &&
-          !this.autoAbort?.signal.aborted &&
+          !autoSignal?.aborted &&
           currentEvaluation(evaluation)));
     // Reserve synchronously, before the host round-trip, for both approval sources.
     this.setCardState(id, "approving");

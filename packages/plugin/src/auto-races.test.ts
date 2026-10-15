@@ -1,5 +1,5 @@
 import type { AutoEvaluation } from "@gatekeeper/shared";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Card } from "./types";
 
 const { connection, query, storageRead, storageWrite } = vi.hoisted(() => ({
@@ -24,8 +24,9 @@ vi.mock("./anim", () => ({ enter: vi.fn(), reveal: vi.fn(), pulse: vi.fn() }));
 
 import { SchemaAnnotator } from "./annotate";
 import { Gatekeeper } from "./app";
-import { SAVED_KEY_MASK } from "./render/auto";
+import { AUTO_APPROVED, SAVED_KEY_MASK } from "./render/auto";
 import { ConfirmModal } from "./render/confirm";
+import { cardHtml } from "./render/queue";
 import { catalogRows } from "./sql/pg/catalog-fixture";
 import { planRead } from "./sql/read-analysis";
 
@@ -688,5 +689,150 @@ describe("shared manual/automatic execution authority", () => {
     await app.toggleAuto({ closest: () => null });
     expect(app.autoEnabled).toBe(false);
     expect(app.mode).toBe("read");
+  });
+});
+
+describe("Auto mode queue while an approved read executes", () => {
+  const empty = { results: [{ rows: [], fields: [] }] };
+
+  // Two reads, both cleared by Jev; the host metadata step is stubbed out.
+  function twoReads() {
+    const { app, card } = harness();
+    const next: Card = {
+      ...card,
+      id: "next",
+      leaseId: "next-lease",
+      sql: "SELECT price FROM public.products LIMIT 5",
+    };
+    app.cards.push(next);
+    vi.spyOn(app.annotator, "inspectRead").mockImplementation(async (sql: string) => ({
+      complete: true,
+      reasons: [],
+      input: { dialect: "postgresql", sql, dependencies: [] },
+    }));
+    app.broker.evaluate.mockImplementation(async () => evaluation());
+    return { app, card, next };
+  }
+
+  it("evaluates and runs the next read while the first one is still executing", async () => {
+    const { app, card, next } = twoReads();
+    const first = deferred<typeof empty>();
+    query.mockImplementation((sql: string) =>
+      sql === card.sql ? first.promise : Promise.resolve(empty),
+    );
+    const pending = app.evaluateNext();
+    await vi.waitFor(() => expect(query).toHaveBeenCalledWith(next.sql));
+    expect(card.state).toBe("executing");
+    expect(card.autoStatus).toBe(AUTO_APPROVED);
+    const html = cardHtml(card, "postgresql", new Map());
+    expect(html).not.toContain("Evaluating with Jev");
+    expect(html).toContain("This read was approved automatically");
+    first.resolve(empty);
+    await pending;
+    expect(app.broker.executing.mock.calls.map((c: unknown[]) => c[0])).toEqual([card.id, next.id]);
+    for (const call of app.broker.executing.mock.calls) {
+      expect(call[2]).toMatchObject({ source: "automatic" });
+    }
+    // The second read delivered its result while the first was still running.
+    expect(app.broker.result.mock.calls.map((c: unknown[]) => c[0])).toEqual([next.id, card.id]);
+  });
+
+  it("keeps the first approval when the next read's evaluation is aborted before its SQL", async () => {
+    const { app, card, next } = twoReads();
+    const executing = deferred<boolean>();
+    const nextAnswer = deferred<AutoEvaluation>();
+    app.broker.executing.mockImplementation(async (id: string) =>
+      id === card.id ? executing.promise : true,
+    );
+    app.broker.evaluate.mockImplementation(async (id: string) =>
+      id === next.id ? nextAnswer.promise : evaluation(),
+    );
+    const pending = app.evaluateNext();
+    // The first read must be held before its SQL, the window where its approval is checked.
+    await vi.waitFor(() => {
+      expect(app.broker.executing).toHaveBeenCalledWith(card.id, card.leaseId, expect.anything());
+      expect(app.broker.evaluate).toHaveBeenCalledTimes(2);
+    });
+    // A human approves the next card mid-evaluation, which aborts that evaluation only.
+    await app.approve(next.id);
+    executing.resolve(true);
+    nextAnswer.resolve(evaluation());
+    await pending;
+    expect(query.mock.calls.filter((c: unknown[]) => c[0] === card.sql)).toHaveLength(1);
+    expect(app.broker.withdrawExecution).not.toHaveBeenCalledWith(card.id, card.leaseId);
+  });
+
+  it("still withdraws the first read if Auto mode is disabled before its SQL", async () => {
+    const { app, card, next } = twoReads();
+    const executing = deferred<boolean>();
+    const nextAnswer = deferred<AutoEvaluation>();
+    app.broker.executing.mockImplementation(async (id: string) =>
+      id === card.id ? executing.promise : true,
+    );
+    app.broker.evaluate.mockImplementation(async (id: string) =>
+      id === next.id ? nextAnswer.promise : evaluation(),
+    );
+    const pending = app.evaluateNext();
+    // The first read must be held before its SQL, the window where its approval is checked.
+    await vi.waitFor(() => {
+      expect(app.broker.executing).toHaveBeenCalledWith(card.id, card.leaseId, expect.anything());
+      expect(app.broker.evaluate).toHaveBeenCalledTimes(2);
+    });
+    app.resetAuto("Auto mode disabled");
+    executing.resolve(true);
+    nextAnswer.resolve(evaluation());
+    await pending;
+    expect(query).not.toHaveBeenCalledWith(card.sql);
+    expect(app.broker.withdrawExecution).toHaveBeenCalledWith(card.id, card.leaseId);
+    expect(card.state).toBe("ready");
+    expect(card.autoStatus).toMatch(/^Needs review: /);
+  });
+
+  describe("15 s evaluation budget", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.stubGlobal("window", { setTimeout, clearTimeout });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("stops at Jev's answer instead of running over the execution preamble", async () => {
+      const { app, card } = harness();
+      vi.spyOn(app.annotator, "inspectRead").mockResolvedValue({
+        complete: true,
+        reasons: [],
+        input: { dialect: "postgresql", sql: card.sql, dependencies: [] },
+      });
+      app.broker.evaluate.mockResolvedValue(evaluation());
+      const executing = deferred<boolean>();
+      app.broker.executing.mockReturnValue(executing.promise);
+      const pending = app.evaluateNext();
+      await vi.waitFor(() => expect(app.broker.executing).toHaveBeenCalledOnce());
+      await vi.advanceTimersByTimeAsync(16_000);
+      executing.resolve(true);
+      await pending;
+      expect(query).toHaveBeenCalledWith(card.sql);
+      expect(app.broker.withdrawExecution).not.toHaveBeenCalled();
+    });
+
+    it("still sends a slow evaluation to manual review", async () => {
+      const { app, card } = harness();
+      vi.spyOn(app.annotator, "inspectRead").mockResolvedValue({
+        complete: true,
+        reasons: [],
+        input: { dialect: "postgresql", sql: card.sql, dependencies: [] },
+      });
+      const answer = deferred<AutoEvaluation>();
+      app.broker.evaluate.mockReturnValue(answer.promise);
+      const pending = app.evaluateNext();
+      await vi.waitFor(() => expect(app.broker.evaluate).toHaveBeenCalledOnce());
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(card.autoStatus).toBe("Needs review: Evaluation timed out. Approve manually");
+      answer.resolve(evaluation());
+      await pending;
+      expect(app.broker.executing).not.toHaveBeenCalled();
+      expect(query).not.toHaveBeenCalled();
+    });
   });
 });

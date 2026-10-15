@@ -17,7 +17,7 @@ import { modeRank, type RiskMode } from "../sql/mode";
 import { visibleControls } from "../sql/sanitize";
 import { analyzeTableOps, type SchemaContext } from "../sql/schema";
 import type { Card, CardState, SessionMeta } from "../types";
-import { AUTO_LEADS, autoIcon, NOTHING_SENT } from "./auto";
+import { AUTO_APPROVED, AUTO_LEADS, autoIcon, NOTHING_SENT } from "./auto";
 
 const WRITE_MODE_NOTE = "Write mode required to approve this query.";
 const DESTRUCTIVE_MODE_NOTE = "Destructive mode required to approve this query.";
@@ -161,7 +161,12 @@ function autoNote(card: Card): string {
     return "";
   }
   if (card.autoStatus === AUTO_EVALUATING) {
+    // A human can approve mid-evaluation; once the card left ready, nothing is evaluating it.
+    if (card.state !== "ready") return "";
     return `<div class="cs-unparsed auto evaluating" role="status"><span class="auto-bolt">${autoIcon}</span><span><b>Auto mode:</b> <i>${AUTO_EVALUATING}&hellip;</i></span></div>`;
+  }
+  if (card.autoStatus === AUTO_APPROVED) {
+    return `<div class="cs-unparsed auto" role="status">${autoIcon}<span><b>Auto mode:</b> ${AUTO_LEADS.automatic}.</span></div>`;
   }
   const lead = card.evaluation
     ? `${AUTO_LEADS.refused}, waiting for your review.`
@@ -191,7 +196,7 @@ export function cardHtml(
   mode: RiskMode = "read",
   connReadOnly = false,
 ): string {
-  const evaluating = card.autoStatus === AUTO_EVALUATING;
+  const evaluating = card.state === "ready" && card.autoStatus === AUTO_EVALUATING;
   // An evaluation in flight borrows the blocked-Approve chrome: the reason rides in the
   // same popover, and Reject stays open for a human who has already made up their mind.
   const gate = evaluating

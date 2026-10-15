@@ -21,6 +21,9 @@ export const AUTO_LEADS = {
   automatic: "This read was approved automatically",
 } as const;
 export const NOTHING_SENT = '<b class="auto-strong">Nothing was sent to TypeSafe.</b>';
+// Card status once Jev cleared a read and Gatekeeper took it to execution; it replaces
+// "Evaluating with Jev", which would otherwise stay up for the whole run.
+export const AUTO_APPROVED = "Approved automatically";
 
 const title = `<span class="sa-pt">${autoIcon}Auto mode <span class="set-rec auto">beta</span></span>`;
 
