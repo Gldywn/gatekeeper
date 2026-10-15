@@ -75,10 +75,12 @@ export function stopTag(requestId: string, token: string): string {
 export function stopStatement(engine: StopEngine, tag: string): string {
   if (!TAG.test(tag)) throw new Error("Invalid stop tag");
   if (engine === "postgresql") {
+    // Parallel workers report the leader's query text, so only the client backend counts;
+    // cancelling it stops its workers. usename is the login role, which SET ROLE leaves alone.
     return (
       "SELECT CASE WHEN count(*) = 1 THEN pg_cancel_backend(min(pid)) END AS sent, count(*) AS matches " +
-      "FROM pg_stat_activity WHERE state = 'active' AND usename = current_user " +
-      `AND pid <> pg_backend_pid() AND left(query, ${tag.length}) = '${tag}'`
+      "FROM pg_catalog.pg_stat_activity WHERE backend_type = 'client backend' AND state = 'active' " +
+      `AND usename = session_user AND pid <> pg_backend_pid() AND left(query, ${tag.length}) = '${tag}'`
     );
   }
   return [

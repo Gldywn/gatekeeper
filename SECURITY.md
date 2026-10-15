@@ -90,9 +90,10 @@ connection in Settings. An agent cannot trigger one, and `cancel_query` still re
 executing query. The stop is fixed SQL built by the plugin, not by an agent, and runs
 through `runQuery` outside the approval gate, like the endpoint read-only probe:
 
-- **PostgreSQL**: one `SELECT` that reads `pg_stat_activity` and calls `pg_cancel_backend` on
-  the session only when exactly one active session of the current role is running a
-  statement that starts with this execution's comment.
+- **PostgreSQL**: one `SELECT` that reads `pg_catalog.pg_stat_activity` and calls
+  `pg_cancel_backend` only when exactly one active client session of the same login role is
+  running a statement that starts with this execution's comment. Parallel workers report the
+  leader's text, so they are left out of the count; cancelling the leader stops them.
 - **MySQL 8.0.19 and later**: one batch that looks the session up in
   `information_schema.PROCESSLIST` the same way and prepares `KILL QUERY` for it, or a no-op
   when anything other than exactly one session matches. `KILL QUERY` stops the statement and

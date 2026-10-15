@@ -71,7 +71,10 @@ describe("stop statement", () => {
     const sql = stopStatement("postgresql", tag);
     expect(sql).not.toContain(";");
     expect(sql).toContain("CASE WHEN count(*) = 1 THEN pg_cancel_backend(min(pid)) END AS sent");
-    expect(sql).toContain("state = 'active' AND usename = current_user");
+    expect(sql).toContain("FROM pg_catalog.pg_stat_activity");
+    // Parallel workers carry the leader's text; counting them would refuse every parallel plan.
+    expect(sql).toContain("backend_type = 'client backend' AND state = 'active'");
+    expect(sql).toContain("usename = session_user");
     expect(sql).toContain("pid <> pg_backend_pid()");
     expect(sql).toContain(`left(query, ${tag.length}) = '${tag}'`);
   });
