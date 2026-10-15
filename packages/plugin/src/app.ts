@@ -517,6 +517,9 @@ export class Gatekeeper {
     this.cards.length = 0;
     this.history.length = 0;
     this.annotator.clearCache();
+    // While on standby the saved connection can be edited to another server under the same
+    // id and name; only a schema re-probe within one active period may keep the version.
+    this.serverVersion = null;
     this.activeGen++;
     this.polling = false;
     this.pollGeneration++;

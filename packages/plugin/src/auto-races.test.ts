@@ -1177,6 +1177,18 @@ describe("stopping a running query", () => {
     expect(app.serverVersion?.version).toBe("PostgreSQL 16.2 on x86_64-pc-linux-gnu");
   });
 
+  it("forgets the server version when the tab goes to standby", () => {
+    const { app } = harness();
+    Object.assign(app, {
+      history: [],
+      rosterLoops: [],
+      stopProbe: vi.fn(),
+      renderStandby: vi.fn(),
+    });
+    app.deactivate();
+    expect(app.serverVersion).toBeNull();
+  });
+
   it("does not trust a MySQL version probed on another connection", async () => {
     const { app, card } = harness();
     connection.mockResolvedValue({
