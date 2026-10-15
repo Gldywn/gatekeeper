@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { versionDockHtml, versionGroupHtml } from "./render/version";
+import { updatePrompt, versionDockHtml, versionGroupHtml } from "./render/version";
 import {
   compareVersions,
   fetchLatestRelease,
@@ -135,18 +135,29 @@ describe("version rendering", () => {
   it("escapes what the server or git reported", () => {
     const html = versionGroupHtml(
       versionStatus(dev("0.4.0", '<img src=x onerror="alert(1)">'), null, null),
-      false,
     );
     expect(html).not.toContain("<img");
     expect(html).toContain("&lt;img");
   });
 
-  it("offers the stop command only where pkill exists", () => {
-    const lagging = versionStatus(rel("0.5.0"), rel("0.4.0"), null);
-    expect(versionGroupHtml(lagging, false)).toContain("data-copy-stop");
-    const windows = versionGroupHtml(lagging, true);
-    expect(windows).not.toContain("data-copy-stop");
-    expect(windows).toContain("close and reopen every agent session");
+  it("offers the agent prompt only when a side has something to update", () => {
+    const prompt = "data-copy-prompt";
+    expect(versionGroupHtml(versionStatus(rel("0.5.0"), rel("0.4.0"), null))).toContain(prompt);
+    expect(versionGroupHtml(versionStatus(rel("0.4.0"), rel("0.4.0"), "0.5.0"))).toContain(prompt);
+    expect(versionGroupHtml(versionStatus(rel("0.4.0"), rel("0.4.0"), "0.4.0"))).not.toContain(
+      prompt,
+    );
+    expect(versionGroupHtml(versionStatus(dev("0.4.0"), rel("0.3.0"), "0.9.0"))).not.toContain(
+      prompt,
+    );
+  });
+
+  it("hands the agent the versions it would otherwise have to look up", () => {
+    const prompt = updatePrompt(rel("0.4.0"), null, "0.5.0");
+    expect(prompt).toContain("- Plugin: 0.4.0");
+    expect(prompt).toContain("- Server answering the plugin: unknown");
+    expect(prompt).toContain("- Latest release on GitHub: 0.5.0");
+    expect(prompt).toContain("-s update-gatekeeper");
   });
 
   it("keeps the corner indicator short", () => {

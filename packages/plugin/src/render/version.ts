@@ -11,10 +11,36 @@ import {
 } from "../icons";
 import { compareVersions, type VersionDock, type VersionRow, type VersionStatus } from "../version";
 
-// Mirrors the two process arms of scripts/dev-server.mjs findServers(): npx and global
-// installs, and checkout builds with their tsx watcher.
-export const STOP_COMMAND =
-  "pkill -f 'gatekeeper-mcp-server|gatekeeper[^ ]*/server/(dist/index\\.js|src/index\\.ts)'";
+export const UPDATE_SKILL_URL =
+  "https://github.com/Gldywn/gatekeeper/tree/main/skills/update-gatekeeper";
+
+// Plain instructions rather than a slash command, so any harness can follow them; the
+// versions spare the agent a round of checks the plugin has already done.
+export function updatePrompt(
+  plugin: BuildIdentity,
+  server: BuildIdentity | null,
+  latest: string | null,
+): string {
+  return [
+    "Update Gatekeeper on this machine.",
+    "Run every command below through whichever package runner I use.",
+    "",
+    "What the Gatekeeper plugin in Beekeeper Studio sees right now:",
+    `- Plugin: ${describe(plugin)}`,
+    `- Server answering the plugin: ${describe(server)}`,
+    `- Latest release on GitHub: ${latest ?? "unknown"}`,
+    "",
+    "1. Check whether the update-gatekeeper skill is installed for you: skills list",
+    "2. Install it globally, or refresh it if it is already there so you follow its latest",
+    "   steps. Ask me before running:",
+    "   skills add Gldywn/gatekeeper -s update-gatekeeper -a <your agent id> -g -y",
+    "3. Run the update-gatekeeper skill to bring the plugin, the server and the skills to the",
+    "   latest release. It stops the old Gatekeeper servers: tell me which agent sessions to",
+    "   restart, and whether Beekeeper Studio needs a restart.",
+    "",
+    `Skill: ${UPDATE_SKILL_URL}`,
+  ].join("\n");
+}
 
 function value(r: VersionRow): string {
   if (r.kind === "unknown") return `<span class="ver none">unknown</span>`;
@@ -29,41 +55,36 @@ function status(icon: string, text: string, cls = ""): string {
   return `<span class="set-desc ver-status${cls ? ` ${cls}` : ""}">${icon}<span>${text}</span></span>`;
 }
 
-function pluginAdvice(r: Extract<VersionRow, { kind: "behind" }>): string {
+const ADVICE = {
+  Plugin: {
+    peer: "server",
+    fix: "Update the plugin in Beekeeper Studio.",
+    restart: "Beekeeper Studio",
+  },
+  Server: {
+    peer: "plugin",
+    fix: "Update it if its version is pinned.",
+    restart: "your agent sessions",
+  },
+};
+
+function advice(name: "Plugin" | "Server", r: Extract<VersionRow, { kind: "behind" }>): string {
+  const { peer, fix, restart } = ADVICE[name];
   const lead =
     r.tone === "warn"
-      ? `Older than the server (${escapeHtml(r.peer)}).`
-      : `Gatekeeper ${escapeHtml(r.latest)} is available.`;
-  return `${status(r.tone === "warn" ? alertTriangleIcon : arrowUpCircleIcon, `${lead} Update the plugin in Beekeeper Studio.`)}
-              <span class="ver-then">Then restart Beekeeper Studio.</span>`;
+      ? `Older than the ${peer} (${escapeHtml(r.peer)}).`
+      : `Gatekeeper <span class="ver-new">${escapeHtml(r.latest)}</span> is available.`;
+  return `${status(r.tone === "warn" ? alertTriangleIcon : arrowUpCircleIcon, `${lead} ${fix}`)}
+              <span class="ver-then">Then restart ${restart}.</span>`;
 }
 
-// Windows has no pkill; closing every session stops the servers they started.
-function serverAdvice(r: Extract<VersionRow, { kind: "behind" }>, windows: boolean): string {
-  const lead =
-    r.tone === "warn"
-      ? `Older than the plugin (${escapeHtml(r.peer)}).`
-      : `Gatekeeper ${escapeHtml(r.latest)} is available.`;
-  const icon = r.tone === "warn" ? alertTriangleIcon : arrowUpCircleIcon;
-  if (windows) {
-    return `${status(icon, `${lead} Update it if its version is pinned.`)}
-              <span class="ver-then">Then close and reopen every agent session.</span>`;
-  }
-  const which = r.tone === "warn" ? "old" : "running";
-  const tone = r.tone === "warn" ? "tonal" : "quiet";
-  return `${status(icon, `${lead} Update it if its version is pinned, then stop the ${which} servers.`)}
-              <span class="ver-fix"><button class="sa-enable ${tone}" type="button" data-copy-stop>${copyIcon}<span>Copy stop command</span></button></span>
-              <span class="ver-then">Then restart your agent sessions.</span>`;
-}
-
-function rowHtml(name: "Plugin" | "Server", r: VersionRow, windows: boolean): string {
+function rowHtml(name: "Plugin" | "Server", r: VersionRow): string {
   let detail = "";
   if (r.kind === "ok") detail = status(checkIcon, "Up to date", "ok");
   else if (r.kind === "unknown")
     detail = status(helpCircleIcon, "Couldn't determine the version.", "unknown");
   else if (r.kind === "dev" && r.branch) detail = status(gitBranchIcon, escapeHtml(r.branch));
-  else if (r.kind === "behind")
-    detail = name === "Plugin" ? pluginAdvice(r) : serverAdvice(r, windows);
+  else if (r.kind === "behind") detail = advice(name, r);
   const tone = r.kind === "behind" ? ` ${r.tone}` : "";
   return `
           <div class="set-row${tone}">
@@ -75,14 +96,33 @@ function rowHtml(name: "Plugin" | "Server", r: VersionRow, windows: boolean): st
           </div>`;
 }
 
-export function versionGroupHtml(s: VersionStatus, windows: boolean): string {
+// The skill does every step above for both sides, old servers included, so it closes the
+// group once, tinted like the rows it would fix, rather than repeating in each row.
+function agentHtml(tone: "warn" | "info"): string {
+  return `
+          <div class="ver-agent ${tone}">
+            <span class="ver-agent-text">
+              <span class="ver-agent-title">Update to the latest version</span>
+              <span>Ask your agent to run the <button class="ver-skill" type="button" data-skill-link>update-gatekeeper</button> skill. It updates the plugin, the server and the skills, and stops the old servers.</span>
+            </span>
+            <button class="sa-enable quiet" type="button" data-copy-prompt>${copyIcon}<span>Copy prompt</span></button>
+          </div>`;
+}
+
+export function versionGroupHtml(s: VersionStatus): string {
+  const rows = [s.plugin, s.server];
+  const tone = rows.some((r) => r.kind === "behind" && r.tone === "warn")
+    ? "warn"
+    : rows.some((r) => r.kind === "behind")
+      ? "info"
+      : null;
   return `
           <div class="set-group-head with-link">
             <span class="set-group-name">Version</span>
             <button class="pair-link" type="button" data-releases>Releases on GitHub ${externalLinkIcon}</button>
           </div>
-          ${rowHtml("Plugin", s.plugin, windows)}
-          ${rowHtml("Server", s.server, windows)}`;
+          ${rowHtml("Plugin", s.plugin)}
+          ${rowHtml("Server", s.server)}${tone ? agentHtml(tone) : ""}`;
 }
 
 function describe(b: BuildIdentity | null): string {

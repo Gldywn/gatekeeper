@@ -48,7 +48,8 @@ import { type CardGate, cardGate, queueHtml, readyActions, schemaInner } from ".
 import { type LayerState, readOnlyView } from "./render/readonly";
 import { presence, rosterRow } from "./render/roster";
 import {
-  STOP_COMMAND,
+  UPDATE_SKILL_URL,
+  updatePrompt,
   versionDockHtml,
   versionDockTitle,
   versionGroupHtml,
@@ -183,8 +184,6 @@ function newInstanceId(): string {
 const REPO_URL = "https://github.com/Gldywn/gatekeeper";
 const ISSUES_URL = `${REPO_URL}/issues/new/choose`;
 const RELEASES_URL = `${REPO_URL}/releases`;
-// Electron's user agent carries the OS; only used to pick the stop-the-servers wording.
-const WINDOWS = typeof navigator !== "undefined" && navigator.userAgent.includes("Windows");
 const STARRED_KEY = "gatekeeper.starred";
 
 // The rows forwarded to the agent are capped independently of the local history budget:
@@ -344,7 +343,7 @@ export class Gatekeeper {
       mode: () => this.mode,
       auto: () => this.autoEnabled,
       keySaved: () => this.keySaved,
-      version: () => versionGroupHtml(this.versionStatus(), WINDOWS),
+      version: () => versionGroupHtml(this.versionStatus()),
     });
     root.addEventListener("click", (e) => {
       // The confirm overlay is rebuilt on every open, so its copy button delegates off
@@ -1333,9 +1332,13 @@ export class Gatekeeper {
         void openExternal(RELEASES_URL);
         return;
       }
-      const copyStop = target.closest<HTMLElement>("[data-copy-stop]");
-      if (copyStop) {
-        void this.copyStopCommand(copyStop);
+      if (target.closest("[data-skill-link]")) {
+        void openExternal(UPDATE_SKILL_URL);
+        return;
+      }
+      const copyPrompt = target.closest<HTMLElement>("[data-copy-prompt]");
+      if (copyPrompt) {
+        void this.copyUpdatePrompt(copyPrompt);
         return;
       }
       if (target.closest("[data-reset-settings]")) {
@@ -1559,8 +1562,12 @@ export class Gatekeeper {
       ?.focus({ preventScroll: true });
   }
 
+  private versionInputs(): [BuildIdentity, BuildIdentity | null, string | null] {
+    return [__GK_BUILD__, this.serverIdentity, this.latestRelease];
+  }
+
   private versionStatus(): VersionStatus {
-    return versionStatus(__GK_BUILD__, this.serverIdentity, this.latestRelease);
+    return versionStatus(...this.versionInputs());
   }
 
   private setServerHeader(raw: string | null): void {
@@ -1577,7 +1584,7 @@ export class Gatekeeper {
     const dock = this.root.querySelector<HTMLButtonElement>("#verDock");
     if (dock) {
       const { cls, html } = versionDockHtml(status.dock);
-      const title = versionDockTitle(__GK_BUILD__, this.serverIdentity, this.latestRelease);
+      const title = versionDockTitle(...this.versionInputs());
       dock.className = `ver-dock${cls ? ` ${cls}` : ""}`;
       dock.innerHTML = html;
       dock.title = title;
@@ -1585,7 +1592,7 @@ export class Gatekeeper {
       dock.hidden = this.serverHeader === undefined;
     }
     const group = this.root.querySelector<HTMLElement>("#settings:not([hidden]) #versionSettings");
-    if (group) group.innerHTML = versionGroupHtml(status, WINDOWS);
+    if (group) group.innerHTML = versionGroupHtml(status);
   }
 
   // Once per plugin start, and never from a dev build: Vite reloads would otherwise spend
@@ -1605,10 +1612,10 @@ export class Gatekeeper {
     section?.focus({ preventScroll: true });
   }
 
-  private async copyStopCommand(button: HTMLElement): Promise<void> {
+  private async copyUpdatePrompt(button: HTMLElement): Promise<void> {
     let copied = true;
     try {
-      await clipboard.writeText(STOP_COMMAND);
+      await clipboard.writeText(updatePrompt(...this.versionInputs()));
     } catch {
       copied = false;
     }
@@ -1618,7 +1625,7 @@ export class Gatekeeper {
       : `${copyIcon}<span>Copy failed, try again</span>`;
     window.setTimeout(() => {
       button.classList.remove("copied");
-      button.innerHTML = `${copyIcon}<span>Copy stop command</span>`;
+      button.innerHTML = `${copyIcon}<span>Copy prompt</span>`;
     }, 1600);
   }
 
