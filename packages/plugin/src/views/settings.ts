@@ -2,7 +2,12 @@ import { escapeHtml } from "../html";
 import { gearIcon, xIcon } from "../icons";
 import { autoSettingsHtml } from "../render/auto";
 import { modeDropdown, switchInput } from "../render/controls";
-import { RECENTLY_RESOLVED_OPTIONS, RESULT_CACHE_OPTIONS, type Settings } from "../settings";
+import {
+  AUTO_STOP_OPTIONS,
+  RECENTLY_RESOLVED_OPTIONS,
+  RESULT_CACHE_OPTIONS,
+  type Settings,
+} from "../settings";
 import type { RiskMode } from "../sql/mode";
 
 interface SettingsViewDeps {
@@ -114,6 +119,14 @@ export class SettingsView {
             </div>
             <span class="set-control">${switchInput("confirmWrites", "Double confirmation", s.confirmWrites)}</span>
           </div>
+          <div class="set-row">
+            <div class="set-text">
+              <span class="set-name">Auto-stop long queries</span>
+              <span class="set-desc">Ask the database to cancel an approved query once it has run this long on this connection.</span>
+              <span class="set-note">PostgreSQL and MySQL only</span>
+            </div>
+            <span class="set-control">${autoStopSelectHtml(s.autoStopMinutes)}</span>
+          </div>
           <div id="autoSettings" data-on="${this.auto()}">${autoSettingsHtml(this.auto(), this.keySaved())}</div>
           <div class="set-row recommend">
             <div class="set-text">
@@ -182,6 +195,14 @@ function selectHtml(value: number): string {
     (n) => `<option value="${n}"${n === value ? " selected" : ""}>${n}</option>`,
   ).join("");
   return `<select class="set-select" data-setting="recentlyResolved" aria-label="Recently resolved count">${opts}</select>`;
+}
+
+function autoStopSelectHtml(value: number): string {
+  const opts = AUTO_STOP_OPTIONS.map(
+    (n) =>
+      `<option value="${n}"${n === value ? " selected" : ""}>${n ? `${n} min` : "Never"}</option>`,
+  ).join("");
+  return `<select class="set-select" data-setting="autoStopMinutes" aria-label="Auto-stop long queries after">${opts}</select>`;
 }
 
 function cacheLabel(mb: number): string {

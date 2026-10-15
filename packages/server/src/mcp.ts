@@ -231,7 +231,8 @@ export function createMcpServer(
     "cancel_query",
     {
       title: "Cancel a pending query",
-      description: "Withdraw a pending or leased query you submitted.",
+      description:
+        "Withdraw a pending or leased query you submitted. A query that is already executing cannot be withdrawn; only the human can ask to stop it, and if it then fails, its error starts with 'Stop requested'.",
       inputSchema: { request_id: z.string() },
     },
     async ({ request_id }) => {

@@ -39,7 +39,14 @@ import { ConfirmModal } from "./render/confirm";
 import { connChipInner } from "./render/connchip";
 import { modeDropdown, switchInput } from "./render/controls";
 import { historyRow } from "./render/history";
-import { type CardGate, cardGate, queueHtml, readyActions, schemaInner } from "./render/queue";
+import {
+  type CardGate,
+  cardGate,
+  LONG_RUN_MS,
+  queueHtml,
+  readyActions,
+  schemaInner,
+} from "./render/queue";
 import { type LayerState, readOnlyView } from "./render/readonly";
 import { presence, rosterRow } from "./render/roster";
 import { capResult, type Field, type HistResult } from "./result";
@@ -52,6 +59,18 @@ import { highlight } from "./sql/highlight";
 import { modeRank, type RiskMode } from "./sql/mode";
 import { mapDialect } from "./sql/readonly";
 import { type EndpointReadOnly, probeReadOnly } from "./sql/readonly-probe";
+import {
+  errorText,
+  newStopToken,
+  readStop,
+  type StopEngine,
+  type StopOutcome,
+  serverVersion,
+  stopNote,
+  stopStatement,
+  stopTag,
+  stopUnavailable,
+} from "./sql/stop";
 import type {
   Card,
   CardState,
@@ -60,6 +79,7 @@ import type {
   Presence,
   Proposal,
   RequestState,
+  RunState,
   SessionRoster,
 } from "./types";
 import { ActivityView } from "./views/activity";
@@ -70,6 +90,9 @@ const BROKER_URL = "http://localhost:9999";
 const POLL_MS = 1000;
 const RENEW_MS = 15_000;
 const TICK_MS = 1000;
+// A query that started but is not in the database's activity yet gets a few ticks to appear.
+const STOP_ATTEMPTS = 5;
+const STOP_RETRY_MS = 10_000;
 const CONN_CHECK_MS = 5000;
 // Printable ASCII only, so a pasted key can never smuggle whitespace or control bytes.
 const API_KEY_FORMAT = /^[\x21-\x7e]{1,4096}$/;
@@ -130,7 +153,7 @@ async function runApprovedQuery(
   // rejects the query or the connection is down; surface it as a failure so the
   // agent gets "failed + reason", not a silent empty result.
   if (result.error) {
-    throw new Error(runErrorText(result.error));
+    throw new Error(errorText(result.error));
   }
   const first = result.results[0];
   return {
@@ -138,16 +161,6 @@ async function runApprovedQuery(
     fields: (first?.fields ?? []).map((f) => ({ name: f.name })),
     affectedRows: affectedRowsOf(first),
   };
-}
-
-function runErrorText(error: unknown): string {
-  if (typeof error === "string") {
-    return error;
-  }
-  if (error && typeof error === "object" && "message" in error) {
-    return String((error as { message: unknown }).message);
-  }
-  return "Query execution failed";
 }
 
 // A quick-menu switch row: the setting name and its live, persisted toggle.
@@ -267,6 +280,8 @@ export class Gatekeeper {
   // pending state distinct from a probe that ran and could not confirm.
   private endpointRO: EndpointReadOnly | null = null;
   private endpointProbed = false;
+  // MySQL only: stopping a query needs 8.0.19+, see sql/stop.ts.
+  private serverVersion: string | null = null;
   private renewTimer?: number;
   private tickTimer?: number;
   private schemaTimer?: number;
@@ -779,6 +794,7 @@ export class Gatekeeper {
     // The endpoint belongs to the old database; re-probe the new one from scratch.
     this.endpointRO = null;
     this.endpointProbed = false;
+    this.serverVersion = null;
     // Settings are per connection; the overlay now shows a different scope, so close
     // it and reload (which re-syncs the quick-menu switches and the activity trigger).
     this.settingsView.close();
@@ -933,10 +949,16 @@ export class Gatekeeper {
       return;
     }
     const gen = this.connGeneration;
+    const type = this.conn.databaseType;
+    // A reactivated tab can sit on another server than the one probed before; an unknown
+    // version keeps Stop unavailable until this probe answers.
+    this.serverVersion = null;
     const result = await probeReadOnly(this.dialect, runQuery);
+    const version = type === "mysql" ? await serverVersion(runQuery) : null;
     if (gen !== this.connGeneration) {
       return;
     }
+    this.serverVersion = version;
     this.endpointRO = result;
     this.endpointProbed = true;
     this.renderConnLabel();
@@ -1156,8 +1178,12 @@ export class Gatekeeper {
       const r = target.closest<HTMLElement>("[data-reject]");
       const denyOpen = target.closest<HTMLElement>("[data-deny-open]");
       const deny = target.closest<HTMLElement>("[data-deny]");
+      const stop = target.closest<HTMLElement>("[data-stop]");
       if (copy) {
         this.copySql(copy);
+      } else if (stop) {
+        const card = this.cards.find((c) => c.id === stop.getAttribute("data-stop"));
+        if (card) this.requestStop(card, "operator");
       } else if (a) {
         void this.approve(a.getAttribute("data-approve")!);
       } else if (r) {
@@ -2129,6 +2155,7 @@ export class Gatekeeper {
         leaseEl.textContent = clock(remaining);
       }
     }
+    this.tickRuns(Date.now());
     // Keep the resolved-history and roster ages current without re-rendering.
     this.root.querySelectorAll<HTMLSpanElement>("#hist .hage, #roster .rage").forEach((el) => {
       const t = Number(el.dataset.age);
@@ -2332,9 +2359,16 @@ export class Gatekeeper {
       this.reviewCard(card, "Execution stopped before SQL ran. Approval authority changed");
       return;
     }
+    const run = this.startRun(card);
+    card.run = run;
     this.setCardState(id, "executing");
     try {
-      const { rows, fields, affectedRows } = await runApprovedQuery(card.sql);
+      // The tag is a plain leading comment: the statement the gate classified is unchanged.
+      const { rows, fields, affectedRows } = await runApprovedQuery(
+        run.tag ? `${run.tag} ${sql}` : sql,
+      ).finally(() => {
+        run.ended = true;
+      });
       // The query may have hit the new database after a switch; never deliver its
       // rows against the old proposal.
       if (gen !== this.connGeneration || active !== this.activeGen) {
@@ -2373,10 +2407,126 @@ export class Gatekeeper {
         capResult(rows, fields, resultBudgetBytes(this.settingsStore.get()), undefined, changed),
       );
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = stopNote(run, err instanceof Error ? err.message : String(err));
       await this.postResult(card, { status: "approved", error: message });
       this.finish(id, "failed", "query failed", undefined, message);
     }
+  }
+
+  private startRun(card: Card): RunState {
+    const type = this.conn?.databaseType ?? "";
+    const run: RunState = {
+      startedAt: Date.now(),
+      limitMs: (this.settingsStore.get().autoStopMinutes ?? 0) * 60_000,
+      ended: false,
+    };
+    const unavailable = stopUnavailable(
+      type,
+      dbDisplayName(type),
+      this.conn?.readOnly ?? false,
+      this.serverVersion,
+    );
+    if (unavailable) {
+      run.unavailable = unavailable;
+    } else {
+      run.engine = type as StopEngine;
+      run.tag = stopTag(card.id, newStopToken());
+    }
+    return run;
+  }
+
+  // The operator's click or the auto-stop limit. The first request is the one reported.
+  private requestStop(card: Card, by: "operator" | "limit"): void {
+    const run = card.run;
+    if (card.state !== "executing" || !run?.engine || run.ended || !this.cards.includes(card)) {
+      return;
+    }
+    if (run.stop && (run.stop.state !== "idle" || run.stop.inFlight)) return;
+    if (run.stop) {
+      Object.assign(run.stop, { state: "pending", attempts: 0, error: undefined });
+    } else {
+      run.stop = {
+        by,
+        atMs: Date.now() - run.startedAt,
+        state: "pending",
+        inFlight: false,
+        attempts: 0,
+      };
+    }
+    this.renderQueue();
+    void this.sendStop(card);
+  }
+
+  // At most one stop request in flight per card; "not found yet" is retried by the tick.
+  private async sendStop(card: Card): Promise<void> {
+    const run = card.run;
+    const stop = run?.stop;
+    if (!run?.engine || !run.tag || !stop || stop.state !== "pending" || stop.inFlight) return;
+    if (run.ended || !this.cards.includes(card)) return;
+    const gen = this.connGeneration;
+    const active = this.activeGen;
+    stop.inFlight = true;
+    stop.attempts++;
+    let outcome: StopOutcome;
+    try {
+      outcome = readStop(run.engine, await runQuery(stopStatement(run.engine, run.tag)));
+    } catch (err) {
+      outcome = { kind: "error", message: errorText(err) };
+    }
+    stop.inFlight = false;
+    // A switched connection or a query that already settled makes the answer moot.
+    if (
+      gen !== this.connGeneration ||
+      active !== this.activeGen ||
+      !this.cards.includes(card) ||
+      card.run !== run ||
+      run.ended ||
+      stop.state !== "pending"
+    ) {
+      return;
+    }
+    if (outcome.kind === "sent") {
+      stop.state = "sent";
+      stop.sentAt = Date.now();
+    } else if (outcome.kind === "error") {
+      stop.state = "idle";
+      stop.error = outcome.message;
+    } else if (stop.attempts >= STOP_ATTEMPTS) {
+      stop.state = "idle";
+      stop.error = "The running query was not found in the database's activity";
+    } else {
+      return;
+    }
+    this.renderQueue();
+  }
+
+  private tickRuns(now: number): void {
+    let rerender = false;
+    for (const card of [...this.cards]) {
+      const run = card.state === "executing" ? card.run : undefined;
+      if (!run || run.ended) continue;
+      const elapsed = now - run.startedAt;
+      const stop = run.stop;
+      if (run.engine && run.limitMs && !stop && elapsed >= run.limitMs) {
+        this.requestStop(card, "limit");
+        continue;
+      }
+      if (stop?.state === "pending" && !stop.inFlight) void this.sendStop(card);
+      // An accepted cancel normally ends the query at once; if it did not, let the
+      // operator try again rather than leave Stop disabled for the rest of the run.
+      if (stop?.state === "sent" && now - (stop.sentAt ?? now) >= STOP_RETRY_MS) {
+        stop.state = "idle";
+        rerender = true;
+      }
+      const el = this.root.querySelector<HTMLElement>(`[data-card="${card.id}"]`);
+      if (!el) continue;
+      el.classList.toggle("long", elapsed >= LONG_RUN_MS);
+      const elapsedEl = el.querySelector<HTMLElement>(".run-clock");
+      if (elapsedEl) elapsedEl.textContent = clock(elapsed);
+      const leftEl = el.querySelector<HTMLElement>(".autostop-clock");
+      if (leftEl) leftEl.textContent = clock(run.limitMs - elapsed);
+    }
+    if (rerender) this.renderQueue();
   }
 
   private async reject(id: string, reason?: string): Promise<void> {

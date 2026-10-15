@@ -1610,15 +1610,17 @@ label.qs-row {
   border-radius: 4px;
 }
 
-.busy {
+/* A transient label is prose, so the UI face; only the run clock is data. */
+.busy,
+.run {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--muted);
 }
 .spin {
+  flex: none;
   width: 11px;
   height: 11px;
   border-radius: 50%;
@@ -1634,6 +1636,94 @@ label.qs-row {
       transform: rotate(360deg);
     }
   }
+}
+
+/* The running row. Blue means executing, so the SQL frame takes --exec while the query
+   runs, then amber once it runs long, the operator's cue that Stop is worth a look. */
+.card.running .sql::before,
+.card.running .sql::after {
+  border-color: var(--exec);
+}
+.card.running.long .sql::before,
+.card.running.long .sql::after {
+  border-color: var(--amber);
+}
+.btn.stop {
+  --sc: var(--exec);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 14px 6px 11px;
+  background: color-mix(in oklch, var(--exec) 17%, transparent);
+  color: var(--exec);
+  transition:
+    background var(--dur) var(--ease),
+    color var(--dur) var(--ease),
+    filter var(--dur) var(--ease);
+}
+.btn.stop:hover:not(:disabled) {
+  filter: brightness(1.12);
+}
+.btn.stop .sq {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: currentColor;
+}
+.card.long .btn.stop {
+  --sc: var(--amber);
+  background: color-mix(in oklch, var(--amber) 18%, transparent);
+  color: var(--amber);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .card.long .btn.stop:not(:disabled) {
+    animation: armed-pulse 2s var(--ease-in-out) infinite;
+  }
+}
+.clock {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--faint);
+}
+.card.long .run-clock {
+  color: var(--amber);
+}
+.autostop {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--faint);
+}
+.autostop svg {
+  flex: none;
+  width: 13px;
+  height: 13px;
+}
+/* An unavailable feature is a warning, not a block: the same popover in amber. */
+.approve-pop.warn {
+  color: var(--amber);
+  border-color: color-mix(in oklch, var(--amber) 35%, var(--edge));
+}
+/* A failed stop: the card's boxed note, with the database's raw error on its own mono
+   line under the message, as the detail overlay shows a failed query. */
+.cs-unparsed.stop-error {
+  margin: var(--s3) 0 0;
+}
+.stop-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.stop-raw {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: color-mix(in oklch, var(--danger) 78%, var(--text));
 }
 
 .empty {
@@ -2091,6 +2181,14 @@ label.qs-row {
   color: var(--faint);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+/* A long note (a failed query's error) ends in an ellipsis instead of squeezing the title;
+   the detail overlay keeps the whole text. */
+.hnote {
+  min-width: 0;
+  max-width: 42ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ---- Result detail overlay ---- */
@@ -3235,6 +3333,12 @@ label.qs-row {
   font-size: 11.5px;
   color: var(--muted);
   overflow-wrap: anywhere;
+}
+/* A scope limit on a setting (which databases it applies to), quieter than its description. */
+.set-note {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--faint);
 }
 .set-control {
   margin-left: auto;

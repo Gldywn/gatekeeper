@@ -48,6 +48,18 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+// On a stoppable connection the approved statement leaves behind a comment tag
+// (sql/stop.ts); what follows the tag must still be the statement, byte for byte.
+const TAG = /^\/\* gatekeeper (req_[0-9a-f]{12} )?[0-9a-f]{12} \*\/ /;
+function untag(sent: string): string {
+  return sent.replace(TAG, "");
+}
+function executed(sql: string) {
+  return expect.toSatisfy(
+    (sent: unknown) => typeof sent === "string" && TAG.test(sent) && untag(sent) === sql,
+  );
+}
+
 function harness() {
   // Exercise the real app methods with host/network boundaries replaced, without a browser.
   const app = Object.create(Gatekeeper.prototype);
@@ -208,7 +220,7 @@ describe("shared manual/automatic execution authority", () => {
       "quantity",
       "sku",
     ]);
-    expect(query).toHaveBeenLastCalledWith(sql);
+    expect(query).toHaveBeenLastCalledWith(executed(sql));
     expect(app.broker.executing).toHaveBeenCalledOnce();
   });
   it.each(["disable", "lease", "reject", "schema"])(
@@ -251,7 +263,7 @@ describe("shared manual/automatic execution authority", () => {
       usage: "output",
     });
     expect(query).toHaveBeenCalledTimes(3);
-    expect(query).toHaveBeenLastCalledWith(sql);
+    expect(query).toHaveBeenLastCalledWith(executed(sql));
     expect(app.broker.executing).toHaveBeenCalledOnce();
   });
   it("inspects correlated reporting sources before evaluation and runs the original SQL", async () => {
@@ -280,7 +292,7 @@ describe("shared manual/automatic execution authority", () => {
     expect(input.sql).not.toContain("2026-01-01");
     expect(input.sql).not.toContain("synthetic-provider");
     expect(query).toHaveBeenCalledTimes(3);
-    expect(query).toHaveBeenLastCalledWith(sql);
+    expect(query).toHaveBeenLastCalledWith(executed(sql));
     expect(app.broker.executing).toHaveBeenCalledOnce();
   });
   it("requires metadata for every joined relation before sharing", async () => {
@@ -718,10 +730,10 @@ describe("Auto mode queue while an approved read executes", () => {
     const { app, card, next } = twoReads();
     const first = deferred<typeof empty>();
     query.mockImplementation((sql: string) =>
-      sql === card.sql ? first.promise : Promise.resolve(empty),
+      untag(sql) === card.sql ? first.promise : Promise.resolve(empty),
     );
     const pending = app.evaluateNext();
-    await vi.waitFor(() => expect(query).toHaveBeenCalledWith(next.sql));
+    await vi.waitFor(() => expect(query).toHaveBeenCalledWith(executed(next.sql)));
     expect(card.state).toBe("executing");
     expect(card.autoStatus).toBe(AUTO_APPROVED);
     const html = cardHtml(card, "postgresql", new Map());
@@ -758,7 +770,9 @@ describe("Auto mode queue while an approved read executes", () => {
     executing.resolve(true);
     nextAnswer.resolve(evaluation());
     await pending;
-    expect(query.mock.calls.filter((c: unknown[]) => c[0] === card.sql)).toHaveLength(1);
+    expect(
+      query.mock.calls.filter((c: unknown[]) => untag(String(c[0])) === card.sql),
+    ).toHaveLength(1);
     expect(app.broker.withdrawExecution).not.toHaveBeenCalledWith(card.id, card.leaseId);
   });
 
@@ -782,7 +796,7 @@ describe("Auto mode queue while an approved read executes", () => {
     executing.resolve(true);
     nextAnswer.resolve(evaluation());
     await pending;
-    expect(query).not.toHaveBeenCalledWith(card.sql);
+    expect(query).not.toHaveBeenCalledWith(executed(card.sql));
     expect(app.broker.withdrawExecution).toHaveBeenCalledWith(card.id, card.leaseId);
     expect(card.state).toBe("ready");
     expect(card.autoStatus).toMatch(/^Needs review: /);
@@ -812,7 +826,7 @@ describe("Auto mode queue while an approved read executes", () => {
       await vi.advanceTimersByTimeAsync(16_000);
       executing.resolve(true);
       await pending;
-      expect(query).toHaveBeenCalledWith(card.sql);
+      expect(query).toHaveBeenCalledWith(executed(card.sql));
       expect(app.broker.withdrawExecution).not.toHaveBeenCalled();
     });
 
@@ -834,5 +848,275 @@ describe("Auto mode queue while an approved read executes", () => {
       expect(app.broker.executing).not.toHaveBeenCalled();
       expect(query).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("stopping a running query", () => {
+  type Answer = { results: { rows: Record<string, unknown>[]; fields: [] }[]; error?: unknown };
+  const answer = (row: Record<string, unknown>): Answer => ({
+    results: [{ rows: [row], fields: [] }],
+  });
+  const sent = answer({ sent: true, matches: "1" });
+  const notFound = answer({ sent: null, matches: "0" });
+  const cancelled: Answer = {
+    results: [],
+    error: { message: "canceling statement due to user request" },
+  };
+
+  // The approved query is held on `run`; every stop statement goes through `stop`.
+  function running(onStop: (sql: string) => Promise<Answer>, minutes = 0) {
+    const { app, card } = harness();
+    app.settingsStore = {
+      get: () => ({ confirmWrites: true, resultCacheMb: 4, autoStopMinutes: minutes }),
+    };
+    const run = deferred<Answer>();
+    const stop = vi.fn(onStop);
+    query.mockImplementation((sql: string) => (TAG.test(sql) ? run.promise : stop(sql)));
+    const pending = app.approve(card.id);
+    return { app, card, run, stop, pending };
+  }
+
+  it("cancels through the database and reports the request as a fact", async () => {
+    const { app, card, run, stop, pending } = running(async () => sent);
+    await vi.waitFor(() => expect(card.state).toBe("executing"));
+    app.requestStop(card, "operator");
+    await vi.waitFor(() => expect(card.run.stop.state).toBe("sent"));
+    expect(stop).toHaveBeenCalledOnce();
+    expect(stop.mock.calls[0][0]).toContain(`= '${card.run.tag}'`);
+    run.resolve(cancelled);
+    await pending;
+    const message = app.broker.result.mock.calls[0][2].error;
+    expect(message).toMatch(
+      /^Stop requested by the operator after \d+s\. The query then ended with: canceling statement due to user request$/,
+    );
+    expect(app.finish).toHaveBeenCalledWith(card.id, "failed", "query failed", undefined, message);
+  });
+
+  it("delivers the normal result when the query finishes before the stop lands", async () => {
+    const { app, card, run, pending } = running(async () => notFound);
+    await vi.waitFor(() => expect(card.state).toBe("executing"));
+    app.requestStop(card, "operator");
+    run.resolve(answer({ quantity: 3 }));
+    await pending;
+    const body = app.broker.result.mock.calls[0][2];
+    expect(body.status).toBe("approved");
+    expect(body.error).toBeUndefined();
+    expect(body.rows).toEqual([{ quantity: 3 }]);
+  });
+
+  it("never sends a stop once the query has settled", async () => {
+    const { app, card, run, stop, pending } = running(async () => notFound);
+    await vi.waitFor(() => expect(card.state).toBe("executing"));
+    app.requestStop(card, "operator");
+    await vi.waitFor(() => expect(stop).toHaveBeenCalledOnce());
+    run.resolve(answer({ quantity: 3 }));
+    await pending;
+    app.tickRuns(Date.now());
+    app.requestStop(card, "operator");
+    expect(stop).toHaveBeenCalledOnce();
+  });
+
+  it("keeps one stop request in flight, however often it is asked", async () => {
+    const { app, card, stop } = running(() => new Promise<Answer>(() => {}));
+    await vi.waitFor(() => expect(card.state).toBe("executing"));
+    app.requestStop(card, "operator");
+    app.requestStop(card, "operator");
+    app.tickRuns(Date.now());
+    app.tickRuns(Date.now() + 1000);
+    expect(stop).toHaveBeenCalledOnce();
+    expect(card.run.stop.state).toBe("pending");
+  });
+
+  it("ignores a stop answer that arrives after a connection switch", async () => {
+    const late = deferred<Answer>();
+    const { app, card, run, pending } = running(() => late.promise);
+    await vi.waitFor(() => expect(card.state).toBe("executing"));
+    app.requestStop(card, "operator");
+    app.onConnectionSwitch();
+    late.resolve(sent);
+    run.resolve(cancelled);
+    await pending;
+    expect(card.run.stop.state).toBe("pending");
+    expect(card.run.stop.sentAt).toBeUndefined();
+  });
+
+  it("shows the database's refusal and lets the operator try again", async () => {
+    const refusals: Answer[] = [
+      { results: [], error: { message: "permission denied to cancel query" } },
+      sent,
+    ];
+    const { app, card, stop } = running(async () => refusals.shift() ?? sent);
+    await vi.waitFor(() => expect(card.state).toBe("executing"));
+    app.requestStop(card, "operator");
+    await vi.waitFor(() => expect(card.run.stop.error).toBe("permission denied to cancel query"));
+    expect(card.run.stop.state).toBe("idle");
+    app.requestStop(card, "operator");
+    await vi.waitFor(() => expect(card.run.stop.state).toBe("sent"));
+    expect(card.run.stop.error).toBeUndefined();
+    expect(stop).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives up after a few attempts that do not find the query", async () => {
+    const { app, card, stop } = running(async () => notFound);
+    await vi.waitFor(() => expect(card.state).toBe("executing"));
+    app.requestStop(card, "operator");
+    for (let i = 1; i < 5; i++) {
+      await vi.waitFor(() => expect(card.run.stop.inFlight).toBe(false));
+      app.tickRuns(Date.now());
+    }
+    await vi.waitFor(() =>
+      expect(card.run.stop.error).toBe(
+        "The running query was not found in the database's activity",
+      ),
+    );
+    expect(stop).toHaveBeenCalledTimes(5);
+  });
+
+  it("auto-stops at the limit captured when the query started", async () => {
+    const { app, card, run, stop, pending } = running(async () => sent, 1);
+    await vi.waitFor(() => expect(card.state).toBe("executing"));
+    app.settingsStore = {
+      get: () => ({ confirmWrites: true, resultCacheMb: 4, autoStopMinutes: 0 }),
+    };
+    app.tickRuns(card.run.startedAt + 59_000);
+    expect(stop).not.toHaveBeenCalled();
+    app.tickRuns(card.run.startedAt + 60_000);
+    await vi.waitFor(() => expect(card.run.stop.state).toBe("sent"));
+    expect(card.run.stop.by).toBe("limit");
+    run.resolve(cancelled);
+    await pending;
+    expect(app.broker.result.mock.calls[0][2].error).toBe(
+      "Stop requested by auto-stop at the 1 min limit set on this connection. The query then ended with: canceling statement due to user request",
+    );
+  });
+
+  it("keeps the operator's request when the limit is reached afterwards", async () => {
+    const { app, card } = running(async () => sent, 1);
+    await vi.waitFor(() => expect(card.state).toBe("executing"));
+    app.requestStop(card, "operator");
+    await vi.waitFor(() => expect(card.run.stop.state).toBe("sent"));
+    app.tickRuns(card.run.startedAt + 60_000);
+    expect(card.run.stop.by).toBe("operator");
+  });
+
+  it.each([
+    ["sqlite", false, "This feature is not available on SQLite."],
+    ["mysql", true, "This feature is not available on read-only MySQL connections."],
+  ])("runs the untouched SQL and offers no stop on %s (read-only %s)", async (type, ro, why) => {
+    const { app, card } = harness();
+    connection.mockResolvedValue({
+      id: 1,
+      connectionName: "test",
+      databaseType: type,
+      databaseName: "test",
+      defaultSchema: "public",
+      readOnlyMode: ro,
+    });
+    Object.assign(app.conn, { databaseType: type, readOnly: ro });
+    app.serverVersion = "8.4.0";
+    const run = deferred<Answer>();
+    query.mockReturnValue(run.promise);
+    const pending = app.approve(card.id);
+    await vi.waitFor(() => expect(card.state).toBe("executing"));
+    expect(query).toHaveBeenCalledWith(card.sql);
+    expect(card.run.unavailable).toBe(why);
+    app.requestStop(card, "operator");
+    run.resolve(answer({ quantity: 3 }));
+    await pending;
+    expect(query).toHaveBeenCalledOnce();
+  });
+
+  it("sends MySQL 8.0.19+ a single KILL QUERY batch", async () => {
+    const { app, card } = harness();
+    connection.mockResolvedValue({
+      id: 1,
+      connectionName: "test",
+      databaseType: "mysql",
+      databaseName: "test",
+      defaultSchema: "public",
+      readOnlyMode: false,
+    });
+    Object.assign(app.conn, { databaseType: "mysql" });
+    app.serverVersion = "8.0.36";
+    const run = deferred<Answer>();
+    const stop = vi.fn(async () => ({
+      results: [
+        { rows: [], fields: [] },
+        { rows: [{ matches: 1 }], fields: [] },
+      ],
+    }));
+    query.mockImplementation((sql: string) => (TAG.test(sql) ? run.promise : stop(sql)));
+    const pending = app.approve(card.id);
+    await vi.waitFor(() => expect(card.state).toBe("executing"));
+    app.requestStop(card, "operator");
+    await vi.waitFor(() => expect(card.run.stop.state).toBe("sent"));
+    expect(stop.mock.calls[0][0]).toContain("CONCAT('KILL QUERY ', @gk_target)");
+    run.resolve(cancelled);
+    await pending;
+  });
+
+  it("records the request without claiming it caused an unrelated failure", async () => {
+    const { app, card, run, pending } = running(async () => ({
+      results: [],
+      error: { message: "permission denied to cancel query" },
+    }));
+    await vi.waitFor(() => expect(card.state).toBe("executing"));
+    app.requestStop(card, "operator");
+    await vi.waitFor(() => expect(card.run.stop.state).toBe("idle"));
+    run.resolve({ results: [], error: { message: 'duplicate key value violates "users_pkey"' } });
+    await pending;
+    expect(app.broker.result.mock.calls[0][2].error).toMatch(
+      /^Stop requested by the operator after \d+s\. The query then ended with: duplicate key value violates "users_pkey"$/,
+    );
+  });
+
+  it("lets the operator try again when an accepted cancel did not end the query", async () => {
+    const { app, card, stop } = running(async () => sent);
+    await vi.waitFor(() => expect(card.state).toBe("executing"));
+    app.requestStop(card, "operator");
+    await vi.waitFor(() => expect(card.run.stop.state).toBe("sent"));
+    app.tickRuns(card.run.stop.sentAt + 9_999);
+    expect(card.run.stop.state).toBe("sent");
+    app.tickRuns(card.run.stop.sentAt + 10_000);
+    expect(card.run.stop.state).toBe("idle");
+    app.requestStop(card, "operator");
+    await vi.waitFor(() => expect(stop).toHaveBeenCalledTimes(2));
+  });
+
+  it("still stops a query whose lease was lost while it runs", async () => {
+    const { app, card, stop } = running(async () => sent);
+    await vi.waitFor(() => expect(card.state).toBe("executing"));
+    card.authorityLost = true;
+    app.requestStop(card, "operator");
+    await vi.waitFor(() => expect(stop).toHaveBeenCalledOnce());
+  });
+
+  it("forgets a MySQL version probed before the tab was reactivated", async () => {
+    const { app, card } = harness();
+    connection.mockResolvedValue({
+      id: 1,
+      connectionName: "test",
+      databaseType: "mysql",
+      databaseName: "test",
+      defaultSchema: "public",
+      readOnlyMode: false,
+    });
+    Object.assign(app.conn, { databaseType: "mysql" });
+    app.dialect = "mysql";
+    app.serverVersion = "8.4.0";
+    const probe = deferred<Answer>();
+    const run = deferred<Answer>();
+    query.mockImplementation((sql: string) =>
+      sql.includes("@@global.read_only") ? probe.promise : run.promise,
+    );
+    const probing = app.probeEndpoint();
+    const pending = app.approve(card.id);
+    await vi.waitFor(() => expect(card.state).toBe("executing"));
+    expect(card.run.unavailable).toBe("This feature is not available on this MySQL server.");
+    expect(query).toHaveBeenCalledWith(card.sql);
+    run.resolve(answer({ quantity: 3 }));
+    await pending;
+    probe.resolve(answer({ read_only: 0, super_read_only: 0 }));
+    await probing;
   });
 });
