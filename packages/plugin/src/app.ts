@@ -93,6 +93,10 @@ const TICK_MS = 1000;
 // A query that started but is not in the database's activity yet gets a few ticks to appear.
 const STOP_ATTEMPTS = 5;
 const STOP_RETRY_MS = 10_000;
+// Auto mode starts no new evaluation while this many automatic reads run. Beekeeper's default
+// PostgreSQL pool holds 8 connections; this leaves room for Stop and the operator's own tabs,
+// without reserving any.
+const AUTO_RUNS_MAX = 3;
 const CONN_CHECK_MS = 5000;
 // Printable ASCII only, so a pasted key can never smuggle whitespace or control bytes.
 const API_KEY_FORMAT = /^[\x21-\x7e]{1,4096}$/;
@@ -229,6 +233,9 @@ export class Gatekeeper {
   private autoGeneration = 0;
   private autoKey = "";
   private autoBusy = false;
+  // Automatic executions still running. Never reset: each run decrements its own count when
+  // it settles, even after a switch or a disable.
+  private autoRuns = 0;
   private autoAbort?: AbortController;
   private autoCard?: Card;
   // Proposals already waiting when Auto mode was switched on. Enabling delegates the
@@ -1681,7 +1688,7 @@ export class Gatekeeper {
   }
 
   private async evaluateNext(): Promise<void> {
-    if (!this.autoEnabled || this.autoBusy) return;
+    if (!this.autoEnabled || this.autoBusy || this.autoRuns >= AUTO_RUNS_MAX) return;
     const card = this.cards.find(
       (c) =>
         c.state === "ready" &&
@@ -1757,6 +1764,7 @@ export class Gatekeeper {
       card.autoStatus = AUTO_APPROVED;
       // approve() reserves the card before its first await, so the finally below frees the
       // evaluator for the next read while this one executes.
+      this.autoRuns++;
       run = this.approve(card.id, false, evaluation);
     } catch {
       if (valid()) this.reviewCard(card, "Evaluator or metadata unavailable. Approve manually");
@@ -1768,10 +1776,14 @@ export class Gatekeeper {
         this.reviewCard(card, "Evaluation cancelled or authority changed");
       void this.evaluateNext();
     }
+    if (!run) return;
     try {
       await run;
     } catch (err) {
       log.error(err instanceof Error ? err : String(err));
+    } finally {
+      this.autoRuns--;
+      void this.evaluateNext();
     }
   }
 

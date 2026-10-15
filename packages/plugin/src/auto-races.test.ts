@@ -84,6 +84,7 @@ function harness() {
     autoKey: "synthetic-key",
     autoDeferred: new Set<string>(),
     autoBusy: false,
+    autoRuns: 0,
     mode: "read",
     dialect: "postgresql",
     conn: {
@@ -747,6 +748,34 @@ describe("Auto mode queue while an approved read executes", () => {
     }
     // The second read delivered its result while the first was still running.
     expect(app.broker.result.mock.calls.map((c: unknown[]) => c[0])).toEqual([next.id, card.id]);
+  });
+
+  it("evaluates no new read while three automatic reads are still running", async () => {
+    const { app, card } = twoReads();
+    const reads: Card[] = [1, 2, 3].map((n) => ({
+      ...card,
+      id: `read-${n}`,
+      leaseId: `lease-${n}`,
+      sql: `SELECT price FROM public.products LIMIT ${n}`,
+    }));
+    app.cards = [card, ...reads];
+    const held = new Map<string, ReturnType<typeof deferred<typeof empty>>>();
+    query.mockImplementation((sent: string) => {
+      const sql = untag(sent);
+      if (sql === reads[2].sql) return Promise.resolve(empty);
+      const gate = deferred<typeof empty>();
+      held.set(sql, gate);
+      return gate.promise;
+    });
+    const pending = app.evaluateNext();
+    await vi.waitFor(() => expect(held.size).toBe(3));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(app.broker.evaluate).toHaveBeenCalledTimes(3);
+    expect(reads[2].state).toBe("ready");
+    held.get(card.sql)?.resolve(empty);
+    await vi.waitFor(() => expect(query).toHaveBeenCalledWith(executed(reads[2].sql)));
+    for (const gate of held.values()) gate.resolve(empty);
+    await pending;
   });
 
   it("keeps the first approval when the next read's evaluation is aborted before its SQL", async () => {
