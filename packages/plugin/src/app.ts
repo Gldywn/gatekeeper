@@ -494,13 +494,7 @@ export class Gatekeeper {
     // The schema annotation caches columns per table; a DDL change invalidates it.
     if (!this.wiredNotifications) {
       this.wiredNotifications = true;
-      addNotificationListener("tablesChanged", () => {
-        this.resetAuto("Schema changed. Enable Auto mode again after review");
-        this.applyMode("read");
-        this.connGeneration++;
-        this.annotator.clearCache();
-        this.scheduleSchemaReport();
-      });
+      addNotificationListener("tablesChanged", () => this.onTablesChanged());
     }
     this.polling = true;
     void this.loadInflight();
@@ -946,6 +940,17 @@ export class Gatekeeper {
       window.clearTimeout(this.schemaReportTimer);
     }
     this.schemaReportTimer = window.setTimeout(() => void this.reportSchema(), SCHEMA_DEBOUNCE_MS);
+  }
+
+  private onTablesChanged(): void {
+    this.resetAuto("Schema changed. Enable Auto mode again after review");
+    this.applyMode("read");
+    this.connGeneration++;
+    this.annotator.clearCache();
+    this.scheduleSchemaReport();
+    // The generation bump discards a probe in flight; without a fresh one, Stop would stay
+    // unavailable for the rest of the session.
+    void this.probeEndpoint();
   }
 
   // connGeneration-guarded like the annotator: a switch mid-probe discards the

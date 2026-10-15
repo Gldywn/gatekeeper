@@ -1121,6 +1121,31 @@ describe("stopping a running query", () => {
     await vi.waitFor(() => expect(stop).toHaveBeenCalledOnce());
   });
 
+  it("probes again when a schema change discards a probe in flight", async () => {
+    const { app } = harness();
+    Object.assign(app, { applyMode: vi.fn(), scheduleSchemaReport: vi.fn() });
+    const first = deferred<Answer>();
+    let probes = 0;
+    // The fresh probe reads 16.2; the stale one, answering after it, would read 9.6.
+    const versions = ["PostgreSQL 16.2 on x86_64-pc-linux-gnu", "PostgreSQL 9.6.24 on x86_64"];
+    query.mockImplementation((sql: string) => {
+      if (sql.includes("pg_is_in_recovery")) {
+        return probes++ === 0 ? first.promise : Promise.resolve(answer({ replica: false }));
+      }
+      return Promise.resolve(answer({ version: versions.shift() }));
+    });
+    const stale = app.probeEndpoint();
+    app.onTablesChanged();
+    await vi.waitFor(() =>
+      expect(app.serverVersion).toBe("PostgreSQL 16.2 on x86_64-pc-linux-gnu"),
+    );
+    first.resolve(answer({ replica: false }));
+    await stale;
+    expect(versions).toHaveLength(0);
+    expect(app.serverVersion).toBe("PostgreSQL 16.2 on x86_64-pc-linux-gnu");
+    expect(probes).toBe(2);
+  });
+
   it("forgets a MySQL version probed before the tab was reactivated", async () => {
     const { app, card } = harness();
     connection.mockResolvedValue({
