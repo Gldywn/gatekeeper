@@ -31,11 +31,14 @@ function readOrNull(url: URL): string | null {
 const pkgText = readFileSync(new URL("../package.json", import.meta.url), "utf8");
 const stamp = readOrNull(new URL("./build.json", import.meta.url));
 
-// build.json is written into dist/ by the build. A server watched from src/ has none, so
-// scripts/dev-server.mjs hands it one in the environment, which can only ever say dev.
-function fromLauncher(): BuildIdentity {
-  const { version, dev } = readIdentity(pkgText, process.env.GATEKEEPER_BUILD_IDENTITY ?? null);
+// build.json is written into dist/ by the build. A server watched from src/ has none next
+// to it, so scripts/dev-server.mjs hands it one in the environment, which can only say dev.
+export function launcherIdentity(pkgText: string, envText: string | null): BuildIdentity {
+  const { version, dev } = readIdentity(pkgText, envText);
   return { version, dev: dev ?? {} };
 }
 
-export const SERVER_IDENTITY = stamp !== null ? readIdentity(pkgText, stamp) : fromLauncher();
+export const SERVER_IDENTITY =
+  stamp !== null
+    ? readIdentity(pkgText, stamp)
+    : launcherIdentity(pkgText, process.env.GATEKEEPER_BUILD_IDENTITY ?? null);

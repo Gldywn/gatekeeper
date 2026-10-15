@@ -82,9 +82,9 @@ The repo ships its dev wiring, so a clone is ready without hand-editing config:
   indicator, with its commit and branch in the indicator's tooltip and in Settings > Version,
   and gets no update advice.
   The commit is the checkout's HEAD, not a fingerprint of uncommitted changes. A server
-  watched from its sources (`pnpm dev`, `pnpm dev:server`) has no `dist/` stamp, so
-  `scripts/dev-server.mjs` hands it one at launch: its commit is HEAD when the launcher
-  started. `dev:link --no-build` keeps whatever stamp the existing `dist/` carries.
+  watched from its sources (`pnpm dev`, `pnpm dev:server`) runs from `src/` and never reads
+  the `dist/` stamp, so `scripts/dev-server.mjs` hands it a dev stamp at launch: its commit
+  is HEAD when the launcher started. `dev:link --no-build` keeps whatever stamp the existing `dist/` carries.
 - **Test databases:** `pnpm db:up` starts the Postgres and MySQL containers in
   `test-db/compose.yaml` (synthetic data, never a real target) and waits for both to pass
   their healthcheck, so nothing connects to a half-initialised server. Host ports are

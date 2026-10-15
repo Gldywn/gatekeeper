@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readIdentity } from "./version.js";
+import { launcherIdentity, readIdentity } from "./version.js";
 
 const pkg = JSON.stringify({ version: "0.4.0" });
 
@@ -26,5 +26,17 @@ describe("readIdentity", () => {
     for (const stamp of [null, "", "{", "null", "[]", '"0.4.0"']) {
       expect(readIdentity(pkg, stamp)).toEqual({ version: "0.4.0", dev: {} });
     }
+  });
+});
+
+describe("launcherIdentity", () => {
+  it("keeps what the dev launcher knew, and never lets it claim a release", () => {
+    const dev = { version: "0.4.0", dev: { sha: "fdd2424", branch: "feat/x" } };
+    expect(launcherIdentity(pkg, JSON.stringify(dev))).toEqual(dev);
+    expect(launcherIdentity(pkg, JSON.stringify({ version: "0.4.0" }))).toEqual({
+      version: "0.4.0",
+      dev: {},
+    });
+    expect(launcherIdentity(pkg, null)).toEqual({ version: "0.4.0", dev: {} });
   });
 });
