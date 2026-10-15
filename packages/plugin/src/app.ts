@@ -38,6 +38,7 @@ import { autoIcon, autoPopHtml, SAVED_KEY_MASK } from "./render/auto";
 import { ConfirmModal } from "./render/confirm";
 import { connChipInner } from "./render/connchip";
 import { modeDropdown, switchInput } from "./render/controls";
+import { type DbCheck, dbLink, dbStatusHtml, nextCheckText } from "./render/dblink";
 import { historyRow } from "./render/history";
 import { type CardGate, cardGate, queueHtml, readyActions, schemaInner } from "./render/queue";
 import { type LayerState, readOnlyView } from "./render/readonly";
@@ -51,7 +52,7 @@ import { formatSql } from "./sql/format";
 import { highlight } from "./sql/highlight";
 import { modeRank, type RiskMode } from "./sql/mode";
 import { mapDialect } from "./sql/readonly";
-import { type EndpointReadOnly, probeReadOnly } from "./sql/readonly-probe";
+import { type EndpointReadOnly, hasProbe, probeReadOnly, runErrorText } from "./sql/readonly-probe";
 import { sensitivityOf, textSchema } from "./sql/schema";
 import type {
   Card,
@@ -89,6 +90,10 @@ const ROSTER_POLL_MS = 2000;
 // The human starts their agent while looking at the no-broker screen, so re-probe
 // on this cadence and move them on to pairing by themselves.
 const PROBE_MS = 3000;
+// One scalar endpoint check on the user's database, possibly prod, while the tab is visible.
+// The operator's bound: a dropped connection must show within about 15 s.
+const CHECK_MS = 15_000;
+const BROKER_TITLE = "Link to the Gatekeeper server, where agents send their queries";
 
 // The read-only layer help sentences, revealed by each row's "?" affordance. The
 // Gatekeeper one tracks the armed mode: read-only by default, wider once armed.
@@ -139,16 +144,6 @@ async function runApprovedQuery(
     fields: (first?.fields ?? []).map((f) => ({ name: f.name })),
     affectedRows: affectedRowsOf(first),
   };
-}
-
-function runErrorText(error: unknown): string {
-  if (typeof error === "string") {
-    return error;
-  }
-  if (error && typeof error === "object" && "message" in error) {
-    return String((error as { message: unknown }).message);
-  }
-  return "Query execution failed";
 }
 
 // A quick-menu switch row: the setting name and its live, persisted toggle.
@@ -263,11 +258,21 @@ export class Gatekeeper {
   private lastConnCheck = 0;
   private connCheckInFlight = false;
   private connGeneration = 0;
-  // Host-side endpoint read-only probe result, reset per connection. null once
-  // probed means "not verified" (non-Postgres or error); endpointProbed keeps the
-  // pending state distinct from a probe that ran and could not confirm.
+  // Host-side endpoint check, reset per connection. endpointRO is the last verdict a passed
+  // check confirmed (null: none yet); a later failure keeps it and only adds to the count.
   private endpointRO: EndpointReadOnly | null = null;
-  private endpointProbed = false;
+  private checkedAt = 0;
+  private nextCheckAt = 0;
+  private checkFailures = 0;
+  private checkError: string | null = null;
+  // Owned by the host call itself and released only when it settles, never by a reset, so a
+  // connection switch can never stack a second check on a hung one.
+  private checkInFlight = false;
+  // What the header chip and its two popover parts last rendered (see renderConnLabel).
+  private connEl: Element | null = null;
+  private connHtml = "";
+  private statusHtml = "";
+  private layersHtml = "";
   private renewTimer?: number;
   private tickTimer?: number;
   private schemaTimer?: number;
@@ -466,6 +471,8 @@ export class Gatekeeper {
     if (gen !== this.activeGen) {
       return;
     }
+    // A promotion may land on another connection than the last one this tab checked.
+    this.resetCheck();
     this.renderShell();
     // The schema annotation caches columns per table; a DDL change invalidates it.
     if (!this.wiredNotifications) {
@@ -484,8 +491,8 @@ export class Gatekeeper {
     void this.pollRoster(++this.pollGeneration);
     void this.reportConnection();
     void this.reportSchema();
-    void this.probeEndpoint();
     this.startTimers();
+    this.maybeCheckEndpoint();
     void this.maybeShowDbNotice();
   }
 
@@ -744,7 +751,15 @@ export class Gatekeeper {
       this.connScopeKey() === nextKey &&
       this.conn.schema === (conn.defaultSchema ?? null)
     ) {
+      const flipped = this.conn.readOnly !== conn.readOnlyMode;
       this.applyConnection(conn);
+      // Beekeeper's own read-only switch is not an identity change, but the layers, the card
+      // gates and the agent's snapshot all read it.
+      if (flipped) {
+        this.renderConnLabel();
+        this.renderQueue();
+        void this.reportConnection();
+      }
       return true;
     }
     this.applyConnection(conn);
@@ -774,9 +789,8 @@ export class Gatekeeper {
     this.activityView.reset();
     this.roster = [];
     this.rosterSig = "";
-    // The endpoint belongs to the old database; re-probe the new one from scratch.
-    this.endpointRO = null;
-    this.endpointProbed = false;
+    // The endpoint belongs to the old database; check the new one from scratch.
+    this.resetCheck();
     // Settings are per connection; the overlay now shows a different scope, so close
     // it and reload (which re-syncs the quick-menu switches and the activity trigger).
     this.settingsView.close();
@@ -784,7 +798,7 @@ export class Gatekeeper {
     this.renderConnLabel();
     this.renderModeSurfaces();
     void this.reportConnection();
-    void this.probeEndpoint();
+    this.maybeCheckEndpoint();
     // Load the NEW connection's settings before reporting its schema, so schema access is
     // read from the connection the human is now on, never from the previous one's consent.
     void (async () => {
@@ -826,25 +840,58 @@ export class Gatekeeper {
       return;
     }
     const data = this.connChipData();
-    if (!data) {
-      el.innerHTML = this.connectionName ? escapeHtml(this.connectionName) : "";
-      return;
+    el.dataset.link = this.conn ? dbLink(this.dbCheck()) : "";
+    // The chip and its glyph are rebuilt only when the identity changes, and each popover
+    // part only when its own content does, so a check landing every 15 s never drops the
+    // keyboard focus or the hover.
+    const chip = data
+      ? `${connChipInner(data, true)}<span class="ro-pop" role="tooltip"><div class="db-slot"></div><div class="ro-layers"></div></span>`
+      : this.connectionName
+        ? escapeHtml(this.connectionName)
+        : "";
+    if (el !== this.connEl || chip !== this.connHtml) {
+      el.innerHTML = chip;
+      this.connEl = el;
+      this.connHtml = chip;
+      this.statusHtml = "";
+      this.layersHtml = "";
     }
-    el.innerHTML = `${connChipInner(data)}<span class="dsep"></span>${this.readOnlyBadge()}`;
+    const slot = el.querySelector(".db-slot");
+    const status = dbStatusHtml(this.dbCheck(), dbDisplayName(this.conn?.databaseType ?? ""));
+    if (slot && status !== this.statusHtml) {
+      slot.innerHTML = status;
+      this.statusHtml = status;
+    }
+    const layers = el.querySelector(".ro-layers");
+    const rows = this.layerRows();
+    if (layers && rows !== this.layersHtml) {
+      const focused = [...layers.querySelectorAll(".ro-help")].indexOf(
+        document.activeElement as Element,
+      );
+      layers.innerHTML = rows;
+      this.layersHtml = rows;
+      if (focused >= 0) {
+        layers.querySelectorAll<HTMLElement>(".ro-help")[focused]?.focus();
+      }
+    }
+    this.renderCheckTimes();
   }
 
-  // Aggregate over the three layers (Gatekeeper mode, Beekeeper mode, endpoint): green
-  // when any blocks writes, amber when all would accept one, muted when it cannot be told.
-  private readOnlyBadge(): string {
-    // The Gatekeeper layer is read-only only while the armed mode is "read"; a raised
-    // mode makes it a writer, so the aggregate rides the lower layers.
-    const view = readOnlyView(
-      this.mode === "read",
-      this.conn?.readOnly ?? false,
-      this.endpointRO,
-      this.endpointProbed,
-    );
-    const rows =
+  private dbCheck(): DbCheck {
+    return {
+      supported: hasProbe(this.conn?.databaseType ?? ""),
+      checkedAt: this.checkedAt,
+      failures: this.checkFailures,
+      error: this.checkError,
+    };
+  }
+
+  // The popover's lower part, under the last check. The Gatekeeper layer is read-only only
+  // while the armed mode is "read".
+  private layerRows(): string {
+    const view = readOnlyView(this.mode === "read", this.conn?.readOnly ?? false, this.endpointRO);
+    return (
+      '<div class="ro-pop-head">Read-only layers</div>' +
       this.roRow(
         "Gatekeeper",
         helpGatekeeper(this.mode),
@@ -852,23 +899,8 @@ export class Gatekeeper {
         view.gatekeeper.state,
       ) +
       this.roRow("Beekeeper", HELP_BEEKEEPER, view.beekeeper.label, view.beekeeper.state) +
-      this.roRow("Endpoint", HELP_ENDPOINT, view.endpoint.label, view.endpoint.state);
-
-    const { kind, label } = view.chip;
-    const title =
-      kind === "ok"
-        ? "Read-only: a layer blocks writes, hover for details"
-        : kind === "warn"
-          ? "Writable: every layer would accept a write, hover for details"
-          : "Read-only status unknown, hover for details";
-    // The chevron signals the badge expands into the layer breakdown on hover/focus.
-    return `<span class="ro-wrap" tabindex="0">
-      <span class="ro ${kind}" title="${title}">${layerGlyph(kind)}${label}<span class="ro-caret" aria-hidden="true">${chevronDown}</span></span>
-      <span class="ro-pop" role="tooltip">
-        <div class="ro-pop-head">Read-only layers</div>
-        ${rows}
-      </span>
-    </span>`;
+      this.roRow("Endpoint", HELP_ENDPOINT, view.endpoint.label, view.endpoint.state)
+    );
   }
 
   // A layer row: name, a "?" help affordance revealing the explanation on hover and
@@ -928,21 +960,79 @@ export class Gatekeeper {
     this.schemaReportTimer = window.setTimeout(() => void this.reportSchema(), SCHEMA_DEBOUNCE_MS);
   }
 
-  // connGeneration-guarded like the annotator: a switch mid-probe discards the
-  // result. Runs via runQuery directly (host-side, not the approval gate) and is
-  // stored on the class only, never posted to the broker.
-  private async probeEndpoint(): Promise<void> {
-    if (!this.conn) {
+  // Leaves checkInFlight alone: a call still pending belongs to the old connection and
+  // releases the guard itself when it settles.
+  private resetCheck(): void {
+    this.endpointRO = null;
+    this.checkedAt = 0;
+    this.nextCheckAt = 0;
+    this.checkFailures = 0;
+    this.checkError = null;
+  }
+
+  // Never while a query is approving or running, or Auto is inspecting the catalog: the
+  // check shares Beekeeper's connection, and a check queued behind a long query would read
+  // as a failure.
+  private maybeCheckEndpoint(): void {
+    if (
+      !this.polling ||
+      !this.token ||
+      !this.conn ||
+      this.checkInFlight ||
+      Date.now() < this.nextCheckAt ||
+      document.visibilityState !== "visible" ||
+      this.autoBusy ||
+      this.cards.some((c) => c.state !== "ready") ||
+      !hasProbe(this.conn.databaseType)
+    ) {
       return;
     }
+    void this.checkEndpoint(this.conn.databaseType);
+  }
+
+  // Runs via runQuery directly (host-side, not the approval gate); the outcome stays on the
+  // class, never posted to the broker. A result for an older connection or tab ownership is
+  // dropped and leaves the check due, so the next tick runs it for the current one.
+  private async checkEndpoint(databaseType: string): Promise<void> {
     const gen = this.connGeneration;
-    const result = await probeReadOnly(this.dialect, runQuery);
-    if (gen !== this.connGeneration) {
+    const active = this.activeGen;
+    this.checkInFlight = true;
+    let outcome: Awaited<ReturnType<typeof probeReadOnly>>;
+    try {
+      outcome = await probeReadOnly(databaseType, runQuery);
+    } finally {
+      this.checkInFlight = false;
+    }
+    if (!outcome || gen !== this.connGeneration || active !== this.activeGen) {
       return;
     }
-    this.endpointRO = result;
-    this.endpointProbed = true;
+    this.checkedAt = Date.now();
+    this.nextCheckAt = this.checkedAt + CHECK_MS;
+    if ("error" in outcome) {
+      this.checkFailures++;
+      this.checkError = outcome.error;
+    } else {
+      const wasReadOnly = this.connectionReadOnly();
+      this.checkFailures = 0;
+      this.checkError = null;
+      this.endpointRO = outcome.readOnly;
+      // A failover can turn a replica into a primary or back, which moves the card gates.
+      if (this.connectionReadOnly() !== wasReadOnly) {
+        this.renderQueue();
+      }
+    }
     this.renderConnLabel();
+  }
+
+  private renderCheckTimes(): void {
+    const age = this.root.querySelector<HTMLElement>("#conn .db-age");
+    if (age) {
+      age.textContent = relAge(this.checkedAt);
+    }
+    const next = this.root.querySelector<HTMLElement>("#conn .db-next");
+    if (next) {
+      next.textContent = nextCheckText(this.nextCheckAt, Date.now());
+    }
   }
 
   // Recreated on every (re-)pair; clear the old handles so re-pairing does not
@@ -1010,14 +1100,15 @@ export class Gatekeeper {
         return;
       }
       this.polling = true;
+      this.resetCheck();
       this.renderShell();
       void this.loadInflight();
       void this.poll();
       void this.pollRoster(++this.pollGeneration);
       void this.reportConnection();
       void this.reportSchema();
-      void this.probeEndpoint();
       this.startTimers();
+      this.maybeCheckEndpoint();
     };
     this.root
       .querySelector<HTMLButtonElement>("#pair-btn")!
@@ -1397,7 +1488,7 @@ export class Gatekeeper {
     if (el) {
       el.dataset.state = state;
       el.textContent = CONNECTION_LABEL[state];
-      el.title = detail;
+      el.title = detail || BROKER_TITLE;
     }
   }
 
@@ -2120,6 +2211,8 @@ export class Gatekeeper {
 
   private tick(): void {
     this.maybeCheckConnection();
+    this.maybeCheckEndpoint();
+    this.renderCheckTimes();
     for (const card of [...this.cards]) {
       if (card.state === "ready" && card.expiresAt - Date.now() <= 0) {
         this.finish(card.id, "expired", "expired");
@@ -2374,6 +2467,8 @@ export class Gatekeeper {
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      // The failure may be the connection itself: check on the next tick, not in 15 s.
+      this.nextCheckAt = 0;
       await this.postResult(card, { status: "approved", error: message });
       this.finish(id, "failed", "query failed", undefined, message);
     }

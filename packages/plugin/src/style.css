@@ -146,6 +146,7 @@ body {
   display: none;
 }
 .chip-db {
+  position: relative;
   display: inline-flex;
   flex: none;
   color: var(--faint);
@@ -153,6 +154,42 @@ body {
 .chip-db .ico {
   width: 15px;
   height: 15px;
+}
+/* In the header the glyph opens the check and read-only layers popover. */
+#conn .chip-db {
+  border-radius: 4px;
+}
+#conn .chip-db:hover,
+#conn .chip-db:focus-visible {
+  color: var(--muted);
+}
+#conn .chip-db:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 3px;
+}
+/* The endpoint check, as one dot on the glyph: the header's only check signal. */
+#conn .chip-db::after {
+  content: "";
+  position: absolute;
+  right: -3px;
+  bottom: -2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--sunken);
+  display: none;
+}
+#conn[data-link="passed"] .chip-db::after {
+  display: block;
+  background: var(--ok);
+}
+#conn[data-link="failed"] .chip-db::after {
+  display: block;
+  background: var(--amber);
+}
+#conn[data-link="failing"] .chip-db::after {
+  display: block;
+  background: var(--danger);
 }
 .chip-name {
   overflow-wrap: anywhere;
@@ -180,68 +217,15 @@ body {
   background: color-mix(in oklch, var(--amber) 14%, transparent);
   white-space: nowrap;
 }
-/* Binary read-only badge, shown in the chip and echoed in the popover. Its tone is
-   set by an explicit state class: ok green (read-only), warn amber (writable), mut
-   faint (unverified). */
-.ro {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  flex: none;
-  font-size: 11px;
-  color: var(--faint);
-  white-space: nowrap;
-}
-.ro svg,
-.ro .ico {
-  width: 12px;
-  height: 12px;
-}
-.ro.ok {
-  color: var(--ok);
-}
-.ro.warn {
-  color: var(--amber);
-}
-.ro.mut {
-  color: var(--faint);
-}
-/* Disclosure caret: hints the badge expands into the layer breakdown, and flips up
-   while it is open. */
-.ro-caret {
-  display: inline-flex;
-  color: var(--faint);
-  transition: transform var(--dur) var(--ease);
-}
-.ro-caret svg {
-  width: 11px;
-  height: 11px;
-}
-.ro-wrap:hover .ro-caret,
-.ro-wrap:focus-within .ro-caret {
-  transform: rotate(180deg);
-}
-/* Wraps the badge so the detail popover can anchor to it and reveal on hover/focus
-   with no JS toggle. */
-.ro-wrap {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-}
-.ro-wrap:focus-visible {
-  outline: 2px solid var(--amber);
-  outline-offset: 2px;
-  border-radius: 4px;
-}
-/* Read-only detail popover: same shell as .settings-pop, anchored left of the
-   badge so it grows toward the header centre and never past the panel's right. */
+/* Check and read-only layers popover: same shell as .settings-pop, anchored under the
+   database glyph (its arrow lands on it) and opened with no JS toggle. */
 .ro-pop {
   position: absolute;
   top: calc(100% + 9px);
-  left: 0;
+  left: -1px;
   z-index: 6;
   width: max-content;
-  max-width: min(232px, 78vw);
+  max-width: min(272px, 78vw);
   padding: 10px 12px;
   background: var(--surface);
   border: 1px solid var(--edge);
@@ -251,16 +235,22 @@ body {
     inset 0 1px 0 var(--hi);
   opacity: 0;
   visibility: hidden;
-  pointer-events: none;
+  /* Closing waits a beat: the cursor leaves the small glyph and crosses the chip, however
+     many rows a long name wraps it to, and the still-visible popover catches it with its
+     own :hover before it fades. */
   transition:
-    opacity var(--dur) var(--ease),
-    visibility var(--dur) var(--ease);
+    opacity var(--dur) var(--ease) 300ms,
+    visibility 0s linear calc(var(--dur) + 300ms);
 }
-.ro-wrap:hover .ro-pop,
-.ro-wrap:focus-within .ro-pop {
+.chip-db:hover ~ .ro-pop,
+.chip-db:focus-visible ~ .ro-pop,
+.ro-pop:hover,
+.ro-pop:focus-within {
   opacity: 1;
   visibility: visible;
-  pointer-events: auto;
+  transition:
+    opacity var(--dur) var(--ease),
+    visibility 0s;
 }
 .ro-pop::before {
   content: "";
@@ -274,7 +264,7 @@ body {
   border-top: 1px solid var(--edge);
   transform: rotate(45deg);
 }
-/* Invisible bridge over the badge-to-popover gap so the cursor can travel down onto
+/* Invisible bridge over the chip-to-popover gap so the cursor can travel down onto
    the popover without :hover dropping and closing it mid-move. */
 .ro-pop::after {
   content: "";
@@ -290,6 +280,91 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.07em;
   color: var(--faint);
+}
+/* The last endpoint check, above the layers: the dot in its own column, then one stack
+   (title and age, the driver's error, when the next check runs). */
+.db-status {
+  display: grid;
+  grid-template-columns: 6px minmax(0, 1fr);
+  column-gap: 7px;
+  align-items: start;
+  padding-bottom: 9px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--edge);
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.db-dot {
+  width: 6px;
+  height: 6px;
+  margin-top: 6px;
+  border-radius: 50%;
+}
+.db-status.passed .db-dot {
+  background: var(--ok);
+}
+.db-status.failed .db-dot {
+  background: var(--amber);
+}
+.db-status.failing .db-dot {
+  background: var(--danger);
+}
+.db-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  min-width: 0;
+}
+.db-title {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+}
+.db-status.failing .db-title {
+  color: var(--danger);
+}
+.db-age {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--faint);
+}
+.db-next {
+  font-size: 11px;
+  color: var(--faint);
+  white-space: nowrap;
+}
+.db-err {
+  max-width: 100%;
+  margin-block: 2px;
+  padding: 4px 7px;
+  border-radius: 5px;
+  background: color-mix(in oklch, var(--sunken) 70%, transparent);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+/* Engines with no check: the same "not available" note as elsewhere in the plugin, toned
+   as a warning. */
+.db-note {
+  display: flex;
+  width: max-content;
+  max-width: 100%;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 9px;
+  padding: 5px 10px;
+  border: 1px solid color-mix(in oklch, var(--ok) 45%, transparent);
+  border-radius: 6px;
+  color: var(--amber);
+  font-size: 11.5px;
+}
+.db-note svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
 }
 /* Fixed name column so every "?" lands in the same vertical line whatever the layer
    name's width, then the state chip pinned to the right. */
@@ -530,7 +605,8 @@ body {
 }
 @media (prefers-reduced-motion: no-preference) {
   .conn-status[data-state="connecting"]::before,
-  .conn-status[data-state="reconnecting"]::before {
+  .conn-status[data-state="reconnecting"]::before,
+  #conn[data-link="failed"] .chip-db::after {
     animation: conn-pulse 1.4s var(--ease-in-out) infinite;
   }
   @keyframes conn-pulse {
