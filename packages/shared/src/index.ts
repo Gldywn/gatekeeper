@@ -152,3 +152,10 @@ export interface ConnectionInput {
 export interface ConnectionSnapshot extends ConnectionInput {
   capturedAt: number;
 }
+
+// Stamped by scripts/build-identity.mjs; no `dev` means a release-workflow build. The
+// server sends its own on every authenticated answer as X-Gatekeeper-Server.
+export interface BuildIdentity {
+  version: string;
+  dev?: { sha?: string; branch?: string };
+}

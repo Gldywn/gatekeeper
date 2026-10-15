@@ -33,6 +33,10 @@ and nothing else. It never gets a component of its own: the active state is the
 armed chip in cyan, the entry is the Schema access hint with a cyan dot, and the
 card note and history glyph reuse theirs.
 
+Versions follow the same rule: amber only when the plugin and the server are out of step,
+on the side that has to act. A newer release while both agree is news, so it stays in the
+ordinary ink with an up arrow.
+
 Feature hints (Schema access, Auto mode) share one shape: an icon with a pulsing
 dot while off, and a popover on hover or keyboard focus with one direct action,
 filled to enable and tinted to disable. Clicking the icon opens its Settings section,

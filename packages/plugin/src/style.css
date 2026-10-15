@@ -4227,3 +4227,168 @@ p.auto-message[data-tone="busy"] {
 .auto-strong {
   font-style: italic;
 }
+
+/* ---- Version: the corner indicator and the Settings group ---- */
+.set-group-head.with-link {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+}
+.set-group-head.with-link .pair-link {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+}
+.set-group-head.with-link .pair-link svg {
+  width: 11px;
+  height: 11px;
+}
+/* A version is data, so mono, like the expiry clock and row counts. */
+.ver {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.ver.none {
+  color: var(--faint);
+}
+/* A 12px glyph on the first line, measured between cap and x-height: these sentences
+   are mostly lowercase, so centring on the caps reads high. */
+.ver-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.ver-status svg {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  margin-top: 3.25px;
+}
+.ver-status.ok svg {
+  color: var(--ok);
+}
+.ver-status.unknown svg {
+  color: var(--faint);
+}
+/* warn: out of step with the other side, so amber. info: only a newer release, so the
+   sentence leaves muted but nothing turns amber. */
+.set-row.warn,
+.set-row.info {
+  align-items: flex-start;
+}
+.set-row.warn .set-control,
+.set-row.info .set-control {
+  padding-top: 1px;
+}
+.set-row.warn .ver,
+.set-row.warn .ver-status svg {
+  color: var(--amber);
+}
+.set-row.warn .ver-status,
+.set-row.info .ver-status {
+  color: var(--text);
+}
+.ver-fix,
+.ver-then {
+  padding-left: 18px;
+  font-size: 11.5px;
+}
+.ver-fix {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-top: 6px;
+}
+.ver-fix .sa-enable {
+  margin-top: 0;
+  gap: 6px;
+  line-height: 1;
+}
+.ver-fix .sa-enable svg {
+  width: 12px;
+  height: 12px;
+}
+.sa-enable.quiet {
+  color: var(--text);
+  background: color-mix(in oklch, var(--text) 8%, transparent);
+}
+.sa-enable.quiet:hover {
+  background: color-mix(in oklch, var(--text) 14%, transparent);
+}
+.sa-enable.copied,
+.sa-enable.copied:hover {
+  color: var(--ok);
+  background: color-mix(in oklch, var(--ok) 14%, transparent);
+}
+.ver-then {
+  margin-top: 6px;
+  font-weight: 650;
+  color: var(--text);
+}
+/* The FABs' floating material, smaller and quieter, in the empty bottom-left corner. */
+.ver-dock {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px 0 8px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--muted);
+  background: color-mix(in oklch, var(--surface) 90%, transparent);
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  backdrop-filter: blur(6px);
+  transition:
+    color 0.18s,
+    border-color 0.18s;
+}
+.ver-dock[hidden] {
+  display: none;
+}
+.ver-dock:hover {
+  color: var(--text);
+  border-color: var(--edge-strong);
+}
+.ver-dock:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+/* Centring the boxes left every glyph 0.75px above the label's cap centre (measured at
+   5x); "dev" has no capital, so its glyph goes down to the x-height centre instead. */
+.ver-dock svg {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  transform: translateY(0.75px);
+}
+.ver-dock.dev svg {
+  transform: translateY(1.5px);
+}
+.ver-dock .num {
+  font-family: var(--font-mono);
+}
+.ver-dock.ok svg {
+  color: var(--ok);
+}
+.ver-dock.warn {
+  color: var(--amber);
+  border-color: color-mix(in oklch, var(--amber) 28%, transparent);
+}
+.ver-dock.info {
+  color: var(--text);
+}
+.ver-dock.unknown {
+  color: var(--faint);
+}

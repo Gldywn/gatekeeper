@@ -76,6 +76,15 @@ The repo ships its dev wiring, so a clone is ready without hand-editing config:
   assets resolve to `http://localhost:<port>`, with the HMR client injected. A CSS edit lands
   without even reloading the tab. Caveat: that shim stays on disk when the dev server stops,
   and it is inert without it, so run `pnpm build` before packaging or testing a real install.
+- **Dev builds say so:** every plugin bundle and server `dist/` is stamped by
+  `scripts/build-identity.mjs`. Only the release workflows set `GATEKEEPER_RELEASE_TAG`, so
+  any local build (`pnpm build`, `dev:link`, Vite) shows as `dev` in the plugin's bottom-left
+  indicator, with its commit and branch in the indicator's tooltip and in Settings > Version,
+  and gets no update advice.
+  The commit is the checkout's HEAD, not a fingerprint of uncommitted changes. A server
+  watched from its sources (`pnpm dev`, `pnpm dev:server`) has no `dist/` stamp, so
+  `scripts/dev-server.mjs` hands it one at launch: its commit is HEAD when the launcher
+  started. `dev:link --no-build` keeps whatever stamp the existing `dist/` carries.
 - **Test databases:** `pnpm db:up` starts the Postgres and MySQL containers in
   `test-db/compose.yaml` (synthetic data, never a real target) and waits for both to pass
   their healthcheck, so nothing connects to a half-initialised server. Host ports are

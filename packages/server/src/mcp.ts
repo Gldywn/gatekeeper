@@ -21,6 +21,7 @@ import {
   type Ticket,
 } from "./service.js";
 import { type RequestStore, StoreError } from "./store.js";
+import { SERVER_IDENTITY } from "./version.js";
 
 // The plugin re-touches the snapshot ~every minute; past this it is presumed dead (plugin
 // closed, or a lost schema-access-off), so the tool fails closed instead of serving it.
@@ -187,7 +188,7 @@ export function createMcpServer(
   // One stdio client per process; this identifies its request ownership.
   const sessionId = `sess_${randomBytes(9).toString("hex")}`;
   const server = new McpServer(
-    { name: "gatekeeper", version: "0.0.1" },
+    { name: "gatekeeper", version: SERVER_IDENTITY.version },
     { instructions: SERVER_INSTRUCTIONS },
   );
   const pairing = createPairingGuard(store, server.server);

@@ -52,6 +52,11 @@ from one source of truth.
                                               └──────────────────────────────────┘
 ```
 
+Both release workflows set `GATEKEEPER_RELEASE_TAG` for the whole job. It stamps the plugin
+bundle and the server's `dist/build.json` as that release, and the build fails if the tag and
+the package version disagree. Without it a release would call itself a dev build in the
+plugin's version indicator, so `publish-server.yml` checks the stamp in the packed tarball.
+
 Three things about that shape are deliberate, not accidental:
 
 - **The draft.** Assets are attached before a human ever sees the release, so an incomplete
@@ -142,6 +147,10 @@ gh release download v0.1.0 --pattern manifest.json --output - | jq '{id, version
 npx -y @gldywn/gatekeeper-mcp-server@0.1.0 < /dev/null
 #   expect: "[gatekeeper] broker on http://127.0.0.1:9999" then a clean exit
 ```
+
+Once the plugin is installed from the release, Settings > Version shows the release version
+on the Plugin row, never `dev`. The bottom-left indicator sums up plugin and server
+together, so it can read `dev` or a mismatch when the server comes from a checkout.
 
 ## Submitting to the Beekeeper Studio plugin registry
 

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -719,5 +720,43 @@ describe("sensitivity record on decisions", () => {
     expect(store.get(c.id)?.policy).toEqual({
       sensitivity: { pii: true, value: false, client: false },
     });
+  });
+});
+
+describe("the server identity header", () => {
+  const { version } = JSON.parse(
+    readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+  ) as { version: string };
+  const identity = (res: Reply) =>
+    JSON.parse(decodeURIComponent(String(res.headers["x-gatekeeper-server"])));
+
+  it("names the build on authenticated answers, with or without a body", async () => {
+    const roster = await call("GET", "/sessions", { token: TOKEN });
+    const empty = await call("GET", "/pending", { token: TOKEN });
+    expect(roster.status).toBe(200);
+    expect(empty.status).toBe(204);
+    for (const res of [roster, empty]) {
+      expect(identity(res).version).toBe(version);
+      expect(res.headers["access-control-expose-headers"]).toBe("X-Gatekeeper-Server");
+    }
+  });
+
+  it("stays on an authenticated failure", async () => {
+    const res = await call("GET", "/no-such-route", { token: TOKEN });
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(identity(res).version).toBe(version);
+  });
+
+  it("is never sent before the bearer check", async () => {
+    const unauthenticated = [
+      await call("GET", "/sessions"),
+      await call("GET", "/pair/status"),
+      await call("OPTIONS", "/pending"),
+      await call("GET", "/pair"),
+      await call("POST", "/pair/exchange", { body: { code: "000000" } }),
+    ];
+    for (const res of unauthenticated) {
+      expect(res.headers["x-gatekeeper-server"]).toBeUndefined();
+    }
   });
 });

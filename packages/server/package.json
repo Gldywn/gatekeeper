@@ -37,7 +37,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "tsc && node notifier/build.mjs",
+    "build": "tsc && node ../../scripts/build-identity.mjs . dist/build.json && node notifier/build.mjs",
     "typecheck": "tsc --noEmit && tsc -p evals/tsconfig.json",
     "start": "node dist/index.js",
     "dev": "node ../../scripts/dev-server.mjs --watch",
