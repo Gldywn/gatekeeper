@@ -70,11 +70,12 @@ operations. See [Auto mode](AUTO-MODE.md) for the supported subset and sharing b
 Beekeeper's plugin API has no connection event, so the plugin checks itself. It re-reads
 `getConnectionInfo()` every 5 seconds (switches, Beekeeper's read-only mode) and, on
 PostgreSQL, MySQL and MariaDB, runs one fixed scalar read-only probe every 15 seconds while
-the tab is visible. It never starts one while a query is approving or running, and never
-two at once. The probe's
-verdict feeds the endpoint read-only layer and the card gates; its outcome (passed, failed,
-three failures in a row) is the dot on the header's database icon. A failure says only that
-the check failed, not why. See [`SECURITY.md`](../SECURITY.md).
+Beekeeper's window is visible and the Gatekeeper view has a size on screen, never two at
+once. `runQuery` takes no connection id, so each check re-reads the connection first and
+picks its SQL from the engine it gets back. The probe's verdict feeds the endpoint
+read-only layer and the card gates; its outcome (passed, failed, three failures in a row) is
+the dot on the header's database icon. A failure says only that the check failed, not why.
+See [`SECURITY.md`](../SECURITY.md).
 
 ## Where the risk gate lives
 

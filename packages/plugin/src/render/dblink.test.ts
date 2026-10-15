@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type DbCheck, dbLink, dbStatusHtml, nextCheckText } from "./dblink";
+import { type DbCheck, dbLink, dbLinkLabel, dbStatusHtml, nextCheckText } from "./dblink";
 
 const base: DbCheck = { supported: true, checkedAt: 1000, failures: 0, error: null };
 
@@ -51,6 +51,20 @@ describe("dbStatusHtml", () => {
     expect(html).toContain('class="db-status failing"');
     expect(html).toContain("4 checks failed in a row");
     expect(html).toContain(`>${"x".repeat(200)}<`);
+  });
+});
+
+describe("dbLinkLabel", () => {
+  it("names the state in words, since the dot only says it in colour", () => {
+    expect(dbLinkLabel({ ...base, supported: false }, "SQLite")).toBe(
+      "No database check on SQLite",
+    );
+    expect(dbLinkLabel({ ...base, checkedAt: 0 }, "PostgreSQL")).toBe("Database check pending");
+    expect(dbLinkLabel(base, "PostgreSQL")).toBe("Database check passed");
+    expect(dbLinkLabel({ ...base, failures: 2 }, "PostgreSQL")).toBe("Database check failed");
+    expect(dbLinkLabel({ ...base, failures: 5 }, "PostgreSQL")).toBe(
+      "5 database checks failed in a row",
+    );
   });
 });
 

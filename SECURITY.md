@@ -148,8 +148,9 @@ itself is in neither the URL nor the prompt.
   as query-derived data, not as a trusted channel.
 - **Connection check.** On PostgreSQL, MySQL and MariaDB the plugin runs one fixed scalar
   query on the connection, outside the approval gate, to read whether the endpoint is
-  read-only: up to once every 15 seconds while the tab is visible, plus right after an
-  approved query fails. It reads no table. Its result and any driver error stay in the plugin
+  read-only: up to once every 15 seconds while Beekeeper's window is visible and the
+  Gatekeeper view has a size on screen, plus right after an approved query fails. It can run
+  alongside an approved query. It reads no table. Its result and any driver error stay in the plugin
   popover and are never sent to the broker or the agent.
 
 ## Audit trail

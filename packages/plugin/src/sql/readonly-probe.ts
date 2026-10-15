@@ -54,24 +54,9 @@ async function probePostgres(run: RunQuery): Promise<ProbeOutcome> {
   };
 }
 
-// A read replica or an explicitly read-only MySQL server sets read_only/super_read_only;
-// there is no per-session read-only probe, so both fold onto the replica flag.
+// read_only alone: super_read_only forces it on anyway, and MariaDB (even under Beekeeper's
+// MySQL type) and MySQL before 5.7.8 lack super_read_only, which would fail every check.
 async function probeMysql(run: RunQuery): Promise<ProbeOutcome> {
-  const r = await firstRow(
-    run,
-    "SELECT @@global.read_only AS read_only, @@global.super_read_only AS super_read_only",
-  );
-  if ("error" in r) return r;
-  return {
-    readOnly: {
-      replica: asBool(r.row.read_only) || asBool(r.row.super_read_only),
-      sessionReadOnly: false,
-    },
-  };
-}
-
-// MariaDB has no super_read_only, and asking for it fails the whole query.
-async function probeMariadb(run: RunQuery): Promise<ProbeOutcome> {
   const r = await firstRow(run, "SELECT @@global.read_only AS read_only");
   if ("error" in r) return r;
   return { readOnly: { replica: asBool(r.row.read_only), sessionReadOnly: false } };
@@ -82,7 +67,7 @@ async function probeMariadb(run: RunQuery): Promise<ProbeOutcome> {
 const PROBES: Record<string, (run: RunQuery) => Promise<ProbeOutcome>> = {
   postgresql: probePostgres,
   mysql: probeMysql,
-  mariadb: probeMariadb,
+  mariadb: probeMysql,
 };
 
 export function hasProbe(databaseType: string): boolean {

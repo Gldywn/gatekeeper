@@ -38,7 +38,7 @@ import { autoIcon, autoPopHtml, SAVED_KEY_MASK } from "./render/auto";
 import { ConfirmModal } from "./render/confirm";
 import { connChipInner } from "./render/connchip";
 import { modeDropdown, switchInput } from "./render/controls";
-import { type DbCheck, dbLink, dbStatusHtml, nextCheckText } from "./render/dblink";
+import { type DbCheck, dbLink, dbLinkLabel, dbStatusHtml, nextCheckText } from "./render/dblink";
 import { historyRow } from "./render/history";
 import { type CardGate, cardGate, queueHtml, readyActions, schemaInner } from "./render/queue";
 import { type LayerState, readOnlyView } from "./render/readonly";
@@ -845,7 +845,7 @@ export class Gatekeeper {
     // part only when its own content does, so a check landing every 15 s never drops the
     // keyboard focus or the hover.
     const chip = data
-      ? `${connChipInner(data, true)}<span class="ro-pop" role="tooltip"><div class="db-slot"></div><div class="ro-layers"></div></span>`
+      ? `${connChipInner(data, true)}<span class="ro-pop" id="connPop" role="tooltip"><div class="db-slot"></div><div class="ro-layers"></div></span>`
       : this.connectionName
         ? escapeHtml(this.connectionName)
         : "";
@@ -856,8 +856,10 @@ export class Gatekeeper {
       this.statusHtml = "";
       this.layersHtml = "";
     }
+    const engine = dbDisplayName(this.conn?.databaseType ?? "");
+    el.querySelector(".chip-db")?.setAttribute("aria-label", dbLinkLabel(this.dbCheck(), engine));
     const slot = el.querySelector(".db-slot");
-    const status = dbStatusHtml(this.dbCheck(), dbDisplayName(this.conn?.databaseType ?? ""));
+    const status = dbStatusHtml(this.dbCheck(), engine);
     if (slot && status !== this.statusHtml) {
       slot.innerHTML = status;
       this.statusHtml = status;
@@ -970,36 +972,44 @@ export class Gatekeeper {
     this.checkError = null;
   }
 
-  // Never while a query is approving or running, or Auto is inspecting the catalog: the
-  // check shares Beekeeper's connection, and a check queued behind a long query would read
-  // as a failure.
+  // A Gatekeeper tab behind another Beekeeper tab still has a visible document (it follows
+  // the window); a hidden iframe is expected to have no viewport, so size gates it too.
+  private checkEligible(): boolean {
+    return (
+      this.polling &&
+      Boolean(this.token) &&
+      document.visibilityState === "visible" &&
+      window.innerHeight > 0
+    );
+  }
+
   private maybeCheckEndpoint(): void {
     if (
-      !this.polling ||
-      !this.token ||
-      !this.conn ||
       this.checkInFlight ||
       Date.now() < this.nextCheckAt ||
-      document.visibilityState !== "visible" ||
-      this.autoBusy ||
-      this.cards.some((c) => c.state !== "ready") ||
-      !hasProbe(this.conn.databaseType)
+      !this.checkEligible() ||
+      !hasProbe(this.conn?.databaseType ?? "")
     ) {
       return;
     }
-    void this.checkEndpoint(this.conn.databaseType);
+    void this.checkEndpoint();
   }
 
   // Runs via runQuery directly (host-side, not the approval gate); the outcome stays on the
   // class, never posted to the broker. A result for an older connection or tab ownership is
   // dropped and leaves the check due, so the next tick runs it for the current one.
-  private async checkEndpoint(databaseType: string): Promise<void> {
+  private async checkEndpoint(): Promise<void> {
     const gen = this.connGeneration;
     const active = this.activeGen;
     this.checkInFlight = true;
-    let outcome: Awaited<ReturnType<typeof probeReadOnly>>;
+    let outcome: Awaited<ReturnType<typeof probeReadOnly>> = null;
     try {
-      outcome = await probeReadOnly(databaseType, runQuery);
+      // runQuery takes no connection id and the 5 s refresh may not have seen a switch yet:
+      // re-read the connection first so the probe's SQL fits the engine it lands on.
+      if (!(await this.checkConnection()) || !this.checkEligible()) {
+        return;
+      }
+      outcome = await probeReadOnly(this.conn?.databaseType ?? "", runQuery);
     } finally {
       this.checkInFlight = false;
     }

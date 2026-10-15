@@ -62,31 +62,15 @@ describe("probeReadOnly", () => {
     },
   );
 
-  it("reads both global read-only flags off the MySQL probe", async () => {
-    const run = vi.fn(async () => ok({ read_only: 0, super_read_only: 1 }));
-    expect(await probeReadOnly("mysql", run)).toEqual({
-      readOnly: { replica: true, sessionReadOnly: false },
-    });
-    expect(run).toHaveBeenCalledWith(
-      "SELECT @@global.read_only AS read_only, @@global.super_read_only AS super_read_only",
-    );
-  });
-
-  it("reports a writable MySQL primary as not read-only", async () => {
-    const run = vi.fn(async () => ok({ read_only: 0, super_read_only: 0 }));
-    expect(await probeReadOnly("mysql", run)).toEqual({
-      readOnly: { replica: false, sessionReadOnly: false },
-    });
-  });
-
-  it("asks MariaDB for read_only alone, since it has no super_read_only", async () => {
+  // No super_read_only: MariaDB (even saved under the MySQL type) and MySQL < 5.7.8 reject it.
+  it.each(["mysql", "mariadb"])("asks %s for read_only alone", async (type) => {
     const run = vi.fn(async () => ok({ read_only: 1 }));
-    expect(await probeReadOnly("mariadb", run)).toEqual({
+    expect(await probeReadOnly(type, run)).toEqual({
       readOnly: { replica: true, sessionReadOnly: false },
     });
     expect(run).toHaveBeenCalledWith("SELECT @@global.read_only AS read_only");
     run.mockResolvedValueOnce(ok({ read_only: 0 }));
-    expect(await probeReadOnly("mariadb", run)).toEqual({
+    expect(await probeReadOnly(type, run)).toEqual({
       readOnly: { replica: false, sessionReadOnly: false },
     });
   });

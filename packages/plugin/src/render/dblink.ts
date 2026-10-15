@@ -47,6 +47,22 @@ export function dbStatusHtml(check: DbCheck, engine: string): string {
   return `<div class="db-status ${link}"><span class="db-dot"></span><span class="db-stack"><span class="db-title">${title}</span>${error}<span class="db-next"></span></span></div>`;
 }
 
+// The glyph's accessible name, since the dot alone says it only in colour.
+export function dbLinkLabel(check: DbCheck, engine: string): string {
+  switch (dbLink(check)) {
+    case "none":
+      return `No database check on ${engine}`;
+    case "pending":
+      return "Database check pending";
+    case "passed":
+      return "Database check passed";
+    case "failed":
+      return "Database check failed";
+    case "failing":
+      return `${check.failures} database checks failed in a row`;
+  }
+}
+
 export function nextCheckText(nextAt: number, now: number): string {
   const s = Math.ceil((nextAt - now) / 1000);
   return s > 0 ? `Checking again in ${s}s.` : "Checking again shortly.";
