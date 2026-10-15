@@ -75,6 +75,18 @@ describe("probeReadOnly", () => {
     });
   });
 
+  // Beekeeper's MySQL pool sets bigNumberStrings, so the integer comes back as a string.
+  it.each(["mysql", "mariadb"])("reads %s's read_only sent as a string", async (type) => {
+    const run = vi.fn(async () => ok({ read_only: "1" }));
+    expect(await probeReadOnly(type, run)).toEqual({
+      readOnly: { replica: true, sessionReadOnly: false },
+    });
+    run.mockResolvedValueOnce(ok({ read_only: "0" }));
+    expect(await probeReadOnly(type, run)).toEqual({
+      readOnly: { replica: false, sessionReadOnly: false },
+    });
+  });
+
   it("passes a MariaDB error through", async () => {
     const run = vi.fn(async () => ({ results: [], error: "Lost connection to server" }));
     expect(await probeReadOnly("mariadb", run)).toEqual({ error: "Lost connection to server" });

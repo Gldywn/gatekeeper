@@ -25,10 +25,11 @@ export function runErrorText(error: unknown): string {
   return "Query execution failed";
 }
 
-// Drivers may return a real boolean or "t"/"true"/1; anything else is false so an
-// unrecognised value never gets read as "read-only".
+// Drivers may return a real boolean or "t"/"true"/1, and Beekeeper's MySQL pool turns integers
+// into strings (bigNumberStrings), so "1" too; anything else is false so an unrecognised value
+// never gets read as "read-only".
 function asBool(value: unknown): boolean {
-  return value === true || value === "t" || value === "true" || value === 1;
+  return value === true || value === "t" || value === "true" || value === 1 || value === "1";
 }
 
 async function firstRow(
