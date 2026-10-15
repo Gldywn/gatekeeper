@@ -24,10 +24,22 @@ describe("probeReadOnly", () => {
     });
   });
 
-  it("coerces driver truthy encodings ('t', 1) to booleans, others to false", async () => {
+  it("reads the drivers' boolean encodings ('t', 1)", async () => {
     const run = vi.fn(async () => ok({ replica: "t", session_read_only: 0 }));
     expect(await probeReadOnly("postgresql", run)).toEqual({
       readOnly: { replica: true, sessionReadOnly: false },
+    });
+  });
+
+  // A silent "writable" would hide the next encoding drift; a failed check shows its value.
+  it("fails the check on a value it does not know rather than reading it as writable", async () => {
+    const run = vi.fn(async () => ok({ replica: false, session_read_only: "maybe" }));
+    expect(await probeReadOnly("postgresql", run)).toEqual({
+      error: "Unexpected session_read_only value: maybe",
+    });
+    run.mockResolvedValueOnce(ok({}));
+    expect(await probeReadOnly("mysql", run)).toEqual({
+      error: "Unexpected read_only value: undefined",
     });
   });
 
@@ -84,6 +96,24 @@ describe("probeReadOnly", () => {
     run.mockResolvedValueOnce(ok({ read_only: "0" }));
     expect(await probeReadOnly(type, run)).toEqual({
       readOnly: { replica: false, sessionReadOnly: false },
+    });
+  });
+
+  // An enum read_only comes back by name.
+  it.each([
+    ["ON", true],
+    ["OFF", false],
+  ])("reads an enum read_only %s", async (value, replica) => {
+    const run = vi.fn(async () => ok({ read_only: value }));
+    expect(await probeReadOnly("mariadb", run)).toEqual({
+      readOnly: { replica, sessionReadOnly: false },
+    });
+  });
+
+  it("fails the check on an enum value it does not know, showing it", async () => {
+    const run = vi.fn(async () => ok({ read_only: "NO_LOCK" }));
+    expect(await probeReadOnly("mariadb", run)).toEqual({
+      error: "Unexpected read_only value: NO_LOCK",
     });
   });
 

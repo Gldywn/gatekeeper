@@ -25,11 +25,16 @@ export function runErrorText(error: unknown): string {
   return "Query execution failed";
 }
 
-// Drivers may return a real boolean or "t"/"true"/1, and Beekeeper's MySQL pool turns integers
-// into strings (bigNumberStrings), so "1" too; anything else is false so an unrecognised value
-// never gets read as "read-only".
-function asBool(value: unknown): boolean {
-  return value === true || value === "t" || value === "true" || value === 1 || value === "1";
+// Beekeeper's MySQL pool returns integers as strings (bigNumberStrings) and an enum sysvar comes
+// back as ON/OFF; any other encoding fails the check with its value, never "writable".
+const TRUE_VALUES = new Set<unknown>([true, 1, "1", "t", "true", "ON"]);
+const FALSE_VALUES = new Set<unknown>([false, 0, "0", "f", "false", "OFF"]);
+
+function readFlag(row: Record<string, unknown>, column: string): boolean | { error: string } {
+  const value = row[column];
+  if (TRUE_VALUES.has(value)) return true;
+  if (FALSE_VALUES.has(value)) return false;
+  return { error: `Unexpected ${column} value: ${String(value)}` };
 }
 
 async function firstRow(
@@ -50,9 +55,11 @@ async function probePostgres(run: RunQuery): Promise<ProbeOutcome> {
     "SELECT pg_is_in_recovery() AS replica, current_setting('transaction_read_only') = 'on' AS session_read_only",
   );
   if ("error" in r) return r;
-  return {
-    readOnly: { replica: asBool(r.row.replica), sessionReadOnly: asBool(r.row.session_read_only) },
-  };
+  const replica = readFlag(r.row, "replica");
+  if (typeof replica !== "boolean") return replica;
+  const sessionReadOnly = readFlag(r.row, "session_read_only");
+  if (typeof sessionReadOnly !== "boolean") return sessionReadOnly;
+  return { readOnly: { replica, sessionReadOnly } };
 }
 
 // read_only alone: super_read_only forces it on anyway, and MariaDB (even under Beekeeper's
@@ -60,7 +67,9 @@ async function probePostgres(run: RunQuery): Promise<ProbeOutcome> {
 async function probeMysql(run: RunQuery): Promise<ProbeOutcome> {
   const r = await firstRow(run, "SELECT @@global.read_only AS read_only");
   if ("error" in r) return r;
-  return { readOnly: { replica: asBool(r.row.read_only), sessionReadOnly: false } };
+  const replica = readFlag(r.row, "read_only");
+  if (typeof replica !== "boolean") return replica;
+  return { readOnly: { replica, sessionReadOnly: false } };
 }
 
 // Keyed by Beekeeper's raw databaseType, never the parser dialect: mapDialect() folds every
