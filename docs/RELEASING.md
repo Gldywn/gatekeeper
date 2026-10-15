@@ -105,7 +105,9 @@ These need a human with account access. None of them are in the repo.
    **stages** `@gldywn/gatekeeper-mcp-server` on npm with provenance. Staged means uploaded
    and invisible: nobody can install it yet, and the version number is now taken.
 6. Approve the staged version with 2FA (`npm stage approve`, or the package page on
-   npmjs.com). That approval is what makes it installable.
+   npmjs.com). That approval is what makes it installable. Approve it as soon as the
+   workflow is done: from the moment of Publish, every plugin shows the release as
+   available, and the update skill holds off pinned servers until npm serves it.
 7. Verify (below).
 
 If a step needs a retry, both workflows have a `workflow_dispatch` entry point that takes

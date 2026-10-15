@@ -67,6 +67,8 @@ There is nothing to compare here, because what matters is how it is registered r
 
 Either of the last two needs **an agent session restart** to take effect. The first does too, but it happens on its own at the next launch.
 
+**Before pinning or reinstalling, check that npm serves that version** (`npm view @gldywn/gatekeeper-mcp-server@<version> version` prints it back). A release shows on GitHub as soon as it is published, but npm only serves it once a maintainer approves the staged upload, so for a while GitHub is ahead. If npm does not have it yet, leave the config and the installed server as they are, since a pin to a version npm cannot serve breaks the next agent launch, and tell the human the release is still being published.
+
 **Mismatch worth flagging:** a pinned server at one version and a plugin at another. They ship together and are meant to match, so if you bumped one, bump the other.
 
 ### Stop every running server
