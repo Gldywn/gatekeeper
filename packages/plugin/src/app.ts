@@ -287,7 +287,7 @@ export class Gatekeeper {
   // pending state distinct from a probe that ran and could not confirm.
   private endpointRO: EndpointReadOnly | null = null;
   private endpointProbed = false;
-  // MySQL only: stopping a query needs 8.0.19+, see sql/stop.ts.
+  // PostgreSQL 10+ and MySQL 8.0.19+ only can be stopped, see sql/stop.ts.
   private serverVersion: string | null = null;
   private renewTimer?: number;
   private tickTimer?: number;
@@ -961,7 +961,8 @@ export class Gatekeeper {
     // version keeps Stop unavailable until this probe answers.
     this.serverVersion = null;
     const result = await probeReadOnly(this.dialect, runQuery);
-    const version = type === "mysql" ? await serverVersion(runQuery) : null;
+    const version =
+      type === "mysql" || type === "postgresql" ? await serverVersion(runQuery) : null;
     if (gen !== this.connGeneration) {
       return;
     }

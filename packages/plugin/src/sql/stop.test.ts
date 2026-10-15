@@ -36,8 +36,16 @@ describe("stop tag", () => {
 
 describe("where stopping is available", () => {
   it.each([
-    ["postgresql", false, null, null],
-    ["postgresql", true, null, null],
+    ["postgresql", false, "PostgreSQL 16.2 on x86_64-pc-linux-gnu, compiled by gcc", null],
+    ["postgresql", false, "PostgreSQL 10.23 on x86_64-pc-linux-gnu", null],
+    [
+      "postgresql",
+      false,
+      "PostgreSQL 9.6.24 on x86_64-pc-linux-gnu",
+      "This feature is not available on PostgreSQL 9.6.",
+    ],
+    ["postgresql", false, null, "This feature is not available on this PostgreSQL server."],
+    ["postgresql", true, "PostgreSQL 15.4 on aarch64-unknown-linux-gnu", null],
     ["mysql", false, "8.0.19", null],
     ["mysql", false, "8.4.2-0ubuntu0.24.04.1", null],
     ["mysql", false, "8.0.18", "This feature is not available on MySQL 8.0.18."],

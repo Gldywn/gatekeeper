@@ -90,7 +90,7 @@ connection in Settings. An agent cannot trigger one, and `cancel_query` still re
 executing query. The stop is fixed SQL built by the plugin, not by an agent, and runs
 through `runQuery` outside the approval gate, like the endpoint read-only probe:
 
-- **PostgreSQL**: one `SELECT` that reads `pg_catalog.pg_stat_activity` and calls
+- **PostgreSQL 10 and later**: one `SELECT` that reads `pg_catalog.pg_stat_activity` and calls
   `pg_cancel_backend` only when exactly one active client session of the same login role is
   running a statement that starts with this execution's comment. Parallel workers report the
   leader's text, so they are left out of the count; cancelling the leader stops them.
@@ -99,7 +99,7 @@ through `runQuery` outside the approval gate, like the endpoint read-only probe:
   when anything other than exactly one session matches. `KILL QUERY` stops the statement and
   leaves the connection open. Older MySQL, MariaDB, TiDB and MySQL connections in Beekeeper's
   read-only mode (which refuses `KILL`) do not offer Stop.
-- Every other database type does not offer Stop.
+- PostgreSQL before 10 and every other database type do not offer Stop.
 
 Both servers ignore a cancel that reaches a session sitting idle, and do not carry it over to
 the session's next statement (PostgreSQL `postgres.c`, MySQL 8.0.19+ `sql_class.cc` and

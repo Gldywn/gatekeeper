@@ -85,6 +85,7 @@ function harness() {
     autoDeferred: new Set<string>(),
     autoBusy: false,
     autoRuns: 0,
+    serverVersion: "PostgreSQL 16.2 on x86_64-pc-linux-gnu",
     mode: "read",
     dialect: "postgresql",
     conn: {

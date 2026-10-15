@@ -30,12 +30,22 @@ export function stopUnavailable(
   readOnly: boolean,
   serverVersion: string | null,
 ): string | null {
-  if (databaseType === "postgresql") return null;
+  if (databaseType === "postgresql") {
+    const server = postgresBelowMin(serverVersion);
+    return server ? unavailableOn(server) : null;
+  }
   if (databaseType !== "mysql") return unavailableOn(displayName);
   // MySQL can only cancel through KILL, which Beekeeper's read-only mode refuses.
   if (readOnly) return unavailableOn("read-only MySQL connections");
   const server = mysqlServerBelowMin(serverVersion);
   return server ? unavailableOn(server) : null;
+}
+
+// The stop statement filters on pg_stat_activity.backend_type, which PostgreSQL 10 added.
+function postgresBelowMin(version: string | null): string | null {
+  const m = version ? /^PostgreSQL (\d+)(\.\d+)?/.exec(version) : null;
+  if (!m) return "this PostgreSQL server";
+  return Number(m[1]) >= 10 ? null : `PostgreSQL ${m[1]}${m[2] ?? ""}`;
 }
 
 function mysqlServerBelowMin(version: string | null): string | null {
