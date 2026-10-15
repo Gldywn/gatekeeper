@@ -23,6 +23,8 @@ echo "$version"
 
 The snippets below reuse that `$version`.
 
+**Check that npm already serves it before touching the plugin or the server**: `npm view @gldywn/gatekeeper-mcp-server@"$version" version` prints the version back once it is installable. A release shows on GitHub as soon as it is published, but npm serves the server only after a maintainer approves the staged upload, so for a while GitHub is ahead, and updating then would leave the plugin ahead of the server or pin a version npm cannot serve. If npm answers that the version does not exist (E404), the release is still being published: report the state of the three pieces, leave the plugin, the server config and the running servers as they are, and tell the human to run this again shortly. If npm cannot be reached at all, say so instead, since that confirms nothing either way. The skills (Piece 3) do not depend on npm and can still be updated.
+
 ## Piece 1: the plugin
 
 Read the installed version straight out of the manifest:
@@ -66,8 +68,6 @@ There is nothing to compare here, because what matters is how it is registered r
 - **Installed globally** (a `gatekeeper-mcp-server` binary on `PATH`, from `pnpm add -g` or equivalent): the client points at a binary that only changes when it is reinstalled. Hand the human the command rather than running it, since a global install is theirs to approve: `pnpm add -g @gldywn/gatekeeper-mcp-server@<version>`.
 
 Either of the last two needs **an agent session restart** to take effect. The first does too, but it happens on its own at the next launch.
-
-**Before pinning or reinstalling, check that npm serves that version** (`npm view @gldywn/gatekeeper-mcp-server@<version> version` prints it back). A release shows on GitHub as soon as it is published, but npm only serves it once a maintainer approves the staged upload, so for a while GitHub is ahead. If npm does not have it yet, leave the config and the installed server as they are, since a pin to a version npm cannot serve breaks the next agent launch, and tell the human the release is still being published.
 
 **Mismatch worth flagging:** a pinned server at one version and a plugin at another. They ship together and are meant to match, so if you bumped one, bump the other.
 
