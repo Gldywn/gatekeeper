@@ -211,6 +211,6 @@ Anything you were blocked on goes under the last heading with the exact command,
 
 ## Updating and removing
 
-**Update:** the `update-gatekeeper` skill does it across all three pieces, and knows which ones need nothing. The short version: re-run step 1 against the new release and restart Beekeeper, since an unpinned `npx` line picks the matching server up on its own at the next agent launch while a pinned one needs its version bumped by hand. Plugin and server ship under one version and are meant to match, and an in-place plugin update keeps the pairing.
+**Update:** hand it to the `update-gatekeeper` skill. It does it across all three pieces, knows which ones need nothing, and defers the plugin and the server until npm serves a new release, so they never end up on different versions. An in-place plugin update keeps the pairing.
 
 **Remove:** delete the `gatekeeper` folder from the plugins directory, drop the `gatekeeper` entry from the MCP client config, and delete `~/.gatekeeper` (the capability token and the local SQLite queue). The skills come out with `npx skills remove gatekeeper install-gatekeeper`, or by deleting their folders. Nothing else was ever written outside those three places.
