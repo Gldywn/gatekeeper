@@ -57,7 +57,9 @@ describe("versionStatus", () => {
     expect(s.plugin).toMatchObject({ kind: "behind", tone: "info" });
     expect(s.server).toEqual({ kind: "unknown" });
     expect(s.dock).toEqual({ kind: "update", latest: "0.5.0" });
-    expect(versionStatus(rel("0.4.0"), null, null).dock).toEqual({ kind: "unknown" });
+    const blind = versionStatus(rel("0.4.0"), null, null);
+    expect(blind.dock).toEqual({ kind: "unknown" });
+    expect(blind.plugin).toEqual({ kind: "plain", version: "0.4.0" });
   });
 
   it("gives no advice at all when either side is a dev build", () => {

@@ -88,6 +88,8 @@ function row(own: string, peer: string | null, latest: string | null): VersionRo
   if (latest !== null && compareVersions(own, latest) < 0) {
     return { kind: "behind", version: own, tone: "info", latest };
   }
+  // With neither side known, nothing was compared: show the version without a verdict.
+  if (peer === null && latest === null) return { kind: "plain", version: own };
   return { kind: "ok", version: own };
 }
 
