@@ -57,12 +57,16 @@ the dev shim, so run `pnpm build` before testing a real install.
 
 ## The MCP server and the shared queue
 
-`.mcp.json` and `opencode.jsonc` start `scripts/dev-server.mjs` whenever an agent session
-opens in the repo. It kills every other Gatekeeper server on the machine, including those
-other sessions rely on, so that one build owns the broker port and `~/.gatekeeper/requests.db`.
-Never run it by hand, and tell the user before reconnecting the MCP server. A server change
-reaches the broker only after `pnpm --filter @gldywn/gatekeeper-mcp-server build` and a
-reconnect.
+`.mcp.json` and `opencode.jsonc` start this checkout's `packages/server/dist/index.js` whenever
+an agent session opens in the repo. It takes over nothing: while the human's `pnpm dev` holds
+the broker port it runs MCP-only and shares `~/.gatekeeper/requests.db` with it. Your MCP tools
+are therefore this branch's last build, not its current sources: an MCP change reaches you only
+after `pnpm --filter @gldywn/gatekeeper-mcp-server build` and a reconnect, so tell the user
+before reconnecting. A worktree with no build has no Gatekeeper tools.
+
+`pnpm dev` and `pnpm dev:server` run `scripts/dev-server.mjs`, which kills every other
+Gatekeeper server on the machine, then keeps the broker port until it stops. Never run them,
+nor the script, yourself.
 
 ## Conventions
 

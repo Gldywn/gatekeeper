@@ -9,6 +9,7 @@ import { createBroker } from "./broker.js";
 import {
   BROKER_HOST,
   brokerPort,
+  brokerSocket,
   dbPath,
   MAX_PENDING_PER_SESSION,
   PROPOSAL_TTL_MS,
@@ -87,6 +88,9 @@ async function main(): Promise<void> {
 
   const broker = createBroker(store, pluginId, token, undefined, undefined, notifier);
   const port = brokerPort();
+  // A child tsx had to SIGKILL leaves this file behind, so the next one runs MCP-only
+  // until the dev launcher restarts; a clean close unlinks it.
+  const socket = brokerSocket();
   let brokerOwner = false;
   let shuttingDown = false;
 
@@ -100,11 +104,13 @@ async function main(): Promise<void> {
         }
         resolve(false);
       };
-      broker.once("error", onError);
-      broker.listen(port, BROKER_HOST, () => {
+      const onListening = () => {
         broker.off("error", onError);
         resolve(true);
-      });
+      };
+      broker.once("error", onError);
+      if (socket) broker.listen(socket, onListening);
+      else broker.listen(port, BROKER_HOST, onListening);
     });
 
   brokerOwner = await tryBind();

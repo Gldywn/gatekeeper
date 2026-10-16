@@ -12,7 +12,7 @@
     "format": "biome format --write .",
     "ci": "pnpm typecheck && pnpm build && pnpm test",
     "dev": "pnpm run db:up && pnpm --parallel --filter @gatekeeper/plugin --filter @gldywn/gatekeeper-mcp-server run dev",
-    "dev:server": "node scripts/dev-server.mjs --watch",
+    "dev:server": "node scripts/dev-server.mjs",
     "db:up": "docker compose -f test-db/compose.yaml up -d --wait",
     "db:down": "docker compose -f test-db/compose.yaml down",
     "dev:link": "node scripts/dev.mjs link",
