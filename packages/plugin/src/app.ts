@@ -139,21 +139,15 @@ const PROBE_MS = 3000;
 const CHECK_MS = 15_000;
 const BROKER_TITLE = "Link to the Gatekeeper server, where agents send their queries";
 
-// The read-only layer help sentences, revealed by each row's "?" affordance. The
-// Gatekeeper one tracks the armed mode: read-only by default, wider once armed.
-function helpGatekeeper(mode: RiskMode): string {
-  if (mode === "write") {
-    return "Write mode is armed: Gatekeeper may run an approved INSERT or UPDATE, still one human approval at a time.";
-  }
-  if (mode === "destructive") {
-    return "Destructive mode is armed: Gatekeeper may run an approved write, up to DELETE, DROP, or TRUNCATE, still one human approval at a time.";
-  }
-  return "Gatekeeper only ever runs read-only SELECT queries. It never sends a write to the database, whatever the connection would allow.";
-}
+// The read-only layer help sentences, revealed by each row's "?" affordance. Each says where
+// the layer sits between this plugin and the database, then what makes it read-only; the
+// badge beside it gives the live state, so the text never changes with the mode.
+const HELP_GATEKEEPER =
+  "This plugin's approval gate, before Beekeeper. In Read-only or Auto mode it lets only reads through.";
 const HELP_BEEKEEPER =
-  "Beekeeper's own connection read-only mode. When on, Beekeeper blocks any write on this connection by itself.";
+  "The saved connection in Beekeeper, between this plugin and the database. With its read-only mode on, it blocks every write.";
 const HELP_ENDPOINT =
-  "The database endpoint this connection actually reaches. A read replica (such as an Aurora reader) rejects writes at the server, even if the credentials could write.";
+  "The database server at the end of the connection. A read replica or a read-only server rejects every write.";
 
 const CONNECTION_LABEL: Record<ConnectionState, string> = {
   connecting: "connecting...",
@@ -957,12 +951,7 @@ export class Gatekeeper {
     const view = readOnlyView(this.mode === "read", this.conn?.readOnly ?? false, this.endpointRO);
     return (
       '<div class="ro-pop-head">Read-only layers</div>' +
-      this.roRow(
-        "Gatekeeper",
-        helpGatekeeper(this.mode),
-        view.gatekeeper.label,
-        view.gatekeeper.state,
-      ) +
+      this.roRow("Gatekeeper", HELP_GATEKEEPER, view.gatekeeper.label, view.gatekeeper.state) +
       this.roRow("Beekeeper", HELP_BEEKEEPER, view.beekeeper.label, view.beekeeper.state) +
       this.roRow("Endpoint", HELP_ENDPOINT, view.endpoint.label, view.endpoint.state)
     );
