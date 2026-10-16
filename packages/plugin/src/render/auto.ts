@@ -53,7 +53,7 @@ export function autoSettingsHtml(enabled: boolean, keySaved = false): string {
               <span class="set-desc">${autoDisclosure}</span>
               <div class="auto-key"><label class="set-name" for="autoKey">TypeSafe API key</label><input id="autoKey" class="confirm-input" type="password" data-auto-key autocomplete="off" spellcheck="false" maxlength="4096" placeholder="apikey_0123456789"${keySaved ? ` value="${SAVED_KEY_MASK}"` : ""}></div>
               <p class="auto-message" data-auto-message role="status"></p>
-              <span class="set-desc">Stored in Beekeeper encrypted storage. Sent only to the local broker and TypeSafe.</span>
+              <span class="set-note">Stored in Beekeeper encrypted storage. Sent only to the local broker and TypeSafe.</span>
             </div>
             <span class="set-control"><input class="switch" type="checkbox" role="switch" data-auto-toggle aria-label="Auto mode"${enabled ? " checked" : ""} /></span>
           </div>`;

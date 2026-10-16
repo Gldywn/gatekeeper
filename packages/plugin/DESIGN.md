@@ -43,6 +43,14 @@ filled to enable and tinted to disable. Clicking the icon opens its Settings sec
 so the popover carries no Settings link. Explanations stay short there, full detail
 lives in Settings.
 
+## Secondary sentences
+
+A setting says what it does in its description; anything secondary (its default, its scope,
+a consequence) goes in `.set-note`: italic, faint, a full sentence ending with a period, on
+its own line under the description, or inline at its end when it is a two-word tail ("Off by
+default."). Status lines that only time something, like the database popover's "Checking
+again in 8s.", use the same voice.
+
 ## Unavailable features and errors
 
 A feature a database cannot offer is a warning, not an error: its control stays visible but

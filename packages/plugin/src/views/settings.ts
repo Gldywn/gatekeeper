@@ -111,14 +111,16 @@ export class SettingsView {
           <div class="set-row">
             <div class="set-text">
               <span class="set-name">Execution mode</span>
-              <span class="set-desc">Which statements Gatekeeper will run once you approve. Resets to read-only on load or a connection switch.</span>
+              <span class="set-desc">Which statements Gatekeeper will run once you approve.</span>
+              <span class="set-note">Resets to read-only on load or a connection switch.</span>
             </div>
             <span class="set-control" id="modeCtlSettings">${modeDropdown(this.mode(), false, this.auto())}</span>
           </div>
           <div class="set-row">
             <div class="set-text">
               <span class="set-name">Double confirmation</span>
-              <span class="set-desc">Ask for a second one-click confirmation, showing the statement, before an approved write or destructive query runs. Reads never prompt.</span>
+              <span class="set-desc">Ask for a second one-click confirmation, showing the statement, before an approved write or destructive query runs.</span>
+              <span class="set-note">Reads never prompt.</span>
             </div>
             <span class="set-control">${switchInput("confirmWrites", "Double confirmation", s.confirmWrites)}</span>
           </div>
@@ -126,7 +128,7 @@ export class SettingsView {
             <div class="set-text">
               <span class="set-name">Auto-stop long queries</span>
               <span class="set-desc">Ask the database to cancel an approved query once it has run this long on this connection.</span>
-              <span class="set-note">PostgreSQL and MySQL only</span>
+              <span class="set-note">PostgreSQL and MySQL only.</span>
             </div>
             <span class="set-control">${autoStopSelectHtml(s.autoStopMinutes)}</span>
           </div>
@@ -134,7 +136,7 @@ export class SettingsView {
           <div class="set-row recommend">
             <div class="set-text">
               <span class="set-name"><span class="set-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3"/></svg></span>Schema access <span class="set-rec">recommended</span></span>
-              <span class="set-desc">Give connected agents your database structure (tables, columns, types, keys) so they write more accurate, valid SQL instead of guessing names. Never exposes any row data. Off by default.</span>
+              <span class="set-desc">Give connected agents your database structure (tables, columns, types, keys) so they write more accurate, valid SQL instead of guessing names. Never exposes any row data. <span class="set-note">Off by default.</span></span>
             </div>
             <span class="set-control">${switchInput("schemaAccess", "Schema access", s.schemaAccess)}</span>
           </div>
@@ -156,7 +158,8 @@ export class SettingsView {
           <div class="set-row">
             <div class="set-text">
               <span class="set-name">Result memory</span>
-              <span class="set-desc">How much result data this tab keeps in memory so you can reopen a past result and scroll its full table. Once the limit is reached, the oldest results are dropped.</span>
+              <span class="set-desc">How much result data this tab keeps in memory so you can reopen a past result and scroll its full table.</span>
+              <span class="set-note">Once the limit is reached, the oldest results are dropped.</span>
             </div>
             <span class="set-control">${cacheSelectHtml(s.resultCacheMb)}</span>
           </div>

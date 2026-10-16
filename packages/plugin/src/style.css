@@ -332,6 +332,7 @@ body {
 }
 .db-next {
   font-size: 11px;
+  font-style: italic;
   color: var(--faint);
   white-space: nowrap;
 }
@@ -3505,7 +3506,8 @@ label.qs-row {
   color: var(--muted);
   overflow-wrap: anywhere;
 }
-/* A scope limit on a setting (which databases it applies to), quieter than its description. */
+/* A setting's secondary sentence (a default, a scope, a consequence), quieter than its
+   description; .db-next in the database popover follows the same voice. */
 .set-note {
   font-size: 11px;
   font-style: italic;
