@@ -748,6 +748,17 @@ describe("joins without a filter", () => {
     ).toEqual(["UPDATE may change every row of `users` since no condition filters it"]);
   });
 
+  it("lets a function of literals bound the join, like a VALUES list", () => {
+    const g = facts({
+      "public.users": { rows: 5_000_000, indexed: new Set(["id", "created_at"]) },
+    });
+    for (const sql of [
+      "UPDATE public.users u SET plan = v.plan FROM unnest(ARRAY[1, 2], ARRAY['a', 'b']) AS v(id, plan) WHERE u.id = v.id",
+      "SELECT d.day, count(u.id) FROM generate_series('2026-10-01'::date, '2026-10-07'::date, interval '1 day') AS d(day) LEFT JOIN public.users u ON u.created_at >= d.day AND u.created_at < d.day + interval '1 day' GROUP BY d.day",
+    ])
+      expect(check(sql, g).lines).toEqual([]);
+  });
+
   it("still reads in full a table a function explodes, and keeps the join forgotten before it", () => {
     const g = facts({ "public.events": { rows: BIG_ROWS } });
     expect(

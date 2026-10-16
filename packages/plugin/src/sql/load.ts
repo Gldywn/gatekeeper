@@ -779,8 +779,8 @@ export function checkLoad(plan: LoadPlan, facts: Facts | Pending): LoadResult {
       const other = b.sources[j];
       if (j === i) return false;
       if (ordered === j) return true;
-      // A function or LATERAL item reads the member rather than bounding it.
-      if (!other.rel) return other.reads === undefined;
+      // A function or LATERAL item that reads the member follows it rather than bounding it.
+      if (!other.rel) return other.reads !== null && !other.reads?.includes(b.sources[i].alias);
       const rows = factsOf(other.rel)?.rows;
       if (rows == null || rows <= PREVIEW_LIMIT) return true;
       if (rows >= LARGE_ROWS) return false;
