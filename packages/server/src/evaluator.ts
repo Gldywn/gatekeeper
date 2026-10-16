@@ -257,7 +257,6 @@ const holdReasons = new Set([
   "Auto mode disabled while evaluating",
   "Pairing lost",
   "Heavy query",
-  "Load check incomplete",
 ]);
 
 export const autoHoldRecord = z

@@ -138,10 +138,10 @@ indexed column can still scan most of a table and shows no alert.
   lists come from Beekeeper's `getTableIndexes` (Beekeeper 5.5 and later), for large tables only.
 - PostgreSQL gets every rule. Other engines get only the rules that read the SQL alone, which
   flag `UPDATE` or `DELETE` without `WHERE` and sources that no join condition links.
-- **Auto mode** holds a query with an alert, or one the check could not finish, before anything
-  is sent to TypeSafe. History keeps the fixed reason `Heavy query` or `Load check incomplete`,
-  never a table name. A check that could not finish (a view, an unknown size) shows nothing on
-  the card, so it never adds friction to a manual review.
+- **Auto mode** holds a query with an alert before anything is sent to TypeSafe. History keeps
+  the fixed reason `Heavy query`, never a table name. A check that could not finish (a view, an
+  unknown size, a late catalog read) blocks nothing, with or without Auto mode, and shows
+  nothing on the card.
 - **Auto-deny heavy queries** (Settings, on by default) rejects a flagged query as soon as its
   card arrives, without a human in the loop. A finding that depends on a missing row estimate
   never auto-denies. The automatic rejection itself tells the agent that its query was judged

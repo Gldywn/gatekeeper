@@ -341,7 +341,7 @@ describe("render/queue loadInner", () => {
     expect(loadInner({ lines: [], notes: [], estimates: [], heavy: false, complete: true })).toBe(
       "",
     );
-    // An unknown size alone is not a finding: it only holds Auto mode.
+    // An unknown size alone is not a finding and shows nothing.
     expect(
       loadInner({
         lines: [],

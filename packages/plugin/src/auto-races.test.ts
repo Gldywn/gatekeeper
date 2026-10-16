@@ -1273,26 +1273,29 @@ describe("load check", () => {
     app.startLoad(card, true);
   }
 
-  it.each([
-    ["heavy", HEAVY, "Heavy query"],
-    ["incomplete", UNKNOWN, "Load check incomplete"],
-  ])("holds a %s read before anything leaves for the provider", async (_, result, reason) => {
+  it("holds a heavy read before anything leaves for the provider", async () => {
     const { app, card } = harness();
-    card.load = Promise.resolve(result);
+    card.load = Promise.resolve(HEAVY);
     const inspect = vi.spyOn(app.annotator, "inspectRead");
     await app.evaluateNext();
-    expect(card.autoStatus).toBe(`Needs review: ${reason}`);
+    expect(card.autoStatus).toBe("Needs review: Heavy query");
     expect(inspect).not.toHaveBeenCalled();
     expect(app.broker.evaluate).not.toHaveBeenCalled();
     expect(app.broker.executing).not.toHaveBeenCalled();
   });
 
-  it("holds a card whose load check never started", async () => {
+  it.each([
+    ["incomplete", Promise.resolve(UNKNOWN)],
+    ["never started", undefined],
+  ])("lets a read whose load check is %s go on to the usual evaluation", async (_, load) => {
     const { app, card } = harness();
-    card.load = undefined;
+    card.load = load;
+    const inspect = vi
+      .spyOn(app.annotator, "inspectRead")
+      .mockResolvedValue({ complete: false, reasons: ["Metadata unavailable"] });
     await app.evaluateNext();
-    expect(card.autoStatus).toBe("Needs review: Load check incomplete");
-    expect(app.broker.evaluate).not.toHaveBeenCalled();
+    expect(inspect).toHaveBeenCalled();
+    expect(card.autoStatus).toBe("Needs review: Metadata unavailable");
   });
 
   it("auto-denies a heavy query on arrival with hints from its SQL only", async () => {

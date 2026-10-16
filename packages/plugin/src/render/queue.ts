@@ -349,8 +349,8 @@ function lineHtml(line: Line): string {
     .join("");
 }
 
-// Only a finding raises the alert. What could not be checked (a view, an unknown size) is
-// noise on a manual review and only holds Auto mode, so it rides along with a finding.
+// Only a finding raises the alert. What could not be checked (a view, an unknown size) blocks
+// nothing, so it only rides along with a finding.
 export function loadInner(result: LoadResult | undefined): string {
   if (!result?.lines.length) {
     return "";

@@ -144,8 +144,6 @@ const BROKER_TITLE = "Link to the Gatekeeper server, where agents send their que
 // The deadline only stops waiting; it cannot cancel a catalog read already sent.
 const LOAD_DEADLINE_MS = 5000;
 const HEAVY_REASON = "Heavy query";
-// No alert backs this one on the card, so it must not read as a heavy query.
-const INCOMPLETE_REASON = "Load check incomplete";
 const AUTO_DENY_NOTE = "heavy query, auto-denied";
 const AUTO_DENY_MESSAGE = "Rejected automatically by the load check.";
 
@@ -1961,12 +1959,13 @@ export class Gatekeeper {
       card.autoStatus = "Evaluating with Jev";
       this.renderQueue();
       if (!(await this.checkConnection()) || !valid() || controller.signal.aborted) return;
-      // Checked before anything leaves for the provider; a card without a settled check holds.
+      // Checked before anything leaves for the provider. Only a finding holds the read, so a
+      // check that could not finish blocks nothing, with or without Auto mode.
       const load = card.load;
       const loaded = await load;
       if (!valid() || controller.signal.aborted || card.load !== load) return;
-      if (!loaded || loaded.heavy || !loaded.complete) {
-        this.reviewCard(card, loaded?.heavy ? HEAVY_REASON : INCOMPLETE_REASON);
+      if (loaded?.heavy) {
+        this.reviewCard(card, HEAVY_REASON);
         return;
       }
       const analysis = await this.annotator.inspectRead(

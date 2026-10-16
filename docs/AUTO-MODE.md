@@ -274,10 +274,10 @@ to the whole plugin.
 
 Before the read analysis, and so before anything is sent to TypeSafe, Auto mode waits for
 the card's [load check](../SECURITY.md#load-check). A read with a Heavy query alert stays for
-manual review with the reason `Heavy query`. One whose check could not finish (no row
-estimate, index list unavailable, statistics late or unavailable) stays with the reason
-`Load check incomplete`, and its card shows no alert. Passing the check does not make a read
-cheap, because a range on an indexed column can still scan most of a table.
+manual review with the reason `Heavy query`. A check that could not finish (no row estimate,
+index list unavailable, statistics late or unavailable) holds nothing, and the read goes on to
+the usual evaluation. Passing the check does not make a read cheap, because a range on an
+indexed column can still scan most of a table.
 
 ## Provider boundary
 

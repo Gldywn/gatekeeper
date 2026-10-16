@@ -41,7 +41,6 @@ it.each([
   ["Needs review: Unsupported automatic SQL clause: where", "Unsupported automatic SQL clause"],
   ["Sensitive source or alias: 'private@example.test'", "Sensitive source or alias"],
   ["Needs review: Heavy query", "Heavy query"],
-  ["Needs review: Load check incomplete", "Load check incomplete"],
   ["Provider error with private@example.test", "Automatic review required"],
 ])("bounds persisted hold reason %s without storing source values", (reason, expected) => {
   expect(autoHoldRecord.parse({ sent: false, reason })).toEqual({ sent: false, reason: expected });
