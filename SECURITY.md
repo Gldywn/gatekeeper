@@ -130,15 +130,18 @@ indexed column can still scan most of a table and shows no alert.
   statement it wraps, so an automatic `EXPLAIN` would let agent text reach the database before
   any decision.
 - **What runs automatically** is one catalog read built by Gatekeeper, after the same search
-  path check Auto mode uses. It reads row estimates from `pg_class.reltuples`, or the statistics
-  counter `pg_stat_get_live_tuples` when a never analyzed table has counted rows, summed over its
-  `pg_inherits` children.
+  path check Auto mode uses. It reads row estimates from `pg_class.reltuples`, summed over its
+  `pg_inherits` children. Autovacuum never analyzes an empty or tiny table, so for a table never
+  analyzed it reads the statistics counter `pg_stat_get_live_tuples`, 0 included, while
+  `track_counts` is on.
   Relation names travel as escaped literals, and none of these reads locks a user table. Index
   lists come from Beekeeper's `getTableIndexes` (Beekeeper 5.5 and later), for large tables only.
 - PostgreSQL gets every rule. Other engines get only the rules that read the SQL alone, which
   flag `UPDATE` or `DELETE` without `WHERE` and sources that no join condition links.
 - **Auto mode** holds a query with an alert, or one the check could not finish, before anything
-  is sent to TypeSafe. History keeps the fixed reason `Heavy query`, never a table name.
+  is sent to TypeSafe. History keeps the fixed reason `Heavy query` or `Load check incomplete`,
+  never a table name. A check that could not finish (a view, an unknown size) shows nothing on
+  the card, so it never adds friction to a manual review.
 - **Auto-deny heavy queries** (Settings, on by default) rejects a flagged query as soon as its
   card arrives, without a human in the loop. A finding that depends on a missing row estimate
   never auto-denies. The automatic rejection itself tells the agent that its query was judged

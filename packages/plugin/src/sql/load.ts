@@ -845,7 +845,8 @@ SELECT t.i, n.nspname AS schema, c.relkind::pg_catalog.text AS kind, c.relrowsec
    FROM (SELECT DISTINCT tr.oid FROM tree tr WHERE tr.i = t.i LIMIT 4097) d
    JOIN pg_catalog.pg_class k ON k.oid = d.oid) AS parts,
   EXISTS (SELECT 1 FROM tree tr JOIN pg_catalog.pg_inherits h ON h.inhparent = tr.oid
-          WHERE tr.i = t.i AND tr.depth = ${MAX_TREE_DEPTH}) AS deeper
+          WHERE tr.i = t.i AND tr.depth = ${MAX_TREE_DEPTH}) AS deeper,
+  pg_catalog.current_setting('track_counts') AS track_counts
 FROM target t
 LEFT JOIN pg_catalog.pg_class c ON c.oid = t.oid
 LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
@@ -900,17 +901,19 @@ export function parseLoadStats(rels: Rel[], rows: Record<string, unknown>[]): St
     }
     let total = 0;
     let missing = bool(row.deeper) !== false;
+    const counting = row.track_counts === "on";
     for (const part of parts) {
       const [k, tuples, live] = Array.isArray(part) && part.length === 3 ? part : [];
       if (k === "p") continue;
-      // Never analyzed reads -1 since PostgreSQL 14. The live counter stands in only when it
-      // has seen rows: without a statistics entry it also returns 0.
+      // Never analyzed reads -1 since PostgreSQL 14, and autovacuum leaves an empty or tiny
+      // table that way for good: on a dev database, 275 of 390 tables. While statistics are
+      // collected, the live counter is then the real figure, 0 included.
       const analyzed = num(tuples);
       const counted = num(live);
       const estimate =
         analyzed !== null && analyzed >= 0
           ? analyzed
-          : counted !== null && counted > 0
+          : counted !== null && (counted > 0 || counting)
             ? counted
             : null;
       if ((k !== "r" && k !== "m") || estimate === null) missing = true;

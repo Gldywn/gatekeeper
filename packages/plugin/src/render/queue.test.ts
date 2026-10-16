@@ -341,5 +341,15 @@ describe("render/queue loadInner", () => {
     expect(loadInner({ lines: [], notes: [], estimates: [], heavy: false, complete: true })).toBe(
       "",
     );
+    // An unknown size alone is not a finding: it only holds Auto mode.
+    expect(
+      loadInner({
+        lines: [],
+        notes: [[{ code: "daily" }, " is a view with no row estimate"]],
+        estimates: [],
+        heavy: false,
+        complete: false,
+      }),
+    ).toBe("");
   });
 });

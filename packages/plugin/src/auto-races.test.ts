@@ -1274,14 +1274,14 @@ describe("load check", () => {
   }
 
   it.each([
-    ["heavy", HEAVY],
-    ["incomplete", UNKNOWN],
-  ])("holds a %s read before anything leaves for the provider", async (_, result) => {
+    ["heavy", HEAVY, "Heavy query"],
+    ["incomplete", UNKNOWN, "Load check incomplete"],
+  ])("holds a %s read before anything leaves for the provider", async (_, result, reason) => {
     const { app, card } = harness();
     card.load = Promise.resolve(result);
     const inspect = vi.spyOn(app.annotator, "inspectRead");
     await app.evaluateNext();
-    expect(card.autoStatus).toBe("Needs review: Heavy query");
+    expect(card.autoStatus).toBe(`Needs review: ${reason}`);
     expect(inspect).not.toHaveBeenCalled();
     expect(app.broker.evaluate).not.toHaveBeenCalled();
     expect(app.broker.executing).not.toHaveBeenCalled();
@@ -1291,7 +1291,7 @@ describe("load check", () => {
     const { app, card } = harness();
     card.load = undefined;
     await app.evaluateNext();
-    expect(card.autoStatus).toBe("Needs review: Heavy query");
+    expect(card.autoStatus).toBe("Needs review: Load check incomplete");
     expect(app.broker.evaluate).not.toHaveBeenCalled();
   });
 

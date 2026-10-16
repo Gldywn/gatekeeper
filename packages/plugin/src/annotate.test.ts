@@ -455,3 +455,31 @@ describe("SchemaAnnotator.inspectLoad host work", () => {
     expect(getColumns).not.toHaveBeenCalled();
   });
 });
+
+describe("SchemaAnnotator.inspectLoad on never analyzed tables", () => {
+  it("reads an empty table autovacuum never analyzed as empty, not unknown", async () => {
+    const metadata = [
+      [{ path: '["pg_catalog","public"]' }],
+      [
+        {
+          i: 0,
+          schema: "treasury",
+          kind: "r",
+          rls: false,
+          deeper: false,
+          track_counts: "on",
+          parts: '[["r",-1,0]]',
+        },
+      ],
+    ];
+    const a = new SchemaAnnotator({
+      getColumns: async () => [],
+      getMetadata: async () => metadata.shift() ?? [],
+      dialect: () => "postgresql",
+      defaultSchema: () => "public",
+      generation: () => 0,
+    });
+    const r = await a.inspectLoad("SELECT count(*) FROM treasury.mangopay_to_swan_migration");
+    expect(r).toMatchObject({ lines: [], notes: [], heavy: false, complete: true });
+  });
+});

@@ -352,11 +352,16 @@ describe("statistics", () => {
     { i: 0, schema: "public", kind, rls: false, deeper: false, parts: JSON.stringify(parts) },
   ];
 
-  it("uses the live counter for a never analyzed table only when it has seen rows", () => {
+  it("uses the live counter for a never analyzed table, 0 included while statistics are collected", () => {
     expect(parseLoadStats(rels, row([["r", -1, 42]]))?.[0].rows).toBe(42);
     expect(parseLoadStats(rels, row([["r", 1200, 42]]))?.[0].rows).toBe(1200);
-    // Without a statistics entry the counter also reads 0: that is not an empty table.
+    // An empty table autovacuum never analyzed, the common case on a real database.
+    const counted = [{ ...row([["r", -1, 0]])[0], track_counts: "on" }];
+    expect(parseLoadStats(rels, counted)?.[0].rows).toBe(0);
+    // Without collected statistics the counter reads 0 whatever the table holds.
     expect(parseLoadStats(rels, row([["r", -1, 0]]))?.[0].rows).toBeNull();
+    const off = [{ ...row([["r", -1, 0]])[0], track_counts: "off" }];
+    expect(parseLoadStats(rels, off)?.[0].rows).toBeNull();
   });
 
   it("never reads a malformed value as zero rows", () => {

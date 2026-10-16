@@ -349,9 +349,10 @@ function lineHtml(line: Line): string {
     .join("");
 }
 
-// One alert for findings and for what could not be checked: the lines say which is which.
+// Only a finding raises the alert. What could not be checked (a view, an unknown size) is
+// noise on a manual review and only holds Auto mode, so it rides along with a finding.
 export function loadInner(result: LoadResult | undefined): string {
-  if (!result || (!result.lines.length && !result.notes.length)) {
+  if (!result?.lines.length) {
     return "";
   }
   const estimates = result.estimates
