@@ -21,9 +21,9 @@ function facts(entries: Record<string, Partial<RelFacts>>): Facts {
     map.set(relKey({ schema, table }), {
       rows: 0,
       rls: false,
-      inherited: false,
       indexed: new Set(["id"]),
       leading: new Set(["id"]),
+      unique: new Set(["id"]),
       columns: null,
       ...f,
     });
@@ -418,31 +418,6 @@ describe("statistics", () => {
     ).toBe(2_000_000);
   });
 
-  it("marks a classic inheritance parent, not a partitioned one", () => {
-    expect(
-      parseLoadStats(
-        rels,
-        row([
-          ["r", 10, 0],
-          ["r", 10, 0],
-        ]),
-      )?.[0].inherited,
-    ).toBe(true);
-    expect(
-      parseLoadStats(
-        rels,
-        row(
-          [
-            ["p", -1, 0],
-            ["r", 10, 0],
-          ],
-          "p",
-        ),
-      )?.[0].inherited,
-    ).toBe(false);
-    expect(parseLoadStats(rels, row([["r", 10, 0]]))?.[0].inherited).toBe(false);
-  });
-
   it("sums partitions and inherited children, and reads an unknown leaf as unknown", () => {
     expect(
       parseLoadStats(
@@ -551,11 +526,12 @@ describe("coverage", () => {
     ]);
   });
 
-  it("links two sources through any condition naming both, never through an OR", () => {
+  it("links two sources through any condition naming both, an OR only when every branch does", () => {
     for (const sql of [
       "SELECT * FROM public.s, public.e WHERE e.ts BETWEEN s.start_at AND s.end_at AND s.id = 3",
       "SELECT * FROM public.a JOIN public.b ON b.id IN (a.x, a.y)",
       "SELECT * FROM public.a JOIN public.b ON st_dwithin(a.geom, b.geom, 100)",
+      "SELECT m.body FROM public.messages m, public.users u WHERE u.id = m.sender_id OR u.id = m.recipient_id",
     ])
       expect(check(sql).lines).toEqual([]);
     expect(
@@ -568,6 +544,19 @@ describe("coverage", () => {
       "SELECT o.id FROM public.orders o, jsonb_array_elements(o.items) AS i WHERE o.id = 42",
       "SELECT u.id FROM public.users u, LATERAL (SELECT count(*) AS n FROM public.orders WHERE orders.user_id = u.id) x WHERE u.id = 42",
       "SELECT o.id FROM public.orders o, (SELECT max(total) AS m FROM public.orders) top WHERE o.id = 1",
+      // A table joined through the item is linked through it.
+      "SELECT g.name FROM public.orders o, unnest(o.tag_ids) AS t(tag_id), public.tags g WHERE g.id = t.tag_id AND o.id = 42",
+      "SELECT u.id, p.name FROM public.users u, LATERAL (SELECT 1 AS product_id) x, public.products p WHERE p.id = x.product_id AND u.id = 42",
+      "SELECT u.id, i.name FROM public.users u LEFT JOIN LATERAL (SELECT 1 AS item_id) l ON true LEFT JOIN public.items i ON i.id = l.item_id WHERE u.id = 42",
+    ])
+      expect(check(sql).lines).toEqual([]);
+  });
+
+  it("reads no missing join into a JOIN ... ON it cannot link", () => {
+    for (const sql of [
+      "SELECT m.body FROM public.messages m JOIN public.users u ON u.id = m.sender_id OR u.id = m.recipient_id WHERE m.thread_id = 5",
+      "SELECT u.email FROM public.users u JOIN public.orders o ON o.id = (SELECT max(o2.id) FROM public.orders o2 WHERE o2.user_id = u.id) WHERE u.id = 42",
+      "SELECT * FROM public.a JOIN public.b ON true WHERE a.id = 1",
     ])
       expect(check(sql).lines).toEqual([]);
   });
@@ -615,6 +604,9 @@ describe("no false alert on bounded queries", () => {
     expect(
       check("SELECT a.id FROM public.a a JOIN public.b b USING (id) WHERE b.id = 7", big).lines,
     ).toEqual([]);
+    expect(
+      check("SELECT a.id FROM public.a a JOIN public.b b USING (ref) WHERE b.id = 7", big).lines,
+    ).toEqual(["Filter on `ref` uses no index and may scan all of `a`"]);
   });
 
   it("lets the enclosing query filter or preview a derived table or CTE", () => {
@@ -624,19 +616,34 @@ describe("no false alert on bounded queries", () => {
       "SELECT * FROM (SELECT * FROM public.t) p LIMIT 10",
     ])
       expect(check(sql, big).lines).toEqual([]);
-    // Nothing filters the CTE, so it is still read in full.
-    expect(check("WITH p AS (SELECT * FROM public.t) SELECT count(*) FROM p", big).lines).toEqual([
-      "Reads every row of `t` without a `WHERE` clause",
-    ]);
+    // Nothing filters the CTE, so it is still read in full; a LIMIT cannot stop a GROUP BY.
+    for (const sql of [
+      "WITH p AS (SELECT * FROM public.t) SELECT count(*) FROM p",
+      "SELECT * FROM (SELECT status, count(*) FROM public.t GROUP BY status) x LIMIT 10",
+    ])
+      expect(check(sql, big).lines).toEqual(["Reads every row of `t` without a `WHERE` clause"]);
   });
 
-  it("reads WHERE FALSE and WHERE 1 = 0 as reading nothing", () => {
+  it("binds a column-list alias to its source", () => {
+    expect(check("SELECT * FROM (SELECT * FROM public.t) p(x) WHERE p.x = 7", big).lines).toEqual(
+      [],
+    );
+  });
+
+  it("reads WHERE FALSE and WHERE 1 = 0 as reading nothing, also through AND or a wrapper", () => {
     for (const sql of [
       "SELECT * FROM public.t WHERE FALSE",
       "SELECT id FROM public.t WHERE 1 = 0",
       "UPDATE public.t SET x = 1 WHERE FALSE",
+      "SELECT * FROM public.t WHERE FALSE AND status = 'x'",
+      "SELECT * FROM (SELECT * FROM public.t) p WHERE FALSE",
     ])
       expect(check(sql, big).lines).toEqual([]);
+  });
+
+  it("reads TABLESAMPLE SYSTEM as a fraction of the pages, BERNOULLI as all of them", () => {
+    expect(check("SELECT * FROM public.t TABLESAMPLE SYSTEM (1)", big).lines).toEqual([]);
+    expect(check("SELECT * FROM public.t TABLESAMPLE BERNOULLI (1)", big).lines).toHaveLength(1);
   });
 });
 
@@ -663,10 +670,44 @@ describe("joins without a filter", () => {
       expect(check(sql, f).lines).toEqual([]);
   });
 
-  it("binds a column-list alias to its source", () => {
-    const sql =
-      "SELECT o.id FROM public.orders o, (VALUES (1, 'a')) AS v(id, label) WHERE o.customer_id = v.id AND o.id = 3";
-    expect(check(sql, f).lines).toEqual([]);
+  it("lets a VALUES list, derived table or CTE bound the join, the index rule judging it", () => {
+    for (const sql of [
+      "SELECT o.id FROM public.orders o JOIN (VALUES (7), (8)) AS k(id) ON o.id = k.id",
+      "SELECT o.id FROM public.orders o JOIN (SELECT 7 AS id) k ON o.id = k.id",
+      "WITH r AS (SELECT 7 AS order_id) SELECT o.id FROM public.orders o JOIN r ON r.order_id = o.id",
+      "UPDATE public.orders o SET status = v.status FROM (VALUES (1, 'paid')) AS v(id, status) WHERE o.id = v.id",
+    ])
+      expect(check(sql, f).lines).toEqual([]);
+    expect(
+      check("SELECT o.id FROM public.orders o JOIN (VALUES ('x')) AS k(ref) ON o.ref = k.ref", f)
+        .lines,
+    ).toEqual(["Filter on `ref` uses no index and may scan all of `orders`"]);
+  });
+
+  it("lets a small table, or a mid-sized one through a unique column, drive the lookups", () => {
+    const g = facts({
+      "public.users": { rows: 5_000_000 },
+      "public.admins": { rows: 30 },
+      "public.customers": { rows: 50_000 },
+    });
+    for (const sql of [
+      "SELECT a.role, u.email FROM public.admins a JOIN public.users u ON u.id = a.user_id",
+      "SELECT c.name, u.email FROM public.customers c JOIN public.users u ON u.id = c.user_id",
+    ])
+      expect(check(sql, g).lines).toEqual([]);
+    // Without a unique column, a mid-sized table reaches most rows of the large one.
+    expect(
+      check("SELECT c.name FROM public.customers c JOIN public.users u ON u.team_id = c.id", g)
+        .lines,
+    ).toEqual(["Reads every row of `users` since no condition filters it"]);
+  });
+
+  it("exempts the newest rows of a join read in index order", () => {
+    for (const sql of [
+      "SELECT o.id, c.name FROM public.orders o JOIN public.customers c ON c.id = o.customer_id ORDER BY o.id DESC LIMIT 20",
+      "SELECT o.id, c.name FROM public.orders o LEFT JOIN public.customers c ON c.id = o.customer_id ORDER BY o.id DESC LIMIT 20",
+    ])
+      expect(check(sql, f).lines).toEqual([]);
   });
 
   it("separates a typed note from the hints", () => {
@@ -683,18 +724,41 @@ describe("index-served reads", () => {
   it("exempts an ORDER BY or min/max on the leading column of an index", () => {
     for (const sql of [
       "SELECT * FROM public.t ORDER BY id DESC LIMIT 20",
+      "SELECT * FROM public.t ORDER BY id DESC LIMIT 20 OFFSET 20",
+      "SELECT * FROM public.t WHERE TRUE ORDER BY id DESC LIMIT 20",
       "SELECT max(id) FROM public.t",
+      "SELECT max(id) FROM public.t WHERE 1 = 1",
       "SELECT min(id), max(id) FROM public.t",
     ])
       expect(check(sql, f).lines).toEqual([]);
   });
 
-  it("still flags an order or min/max no index leads", () => {
+  it("still flags an order or min/max no index leads, a deep page, a window or row security", () => {
+    const g = facts({
+      "public.t": {
+        rows: 41_000_000,
+        indexed: new Set(["id", "status"]),
+        leading: new Set(["id"]),
+      },
+    });
     for (const sql of [
       "SELECT * FROM public.t ORDER BY status LIMIT 20",
-      "SELECT max(amount) FROM public.t",
+      "SELECT max(status) FROM public.t",
       "SELECT * FROM public.t ORDER BY id DESC",
+      "SELECT * FROM public.t ORDER BY id DESC LIMIT 20 OFFSET 5000",
+      "SELECT max(id) OVER () FROM public.t",
     ])
-      expect(check(sql, f).lines).toHaveLength(1);
+      expect(check(sql, g).lines).toHaveLength(1);
+    const rls = facts({ "public.t": { rows: 41_000_000, rls: true } });
+    expect(check("SELECT max(id) FROM public.t", rls).lines).toHaveLength(1);
+  });
+
+  it("makes no claim on an index-served read when the index list is unavailable", () => {
+    const g = facts({
+      "public.t": { rows: 41_000_000, indexed: null, leading: null, unique: null },
+    });
+    const r = check("SELECT * FROM public.t ORDER BY id DESC LIMIT 20", g);
+    expect(r.lines).toEqual([]);
+    expect(r.complete).toBe(false);
   });
 });
