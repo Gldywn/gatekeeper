@@ -188,6 +188,10 @@ communicates. If you cannot, cut it.
 - Self-colored tonal edges, not hard hairline borders on every box.
 - No accent bar down a card edge.
 - Terse copy. Buttons do not move on hover.
+- Impersonal, product-like copy. State the fact or the state, never address the
+  reader ("Reject queries flagged as heavy without waiting for manual review", not
+  "You confirm it before it runs"). Write plain sentences, not chains of
+  "label: explanation". Older strings that still say "you" predate this rule.
 
 ## Extending the panel
 

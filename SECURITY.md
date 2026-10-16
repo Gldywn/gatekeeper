@@ -119,6 +119,37 @@ since a stop that lands late changes nothing. Auto-stop is an attempt, not a gua
 time limit: it runs only while the Gatekeeper tab is open, and the stop itself waits for a free
 connection in Beekeeper's pool.
 
+## Load check
+
+Before approval, the plugin estimates whether a proposal could load or lock the database and
+shows a Heavy query alert on its card. It is a warning, not a guarantee. A read filtered on an
+indexed column can still scan most of a table and shows no alert.
+
+- **The proposal is never run, planned or explained before approval.** The PostgreSQL planner
+  evaluates IMMUTABLE and STABLE functions while it plans, and `EXPLAIN` takes the locks of the
+  statement it wraps, so an automatic `EXPLAIN` would let agent text reach the database before
+  any decision.
+- **What runs automatically** is one catalog read built by Gatekeeper, after the same search
+  path check Auto mode uses. It reads row estimates from `pg_class.reltuples`, or the statistics
+  counter `pg_stat_get_live_tuples` when a never analyzed table has counted rows, summed over its
+  `pg_inherits` children.
+  Relation names travel as escaped literals, and none of these reads locks a user table. Index
+  lists come from Beekeeper's `getTableIndexes` (Beekeeper 5.5 and later), for large tables only.
+- PostgreSQL gets every rule. Other engines get only the rules that read the SQL alone, which
+  flag `UPDATE` or `DELETE` without `WHERE` and sources that no join condition links.
+- **Auto mode** holds a query with an alert, or one the check could not finish, before anything
+  is sent to TypeSafe. History keeps the fixed reason `Heavy query`, never a table name.
+- **Auto-deny heavy queries** (Settings, on by default) rejects a flagged query as soon as its
+  card arrives, without a human in the loop. A finding that depends on a missing row estimate
+  never auto-denies. The automatic rejection itself tells the agent that its query was judged
+  heavy, so by trying variants an agent can learn whether a table holds over a million rows or
+  whether a filtered column has no index. Turn the setting off to keep that signal behind a
+  human decision.
+- **On a rejection**, the agent receives the operator's note, then hints computed from the
+  SQL text alone (no `WHERE` clause, missing join condition, DDL without `CONCURRENTLY`), the
+  same whatever the database holds. Row estimates, index facts and sensitive-data flags never
+  leave the plugin. The history detail shows the exact text sent.
+
 ## Same-user trust boundary
 
 The broker requires an `Authorization: Bearer` capability token on every request. It is

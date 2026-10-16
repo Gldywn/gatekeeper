@@ -70,11 +70,14 @@ function outcomeInner(item: HistItem): string {
     );
   }
   if (item.status === "rejected") {
-    // A decline carries no reason to show; state it plainly, no placeholder note.
-    return (
-      ocHead(xCircleIcon, "Declined", relAge(item.resolvedAt)) +
-      ocMsg("You declined this proposal. Nothing ran against the database.")
-    );
+    // A decline with nothing sent states it plainly, no placeholder note.
+    const sent = item.sent ? " The agent received the text below." : "";
+    const head = item.autoDenied
+      ? ocHead(xCircleIcon, "Rejected automatically", relAge(item.resolvedAt)) +
+        ocMsg(`The load check rejected this query. Nothing ran against the database.${sent}`)
+      : ocHead(xCircleIcon, "Declined", relAge(item.resolvedAt)) +
+        ocMsg(`You declined this proposal. Nothing ran against the database.${sent}`);
+    return head + (item.sent ? ocNote(item.sent) : "");
   }
   return (
     ocHead(clockIcon, "Expired", relAge(item.resolvedAt)) +
