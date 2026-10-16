@@ -1,6 +1,7 @@
 import { capitalize, clock, escapeHtml, relAge } from "../html";
 import {
   buildingIcon,
+  clockIcon,
   copyIcon,
   dbReadsIcon,
   harnessIcon,
@@ -9,6 +10,7 @@ import {
   sendIcon,
   trashIcon,
   warnIcon,
+  xCircleIcon,
 } from "../icons";
 import { classifyQuery, type RiskClass, rank } from "../sql/classify";
 import { formatSql } from "../sql/format";
@@ -16,8 +18,8 @@ import { highlight } from "../sql/highlight";
 import { modeRank, type RiskMode } from "../sql/mode";
 import { visibleControls } from "../sql/sanitize";
 import { analyzeTableOps, type SchemaContext } from "../sql/schema";
-import type { Card, CardState, SessionMeta } from "../types";
-import { AUTO_LEADS, autoIcon, NOTHING_SENT } from "./auto";
+import type { Card, CardState, RunState, SessionMeta } from "../types";
+import { AUTO_APPROVED, AUTO_LEADS, autoIcon, NOTHING_SENT } from "./auto";
 
 const WRITE_MODE_NOTE = "Write mode required to approve this query.";
 const DESTRUCTIVE_MODE_NOTE = "Destructive mode required to approve this query.";
@@ -161,7 +163,12 @@ function autoNote(card: Card): string {
     return "";
   }
   if (card.autoStatus === AUTO_EVALUATING) {
+    // A human can approve mid-evaluation; once the card left ready, nothing is evaluating it.
+    if (card.state !== "ready") return "";
     return `<div class="cs-unparsed auto evaluating" role="status"><span class="auto-bolt">${autoIcon}</span><span><b>Auto mode:</b> <i>${AUTO_EVALUATING}&hellip;</i></span></div>`;
+  }
+  if (card.autoStatus === AUTO_APPROVED) {
+    return `<div class="cs-unparsed auto" role="status">${autoIcon}<span><b>Auto mode:</b> ${AUTO_LEADS.automatic}.</span></div>`;
   }
   const lead = card.evaluation
     ? `${AUTO_LEADS.refused}, waiting for your review.`
@@ -191,26 +198,34 @@ export function cardHtml(
   mode: RiskMode = "read",
   connReadOnly = false,
 ): string {
-  const evaluating = card.autoStatus === AUTO_EVALUATING;
+  const evaluating = card.state === "ready" && card.autoStatus === AUTO_EVALUATING;
   // An evaluation in flight borrows the blocked-Approve chrome: the reason rides in the
   // same popover, and Reject stays open for a human who has already made up their mind.
   const gate = evaluating
     ? { ...cardGate(card.sql, dialect, mode, connReadOnly), approveEnabled: false, note: EVAL_NOTE }
     : cardGate(card.sql, dialect, mode, connReadOnly);
   const remaining = card.expiresAt - Date.now();
+  const run = card.state === "executing" ? card.run : undefined;
   let actions: string;
-  if (card.state !== "ready") {
-    actions = `<div class="actions"><span class="busy"><span class="spin"></span>${busyLabel(card.state)}...</span></div>`;
+  if (run) {
+    actions = runningActions(card.id, run);
+  } else if (card.state !== "ready") {
+    actions = `<div class="actions"><span class="busy"><span class="spin"></span>${busyLabel(card.state)}&hellip;</span></div>`;
   } else {
     actions = readyActions(card.id, gate, denyDrafts);
   }
   const badge = riskBadge(gate.cls);
   const riskAnno = riskAnnotation(card.sql, dialect, gate.cls);
+  // The expiry clock only means something while the proposal waits for a decision.
+  const lease =
+    card.state === "ready"
+      ? `<span class="${remaining <= 45_000 ? "lease low" : "lease"}">${clock(remaining)}</span>`
+      : "";
   return `
-      <div class="card ${cardClassFor(gate)}${evaluating ? " auto-eval" : ""}" data-card="${card.id}">
+      <div class="card ${cardClassFor(gate)}${evaluating ? " auto-eval" : ""}${run ? runClass(run) : ""}" data-card="${card.id}">
         <div class="top">
           ${badge}${evaluating ? `<span class="auto-mark" title="${EVAL_NOTE}" aria-label="${EVAL_NOTE}">${autoIcon}</span>` : ""}${card.intent ? `<span class="intent">${escapeHtml(capitalize(card.intent))}</span>` : `<span class="intent">${escapeHtml(card.id)}</span>`}
-          <span class="${remaining <= 45_000 ? "lease low" : "lease"}">${clock(remaining)}</span>
+          ${lease}
         </div>
         <div class="meta">${escapeHtml(card.id)} &middot; ${relAge(card.createdAt)}</div>
         <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(visibleControls(card.sql))}" aria-label="Copy SQL">${copyIcon}</button><code class="sql-body" id="sqlbody-${card.id}">${highlight(formatSql(card.sql), card.schema?.pii, card.schema?.client, card.schema?.literals)}</code></pre>
@@ -344,8 +359,35 @@ export function schemaInner(schema: SchemaContext | null | undefined, hideReads 
 }
 
 export function busyLabel(state: CardState): string {
-  if (state === "approving") return "approving";
-  if (state === "executing") return "running on connection";
-  if (state === "posting") return "returning rows";
-  return "rejecting";
+  if (state === "approving") return "Approving";
+  if (state === "executing") return "Running";
+  if (state === "posting") return "Returning rows";
+  return "Rejecting";
+}
+
+// Past this, a run reads as long: the clock and Stop turn amber and Stop pulses.
+export const LONG_RUN_MS = 45_000;
+
+export function runClass(run: RunState, now = Date.now()): string {
+  return now - run.startedAt >= LONG_RUN_MS ? " running long" : " running";
+}
+
+// Stop takes Approve's place, live from the first frame. Unavailable reads as a warning
+// on the disabled button; a failed stop is an error note with the database's own text.
+export function runningActions(id: string, run: RunState, now = Date.now()): string {
+  const elapsed = now - run.startedAt;
+  const stop = run.stop;
+  const stopping = stop?.state === "pending" || stop?.state === "sent";
+  const button = `<button class="btn stop" type="button" data-stop="${id}"${run.unavailable || stopping ? " disabled" : ""}><span class="sq" aria-hidden="true"></span>${stopping ? "Stopping&hellip;" : "Stop"}</button>`;
+  const control = run.unavailable
+    ? `<span class="approve-slot">${button}<span class="approve-pop warn" role="tooltip">${ALERT_ICON}${escapeHtml(run.unavailable)}</span></span>`
+    : button;
+  const limit =
+    run.limitMs && !run.unavailable && !stop
+      ? `<span class="autostop" title="Auto-stop is set to ${run.limitMs / 60_000} min on this connection">${clockIcon}Auto-stop in<span class="clock autostop-clock">${clock(run.limitMs - elapsed)}</span></span>`
+      : "";
+  const error = stop?.error
+    ? `<div class="cs-unparsed stop-error" role="status">${xCircleIcon}<span class="stop-msg"><span>An error occurred while stopping the query.</span><span class="stop-raw">${escapeHtml(stop.error)}</span></span></div>`
+    : "";
+  return `<div class="actions">${control}<span class="run"><span class="spin"></span>Running<span class="clock run-clock">${clock(elapsed)}</span></span>${limit}</div>${error}`;
 }

@@ -43,6 +43,36 @@ filled to enable and tinted to disable. Clicking the icon opens its Settings sec
 so the popover carries no Settings link. Explanations stay short there, full detail
 lives in Settings.
 
+## Secondary sentences
+
+A setting says what it does in its description; anything secondary (its default, its scope,
+a consequence) goes in `.set-note`: italic, faint, a full sentence ending with a period, on
+its own line under the description, or inline at its end when it is a two-word tail ("Off by
+default."). Status lines that only time something, like the database popover's "Checking
+again in 8s.", use the same voice.
+
+## Unavailable features and errors
+
+A feature a database cannot offer is a warning, not an error: its control stays visible but
+disabled, and the reason rides in the amber variant of the blocked-Approve popover
+(`.approve-pop.warn`), always worded `This feature is not available on <database>.`
+(`unavailableOn` in `sql/stop.ts`, with `dbDisplayName` for the name). One sentence for every
+feature, so the reason never reads as a bug.
+
+An action that failed is an error: the card's boxed note (`.cs-unparsed`) with the red
+failed-outcome mark (`xCircleIcon`), one short sentence in the UI face, then the raw error
+from the host on its own mono line under it (`.stop-raw`), the way the detail overlay shows a
+failed query. No narration of the cause in the sentence; the raw text carries the specifics.
+
+## Running row
+
+Once a query is approved, Stop takes Approve's place from the first frame, beside "Running"
+and the elapsed clock (mono, data). Blue means executing, so the button and the SQL frame
+take `--exec`; from 45 s the clock, the button and the frame turn amber and the button
+breathes with the armed-mode pulse, the cue that the run is long. An auto-stop limit shows
+as a quiet countdown after the clock. The expiry clock leaves the card's top row while the
+query runs, since it no longer means anything.
+
 ## Type: two roles
 
 - **Sans (system-ui)** carries all prose: intents, section labels, buttons, the
