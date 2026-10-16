@@ -1330,6 +1330,11 @@ describe("load check", () => {
     await evaluating;
     await flush();
     expect(app.broker.result).toHaveBeenCalledOnce();
+    expect(app.broker.result).toHaveBeenCalledWith(
+      card.id,
+      card.leaseId,
+      expect.objectContaining({ autoHold: { sent: false, reason: "Heavy query" } }),
+    );
     expect(app.broker.evaluate).not.toHaveBeenCalled();
     expect(app.broker.executing).not.toHaveBeenCalled();
   });
@@ -1548,23 +1553,50 @@ describe("load check binding", () => {
 
 describe("load check after a re-pair", () => {
   const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
-
-  it("restarts a check cut short once the card is claimed again", async () => {
+  const setup = () => {
     const { app, card } = harness();
     vi.stubGlobal("CSS", { escape: (s: string) => s });
     app.settingsStore = {
       get: () => ({ confirmWrites: true, resultCacheMb: 4, autoDenyHeavy: true }),
       loadedForConnection: () => true,
     };
-    const inspect = vi.spyOn(app.annotator, "inspectLoad").mockResolvedValueOnce(undefined);
+    return { app, card, inspect: vi.spyOn(app.annotator, "inspectLoad") };
+  };
+
+  it("restarts a check cut short once the card is claimed again", async () => {
+    const { app, card, inspect } = setup();
+    inspect.mockResolvedValueOnce(undefined);
     app.startLoad(card, true);
+    app.activeGen++;
     await flush();
-    expect(card.loadStale).toBe(true);
     inspect.mockResolvedValueOnce(LIGHT);
     app.claim({ ...card });
     await flush();
     expect(inspect).toHaveBeenCalledTimes(2);
-    expect(card.loadStale).toBe(false);
     expect(card.loadResult).toBe(LIGHT);
+  });
+
+  it("restarts a check still waiting on the host when the card is claimed again", async () => {
+    const { app, card, inspect } = setup();
+    const old = deferred<LoadResult | undefined>();
+    inspect.mockReturnValueOnce(old.promise);
+    app.startLoad(card, true);
+    app.activeGen++;
+    inspect.mockResolvedValueOnce(LIGHT);
+    app.claim({ ...card });
+    await flush();
+    old.resolve(undefined);
+    await flush();
+    expect(inspect).toHaveBeenCalledTimes(2);
+    expect(card.loadResult).toBe(LIGHT);
+  });
+
+  it("keeps a check of the same session when a re-offer claims the card again", async () => {
+    const { app, card, inspect } = setup();
+    inspect.mockResolvedValueOnce(LIGHT);
+    app.startLoad(card, true);
+    app.claim({ ...card });
+    await flush();
+    expect(inspect).toHaveBeenCalledOnce();
   });
 });

@@ -41,7 +41,7 @@ export interface Card extends Proposal {
   // renders loadResult, which starts with the SQL-only findings.
   load?: Promise<LoadResult>;
   loadResult?: LoadResult;
-  loadStale?: boolean;
+  loadSession?: number;
 }
 
 // One approved execution, from the moment its SQL leaves for the host until it settles.

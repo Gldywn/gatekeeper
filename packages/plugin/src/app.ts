@@ -2320,7 +2320,9 @@ export class Gatekeeper {
         existing.leaseId = proposal.leaseId;
         existing.leaseExpiresAt = proposal.leaseExpiresAt;
       }
-      if (existing.loadStale && existing.state === "ready") this.startLoad(existing, false);
+      // A check started under an earlier session was or will be cut short at its next host call.
+      if (existing.loadSession !== this.activeGen && existing.state === "ready")
+        this.startLoad(existing, false);
       void this.evaluateNext();
       return;
     }
@@ -2361,7 +2363,7 @@ export class Gatekeeper {
   // arrival may auto-deny it: a recheck after a schema change never rejects a waiting card.
   private startLoad(card: Card, arrival: boolean): void {
     const plan = planLoad(card.sql, this.dialect);
-    card.loadStale = false;
+    card.loadSession = this.activeGen;
     card.loadResult = checkLoad(plan, "pending");
     const bound = {
       generation: this.connGeneration,
@@ -2388,11 +2390,7 @@ export class Gatekeeper {
     this.annotator
       .inspectLoad(card.sql, live)
       .then(
-        (result) => {
-          // Cut short (re-pair, decision, deadline): claim() restarts it if the card comes back.
-          if (result === undefined && card.load === load) card.loadStale = true;
-          settle(result ?? checkLoad(plan, "unavailable"));
-        },
+        (result) => settle(result ?? checkLoad(plan, "unavailable")),
         () => settle(checkLoad(plan, "unavailable")),
       )
       .finally(() => window.clearTimeout(timer));
@@ -2439,6 +2437,9 @@ export class Gatekeeper {
     )
       return;
     if (this.autoCard === card) this.autoAbort?.abort();
+    // The audit row and history record why Auto mode stopped, never the evaluation it cut short.
+    if (card.autoStatus === "Evaluating with Jev")
+      card.autoStatus = `Needs review: ${HEAVY_REASON}`;
     // Reserved before the await, like a click on Reject, so nothing else can take the card.
     this.setCardState(card.id, "rejecting");
     const sent = agentMessage(AUTO_DENY_MESSAGE, planLoad(card.sql, this.dialect).hints);
@@ -2447,11 +2448,8 @@ export class Gatekeeper {
     // review undecided. A delivered one is final for the broker, whatever changed meanwhile.
     if (!posted) {
       // The reservation above changed the state; TypeScript still narrows it to "ready".
-      if (this.cards.includes(card) && (card.state as CardState) === "rejecting") {
-        if (card.autoStatus === "Evaluating with Jev")
-          card.autoStatus = `Needs review: ${HEAVY_REASON}`;
+      if (this.cards.includes(card) && (card.state as CardState) === "rejecting")
         this.setCardState(card.id, "ready");
-      }
       return;
     }
     this.finish(card.id, "rejected", AUTO_DENY_NOTE, undefined, undefined, {
