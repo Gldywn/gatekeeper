@@ -182,7 +182,7 @@ Pairing proves the channel. One approved query proves the whole loop, and it wal
 
 1. `set_session_label` with something like `Gatekeeper install check`.
 2. `get_connection_info`: expect `connected: true` and the connection the human has open in Beekeeper.
-3. Propose `SELECT 1` with the intent `Install check: confirm the approval loop end to end.` It appears in the plugin, the human approves, one row comes back.
+3. Propose `SELECT 1` with the intent `Confirm the Gatekeeper approval loop works end to end after the install.` It appears in the plugin, the human approves, one row comes back.
 
 Then set expectations before handing back: reads are always allowed, a write only runs once the human arms Write mode in the plugin, and a destructive statement only under Destructive mode. Those modes are ephemeral and reset on a connection switch. On macOS the first pending query also raises a desktop notification, and macOS asks for permission the first time: allow it, or banners stop for good and the only symptom is a chime with nothing on screen.
 

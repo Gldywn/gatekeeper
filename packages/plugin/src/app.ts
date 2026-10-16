@@ -118,10 +118,10 @@ const BROKER_TITLE = "Link to the Gatekeeper server, where agents send their que
 // Gatekeeper one tracks the armed mode: read-only by default, wider once armed.
 function helpGatekeeper(mode: RiskMode): string {
   if (mode === "write") {
-    return "Write mode is armed: Gatekeeper may run an approved INSERT or UPDATE, still one human approval at a time.";
+    return "With Write mode armed, Gatekeeper may run an approved INSERT or UPDATE, still one human approval at a time.";
   }
   if (mode === "destructive") {
-    return "Destructive mode is armed: Gatekeeper may run an approved write, up to DELETE, DROP, or TRUNCATE, still one human approval at a time.";
+    return "With Destructive mode armed, Gatekeeper may run an approved write, up to DELETE, DROP, or TRUNCATE, still one human approval at a time.";
   }
   return "Gatekeeper only ever runs read-only SELECT queries. It never sends a write to the database, whatever the connection would allow.";
 }
