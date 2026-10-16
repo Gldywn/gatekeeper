@@ -23,7 +23,7 @@ function facts(entries: Record<string, Partial<RelFacts>>): Facts {
       rls: false,
       indexed: new Set(["id"]),
       leading: new Set(["id"]),
-      unique: new Set(["id"]),
+      unique: [["id"]],
       columns: null,
       ...f,
     });
@@ -127,6 +127,7 @@ describe("scans", () => {
 
   it("exempts a small unfiltered preview, but not with an offset, an order, an aggregate or RLS", () => {
     expect(check("SELECT * FROM public.payment_attempt LIMIT 50", f).lines).toEqual([]);
+    expect(check("SELECT * FROM public.payment_attempt WHERE 1 = 1 LIMIT 50", f).lines).toEqual([]);
     for (const sql of [
       "SELECT * FROM public.payment_attempt LIMIT 50 OFFSET 10",
       "SELECT * FROM public.payment_attempt ORDER BY created_at LIMIT 50",
@@ -273,6 +274,8 @@ describe("joins", () => {
     expect(check(sql).lines).toEqual([]);
     const big = facts({ "public.a": { rows: 5_000 }, "public.b": { rows: 5_000 } });
     expect(check(sql, big).lines).toHaveLength(1);
+    // A filter makes the size of its side unknown.
+    expect(check(`${sql} WHERE a.id = 7`, big).lines).toEqual([]);
   });
 });
 
@@ -616,12 +619,10 @@ describe("no false alert on bounded queries", () => {
       "SELECT * FROM (SELECT * FROM public.t) p LIMIT 10",
     ])
       expect(check(sql, big).lines).toEqual([]);
-    // Nothing filters the CTE, so it is still read in full; a LIMIT cannot stop a GROUP BY.
-    for (const sql of [
-      "WITH p AS (SELECT * FROM public.t) SELECT count(*) FROM p",
-      "SELECT * FROM (SELECT status, count(*) FROM public.t GROUP BY status) x LIMIT 10",
-    ])
-      expect(check(sql, big).lines).toEqual(["Reads every row of `t` without a `WHERE` clause"]);
+    // Nothing filters the CTE, so it is still read in full.
+    expect(check("WITH p AS (SELECT * FROM public.t) SELECT count(*) FROM p", big).lines).toEqual([
+      "Reads every row of `t` without a `WHERE` clause",
+    ]);
   });
 
   it("binds a column-list alias to its source", () => {
@@ -702,12 +703,61 @@ describe("joins without a filter", () => {
     ).toEqual(["Reads every row of `users` since no condition filters it"]);
   });
 
-  it("exempts the newest rows of a join read in index order", () => {
+  it("exempts the newest rows of a join read in index order, and the lookups they drive", () => {
+    const g = facts({
+      "public.orders": {
+        rows: BIG_ROWS,
+        indexed: new Set(["id", "customer_id", "created_at"]),
+        leading: new Set(["id", "created_at"]),
+        columns: ["id", "customer_id", "created_at"],
+      },
+      "public.customers": { rows: 5_000_000, columns: ["id", "name"] },
+    });
     for (const sql of [
       "SELECT o.id, c.name FROM public.orders o JOIN public.customers c ON c.id = o.customer_id ORDER BY o.id DESC LIMIT 20",
       "SELECT o.id, c.name FROM public.orders o LEFT JOIN public.customers c ON c.id = o.customer_id ORDER BY o.id DESC LIMIT 20",
+      "SELECT o.id, c.name FROM public.orders o JOIN public.customers c ON c.id = o.customer_id ORDER BY created_at DESC LIMIT 20",
     ])
-      expect(check(sql, f).lines).toEqual([]);
+      expect(check(sql, g).lines).toEqual([]);
+  });
+
+  it("exempts a small LIMIT over a join whatever bounds its members", () => {
+    const g = facts({ "public.users": { rows: 5_000_000 }, "public.roles": { rows: 10 } });
+    const sql =
+      "SELECT u.email, r.name FROM public.users u JOIN public.roles r ON r.id = u.role_id LIMIT 50";
+    expect(check(sql, g).lines).toEqual([]);
+  });
+
+  it("lets a staging table bound a write through a composite key", () => {
+    const g = facts({
+      "public.users": {
+        rows: 40_000_000,
+        indexed: new Set(["tenant_id", "id"]),
+        unique: [["tenant_id", "id"]],
+      },
+      "public.staging": { rows: 2_000 },
+    });
+    const sql =
+      "UPDATE public.users u SET status = s.status FROM public.staging s WHERE u.tenant_id = s.tenant_id AND u.id = s.id";
+    expect(check(sql, g).lines).toEqual([]);
+    expect(
+      check(
+        "UPDATE public.users u SET status = s.status FROM public.staging s WHERE u.tenant_id = s.tenant_id",
+        g,
+      ).lines,
+    ).toEqual(["UPDATE may change every row of `users` since no condition filters it"]);
+  });
+
+  it("still reads in full a table a function explodes, and keeps the join forgotten before it", () => {
+    const g = facts({ "public.events": { rows: BIG_ROWS } });
+    expect(
+      check("SELECT x FROM public.events e, jsonb_array_elements(e.payload) x", g).lines,
+    ).toEqual(["Reads every row of `events` since no condition filters it"]);
+    expect(
+      check(
+        "SELECT o.id FROM public.orders o, public.customers c, jsonb_array_elements(o.items) i WHERE o.id = 42",
+      ).lines,
+    ).toEqual(["Missing join condition pairs every row of `o` with every row of `c`"]);
   });
 
   it("separates a typed note from the hints", () => {

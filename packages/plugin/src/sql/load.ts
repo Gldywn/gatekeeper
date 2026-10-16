@@ -25,8 +25,9 @@ export interface RelFacts {
   indexed: Set<string> | null;
   // The first column of each index, the one an ORDER BY or min/max can read in order.
   leading: Set<string> | null;
-  // Columns that make a unique index on their own: a join on one reads one row per outer row.
-  unique: Set<string> | null;
+  // The columns of each unique index and of the primary key: a join matching all of one
+  // reads one row per outer row.
+  unique: string[][] | null;
   columns: string[] | null;
 }
 
@@ -56,8 +57,9 @@ interface Source {
   rel?: Rel;
   joinedBy: "first" | "comma" | "cross" | "on" | "using";
   using?: string[];
-  // A function or LATERAL item reads its siblings, so it is joined to the sources before it.
-  correlated?: boolean;
+  // A function or LATERAL item reads its siblings: the aliases its arguments name, or null
+  // when they cannot be told, which joins it to every source before it.
+  reads?: string[] | null;
   // TABLESAMPLE SYSTEM reads only a fraction of the pages.
   sampled?: boolean;
   // Blocks read through this source (a derived table or CTE body): their cost depends on how
@@ -74,11 +76,9 @@ interface Block {
   empty: boolean;
   limited: boolean;
   preview: boolean;
-  // GROUP BY, an aggregate or DISTINCT: an enclosing LIMIT cannot stop its scan early.
-  grouped: boolean;
   // A source whose columns, if each leads an index, let PostgreSQL answer from a few index
   // entries: the ORDER BY of a small LIMIT, or every min/max argument.
-  indexOrder?: { source: number; columns: string[] };
+  indexOrder?: { table: string | null; columns: string[] };
 }
 
 interface Write {
@@ -355,7 +355,11 @@ class Walker {
         alias: alias ?? `#${index}`,
         joinedBy,
         using,
-        correlated: lateral || (!statement && item.expr.type !== "values"),
+        reads: lateral
+          ? null
+          : statement || item.expr.type === "values"
+            ? undefined
+            : reads(item.expr),
         inner: this.blocks.slice(before),
       };
     }
@@ -396,7 +400,6 @@ class Walker {
       empty: conjuncts(where).some(contradiction),
       limited: false,
       preview: false,
-      grouped: false,
       ...extra,
     };
     this.blocks.push(block);
@@ -421,15 +424,16 @@ class Walker {
     const branch = ast._next != null || ast.set_op != null;
     const from = Array.isArray(ast.from) ? ast.from : [];
     const { count, offset, skip } = limitParts(ast.limit);
-    const grouped = ast.groupby != null || distinct(ast.distinct) || aggregates(ast.columns);
     // A small LIMIT with no WHERE, order or aggregate lets PostgreSQL stop early, joins included.
     const preview =
       !branch &&
       from.length > 0 &&
-      ast.where == null &&
-      !grouped &&
+      (ast.where == null || tautology(ast.where)) &&
+      ast.groupby == null &&
       ast.having == null &&
       ast.orderby == null &&
+      !distinct(ast.distinct) &&
+      !aggregates(ast.columns) &&
       !offset &&
       count !== undefined &&
       Number.isInteger(count) &&
@@ -438,7 +442,6 @@ class Walker {
     const block = this.block(from, ast.where, ctes, depth, {
       limited: count !== undefined,
       preview,
-      grouped,
     });
     if (!branch) block.indexOrder = indexOrder(ast, block, count, skip);
     this.nested([ast.columns, ast.having, ast.orderby], ctes, depth);
@@ -587,7 +590,9 @@ function usage(block: Block, facts: Facts | null): Usage {
   // USING compares the new item with the side it joins, the source just before it, on the
   // columns it names, as the equivalent ON would.
   for (const [i, s] of block.sources.entries()) {
-    if (s.correlated) for (let j = 0; j < i; j++) link(i, j);
+    if (s.reads !== undefined)
+      for (let j = 0; j < i; j++)
+        if (s.reads === null || s.reads.includes(block.sources[j].alias)) link(i, j);
     if (s.joinedBy !== "using") continue;
     link(i, i - 1);
     for (const column of s.using ?? []) for (const side of [i, i - 1]) columns[side].add(column);
@@ -659,14 +664,13 @@ export function planLoad(sql: string, dialect: string): LoadPlan {
   plan.relations = [...seen.values()];
   if (plan.relations.length > MAX_RELATIONS) plan.covered = false;
   // An inner block the enclosing query filters, previews or empties is not read in full:
-  // PostgreSQL pushes the filter down or stops early, except through a GROUP BY or aggregate.
+  // PostgreSQL pushes the filter down or stops early.
   for (const b of plan.blocks) {
     const u = usage(b, null);
     for (const [i, s] of b.sources.entries()) {
       const group = u.groups.find((g) => g.includes(i)) ?? [i];
       const bounded = b.empty || group.some((j) => u.filtered[j]);
-      for (const inner of s.inner ?? [])
-        if (bounded || (b.preview && !inner.grouped)) plan.dependent.add(inner);
+      for (const inner of s.inner ?? []) if (bounded || b.preview) plan.dependent.add(inner);
     }
   }
   // Computed before any catalog fact exists, so a hint never tells the agent about the data.
@@ -769,16 +773,18 @@ export function checkLoad(plan: LoadPlan, facts: Facts | Pending): LoadResult {
   const writeOf = new Map(plan.writes.map((w) => [w.block, w]));
   // A sibling with few or unknown rows drives index lookups into the member, which the index
   // rule then judges; a mid-sized table only through a unique column, one row per lookup.
-  const bounds = (b: Block, u: Usage, group: number[], i: number): boolean => {
+  const bounds = (b: Block, u: Usage, group: number[], i: number, ordered?: number | string) => {
     const unique = factsOf(b.sources[i].rel)?.unique;
     return group.some((j) => {
       const other = b.sources[j];
       if (j === i) return false;
-      if (!other.rel || b.indexOrder?.source === j) return true;
+      if (ordered === j) return true;
+      // A function or LATERAL item reads the member rather than bounding it.
+      if (!other.rel) return other.reads === undefined;
       const rows = factsOf(other.rel)?.rows;
       if (rows == null || rows <= PREVIEW_LIMIT) return true;
       if (rows >= LARGE_ROWS) return false;
-      return unique == null || [...u.columns[i]].some((c) => unique.has(c));
+      return unique == null || unique.some((key) => key.every((c) => u.columns[i].has(c)));
     });
   };
 
@@ -800,10 +806,12 @@ export function checkLoad(plan: LoadPlan, facts: Facts | Pending): LoadResult {
     const write = writeOf.get(b);
     const u = usage(b, known);
     if (u.ambiguous && b.sources.some((s) => s.rel)) unbound = true;
+    const order = b.indexOrder;
+    const orderedAt = order && bind(b, { table: order.table, column: order.columns[0] }, known);
     for (const [i, s] of b.sources.entries()) {
       if (!s.rel || s.sampled || plan.dependent.has(b)) continue;
       const f = factsOf(s.rel);
-      const ordered = b.indexOrder?.source === i ? b.indexOrder.columns : undefined;
+      const ordered = orderedAt === i ? order?.columns : undefined;
       if (ordered && f?.rls === false) {
         // Without the index list nothing says the order is not served, as for a filter.
         if (f.leading == null) {
@@ -815,7 +823,10 @@ export function checkLoad(plan: LoadPlan, facts: Facts | Pending): LoadResult {
       // A join reads every matching row: unless some member of the joined group is filtered
       // on its own, or bounds this one (see bounds), every member is read in full.
       const group = u.groups.find((g) => g.includes(i)) ?? [i];
-      if (!group.some((j) => u.filtered[j]) && !bounds(b, u, group, i)) {
+      const unfiltered = !group.some((j) => u.filtered[j]);
+      // A small LIMIT stops the join early, whatever bounds its members.
+      if (unfiltered && b.preview && f && f.rows !== null && !f.kind && f.rls === false) continue;
+      if (unfiltered && !bounds(b, u, group, i, orderedAt)) {
         if (write?.target === i) {
           // A write with no WHERE at all already has its rows-changed line.
           if ((!b.noWhere || b.sources.length > 1) && large(s.rel))
@@ -834,7 +845,6 @@ export function checkLoad(plan: LoadPlan, facts: Facts | Pending): LoadResult {
             );
           continue;
         }
-        if (b.preview && f && f.rows !== null && !f.kind && f.rls === false) continue;
         if (!large(s.rel)) continue;
         scans.push(
           b.sources.length === 1 && b.noWhere
@@ -866,6 +876,8 @@ export function checkLoad(plan: LoadPlan, facts: Facts | Pending): LoadResult {
     if (!pair) continue;
     // An explicit CROSS JOIN is flagged only when every group's size is known to be large together.
     const size = (group: number[]) => {
+      // A filtered group may hold a few rows: its size is unknown, so the pairing is no claim.
+      if (group.some((j) => u.filtered[j])) return null;
       const rows = group.map((i) => {
         const rel = b.sources[i].rel;
         return rel ? factsOf(rel)?.rows : null;
@@ -1052,17 +1064,9 @@ function indexOrder(
   const first = node(orders[0]) && node(orders[0].expr) ? orders[0].expr : null;
   if (first?.type === "column_ref") {
     const column = label(first.column);
-    const table = label(first.table);
-    // Unqualified, the column surely belongs to the only source; with a join, it may not.
-    const source =
-      table === null
-        ? b.sources.length === 1
-          ? 0
-          : -1
-        : b.sources.findIndex((s) => s.alias === table);
     const small = count !== undefined && Number.isInteger(count) && count + skip <= PREVIEW_LIMIT;
-    return small && column && source >= 0 && !aggregates(ast.columns)
-      ? { source, columns: [column] }
+    return small && column && !aggregates(ast.columns)
+      ? { table: label(first.table), columns: [column] }
       : undefined;
   }
   if (orders.length || b.sources.length !== 1 || skip || !Array.isArray(ast.columns))
@@ -1079,6 +1083,11 @@ function indexOrder(
       : null;
   });
   return args.length && args.every((a): a is string => a !== null)
-    ? { source: 0, columns: args }
+    ? { table: null, columns: args }
     : undefined;
+}
+
+function reads(expr: unknown): string[] | null {
+  const tables = columnRefs(expr).map((ref) => ref.table);
+  return tables.every((t): t is string => t !== null) ? tables : null;
 }

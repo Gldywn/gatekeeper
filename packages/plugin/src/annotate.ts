@@ -177,12 +177,9 @@ export class SchemaAnnotator {
             indexes &&
             new Set(indexes.flatMap((ix) => (ix.columns[0] ? [ix.columns[0].name] : []))),
           unique:
-            indexes &&
-            new Set(
-              indexes.flatMap((ix) =>
-                (ix.unique || ix.primary) && ix.columns.length === 1 ? [ix.columns[0].name] : [],
-              ),
-            ),
+            indexes
+              ?.filter((ix) => ix.unique || ix.primary)
+              .map((ix) => ix.columns.map((c) => c.name)) ?? null,
           columns: columns?.map((c) => c.name) ?? null,
         });
       }),

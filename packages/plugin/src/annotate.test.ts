@@ -346,6 +346,34 @@ describe("SchemaAnnotator.inspectLoad", () => {
     expect(small.getIndexes).not.toHaveBeenCalled();
   });
 
+  it("reads a composite unique index as a key a join can match in full", async () => {
+    const getIndexes = vi.fn(async () => [
+      {
+        id: "1",
+        table: "users",
+        schema: "public",
+        name: "users_pkey",
+        columns: [{ name: "tenant_id" }, { name: "id" }],
+        unique: true,
+        primary: true,
+      },
+    ]);
+    const two = [
+      { ...stats(50_000)[0], i: 0 },
+      { ...stats(40_000_000)[0], i: 1 },
+    ];
+    const join =
+      "SELECT c.name FROM public.customers c JOIN public.users u ON u.tenant_id = c.tenant_id";
+    const key = await annotator([PATH, two], getIndexes).a.inspectLoad(
+      `${join} AND u.id = c.user_id`,
+    );
+    expect(key?.lines).toEqual([]);
+    const part = await annotator([PATH, two], getIndexes).a.inspectLoad(join);
+    expect(part?.lines.map(text)).toEqual([
+      "Reads every row of users since no condition filters it",
+    ]);
+  });
+
   it("reports statistics as unavailable when the search path is not trusted or the read fails", async () => {
     const untrusted = annotator([[{ path: '["public","pg_catalog"]' }]]);
     const r = await untrusted.a.inspectLoad("SELECT id FROM public.t");
