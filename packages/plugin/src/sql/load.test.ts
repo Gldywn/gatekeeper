@@ -761,9 +761,24 @@ describe("joins without a filter", () => {
 
   it("still reads in full a table a function explodes, and keeps the join forgotten before it", () => {
     const g = facts({ "public.events": { rows: BIG_ROWS } });
+    for (const sql of [
+      "SELECT x FROM public.events e, jsonb_array_elements(e.payload) x",
+      "SELECT DISTINCT k FROM public.events e, jsonb_array_elements(e.payload->'items') AS i(item), jsonb_object_keys(i.item) AS k",
+    ])
+      expect(check(sql, g).lines).toEqual([
+        "Reads every row of `events` since no condition filters it",
+      ]);
+    // Exploding a mid-sized table bounds the join no more than that table does.
+    const sales = facts({
+      "public.products": { rows: 50_000 },
+      "public.order_items": { rows: 30_000_000, indexed: new Set(["id", "product_id"]) },
+    });
     expect(
-      check("SELECT x FROM public.events e, jsonb_array_elements(e.payload) x", g).lines,
-    ).toEqual(["Reads every row of `events` since no condition filters it"]);
+      check(
+        "SELECT cat, sum(oi.amount) FROM public.products p, unnest(p.categories) AS cat, public.order_items oi WHERE oi.product_id = p.id GROUP BY cat",
+        sales,
+      ).lines,
+    ).toEqual(["Reads every row of `order_items` since no condition filters it"]);
     expect(
       check(
         "SELECT o.id FROM public.orders o, public.customers c, jsonb_array_elements(o.items) i WHERE o.id = 42",
