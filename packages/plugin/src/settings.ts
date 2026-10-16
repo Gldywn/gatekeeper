@@ -10,6 +10,8 @@ export interface Settings {
   // Require a second one-click confirmation before an approved write or destructive
   // statement runs. On by default; a read never prompts.
   confirmWrites: boolean;
+  // Reject a query the load check flags as heavy as soon as its card arrives. On by default.
+  autoDenyHeavy: boolean;
   // Let connected agents read the database's table/column/type structure (never data)
   // through the get_schema tool. Off by default; the human opts in per connection.
   schemaAccess: boolean;
@@ -42,6 +44,7 @@ export function defaultSettings(): Settings {
     clientFlagging: true,
     sensitiveValues: true,
     confirmWrites: true,
+    autoDenyHeavy: true,
     schemaAccess: false,
     recentlyResolved: RECENTLY_RESOLVED_DEFAULT,
     resultCacheMb: RESULT_CACHE_DEFAULT,
@@ -65,6 +68,7 @@ export function normalizeSettings(raw: unknown): Settings {
     clientFlagging: asBool(r.clientFlagging, true),
     sensitiveValues: asBool(r.sensitiveValues, true),
     confirmWrites: asBool(r.confirmWrites, true),
+    autoDenyHeavy: asBool(r.autoDenyHeavy, true),
     schemaAccess: asBool(r.schemaAccess, false),
     recentlyResolved: (RECENTLY_RESOLVED_OPTIONS as readonly number[]).includes(resolved)
       ? resolved
@@ -104,20 +108,34 @@ export class SettingsStore {
   private all: Store = {};
   private connectionName = "";
   private current: Settings = defaultSettings();
+  private loadedFor: string | null = null;
+  private loads = 0;
 
   async load(connectionName: string): Promise<Settings> {
+    const load = ++this.loads;
     this.connectionName = connectionName;
+    this.loadedFor = null;
+    let all: Store;
     try {
-      this.all = (await appStorage.getItem<Store>(STORE_KEY)) ?? {};
+      all = (await appStorage.getItem<Store>(STORE_KEY)) ?? {};
     } catch {
-      this.all = {};
+      all = {};
     }
-    this.current = normalizeSettings(this.all[connectionName]);
+    // Only the latest load applies; an older one, even for the same connection, is stale.
+    if (load !== this.loads) return this.current;
+    this.all = all;
+    this.current = normalizeSettings(all[connectionName]);
+    this.loadedFor = connectionName;
     return this.current;
   }
 
   get(): Settings {
     return this.current;
+  }
+
+  // Until then get() may still hold the previous connection's preferences.
+  loadedForConnection(connectionName: string): boolean {
+    return this.loadedFor === connectionName;
   }
 
   async set(patch: Record<string, boolean | number>): Promise<Settings> {

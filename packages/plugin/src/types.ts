@@ -9,6 +9,7 @@ import type {
   SessionRoster,
 } from "@gatekeeper/shared";
 import type { HistResult } from "./result";
+import type { LoadResult } from "./sql/load";
 import type { SchemaContext } from "./sql/schema";
 
 // Re-export the shared wire contract so existing `./types` imports keep resolving here.
@@ -36,6 +37,10 @@ export interface Card extends Proposal {
   // only, so no table or column name ever reaches the broker.
   sensitivity?: import("@gatekeeper/shared").SensitivityRecord;
   run?: RunState;
+  // Host-side only, like schema. Auto mode and auto-deny read the settled promise; the card
+  // renders loadResult, which starts with the SQL-only findings.
+  load?: Promise<LoadResult>;
+  loadResult?: LoadResult;
 }
 
 // One approved execution, from the moment its SQL leaves for the host until it settles.
@@ -79,4 +84,7 @@ export interface HistItem {
   approval?: import("@gatekeeper/shared").ApprovalAttribution;
   evaluation?: import("@gatekeeper/shared").AutoEvaluation;
   autoHold?: AutoHold;
+  // The exact rejection text the agent received, when there was one.
+  sent?: string;
+  autoDenied?: boolean;
 }

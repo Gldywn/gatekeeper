@@ -27,6 +27,7 @@ import { Gatekeeper } from "./app";
 import { AUTO_APPROVED, SAVED_KEY_MASK } from "./render/auto";
 import { ConfirmModal } from "./render/confirm";
 import { cardHtml } from "./render/queue";
+import type { LoadResult } from "./sql/load";
 import { catalogRows } from "./sql/pg/catalog-fixture";
 import { planRead } from "./sql/read-analysis";
 
@@ -39,6 +40,8 @@ function control() {
     removeAttribute: (name: string) => attrs.delete(name),
   };
 }
+
+const LIGHT: LoadResult = { lines: [], notes: [], estimates: [], heavy: false, complete: true };
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -73,6 +76,9 @@ function harness() {
     createdAt: Date.now(),
     sessionId: "session",
     session: null,
+    // claim() gives every card a load check; these cards found nothing heavy.
+    load: Promise.resolve(LIGHT),
+    loadResult: LIGHT,
   };
   Object.assign(app, {
     cards: [card],
@@ -1231,5 +1237,281 @@ describe("generation changes during an approved run", () => {
     run.resolve(rows);
     await pending;
     expect(app.broker.result).not.toHaveBeenCalled();
+  });
+});
+
+describe("load check", () => {
+  const HEAVY: LoadResult = {
+    lines: [["Reads every row of ", { code: "big" }, " without a ", { code: "WHERE" }, " clause"]],
+    notes: [],
+    estimates: [{ table: "big", rows: 2_000_000 }],
+    heavy: true,
+    complete: true,
+  };
+  const UNKNOWN: LoadResult = {
+    lines: [],
+    notes: [[{ code: "daily" }, " is a view with no row estimate"]],
+    estimates: [],
+    heavy: false,
+    complete: false,
+  };
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  function arrive(
+    app: ReturnType<typeof harness>["app"],
+    card: Card,
+    result: Promise<LoadResult | undefined>,
+    autoDenyHeavy = true,
+    loaded = true,
+  ) {
+    vi.stubGlobal("CSS", { escape: (s: string) => s });
+    app.settingsStore = {
+      get: () => ({ confirmWrites: true, resultCacheMb: 4, autoDenyHeavy }),
+      loadedForConnection: () => loaded,
+    };
+    vi.spyOn(app.annotator, "inspectLoad").mockReturnValue(result);
+    app.startLoad(card, true);
+  }
+
+  it("holds a heavy read before anything leaves for the provider", async () => {
+    const { app, card } = harness();
+    card.load = Promise.resolve(HEAVY);
+    const inspect = vi.spyOn(app.annotator, "inspectRead");
+    await app.evaluateNext();
+    expect(card.autoStatus).toBe("Needs review: Heavy query");
+    expect(inspect).not.toHaveBeenCalled();
+    expect(app.broker.evaluate).not.toHaveBeenCalled();
+    expect(app.broker.executing).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["incomplete", Promise.resolve(UNKNOWN)],
+    ["never started", undefined],
+  ])("lets a read whose load check is %s go on to the usual evaluation", async (_, load) => {
+    const { app, card } = harness();
+    card.load = load;
+    const inspect = vi
+      .spyOn(app.annotator, "inspectRead")
+      .mockResolvedValue({ complete: false, reasons: ["Metadata unavailable"] });
+    await app.evaluateNext();
+    expect(inspect).toHaveBeenCalled();
+    expect(card.autoStatus).toBe("Needs review: Metadata unavailable");
+  });
+
+  it("auto-denies a heavy query on arrival with hints from its SQL only", async () => {
+    const { app, card } = harness();
+    app.autoEnabled = false;
+    card.sql = "SELECT count(*) FROM public.big";
+    arrive(app, card, Promise.resolve(HEAVY));
+    await flush();
+    const sent =
+      "Rejected automatically by the load check. The query reads a table without a WHERE clause.";
+    expect(app.broker.result).toHaveBeenCalledWith(
+      card.id,
+      card.leaseId,
+      expect.objectContaining({ status: "rejected", reason: sent }),
+    );
+    expect(app.finish).toHaveBeenCalledWith(
+      card.id,
+      "rejected",
+      "heavy query, auto-denied",
+      undefined,
+      undefined,
+      { sent, autoDenied: true },
+    );
+  });
+
+  it("wins against Auto mode and never lets the read run", async () => {
+    const { app, card } = harness();
+    const settled = deferred<LoadResult | undefined>();
+    arrive(app, card, settled.promise);
+    const evaluating = app.evaluateNext();
+    settled.resolve(HEAVY);
+    await evaluating;
+    await flush();
+    expect(app.broker.result).toHaveBeenCalledOnce();
+    expect(app.broker.evaluate).not.toHaveBeenCalled();
+    expect(app.broker.executing).not.toHaveBeenCalled();
+  });
+
+  it("leaves the card for review when the setting is off or nothing is heavy", async () => {
+    for (const [result, setting] of [
+      [HEAVY, false],
+      [UNKNOWN, true],
+    ] as const) {
+      const { app, card } = harness();
+      arrive(app, card, Promise.resolve(result), setting);
+      await flush();
+      expect(app.broker.result).not.toHaveBeenCalled();
+      expect(card.state).toBe("ready");
+      expect(card.loadResult).toBe(result);
+    }
+  });
+
+  it("never auto-denies a card a human is already approving or a removed card", async () => {
+    const { app, card } = harness();
+    const settled = deferred<LoadResult | undefined>();
+    arrive(app, card, settled.promise);
+    card.state = "approving";
+    settled.resolve(HEAVY);
+    await flush();
+    expect(app.broker.result).not.toHaveBeenCalled();
+
+    const second = harness();
+    const late = deferred<LoadResult | undefined>();
+    arrive(second.app, second.card, late.promise);
+    second.app.cards = [];
+    late.resolve(HEAVY);
+    await flush();
+    expect(second.app.broker.result).not.toHaveBeenCalled();
+    expect(second.card.loadResult?.heavy).toBe(false);
+  });
+
+  it("never auto-denies on a recheck after a schema change", async () => {
+    const { app, card } = harness();
+    arrive(app, card, Promise.resolve(HEAVY));
+    app.startLoad(card, false);
+    await flush();
+    expect(app.broker.result).not.toHaveBeenCalled();
+    expect(card.loadResult).toBe(HEAVY);
+  });
+
+  it("returns the card to review when the rejection cannot be delivered", async () => {
+    const { app, card } = harness();
+    app.broker.result.mockResolvedValueOnce(false);
+    arrive(app, card, Promise.resolve(HEAVY));
+    await flush();
+    expect(app.finish).not.toHaveBeenCalled();
+    expect(card.state).toBe("ready");
+  });
+
+  it("settles to a timeout note that keeps the SQL-only findings", async () => {
+    vi.useFakeTimers();
+    try {
+      const { app, card } = harness();
+      card.sql = "DELETE FROM public.sessions";
+      vi.stubGlobal("window", { setTimeout, clearTimeout });
+      arrive(app, card, new Promise(() => {}), false);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(card.loadResult?.heavy).toBe(true);
+      expect(card.loadResult?.notes).toEqual([["Statistics did not return within 5 seconds"]]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("appends SQL-only hints to a manual rejection and records them once delivered", async () => {
+    const { app, card } = harness();
+    card.sql = "DELETE FROM public.sessions";
+    await app.reject(card.id, "Narrow it to last week.");
+    const sent = "Narrow it to last week. The DELETE has no WHERE clause.";
+    expect(app.broker.result).toHaveBeenCalledWith(
+      card.id,
+      card.leaseId,
+      expect.objectContaining({ status: "rejected", reason: sent }),
+    );
+    expect(app.finish).toHaveBeenCalledWith(
+      card.id,
+      "rejected",
+      "declined",
+      undefined,
+      "Narrow it to last week.",
+      { sent },
+    );
+
+    const failed = harness();
+    failed.card.sql = "DELETE FROM public.sessions";
+    failed.app.broker.result.mockResolvedValueOnce(false);
+    await failed.app.reject(failed.card.id);
+    expect(failed.app.finish).toHaveBeenCalledWith(
+      failed.card.id,
+      "rejected",
+      "declined",
+      undefined,
+      undefined,
+      { sent: undefined },
+    );
+  });
+});
+
+describe("load check binding", () => {
+  const HEAVY: LoadResult = {
+    lines: [["Reads every row of ", { code: "big" }]],
+    notes: [],
+    estimates: [],
+    heavy: true,
+    complete: true,
+  };
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  function start(app: ReturnType<typeof harness>["app"], card: Card, loaded = true) {
+    vi.stubGlobal("CSS", { escape: (s: string) => s });
+    app.settingsStore = {
+      get: () => ({ confirmWrites: true, resultCacheMb: 4, autoDenyHeavy: true }),
+      loadedForConnection: () => loaded,
+    };
+    const settled = deferred<LoadResult | undefined>();
+    const inspect = vi.spyOn(app.annotator, "inspectLoad").mockReturnValue(settled.promise);
+    app.startLoad(card, true);
+    return { settled, live: inspect.mock.calls[0][1] as () => boolean };
+  }
+
+  it("waits for the current connection's preferences before auto-denying", async () => {
+    const { app, card } = harness();
+    const { settled } = start(app, card, false);
+    settled.resolve(HEAVY);
+    await flush();
+    expect(app.broker.result).not.toHaveBeenCalled();
+    expect(card.state).toBe("ready");
+  });
+
+  it("never auto-denies after a re-pair or under a replaced lease", async () => {
+    const repaired = harness();
+    const a = start(repaired.app, repaired.card);
+    repaired.app.activeGen++;
+    expect(a.live()).toBe(false);
+    a.settled.resolve(HEAVY);
+    await flush();
+    expect(repaired.app.broker.result).not.toHaveBeenCalled();
+
+    const reoffered = harness();
+    const b = start(reoffered.app, reoffered.card);
+    reoffered.card.leaseId = "fresh-lease";
+    b.settled.resolve(HEAVY);
+    await flush();
+    expect(reoffered.app.broker.result).not.toHaveBeenCalled();
+  });
+
+  it("stops starting host work once the card is decided or the deadline passed", async () => {
+    vi.useFakeTimers();
+    try {
+      const { app, card } = harness();
+      vi.stubGlobal("window", { setTimeout, clearTimeout });
+      const { live } = start(app, card);
+      expect(live()).toBe(true);
+      card.state = "approving";
+      expect(live()).toBe(false);
+      card.state = "ready";
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(live()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("releases a card re-offered while its rejection was in flight, undecided", async () => {
+    const { app, card } = harness();
+    const delivered = deferred<boolean>();
+    app.broker.result.mockReturnValueOnce(delivered.promise);
+    const { settled } = start(app, card);
+    settled.resolve(HEAVY);
+    await flush();
+    expect(card.state).toBe("rejecting");
+    card.leaseId = "fresh-lease";
+    delivered.resolve(true);
+    await flush();
+    // Released for the new lease, never recorded as decided.
+    expect(card.state).toBe("ready");
+    expect(app.finish).not.toHaveBeenCalled();
   });
 });

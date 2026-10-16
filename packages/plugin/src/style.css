@@ -1492,6 +1492,85 @@ label.qs-row {
   margin-top: 1px;
   color: var(--danger);
 }
+/* The load check: the cs-unparsed box in amber, the held state. One line per finding;
+   the row estimates sit beside the title so no line wraps to carry them. */
+.card-load:empty {
+  display: none;
+}
+.cs-load {
+  display: grid;
+  gap: 5px;
+  margin-bottom: var(--s3);
+  padding: 8px 10px;
+  border: 1px solid color-mix(in oklch, var(--amber) 34%, transparent);
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--amber) 7%, transparent);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+.load-lead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  font-weight: 650;
+  color: var(--amber);
+}
+.load-lead > span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.load-lead svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+.load-est {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 1px 7px;
+  border-radius: 4px;
+  background: color-mix(in oklch, var(--amber) 17%, transparent);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.load-est i {
+  font-style: normal;
+  color: color-mix(in oklch, var(--amber) 62%, var(--text));
+}
+.load-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0 0 0 21px;
+  list-style: none;
+}
+.load-list li {
+  position: relative;
+  color: var(--text);
+}
+.load-list li::before {
+  content: "";
+  position: absolute;
+  left: -12px;
+  top: 0.62em;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--amber);
+}
+.load-list code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: color-mix(in oklch, var(--text) 7%, transparent);
+  border-radius: 3px;
+  padding: 0 4px;
+}
 .cs-writes {
   display: flex;
   align-items: center;

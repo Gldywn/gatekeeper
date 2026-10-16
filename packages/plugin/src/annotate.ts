@@ -1,4 +1,16 @@
-import type { Column } from "@beekeeperstudio/plugin";
+import type { Column, TableIndex } from "@beekeeperstudio/plugin";
+import {
+  checkLoad,
+  type Facts,
+  LARGE_ROWS,
+  type LoadResult,
+  loadStatsSql,
+  MAX_RELATIONS,
+  parseLoadStats,
+  planLoad,
+  relKey,
+  type StatRow,
+} from "./sql/load";
 import {
   planRead,
   type ReadSnapshot,
@@ -21,6 +33,8 @@ interface SchemaAnnotatorDeps {
   getColumns: (table: string, schema?: string) => Promise<Column[]>;
   // Runs one catalog-only query built by the dialect module, never the proposal itself.
   getMetadata?: (sql: string) => Promise<Record<string, unknown>[]>;
+  // Beekeeper 5.5 and later; absent or failing means the index list is unknown.
+  getIndexes?: (table: string, schema?: string) => Promise<TableIndex[]>;
   dialect: () => string;
   defaultSchema: () => string | undefined;
   generation: () => number;
@@ -107,6 +121,78 @@ export class SchemaAnnotator {
       return resolveRead(plan, rows);
     } catch {
       return current() ? { complete: false, reasons: ["Metadata unavailable"] } : undefined;
+    }
+  }
+
+  // Undefined when the answer went stale. authorized() is checked before every host call:
+  // the SDK cannot cancel a call already sent, so none may start after a decision or switch.
+  async inspectLoad(
+    sql: string,
+    authorized: () => boolean = () => true,
+  ): Promise<LoadResult | undefined> {
+    const dialect = this.deps.dialect();
+    const plan = planLoad(sql, dialect);
+    if (!plan.relations.length) return checkLoad(plan, new Map());
+    if (plan.relations.length > MAX_RELATIONS) return checkLoad(plan, "skipped");
+    const generation = this.deps.generation();
+    const revision = this.revision;
+    const current = () =>
+      authorized() && generation === this.deps.generation() && revision === this.revision;
+    const pg = dialect === "postgresql";
+    let stats: StatRow[] | null = null;
+    if (pg) {
+      if (!this.deps.getMetadata) return checkLoad(plan, "unavailable");
+      try {
+        if (!current()) return undefined;
+        const path = await this.deps.getMetadata(readSearchPathSql());
+        if (!current()) return undefined;
+        if (searchPathVerified(path))
+          stats = parseLoadStats(
+            plan.relations,
+            await this.deps.getMetadata(loadStatsSql(plan.relations)),
+          );
+      } catch {
+        stats = null;
+      }
+      if (!current()) return undefined;
+      if (!stats) return checkLoad(plan, "unavailable");
+    }
+    const facts: Facts = new Map();
+    await Promise.all(
+      plan.relations.map(async (rel, i) => {
+        const stat = stats?.[i];
+        const schema = stat?.schema ?? rel.schema ?? this.deps.defaultSchema();
+        // Only a large relation is ever judged on its indexes.
+        const indexes =
+          stat?.rows != null && stat.rows >= LARGE_ROWS && current()
+            ? await this.indexesFor(rel.table, schema)
+            : null;
+        const columns = current() ? await this.columnsFor(rel.table, schema) : null;
+        facts.set(relKey(rel), {
+          rows: stat?.rows ?? null,
+          kind: stat?.kind,
+          rls: stat?.rls ?? null,
+          inherited: stat?.inherited ?? false,
+          indexed: indexes && new Set(indexes.flatMap((ix) => ix.columns.map((c) => c.name))),
+          primaryKey:
+            indexes && (indexes.find((ix) => ix.primary)?.columns.map((c) => c.name) ?? []),
+          columns: columns?.map((c) => c.name) ?? null,
+        });
+      }),
+    );
+    if (!current()) return undefined;
+    return checkLoad(plan, facts);
+  }
+
+  private async indexesFor(
+    table: string,
+    schema: string | undefined,
+  ): Promise<TableIndex[] | null> {
+    if (!this.deps.getIndexes) return null;
+    try {
+      return await this.deps.getIndexes(table, schema);
+    } catch {
+      return null;
     }
   }
 

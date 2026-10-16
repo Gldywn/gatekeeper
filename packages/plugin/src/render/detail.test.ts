@@ -139,6 +139,24 @@ describe("render/detail", () => {
     expect(declined).not.toContain("detail-oc-note");
   });
 
+  it("shows what the agent received, and names an automatic rejection", () => {
+    const sent =
+      "Rejected automatically by the load check. The query reads a table without a WHERE clause.";
+    const auto = detailHtml({
+      ...item,
+      status: "rejected",
+      note: "heavy query, auto-denied",
+      result: undefined,
+      sent,
+      autoDenied: true,
+    });
+    expect(auto).toContain('<span class="detail-oc-title">Rejected automatically</span>');
+    expect(auto).toContain(
+      '<div class="detail-oc-msg">The load check rejected this query. Nothing ran against the database. The agent received the text below.</div>',
+    );
+    expect(auto).toContain(`<div class="detail-oc-note">${sent}</div>`);
+  });
+
   it("renders an expired outcome that ran nothing against the database", () => {
     const html = detailHtml({
       ...item,

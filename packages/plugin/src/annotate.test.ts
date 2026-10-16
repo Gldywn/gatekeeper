@@ -289,3 +289,197 @@ describe("SchemaAnnotator.schemaFor", () => {
     expect(getColumns).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("SchemaAnnotator.inspectLoad", () => {
+  const PATH = [{ path: '["pg_catalog","public"]' }];
+  const stats = (rows: number) => [
+    { i: 0, schema: "public", kind: "r", rls: false, parts: JSON.stringify([["r", rows, 0]]) },
+  ];
+  const text = (line: (string | { code: string })[]) =>
+    line.map((s) => (typeof s === "string" ? s : s.code)).join("");
+
+  function annotator(metadata: Record<string, unknown>[][], getIndexes = vi.fn(async () => [])) {
+    const getMetadata = vi.fn(async () => metadata.shift() ?? []);
+    const a = new SchemaAnnotator({
+      getColumns: async () => columns("id", "failure_code"),
+      getMetadata,
+      getIndexes,
+      dialect: () => "postgresql",
+      defaultSchema: () => "public",
+      generation: () => 0,
+    });
+    return { a, getMetadata, getIndexes };
+  }
+
+  it("checks the search path before reading statistics, and reads indexes for large tables only", async () => {
+    const getIndexes = vi.fn(async () => [
+      {
+        id: "1",
+        table: "t",
+        schema: "public",
+        name: "t_pkey",
+        columns: [{ name: "id" }],
+        unique: true,
+        primary: true,
+      },
+    ]);
+    const { a, getMetadata } = annotator([PATH, stats(2_000_000)], getIndexes);
+    const result = await a.inspectLoad("SELECT id FROM public.t WHERE failure_code = 'x'");
+    expect(getMetadata.mock.calls[0][0]).toContain("current_schemas");
+    expect(getMetadata.mock.calls[1][0]).toContain("pg_catalog.pg_inherits");
+    expect(getIndexes).toHaveBeenCalledWith("t", "public");
+    expect(result?.lines.map(text)).toEqual([
+      "Filter on failure_code uses no index and may scan all of t",
+    ]);
+
+    const small = annotator([PATH, stats(10)]);
+    expect(
+      (await small.a.inspectLoad("SELECT id FROM public.t WHERE failure_code = 'x'"))?.heavy,
+    ).toBe(false);
+    expect(small.getIndexes).not.toHaveBeenCalled();
+  });
+
+  it("reports statistics as unavailable when the search path is not trusted or the read fails", async () => {
+    const untrusted = annotator([[{ path: '["public","pg_catalog"]' }]]);
+    const r = await untrusted.a.inspectLoad("SELECT id FROM public.t");
+    expect(r?.notes.map(text)).toEqual(["Statistics are unavailable on this connection"]);
+    expect(untrusted.getMetadata).toHaveBeenCalledOnce();
+    const failing = new SchemaAnnotator({
+      getColumns: async () => [],
+      getMetadata: async () => {
+        throw new Error("private database detail");
+      },
+      dialect: () => "postgresql",
+      defaultSchema: () => "public",
+      generation: () => 0,
+    });
+    expect((await failing.inspectLoad("DELETE FROM public.t"))?.lines.map(text)).toEqual([
+      "DELETE without WHERE removes every row of t",
+    ]);
+  });
+
+  it("drops an answer that a connection switch made stale", async () => {
+    let generation = 0;
+    const a = new SchemaAnnotator({
+      getColumns: async () => [],
+      getMetadata: async () => {
+        generation++;
+        return PATH;
+      },
+      dialect: () => "postgresql",
+      defaultSchema: () => "public",
+      generation: () => generation,
+    });
+    expect(await a.inspectLoad("SELECT id FROM public.t")).toBeUndefined();
+  });
+
+  it("never sends catalog SQL outside PostgreSQL", async () => {
+    const getMetadata = vi.fn(async () => []);
+    const a = new SchemaAnnotator({
+      getColumns: async () => [],
+      getMetadata,
+      dialect: () => "mysql",
+      defaultSchema: () => "app",
+      generation: () => 0,
+    });
+    expect((await a.inspectLoad("DELETE FROM sessions"))?.heavy).toBe(true);
+    expect(getMetadata).not.toHaveBeenCalled();
+  });
+});
+
+describe("SchemaAnnotator.inspectLoad host work", () => {
+  const PATH = [{ path: '["pg_catalog","public"]' }];
+
+  it("starts no host call for a statement over the relation budget", async () => {
+    const getMetadata = vi.fn(async () => []);
+    const getColumns = vi.fn(async () => []);
+    const a = new SchemaAnnotator({
+      getColumns,
+      getMetadata,
+      dialect: () => "postgresql",
+      defaultSchema: () => "public",
+      generation: () => 0,
+    });
+    const tables = Array.from({ length: 17 }, (_, i) => `public.t${i}`).join(", ");
+    const r = await a.inspectLoad(`SELECT 1 FROM ${tables}`);
+    expect(getMetadata).not.toHaveBeenCalled();
+    expect(getColumns).not.toHaveBeenCalled();
+    expect(r?.complete).toBe(false);
+  });
+
+  it("sends nothing more once the caller withdraws authority", async () => {
+    let allowed = true;
+    const getMetadata = vi.fn(async () => {
+      allowed = false;
+      return PATH;
+    });
+    const a = new SchemaAnnotator({
+      getColumns: async () => [],
+      getMetadata,
+      dialect: () => "postgresql",
+      defaultSchema: () => "public",
+      generation: () => 0,
+    });
+    expect(await a.inspectLoad("SELECT id FROM public.t", () => allowed)).toBeUndefined();
+    expect(getMetadata).toHaveBeenCalledOnce();
+  });
+
+  it("does not ask the new connection for columns after a switch during the index call", async () => {
+    let generation = 0;
+    const getColumns = vi.fn(async () => []);
+    const metadata = [
+      PATH,
+      [
+        {
+          i: 0,
+          schema: "public",
+          kind: "r",
+          rls: false,
+          deeper: false,
+          parts: '[["r",2000000,0]]',
+        },
+      ],
+    ];
+    const a = new SchemaAnnotator({
+      getColumns,
+      getMetadata: async () => metadata.shift() ?? [],
+      getIndexes: async () => {
+        generation++;
+        return [];
+      },
+      dialect: () => "postgresql",
+      defaultSchema: () => "public",
+      generation: () => generation,
+    });
+    expect(await a.inspectLoad("SELECT id FROM public.t WHERE x = 1")).toBeUndefined();
+    expect(getColumns).not.toHaveBeenCalled();
+  });
+});
+
+describe("SchemaAnnotator.inspectLoad on never analyzed tables", () => {
+  it("reads an empty table autovacuum never analyzed as empty, not unknown", async () => {
+    const metadata = [
+      [{ path: '["pg_catalog","public"]' }],
+      [
+        {
+          i: 0,
+          schema: "treasury",
+          kind: "r",
+          rls: false,
+          deeper: false,
+          track_counts: "on",
+          parts: '[["r",-1,0]]',
+        },
+      ],
+    ];
+    const a = new SchemaAnnotator({
+      getColumns: async () => [],
+      getMetadata: async () => metadata.shift() ?? [],
+      dialect: () => "postgresql",
+      defaultSchema: () => "public",
+      generation: () => 0,
+    });
+    const r = await a.inspectLoad("SELECT count(*) FROM treasury.mangopay_to_swan_migration");
+    expect(r).toMatchObject({ lines: [], notes: [], heavy: false, complete: true });
+  });
+});

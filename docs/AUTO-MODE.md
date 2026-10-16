@@ -270,6 +270,15 @@ every detection display toggle.
 No table or field editor is part of this beta. Any future Sensitive tables policy belongs
 to the whole plugin.
 
+## Load check
+
+Before the read analysis, and so before anything is sent to TypeSafe, Auto mode waits for
+the card's [load check](../SECURITY.md#load-check). A read with a Heavy query alert stays for
+manual review with the reason `Heavy query`. A check that could not finish (no row estimate,
+index list unavailable, statistics late or unavailable) holds nothing, and the read goes on to
+the usual evaluation. Passing the check does not make a read cheap, because a range on an
+indexed column can still scan most of a table.
+
 ## Provider boundary
 
 The plugin detects known sensitive literals before sharing, then serializes the parsed

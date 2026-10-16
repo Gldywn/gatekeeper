@@ -15,6 +15,7 @@ import {
 import { classifyQuery, type RiskClass, rank } from "../sql/classify";
 import { formatSql } from "../sql/format";
 import { highlight } from "../sql/highlight";
+import type { Line, LoadResult } from "../sql/load";
 import { modeRank, type RiskMode } from "../sql/mode";
 import { visibleControls } from "../sql/sanitize";
 import { analyzeTableOps, type SchemaContext } from "../sql/schema";
@@ -229,7 +230,7 @@ export function cardHtml(
         </div>
         <div class="meta">${escapeHtml(card.id)} &middot; ${relAge(card.createdAt)}</div>
         <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(visibleControls(card.sql))}" aria-label="Copy SQL">${copyIcon}</button><code class="sql-body" id="sqlbody-${card.id}">${highlight(formatSql(card.sql), card.schema?.pii, card.schema?.client, card.schema?.literals)}</code></pre>
-        ${unparsedNote(gate)}${riskAnno}<div class="card-schema" id="cs-${card.id}">${schemaInner(card.schema, gate.cls !== "read")}</div>
+        ${unparsedNote(gate)}<div class="card-load" id="cl-${card.id}">${loadInner(card.loadResult)}</div>${riskAnno}<div class="card-schema" id="cs-${card.id}">${schemaInner(card.schema, gate.cls !== "read")}</div>
         ${autoNote(card)}${actions}
       </div>`;
 }
@@ -334,6 +335,34 @@ export function denyField(id: string, value = ""): string {
              <input class="deny-reason" type="text" maxlength="140" data-deny-input="${id}" aria-label="What should the agent change?" placeholder="What should the agent change?" autocomplete="off" spellcheck="false" value="${escapeHtml(value)}" />
              <button class="deny-send" type="button" data-deny="${id}" aria-label="Send to the agent">${sendIcon}</button>
            </div>`;
+}
+
+const ROWS = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
+
+function rowsLabel(rows: number): string {
+  return `~${ROWS.format(rows)} ${rows === 1 ? "row" : "rows"}`;
+}
+
+function lineHtml(line: Line): string {
+  return line
+    .map((s) => (typeof s === "string" ? escapeHtml(s) : `<code>${escapeHtml(s.code)}</code>`))
+    .join("");
+}
+
+// Only a finding raises the alert. What could not be checked (a view, an unknown size) blocks
+// nothing, so it only rides along with a finding.
+export function loadInner(result: LoadResult | undefined): string {
+  if (!result?.lines.length) {
+    return "";
+  }
+  const estimates = result.estimates
+    .map(
+      (e) =>
+        `<span class="load-est" title="PostgreSQL row estimate"><i>${escapeHtml(e.table)}</i>${escapeHtml(rowsLabel(e.rows))}</span>`,
+    )
+    .join("");
+  const items = [...result.lines, ...result.notes].map((l) => `<li>${lineHtml(l)}</li>`).join("");
+  return `<div class="cs-load" role="status"><div class="load-lead"><span>${warnIcon}Heavy query</span>${estimates}</div><ul class="load-list">${items}</ul></div>`;
 }
 
 // hideReads drops the "Reads" line on a write/destructive card, whose tables the risk

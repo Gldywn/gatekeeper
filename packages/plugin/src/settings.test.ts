@@ -2,14 +2,21 @@ import { describe, expect, it, vi } from "vitest";
 
 // settings.ts imports appStorage only for the store; the pure helpers under test
 // never touch it, so a no-op mock keeps this a plain node run.
+const { getItem } = vi.hoisted(() => ({ getItem: vi.fn(async (): Promise<unknown> => null) }));
 vi.mock("@beekeeperstudio/plugin", () => ({
   appStorage: {
-    getItem: async () => null,
+    getItem: (key: string) => getItem(key),
     setItem: async () => {},
   },
 }));
 
-import { defaultSettings, filterSchema, normalizeSettings, resultBudgetBytes } from "./settings";
+import {
+  defaultSettings,
+  filterSchema,
+  normalizeSettings,
+  resultBudgetBytes,
+  SettingsStore,
+} from "./settings";
 import type { SchemaContext } from "./sql/schema";
 
 const full: SchemaContext = {
@@ -23,6 +30,12 @@ const full: SchemaContext = {
 describe("settings/normalizeSettings", () => {
   it("fills every default for an empty blob", () => {
     expect(normalizeSettings(undefined)).toEqual(defaultSettings());
+  });
+
+  it("turns auto-deny of heavy queries on unless explicitly turned off", () => {
+    expect(defaultSettings().autoDenyHeavy).toBe(true);
+    expect(normalizeSettings({ autoDenyHeavy: "nope" }).autoDenyHeavy).toBe(true);
+    expect(normalizeSettings({ autoDenyHeavy: false }).autoDenyHeavy).toBe(false);
   });
 
   it("keeps a valid recentlyResolved option and an explicit false", () => {
@@ -82,5 +95,50 @@ describe("settings/filterSchema", () => {
 
   it("returns null for a null annotation", () => {
     expect(filterSchema(null, defaultSettings())).toBeNull();
+  });
+});
+
+describe("settings/SettingsStore", () => {
+  it("keeps the active connection's preferences when an older load resolves last", async () => {
+    let resolveSlow!: (value: unknown) => void;
+    getItem
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveSlow = resolve;
+        }),
+      )
+      .mockResolvedValueOnce({ b: { autoDenyHeavy: false } });
+    const store = new SettingsStore();
+    const first = store.load("a");
+    expect(store.loadedForConnection("a")).toBe(false);
+    await store.load("b");
+    expect(store.loadedForConnection("b")).toBe(true);
+    resolveSlow({ a: { autoDenyHeavy: true }, b: { autoDenyHeavy: false } });
+    await first;
+    expect(store.get().autoDenyHeavy).toBe(false);
+    expect(store.loadedForConnection("b")).toBe(true);
+  });
+});
+
+describe("settings/SettingsStore reloads", () => {
+  it("lets only the latest load apply, even for the same connection", async () => {
+    let resolveFirst!: (value: unknown) => void;
+    getItem
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveFirst = resolve;
+        }),
+      )
+      .mockResolvedValueOnce({ b: {} })
+      .mockResolvedValueOnce({ a: { autoDenyHeavy: false } });
+    const store = new SettingsStore();
+    const first = store.load("a");
+    await store.load("b");
+    await store.load("a");
+    expect(store.get().autoDenyHeavy).toBe(false);
+    resolveFirst({ a: { autoDenyHeavy: true } });
+    await first;
+    expect(store.get().autoDenyHeavy).toBe(false);
+    expect(store.loadedForConnection("a")).toBe(true);
   });
 });
