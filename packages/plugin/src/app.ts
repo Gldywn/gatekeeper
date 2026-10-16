@@ -2612,9 +2612,9 @@ export class Gatekeeper {
       ).finally(() => {
         run.ended = true;
       });
-      // The query may have hit the new database after a switch; never deliver its
-      // rows against the old proposal.
-      if (gen !== this.connGeneration || active !== this.activeGen) {
+      // A switch drops the cards, so never deliver rows to an old proposal; a schema change
+      // bumps connGeneration but keeps them, and must not strand this card running.
+      if (!this.cards.includes(card) || active !== this.activeGen) {
         return;
       }
       this.setCardState(id, "posting");

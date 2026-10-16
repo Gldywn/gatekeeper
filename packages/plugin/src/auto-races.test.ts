@@ -1195,3 +1195,41 @@ describe("sensitivity recorded with the decision", () => {
     expect(app.broker.result.mock.calls[0][2]).toMatchObject({ sensitivity: recorded });
   });
 });
+
+describe("generation changes during an approved run", () => {
+  const rows = { results: [{ rows: [{ quantity: 3 }], fields: [{ name: "quantity" }] }] };
+
+  it("delivers the result when only the schema changed while the query ran", async () => {
+    const { app, card } = harness();
+    const run = deferred<typeof rows>();
+    query.mockReturnValue(run.promise);
+    const pending = app.approve(card.id);
+    await vi.waitFor(() => expect(card.state).toBe("executing"));
+    // What the tablesChanged handler does to the generation; it keeps the cards.
+    app.connGeneration++;
+    run.resolve(rows);
+    await pending;
+    expect(app.broker.result.mock.calls[0][2]).toMatchObject({
+      status: "approved",
+      rows: [{ quantity: 3 }],
+    });
+    expect(app.finish).toHaveBeenCalledWith(
+      card.id,
+      "approved",
+      expect.any(String),
+      expect.anything(),
+    );
+  });
+
+  it("still withholds the rows after a connection switch", async () => {
+    const { app, card } = harness();
+    const run = deferred<typeof rows>();
+    query.mockReturnValue(run.promise);
+    const pending = app.approve(card.id);
+    await vi.waitFor(() => expect(card.state).toBe("executing"));
+    app.onConnectionSwitch();
+    run.resolve(rows);
+    await pending;
+    expect(app.broker.result).not.toHaveBeenCalled();
+  });
+});
