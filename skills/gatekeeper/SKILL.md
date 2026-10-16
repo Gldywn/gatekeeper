@@ -19,7 +19,7 @@ A query can require manual review even when the human enabled Auto mode. That ta
 Two ways to wait, both correct, pick per situation:
 
 1. **You still have useful work.** `submit_query` is non-blocking and returns a `request_id` at once. Keep making progress: read code, reason, prepare the next step, submit follow-ups. Then collect: one `poll_results` call tells you which of your queries resolved, and `get_query_result` reads a resolved one's rows. Repeat until nothing is non-terminal.
-2. **Nothing left to do but wait.** Roll bounded waits: `poll_results({ wait_ms: 25000 })` for all your queries at once, or `get_query_result({ request_id, wait_ms: 25000 })` for one. Each call returns the instant the human decides, or after 25 seconds, whichever comes first. 25000 is the maximum the server accepts, and a larger value is rejected outright, so never try to wait longer in one call. When the wait runs out first, the call simply hands you back the same still-pending state: that is a timed checkpoint, not a decision. Call again, and keep calling until you get a terminal state. Several consecutive calls for one approval is the design, not a malfunction.
+2. **Nothing left to do but wait.** Roll bounded waits: `poll_results({ wait_ms: 25000 })` for all your queries at once, or `get_query_result({ request_id, wait_ms: 25000 })` for one. Each call returns the instant the human decides, or after 25 seconds, whichever comes first. 25000 is the maximum the server accepts, and a larger value is rejected outright, so never try to wait longer in one call. When the wait runs out first, the call simply hands you back the same still-pending state. That is a timed checkpoint, not a decision. Call again, and keep calling until you get a terminal state. Several consecutive calls for one approval is the design, not a malfunction.
 
 Why a short cap and a loop, rather than one long wait: every harness runs tool calls one at a time under its own per-call time limit (Codex cuts a tool call at 60 seconds by default, others allow more, some are undocumented). A 25 second wait fits inside every documented limit, and if some harness ever killed a wait call anyway, you would simply issue the next one. The loop, not one long wait, is what carries you across a human who takes minutes, and it is what makes the wait portable whatever limit your harness sets.
 
@@ -47,7 +47,7 @@ Both patterns above work in every harness. Only the fine print differs:
 
 Before anything else, call `set_session_label` once with a short, human-readable label for this session, ideally the same title as your own session (a ticket id or the task you are on) so a human can correlate this agent with your session on their side. Name the whole task, not a single query, in a few words, and keep PII, credentials, and connection details out. It shows in the human's connected-agents roster. **This is required: Gatekeeper rejects `submit_query` until a session label is set.** Update it if the task changes.
 
-Examples: `Analytics: weekly active users by plan`, `Verify migration 0142 backfilled order_totals`, `Debug: orders stuck in pending since 09:00`, `Support SUP-1042: login/identity check`.
+Examples: `Weekly active users by plan`, `Verify migration 0142 backfilled order_totals`, `Orders stuck in pending since 09:00`, `SUP-1042 login check for a locked-out customer`.
 
 ## Confirm which database you are on
 
@@ -66,22 +66,24 @@ If any of those three identifying fields changed since you started, do not carry
 
 ## If a call comes back NOT_PAIRED
 
-The human's plugin is not connected to Gatekeeper yet. Reply with the 6-digit code from the error, ask them to type it into the Gatekeeper tab in Beekeeper Studio, then stop and wait for their confirmation. This is a one-off setup on their machine, not a fault in your query and nothing you can fix: do not investigate it, do not retry the call, and do not open the pairing page yourself. If they tell you the plugin was never installed, or the Gatekeeper tools are not there at all, that is an install rather than a query: hand it to the `install-gatekeeper` skill and stop, rather than improvising one yourself.
+The human's plugin is not connected to Gatekeeper yet. Reply with the 6-digit code from the error, ask them to type it into the Gatekeeper tab in Beekeeper Studio, then stop and wait for their confirmation. This is a one-off setup on their machine, not a fault in your query and nothing you can fix, so do not investigate it, do not retry the call, and do not open the pairing page yourself. If they tell you the plugin was never installed, or the Gatekeeper tools are not there at all, that is an install rather than a query, so hand it to the `install-gatekeeper` skill and stop, rather than improvising one yourself.
 
 ## Write the intent for a human, not a parser
 
 The `intent` is the one line a reviewer approves on. Say what you're trying to accomplish and why (the task or business goal), in plain language someone who doesn't know the schema can judge. Anchor it to a ticket or incident id when you have one. For a write or destructive query, state what changes and whether it's scoped or irreversible, that is what the human is gating. Keep it to one or two sentences. Don't restate the SQL, don't lean on table or column names, never paste raw PII, secrets, or values (reference a ticket or an id instead), and don't invent context you haven't verified (row counts, approvals).
 
+Avoid the `Label: detail` shape (`Analytics: …`, `Note: …`) in the intent, the session label and your replies about queries. Write a plain sentence instead, or a plain title for the label.
+
 - Bad: `Select count(*) from sessions group by plan`
-  Good: `Analytics: weekly active users split by plan tier, for the Q3 growth review.`
+  Good: `Count weekly active users by plan tier for the Q3 growth review.`
 - Bad: `Select * from orders where total is null`
-  Good: `Verify migration 0142 backfilled order_totals: check whether any order still has a null total.`
+  Good: `Check that migration 0142 backfilled order_totals by looking for any order still without a total.`
 - Bad: `Select status, last_login_at from users where email='jane@acme.io'`
-  Good: `Ticket SUP-1042: customer reports being locked out, check if their account is active and when they last signed in.`
+  Good: `SUP-1042 reports a locked-out customer, so check whether their account is active and when they last signed in.`
 - Bad: `Update accounts set status active where id 4821`
   Good: `Re-activate account 4821 (OPS-1500), suspended by a false fraud flag; only flips it back from suspended.`
 - Bad: `Delete from events where user_id 10237`
-  Good: `GDPR erasure DSR-1042: permanently delete this former user's events; irreversible, limited to their records.`
+  Good: `Permanently delete this former user's events for GDPR erasure request DSR-1042. Irreversible, and limited to their records.`
 
 ## The tools
 

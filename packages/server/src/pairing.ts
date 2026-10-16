@@ -27,7 +27,7 @@ export function pairingUrl(): string {
 export function pairingMessage(code: string | null): string {
   const enter = "type it into the Gatekeeper tab in Beekeeper Studio (Tools menu)";
   const hold =
-    "Nothing runs until they do. This is the normal unpaired state, not a fault in your call or in any code: do not investigate it, and do not call this tool again until the human confirms they have entered the code.";
+    "Nothing runs until they do. This is the normal unpaired state, not a fault in your call or in any code, so do not investigate it, and do not call this tool again until the human confirms they have entered the code.";
   return code
     ? `PAIRING REQUIRED. Stop and ask the human, in your reply, to ${enter}: ${code}. ${hold} The code lasts about five minutes; ${pairingUrl()} shows the current one.`
     : `PAIRING REQUIRED. Stop and ask the human, in your reply, to open ${pairingUrl()}, read the 6-digit code shown there, and ${enter}. ${hold}`;

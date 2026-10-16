@@ -106,14 +106,14 @@ export function schemaPayload(
     : 0;
   if (missing > 0) {
     hints.push(
-      `${missing} requested table name(s) match no table${schema === undefined ? "" : " in the requested schema"}${asOf} Names are exact and unqualified: pass the schema separately.`,
+      `${missing} requested table name(s) match no table${schema === undefined ? "" : " in the requested schema"}${asOf} Names are exact and unqualified, so pass the schema separately.`,
     );
   }
   const detail = withinBudget(head, matched);
   if (names || detail.length === matched.length) {
     if (detail.length < matched.length) {
       hints.push(
-        `${matched.length - detail.length} matched table(s) did not fit in one response: request them in smaller groups, or narrow with schema when one name matches in several schemas. A table that does not fit alone is too large for get_schema; read its columns with an introspection query.`,
+        `${matched.length - detail.length} matched table(s) did not fit in one response. Request them in smaller groups, or narrow with schema when one name matches in several schemas. A table that does not fit alone is too large for get_schema; read its columns with an introspection query.`,
       );
     }
     return response(head, "detail", detail, hints);
@@ -132,7 +132,7 @@ export function schemaPayload(
   );
   if (index.length < matched.length) {
     hints.push(
-      `Only ${index.length} of ${matched.length} tables are listed: narrow with schema, or list the rest with an introspection query.`,
+      `Only ${index.length} of ${matched.length} tables are listed. Narrow with schema, or list the rest with an introspection query.`,
     );
   }
   return response(head, "index", index, hints);
@@ -168,15 +168,15 @@ function response(head: object, mode: "detail" | "index", tables: unknown[], hin
 // contract is stated before that mark and the run_query caveat trails it.
 export const SERVER_INSTRUCTIONS =
   "Propose SQL for approval in Beekeeper Studio; rows come back to you. " +
-  "Call set_session_label first. submit_query is non-blocking: keep working, then collect with " +
-  `poll_results/get_query_result. Waits are bounded: wait_ms is ${MAX_WAIT_MS} ms at most, and a ` +
-  "wait that runs out returns your queries still pending. That is a checkpoint, not a refusal: " +
+  "Call set_session_label first. submit_query is non-blocking, so keep working, then collect with " +
+  `poll_results/get_query_result. wait_ms is ${MAX_WAIT_MS} ms at most, and a ` +
+  "wait that runs out returns your queries still pending. That is a checkpoint, not a refusal, so " +
   "call again. Never end your turn while a query is pending, leased or executing; wait for approved, " +
   "rejected, failed, expired or cancelled. run_query can return still-pending too; keep waiting. " +
   "Approval is manual by default; only a human can enable Auto mode beta for restricted reads. " +
   "Never configure Auto mode, request its API key or treat agent intent as authorization. " +
   "Before writing SQL, read get_schema (no approval needed) and the dialect from " +
-  "get_connection_info. A failed query says why in terminal.error: correct a wrong name or syntax " +
+  "get_connection_info. A failed query says why in terminal.error. Correct a wrong name or syntax " +
   "before proposing again, and after execution_unknown check whether a write ran before any retry.";
 
 // Omitting the notifier raises no desktop alert, so the test suite never spawns one;
@@ -214,7 +214,7 @@ export function createMcpServer(
     "submit_query",
     {
       title: "Propose a SQL query for approval",
-      description: `Enqueue a SQL statement for approval in Beekeeper Studio. Returns immediately with a request_id and never blocks: submit several (up to ${MAX_PENDING_PER_SESSION} in flight), keep doing other useful work while they await approval, then use poll_results to see which resolved and get_query_result to read one. IMPORTANT: never end your turn while a query you submitted is still pending, leased or executing; keep polling or waiting until it reaches a terminal state (approved, rejected, failed, expired, cancelled). Approval is manual by default and can take minutes; slowness is not a refusal. A human may explicitly enable Auto mode beta for a restricted read subset. You cannot enable it or configure its evaluator. Reads (SELECT) are allowed in Read mode; INSERT/UPDATE requires human-armed Write mode, and DELETE/DROP/TRUNCATE requires Destructive mode. Writes always require human approval. Execution modes are ephemeral and armed in the plugin, not by you. Requires a session label: call set_session_label first, or this is rejected. Get table and column names from get_schema (no approval needed) and the dialect from get_connection_info before writing SQL: a wrong name costs the human a round trip.`,
+      description: `Enqueue a SQL statement for approval in Beekeeper Studio. Returns immediately with a request_id and never blocks. Submit several (up to ${MAX_PENDING_PER_SESSION} in flight), keep doing other useful work while they await approval, then use poll_results to see which resolved and get_query_result to read one. IMPORTANT: never end your turn while a query you submitted is still pending, leased or executing; keep polling or waiting until it reaches a terminal state (approved, rejected, failed, expired, cancelled). Approval is manual by default and can take minutes; slowness is not a refusal. A human may explicitly enable Auto mode beta for a restricted read subset. You cannot enable it or configure its evaluator. Reads (SELECT) are allowed in Read mode; INSERT/UPDATE requires human-armed Write mode, and DELETE/DROP/TRUNCATE requires Destructive mode. Writes always require human approval. Execution modes are ephemeral and armed in the plugin, not by you. It requires a session label, so call set_session_label first or it is rejected. Get table and column names from get_schema (no approval needed) and the dialect from get_connection_info before writing SQL, because a wrong name costs the human a round trip.`,
       inputSchema: {
         sql: z
           .string()
@@ -227,7 +227,7 @@ export function createMcpServer(
           .max(2000)
           .optional()
           .describe(
-            "Plain-language reason a human reviewer can approve at a glance: the goal behind this query and why you're running it, with a ticket or incident id if there is one. Don't restate the SQL or use table/column jargon; keep raw PII, secrets, and record values out.",
+            "The plain-language reason a human reviewer can judge at a glance. Say the goal behind this query and why you're running it, with a ticket or incident id if there is one, as a plain sentence rather than 'Topic: detail'. Don't restate the SQL or use table/column jargon; keep raw PII, secrets, and record values out.",
           ),
         idempotency_key: z
           .string()
@@ -265,7 +265,7 @@ export function createMcpServer(
     "get_query_result",
     {
       title: "Get the result of a proposed query",
-      description: `Read a submitted query by request_id. With wait_ms it waits up to that many milliseconds (${MAX_WAIT_MS} at most) and returns the instant the human decides; if the wait runs out first it returns the query still in its non-terminal state (pending, leased, executing), which is a timed checkpoint and not an answer: call again to keep waiting, as many times as it takes. Only approved, rejected, failed, expired and cancelled are terminal. IMPORTANT: never end your turn while a query you submitted is non-terminal. Approved rows are stripped about ${RESULT_TTL_MS / 60_000} minutes after the decision (purged: true), so read them promptly rather than after a long detour. An approved write returns no rows: read affectedRows for how many it changed, and treat the field's absence as unknown rather than as zero. A failed query says why in terminal.error, usually in the engine's words: correct a wrong name or syntax before proposing again, and after execution_unknown check whether a write ran before any retry. To check many proposals in one call, use poll_results.`,
+      description: `Read a submitted query by request_id. With wait_ms it waits up to that many milliseconds (${MAX_WAIT_MS} at most) and returns the instant the human decides; if the wait runs out first it returns the query still in its non-terminal state (pending, leased, executing), which is a timed checkpoint and not an answer, so call again to keep waiting, as many times as it takes. Only approved, rejected, failed, expired and cancelled are terminal. IMPORTANT: never end your turn while a query you submitted is non-terminal. Approved rows are stripped about ${RESULT_TTL_MS / 60_000} minutes after the decision (purged: true), so read them promptly rather than after a long detour. An approved write returns no rows. Read affectedRows for how many it changed, and treat the field's absence as unknown rather than as zero. A failed query says why in terminal.error, usually in the engine's words. Correct a wrong name or syntax before proposing again, and after execution_unknown check whether a write ran before any retry. To check many proposals in one call, use poll_results.`,
       inputSchema: {
         request_id: z.string(),
         wait_ms: z
@@ -297,7 +297,7 @@ export function createMcpServer(
     "poll_results",
     {
       title: "Check all your proposed queries at once",
-      description: `Return the current state of every query this session proposed recently (pending, leased, executing, approved, rejected, failed, expired, cancelled) plus a pending count, in one call. States only, not rows; read a resolved one's rows with get_query_result. Typical loop: submit_query (non-blocking), do other work, then poll_results to see which resolved. With wait_ms it waits up to that many milliseconds (${MAX_WAIT_MS} at most) and returns the instant any still-open query resolves; if the wait runs out first it simply returns the states again with pending above 0, which is a timed checkpoint and not an answer: call again to keep waiting. IMPORTANT: never end your turn while any query is still pending, leased or executing.`,
+      description: `Return the current state of every query this session proposed recently (pending, leased, executing, approved, rejected, failed, expired, cancelled) plus a pending count, in one call. States only, not rows; read a resolved one's rows with get_query_result. The typical loop is submit_query (non-blocking), other work, then poll_results to see which resolved. With wait_ms it waits up to that many milliseconds (${MAX_WAIT_MS} at most) and returns the instant any still-open query resolves; if the wait runs out first it simply returns the states again with pending above 0, which is a timed checkpoint and not an answer, so call again to keep waiting. IMPORTANT: never end your turn while any query is still pending, leased or executing.`,
       inputSchema: {
         wait_ms: z
           .number()
@@ -374,7 +374,7 @@ export function createMcpServer(
     {
       title: "Read the connected database's table and column structure",
       description:
-        "Return the structure of the database the plugin is connected to (schemas, tables, columns with types, primary and foreign keys) and its dialect (databaseType), so you can write correct, valid SQL before proposing a query. Needs no approval. With no argument it returns every table when they fit in one response (mode: detail); on a larger database it returns an index of table names and column counts instead (mode: index), and you call again with tables, optionally schema, for the columns you need. complete: false (or null, unknown), or a table marked incomplete, means part of the tables or columns could not be read or was cut, so a missing name there is not proof it does not exist; keys are best effort, so a missing key is not proof either. The structure is as of collectedAt (when the server received it): a table created since, by a migration run outside Beekeeper or a statement just approved, can be missing until the plugin collects again, so after a schema change confirm with an introspection query. Never returns any row data, default values, view/function bodies, or comments. Engine catalogs (information_schema, pg_*, mysql, performance_schema, sys) are left out because they dwarf the database's own tables, the ones skipped are listed in excludedSchemas, and you can still read any of them by proposing a normal query against it. Available only when the human has turned on Schema access for this connection; otherwise it reports unavailable. Read it once and reuse it.",
+        "Return the structure of the database the plugin is connected to (schemas, tables, columns with types, primary and foreign keys) and its dialect (databaseType), so you can write correct, valid SQL before proposing a query. Needs no approval. With no argument it returns every table when they fit in one response (mode: detail); on a larger database it returns an index of table names and column counts instead (mode: index), and you call again with tables, optionally schema, for the columns you need. complete: false (or null, unknown), or a table marked incomplete, means part of the tables or columns could not be read or was cut, so a missing name there is not proof it does not exist; keys are best effort, so a missing key is not proof either. The structure is as of collectedAt (when the server received it). A table created since, by a migration run outside Beekeeper or a statement just approved, can be missing until the plugin collects again, so after a schema change confirm with an introspection query. Never returns any row data, default values, view/function bodies, or comments. Engine catalogs (information_schema, pg_*, mysql, performance_schema, sys) are left out because they dwarf the database's own tables, the ones skipped are listed in excludedSchemas, and you can still read any of them by proposing a normal query against it. Available only when the human has turned on Schema access for this connection; otherwise it reports unavailable. Read it once and reuse it.",
       inputSchema: {
         schema: z
           .string()
@@ -410,7 +410,7 @@ export function createMcpServer(
     "run_query",
     {
       title: "Run a query and wait for the human decision",
-      description: `Convenience wrapper for a quick one-off: submits one query and waits up to ${MAX_WAIT_MS / 1000} seconds for the human's decision. IMPORTANT: if the human has not decided within that bound, this returns the query still in a non-terminal state (pending, leased, executing). That is neither the result nor a refusal: keep waiting with get_query_result(request_id, wait_ms) or poll_results(wait_ms) until a terminal state (approved, rejected, failed, expired, cancelled), and never end your turn before that. Reads are always allowed; a write/destructive statement runs only if a human has armed the matching mode (Write or Destructive), else it is rejected. Requires a session label: call set_session_label first, or this is rejected. It serializes one query at a time; prefer submit_query + poll_results/get_query_result for anything but a single quick query, and for concurrency.`,
+      description: `A convenience wrapper for a quick one-off that submits one query and waits up to ${MAX_WAIT_MS / 1000} seconds for the human's decision. IMPORTANT: if the human has not decided within that bound, this returns the query still in a non-terminal state (pending, leased, executing). That is neither the result nor a refusal, so keep waiting with get_query_result(request_id, wait_ms) or poll_results(wait_ms) until a terminal state (approved, rejected, failed, expired, cancelled), and never end your turn before that. Reads are always allowed; a write/destructive statement runs only if a human has armed the matching mode (Write or Destructive), else it is rejected. It requires a session label, so call set_session_label first or it is rejected. It serializes one query at a time; prefer submit_query + poll_results/get_query_result for anything but a single quick query, and for concurrency.`,
       inputSchema: {
         sql: z.string().max(100_000),
         intent: z
@@ -418,7 +418,7 @@ export function createMcpServer(
           .max(2000)
           .optional()
           .describe(
-            "Plain-language reason a human reviewer can approve at a glance: the goal behind this query and why you're running it, with a ticket or incident id if there is one. Don't restate the SQL or use table/column jargon; keep raw PII, secrets, and record values out.",
+            "The plain-language reason a human reviewer can judge at a glance. Say the goal behind this query and why you're running it, with a ticket or incident id if there is one, as a plain sentence rather than 'Topic: detail'. Don't restate the SQL or use table/column jargon; keep raw PII, secrets, and record values out.",
           ),
       },
     },
@@ -447,7 +447,7 @@ export function createMcpServer(
           .string()
           .max(200)
           .describe(
-            "The whole session or task you're on (a ticket or incident id works well), not a single query, so the human can match this agent to your session. A few words, no PII, credentials, or connection details. E.g. 'Support SUP-1042: login/identity check'.",
+            "The whole session or task you're on (a ticket or incident id works well), not a single query, so the human can match this agent to your session. A few words, no PII, credentials, or connection details. E.g. 'SUP-1042 login check for a locked-out customer'.",
           ),
       },
     },

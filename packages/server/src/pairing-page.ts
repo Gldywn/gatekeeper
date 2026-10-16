@@ -53,6 +53,6 @@ export function pairingPage(code: PairingCode | null, now: number): string {
      <p>Type it into the Gatekeeper tab in Beekeeper Studio.</p>
      <div class="code">${code.code}</div>
      <p>It works once and expires in about ${minutes} minute${minutes > 1 ? "s" : ""}. Reload this page to get a fresh one.</p>
-     <p class="note">Keep it to yourself: whoever enters it can read the queries your agents propose.</p>`,
+     <p class="note">Keep it to yourself. Whoever enters it can read the queries your agents propose.</p>`,
   );
 }
