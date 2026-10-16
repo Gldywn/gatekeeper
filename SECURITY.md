@@ -148,10 +148,11 @@ indexed column can still scan most of a table and shows no alert.
   heavy, so by trying variants an agent can learn whether a table holds over a million rows or
   whether a filtered column has no index. Turn the setting off to keep that signal behind a
   human decision.
-- **On a rejection**, the agent receives the operator's note, then hints computed from the
-  SQL text alone (no `WHERE` clause, missing join condition, DDL without `CONCURRENTLY`), the
-  same whatever the database holds. Row estimates, index facts and sensitive-data flags never
-  leave the plugin. The history detail shows the exact text sent.
+- **On a rejection**, the agent receives the operator's note. When the card showed a Heavy
+  query alert, hints computed from the SQL text alone follow (no `WHERE` clause, missing join
+  condition, DDL without `CONCURRENTLY`). Their presence tells the agent the query was flagged,
+  the same signal as an automatic rejection. Row estimates, index facts and sensitive-data
+  flags never leave the plugin. The history detail shows the exact text sent.
 
 ## Same-user trust boundary
 

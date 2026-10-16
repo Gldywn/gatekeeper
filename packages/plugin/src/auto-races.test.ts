@@ -1400,9 +1400,10 @@ describe("load check", () => {
     }
   });
 
-  it("appends SQL-only hints to a manual rejection and records them once delivered", async () => {
+  it("appends SQL-only hints to the rejection of a flagged card and records them once delivered", async () => {
     const { app, card } = harness();
     card.sql = "DELETE FROM public.sessions";
+    card.loadResult = HEAVY;
     await app.reject(card.id, "Narrow it to last week.");
     const sent = "Narrow it to last week. The DELETE has no WHERE clause.";
     expect(app.broker.result).toHaveBeenCalledWith(
@@ -1421,6 +1422,7 @@ describe("load check", () => {
 
     const failed = harness();
     failed.card.sql = "DELETE FROM public.sessions";
+    failed.card.loadResult = HEAVY;
     failed.app.broker.result.mockResolvedValueOnce(false);
     await failed.app.reject(failed.card.id);
     expect(failed.app.finish).toHaveBeenCalledWith(
@@ -1430,6 +1432,17 @@ describe("load check", () => {
       undefined,
       undefined,
       { sent: undefined },
+    );
+  });
+
+  it("sends no hint with the decline of a card that showed no alert", async () => {
+    const { app, card } = harness();
+    card.sql = "SELECT * FROM public.feature_flags";
+    await app.reject(card.id);
+    expect(app.broker.result).toHaveBeenCalledWith(
+      card.id,
+      card.leaseId,
+      expect.objectContaining({ status: "rejected", reason: undefined }),
     );
   });
 });

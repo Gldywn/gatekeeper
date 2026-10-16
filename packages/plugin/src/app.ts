@@ -2913,8 +2913,10 @@ export class Gatekeeper {
     // state already says a human declined, and a placeholder would sit in the audit
     // record for good.
     const custom = reason?.trim();
-    // The hints come from the SQL text alone, so they reveal nothing about the database.
-    const sent = agentMessage(custom, planLoad(card.sql, this.dialect).hints);
+    // Only a card that showed a Heavy query alert sends hints: on any other decline they would
+    // read as the reason, which the human never gave. The hints come from the SQL text alone.
+    const hints = card.loadResult?.heavy ? planLoad(card.sql, this.dialect).hints : [];
+    const sent = agentMessage(custom, hints);
     this.setCardState(id, "rejecting");
     const posted = await this.postResult(card, { status: "rejected", reason: sent });
     this.finish(id, "rejected", "declined", undefined, custom || undefined, {
