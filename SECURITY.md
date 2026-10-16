@@ -155,6 +155,12 @@ itself is in neither the URL nor the prompt.
 - **Engine errors.** A failed query's engine error is returned to the agent and recorded
   in the audit trail. Engine errors can echo fragments of the query or schema; treat them
   as query-derived data, not as a trusted channel.
+- **Connection check.** On PostgreSQL, MySQL and MariaDB the plugin runs one fixed scalar
+  query on the connection, outside the approval gate, to read whether the endpoint is
+  read-only: up to once every 15 seconds while Beekeeper's window is visible and the
+  Gatekeeper view has a size on screen, plus right after an approved query fails. It can run
+  alongside an approved query. It reads no table. Its result and any driver error stay in the plugin
+  popover and are never sent to the broker or the agent.
 
 ## Audit trail
 

@@ -431,6 +431,21 @@ describe("shared manual/automatic execution authority", () => {
     expect(query).not.toHaveBeenCalled();
     expect(app.broker.withdrawExecution).toHaveBeenCalledOnce();
   });
+  it("brings the endpoint check forward when an approved query errors", async () => {
+    const { app, card } = harness();
+    app.nextCheckAt = Number.MAX_SAFE_INTEGER;
+    query.mockResolvedValueOnce({ results: [], error: "Connection terminated unexpectedly" });
+    await app.approve(card.id);
+    expect(query).toHaveBeenCalledWith(card.sql);
+    expect(app.finish).toHaveBeenCalledWith(
+      card.id,
+      "failed",
+      "query failed",
+      undefined,
+      "Connection terminated unexpectedly",
+    );
+    expect(app.nextCheckAt).toBe(0);
+  });
   it("detects a schema identity change even when connection names match", async () => {
     const { app } = harness();
     connection.mockResolvedValue({
