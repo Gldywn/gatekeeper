@@ -24,7 +24,6 @@ function facts(entries: Record<string, Partial<RelFacts>>): Facts {
       inherited: false,
       indexed: new Set(["id"]),
       leading: new Set(["id"]),
-      primaryKey: ["id"],
       columns: null,
       ...f,
     });
@@ -77,26 +76,37 @@ describe("rows changed", () => {
     expect(r.complete).toBe(false);
   });
 
-  it("flags a large write not pinned to its primary key", () => {
+  it("flags a large write whose filter uses no index", () => {
     const f = facts({ "public.payment_intent": { rows: 18_400_000 } });
     const sql = `UPDATE public.payment_intent SET status = 'EXPIRED' WHERE "updatedAt" < now()`;
     const r = check(sql, f);
     expect(r.lines).toEqual([
-      "UPDATE is not limited to primary key values and may change every row of `payment_intent`",
       "Filter on `updatedAt` uses no index and may scan all of `payment_intent`",
     ]);
     expect(r.estimates).toEqual([{ table: "payment_intent", rows: 18_400_000 }]);
     expect(r.heavy).toBe(true);
   });
 
-  it("accepts a write pinned by literal primary key values", () => {
-    const f = facts({ "public.t": { rows: BIG } });
-    expect(check("UPDATE public.t SET a = 1 WHERE id = 7", f).lines).toEqual([]);
-    expect(check("DELETE FROM public.t WHERE id IN (1, 2)", f).lines).toEqual([]);
-    expect(check("DELETE FROM public.t WHERE id = 7 OR a = 1", f).lines).toEqual([
-      "DELETE is not limited to primary key values and may remove every row of `t`",
+  it("accepts a large write filtered on an indexed column, whatever the key", () => {
+    const f = facts({ "public.t": { rows: BIG, indexed: new Set(["id", "company_id"]) } });
+    for (const sql of [
+      "UPDATE public.t SET a = 1 WHERE id = 7",
+      "UPDATE public.t SET a = 1 WHERE 7 = id",
+      "DELETE FROM public.t WHERE id IN (1, 2)",
+      "UPDATE public.t SET plan = 'pro' WHERE company_id = 42",
+    ])
+      expect(check(sql, f).lines).toEqual([]);
+  });
+
+  it("flags a large write that no condition filters", () => {
+    const f = facts({ "public.t": { rows: BIG }, "public.u": { rows: BIG } });
+    expect(check("UPDATE public.t SET a = 1 WHERE now() > '2020-01-01'", f).lines).toEqual([
+      "UPDATE may change every row of `t` since no condition filters it",
     ]);
-    expect(check("DELETE FROM public.t WHERE id > 7", f).lines).toHaveLength(1);
+    expect(check("UPDATE public.t SET a = u.b FROM public.u WHERE t.uid = u.id", f).lines).toEqual([
+      "UPDATE may change every row of `t` since no condition filters it",
+      "Reads every row of `u` since no condition filters it",
+    ]);
   });
 
   it("never treats a small write target as large", () => {
@@ -197,7 +207,6 @@ describe("scans", () => {
           kind: "view" as const,
           rls: false,
           indexed: null,
-          primaryKey: null,
           columns: null,
         },
       ],
@@ -517,20 +526,10 @@ describe("coverage", () => {
     const missing = check(sql, new Map());
     expect(missing.notes).toEqual(["`t` has no row estimate yet"]);
     expect(missing.complete).toBe(false);
-    const view = check(
-      sql,
-      facts({ "public.t": { rows: null, kind: "view", indexed: null, primaryKey: null } }),
-    );
+    const view = check(sql, facts({ "public.t": { rows: null, kind: "view", indexed: null } }));
     expect(view.notes).toEqual(["`t` is a view with no row estimate"]);
     expect(check(sql, facts({ "public.t": { rows: BIG_ROWS, rls: null } })).lines).toHaveLength(1);
     expect(check(sql, facts({ "public.t": { rows: BIG_ROWS } })).complete).toBe(true);
-  });
-
-  it("never exempts a write on a classic inheritance parent through its key", () => {
-    const f = facts({ "public.t": { rows: BIG_ROWS, inherited: true } });
-    expect(check("UPDATE public.t SET a = 1 WHERE id = 7", f).lines).toEqual([
-      "UPDATE is not limited to primary key values and may change every row of `t`",
-    ]);
   });
 
   it("claims every row only for a single-table write", () => {
@@ -638,11 +637,6 @@ describe("no false alert on bounded queries", () => {
       "UPDATE public.t SET x = 1 WHERE FALSE",
     ])
       expect(check(sql, big).lines).toEqual([]);
-  });
-
-  it("pins a primary key written either way round", () => {
-    expect(check("UPDATE public.t SET x = 1 WHERE 7 = id", big).lines).toEqual([]);
-    expect(check("DELETE FROM public.t WHERE 7 = id", big).lines).toEqual([]);
   });
 });
 

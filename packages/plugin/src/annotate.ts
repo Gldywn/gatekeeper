@@ -177,8 +177,6 @@ export class SchemaAnnotator {
           leading:
             indexes &&
             new Set(indexes.flatMap((ix) => (ix.columns[0] ? [ix.columns[0].name] : []))),
-          primaryKey:
-            indexes && (indexes.find((ix) => ix.primary)?.columns.map((c) => c.name) ?? []),
           columns: columns?.map((c) => c.name) ?? null,
         });
       }),

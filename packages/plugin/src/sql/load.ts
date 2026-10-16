@@ -27,7 +27,6 @@ export interface RelFacts {
   indexed: Set<string> | null;
   // The first column of each index, the one an ORDER BY or min/max can read in order.
   leading: Set<string> | null;
-  primaryKey: string[] | null;
   columns: string[] | null;
 }
 
@@ -761,48 +760,7 @@ export function checkLoad(plan: LoadPlan, facts: Facts | Pending): LoadResult {
           ? ["UPDATE without WHERE changes every row of ", code(name(target))]
           : ["DELETE without WHERE removes every row of ", code(name(target))],
       );
-      continue;
     }
-    if (!large(target)) continue;
-    const f = factsOf(target);
-    if (f?.primaryKey == null) {
-      indexesMissing = true;
-      continue;
-    }
-    const pinned = new Set<string>();
-    for (const part of conjuncts(w.block.where)) {
-      if (!node(part) || part.type !== "binary_expr") continue;
-      const op = String(part.operator).toUpperCase();
-      // "id = 7" and "7 = id" pin the same key.
-      const flipped = op === "=" && literal(part.left);
-      const side = flipped ? part.right : part.left;
-      const other = flipped ? part.left : part.right;
-      const ref = node(side) && side.type === "column_ref" ? side : null;
-      const list = node(other) && Array.isArray(other.value) ? other.value : null;
-      const fixed =
-        (op === "=" && literal(other)) ||
-        (op === "IN" && list !== null && list.length > 0 && list.every(literal));
-      const column = ref ? label(ref.column) : null;
-      if (
-        column &&
-        fixed &&
-        bind(w.block, { table: label(ref?.table), column }, known) === w.target
-      )
-        pinned.add(column);
-    }
-    const key = f.primaryKey;
-    if (f.inherited || !key.length || !key.every((c) => pinned.has(c)))
-      rowsChanged.push(
-        w.op === "update"
-          ? [
-              "UPDATE is not limited to primary key values and may change every row of ",
-              code(name(target)),
-            ]
-          : [
-              "DELETE is not limited to primary key values and may remove every row of ",
-              code(name(target)),
-            ],
-      );
   }
 
   for (const b of plan.blocks) {
@@ -817,8 +775,24 @@ export function checkLoad(plan: LoadPlan, facts: Facts | Pending): LoadResult {
       // on its own, every member is read in full, whatever index the join uses.
       const group = u.groups.find((g) => g.includes(i)) ?? [i];
       if (!group.some((j) => u.filtered[j])) {
-        // The rows-changed line already speaks for an unfiltered write target.
-        if (write?.target === i) continue;
+        if (write?.target === i) {
+          // A write with no WHERE at all already has its rows-changed line.
+          if ((!b.noWhere || b.sources.length > 1) && large(s.rel))
+            rowsChanged.push(
+              write.op === "update"
+                ? [
+                    "UPDATE may change every row of ",
+                    code(name(s.rel)),
+                    " since no condition filters it",
+                  ]
+                : [
+                    "DELETE may remove every row of ",
+                    code(name(s.rel)),
+                    " since no condition filters it",
+                  ],
+            );
+          continue;
+        }
         if (b.preview && f && f.rows !== null && !f.kind && f.rls === false) continue;
         if (b.indexOrder && f?.rls === false && b.indexOrder.every((c) => f.leading?.has(c)))
           continue;
