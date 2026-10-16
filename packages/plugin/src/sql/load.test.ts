@@ -23,6 +23,7 @@ function facts(entries: Record<string, Partial<RelFacts>>): Facts {
       rls: false,
       inherited: false,
       indexed: new Set(["id"]),
+      leading: new Set(["id"]),
       primaryKey: ["id"],
       columns: null,
       ...f,
@@ -118,7 +119,7 @@ describe("scans", () => {
     expect(check("SELECT * FROM public.payment_attempt LIMIT 50", f).lines).toEqual([]);
     for (const sql of [
       "SELECT * FROM public.payment_attempt LIMIT 50 OFFSET 10",
-      "SELECT * FROM public.payment_attempt ORDER BY id LIMIT 50",
+      "SELECT * FROM public.payment_attempt ORDER BY created_at LIMIT 50",
       "SELECT count(*) FROM public.payment_attempt LIMIT 50",
       "SELECT * FROM public.payment_attempt LIMIT 5000",
     ])
@@ -679,5 +680,27 @@ describe("joins without a filter", () => {
       "wrong table. The DELETE has no WHERE clause.",
     );
     expect(agentMessage("wrong table", [])).toBe("wrong table");
+  });
+});
+
+describe("index-served reads", () => {
+  const f = facts({ "public.t": { rows: 41_000_000 } });
+
+  it("exempts an ORDER BY or min/max on the leading column of an index", () => {
+    for (const sql of [
+      "SELECT * FROM public.t ORDER BY id DESC LIMIT 20",
+      "SELECT max(id) FROM public.t",
+      "SELECT min(id), max(id) FROM public.t",
+    ])
+      expect(check(sql, f).lines).toEqual([]);
+  });
+
+  it("still flags an order or min/max no index leads", () => {
+    for (const sql of [
+      "SELECT * FROM public.t ORDER BY status LIMIT 20",
+      "SELECT max(amount) FROM public.t",
+      "SELECT * FROM public.t ORDER BY id DESC",
+    ])
+      expect(check(sql, f).lines).toHaveLength(1);
   });
 });

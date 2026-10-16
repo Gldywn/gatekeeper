@@ -25,6 +25,8 @@ export interface RelFacts {
   inherited: boolean;
   // Every column that appears in any index, at any position.
   indexed: Set<string> | null;
+  // The first column of each index, the one an ORDER BY or min/max can read in order.
+  leading: Set<string> | null;
   primaryKey: string[] | null;
   columns: string[] | null;
 }
@@ -69,6 +71,9 @@ interface Block {
   empty: boolean;
   limited: boolean;
   preview: boolean;
+  // Columns that, if each leads an index, let PostgreSQL answer from a few index entries:
+  // the ORDER BY of a small LIMIT, or every min/max argument.
+  indexOrder?: string[];
 }
 
 interface Write {
@@ -412,7 +417,11 @@ class Walker {
       Number.isInteger(count) &&
       count >= 0 &&
       count <= PREVIEW_LIMIT;
-    this.block(from, ast.where, ctes, depth, { limited: count !== undefined, preview });
+    this.block(from, ast.where, ctes, depth, {
+      limited: count !== undefined,
+      preview,
+      indexOrder: branch ? undefined : indexOrder(ast, from, count, offset),
+    });
     this.nested([ast.columns, ast.having, ast.orderby], ctes, depth);
     if (node(ast._next)) this.statement(ast._next, ctes, depth + 1);
   }
@@ -811,6 +820,8 @@ export function checkLoad(plan: LoadPlan, facts: Facts | Pending): LoadResult {
         // The rows-changed line already speaks for an unfiltered write target.
         if (write?.target === i) continue;
         if (b.preview && f && f.rows !== null && !f.kind && f.rls === false) continue;
+        if (b.indexOrder && f?.rls === false && b.indexOrder.every((c) => f.leading?.has(c)))
+          continue;
         if (!large(s.rel)) continue;
         scans.push(
           b.sources.length === 1 && b.noWhere
@@ -1016,4 +1027,40 @@ export function parseLoadStats(rels: Rel[], rows: Record<string, unknown>[]): St
     });
   }
   return out;
+}
+
+function indexOrder(
+  ast: Node,
+  from: unknown[],
+  count: number | undefined,
+  offset: boolean,
+): string[] | undefined {
+  const plain =
+    from.length === 1 &&
+    node(from[0]) &&
+    from[0].join == null &&
+    ast.where == null &&
+    ast.groupby == null &&
+    ast.having == null &&
+    !distinct(ast.distinct) &&
+    !offset;
+  if (!plain) return undefined;
+  const orders = Array.isArray(ast.orderby) ? ast.orderby : [];
+  const first = node(orders[0]) && node(orders[0].expr) ? orders[0].expr : null;
+  if (first?.type === "column_ref") {
+    const small = count !== undefined && Number.isInteger(count) && count <= PREVIEW_LIMIT;
+    const column = label(first.column);
+    return small && column && !aggregates(ast.columns) ? [column] : undefined;
+  }
+  if (orders.length || !Array.isArray(ast.columns) || !ast.columns.length) return undefined;
+  const args = ast.columns.map((c) => {
+    const expr = node(c) && node(c.expr) ? c.expr : null;
+    const arg = expr && node(expr.args) && node(expr.args.expr) ? expr.args.expr : null;
+    return expr?.type === "aggr_func" &&
+      /^(min|max)$/i.test(String(expr.name)) &&
+      arg?.type === "column_ref"
+      ? label(arg.column)
+      : null;
+  });
+  return args.every((a): a is string => a !== null) ? args : undefined;
 }
