@@ -2320,6 +2320,7 @@ export class Gatekeeper {
         existing.leaseId = proposal.leaseId;
         existing.leaseExpiresAt = proposal.leaseExpiresAt;
       }
+      if (existing.loadStale && existing.state === "ready") this.startLoad(existing, false);
       void this.evaluateNext();
       return;
     }
@@ -2360,6 +2361,7 @@ export class Gatekeeper {
   // arrival may auto-deny it: a recheck after a schema change never rejects a waiting card.
   private startLoad(card: Card, arrival: boolean): void {
     const plan = planLoad(card.sql, this.dialect);
+    card.loadStale = false;
     card.loadResult = checkLoad(plan, "pending");
     const bound = {
       generation: this.connGeneration,
@@ -2386,7 +2388,11 @@ export class Gatekeeper {
     this.annotator
       .inspectLoad(card.sql, live)
       .then(
-        (result) => settle(result ?? checkLoad(plan, "unavailable")),
+        (result) => {
+          // Cut short (re-pair, decision, deadline): claim() restarts it if the card comes back.
+          if (result === undefined && card.load === load) card.loadStale = true;
+          settle(result ?? checkLoad(plan, "unavailable"));
+        },
         () => settle(checkLoad(plan, "unavailable")),
       )
       .finally(() => window.clearTimeout(timer));
@@ -2437,12 +2443,15 @@ export class Gatekeeper {
     this.setCardState(card.id, "rejecting");
     const sent = agentMessage(AUTO_DENY_MESSAGE, planLoad(card.sql, this.dialect).hints);
     const posted = await this.postResult(card, { status: "rejected", reason: sent });
-    // An undelivered rejection, or a card now standing for another lease or session, only
-    // releases the reservation, so the card returns to manual review undecided.
-    if (!same() || !posted) {
+    // An undelivered rejection only releases the reservation, so the card returns to manual
+    // review undecided. A delivered one is final for the broker, whatever changed meanwhile.
+    if (!posted) {
       // The reservation above changed the state; TypeScript still narrows it to "ready".
-      if (this.cards.includes(card) && (card.state as CardState) === "rejecting")
+      if (this.cards.includes(card) && (card.state as CardState) === "rejecting") {
+        if (card.autoStatus === "Evaluating with Jev")
+          card.autoStatus = `Needs review: ${HEAVY_REASON}`;
         this.setCardState(card.id, "ready");
+      }
       return;
     }
     this.finish(card.id, "rejected", AUTO_DENY_NOTE, undefined, undefined, {

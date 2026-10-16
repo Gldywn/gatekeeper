@@ -36,7 +36,7 @@ export interface LoadResult {
   notes: Line[];
   estimates: { table: string; rows: number }[];
   heavy: boolean;
-  // False when part of the check could not run; Auto mode then holds the query.
+  // False when part of the check could not run. Informational: nothing blocks on it.
   complete: boolean;
 }
 
@@ -54,6 +54,10 @@ interface Source {
   // Absent for derived tables, CTE references and table functions: no estimate of their own.
   rel?: Rel;
   joinedBy: "first" | "comma" | "cross" | "on" | "using";
+  using?: string[];
+  // Blocks read through this source (a derived table or CTE body): their cost depends on how
+  // the enclosing query filters or limits this source.
+  inner?: Block[];
 }
 
 interface Block {
@@ -61,6 +65,8 @@ interface Block {
   where: unknown;
   ons: unknown[];
   noWhere: boolean;
+  // WHERE FALSE or WHERE 1 = 0: nothing is read, a common way to fetch column names.
+  empty: boolean;
   limited: boolean;
   preview: boolean;
 }
@@ -86,6 +92,8 @@ export interface LoadPlan {
   relations: Rel[];
   // False when part of the statement could not be read or is not modelled.
   covered: boolean;
+  // Inner blocks the enclosing query filters or limits: judged as unknown, never as a full read.
+  dependent: Set<Block>;
 }
 
 function node(value: unknown): value is Node {
@@ -99,6 +107,8 @@ function label(value: unknown): string | null {
 }
 
 class Incomplete extends Error {}
+
+type Ctes = Map<string, Block[]>;
 
 function conjuncts(expr: unknown): unknown[] {
   if (node(expr) && expr.type === "binary_expr" && String(expr.operator).toUpperCase() === "AND")
@@ -145,9 +155,13 @@ const LITERALS = new Set([
   "bit_string",
 ]);
 
-// Only a comparison between two sides links two sources; a column named inside a CASE
-// branch or an OR operand proves nothing about how their rows pair up.
-const COMPARISONS = new Set(["=", "<>", "!=", "<", ">", "<=", ">=", "LIKE", "ILIKE"]);
+function hasOr(expr: unknown): boolean {
+  let found = false;
+  visitExpr(expr, (n) => {
+    if (n.type === "binary_expr" && String(n.operator).toUpperCase() === "OR") found = true;
+  });
+  return found;
+}
 
 function literal(expr: unknown): boolean {
   if (!node(expr)) return false;
@@ -165,6 +179,21 @@ function tautology(expr: unknown): boolean {
     literal(expr.left) &&
     literal(expr.right) &&
     JSON.stringify(expr.left) === JSON.stringify(expr.right)
+  );
+}
+
+function contradiction(expr: unknown): boolean {
+  if (!node(expr)) return false;
+  if ((expr.type === "bool" || expr.type === "boolean") && expr.value === false) return true;
+  return (
+    expr.type === "binary_expr" &&
+    expr.operator === "=" &&
+    literal(expr.left) &&
+    literal(expr.right) &&
+    node(expr.left) &&
+    node(expr.right) &&
+    expr.left.type === expr.right.type &&
+    JSON.stringify(expr.left) !== JSON.stringify(expr.right)
   );
 }
 
@@ -201,7 +230,7 @@ class Walker {
   readonly locks: Lock[] = [];
   covered = true;
 
-  statement(ast: unknown, ctes: Set<string>, depth: number): void {
+  statement(ast: unknown, ctes: Ctes, depth: number): void {
     if (depth > MAX_DEPTH || this.blocks.length > MAX_BLOCKS) throw new Incomplete();
     if (!node(ast)) return;
     const scope = this.ctes(ast.with, ctes, depth);
@@ -222,7 +251,10 @@ class Walker {
         this.create(ast, scope, depth);
         return;
       case "alter":
-        this.lock(ast.table, (t) => ["ALTER TABLE may lock and rewrite ", code(t)], ALTER_HINT);
+        // ALTER SEQUENCE, TYPE, VIEW or FUNCTION parse as "alter" too, without a table.
+        if (ast.table)
+          this.lock(ast.table, (t) => ["ALTER TABLE may lock and rewrite ", code(t)], ALTER_HINT);
+        else this.covered = false;
         return;
       case "lock":
         for (const item of Array.isArray(ast.tables) ? ast.tables : [])
@@ -239,20 +271,23 @@ class Walker {
     }
   }
 
-  private ctes(clause: unknown, outer: Set<string>, depth: number): Set<string> {
+  private ctes(clause: unknown, outer: Ctes, depth: number): Ctes {
     if (!Array.isArray(clause)) return outer;
-    const scope = new Set(outer);
+    const scope = new Map(outer);
     for (const cte of clause) {
       if (!node(cte)) throw new Incomplete();
       const name = label(cte.name);
-      if (name) scope.add(name);
+      // Set before the body so a recursive reference reads as the CTE, not as a table.
+      if (name) scope.set(name, []);
+      const before = this.blocks.length;
       // PostgreSQL emits the body directly, MySQL keeps it in a statement wrapper.
       this.statement(isStatement(cte.stmt) ? cte.stmt.ast : cte.stmt, scope, depth + 1);
+      if (name) scope.set(name, this.blocks.slice(before));
     }
     return scope;
   }
 
-  private create(ast: Node, ctes: Set<string>, depth: number): void {
+  private create(ast: Node, ctes: Ctes, depth: number): void {
     const keyword = String(ast.keyword ?? "").toLowerCase();
     if (keyword === "index" && !ast.concurrently)
       this.lock(
@@ -275,7 +310,7 @@ class Walker {
     this.locks.push({ rel: name ? { schema, table: name } : undefined, line, hint });
   }
 
-  private source(item: unknown, index: number, ctes: Set<string>, depth: number): Source {
+  private source(item: unknown, index: number, ctes: Ctes, depth: number): Source {
     if (!node(item)) throw new Incomplete();
     const join = String(item.join ?? "").toUpperCase();
     // A parenthesized set-operation branch comes back as a FROM item joined by "union", and
@@ -295,26 +330,32 @@ class Walker {
             : join.startsWith("CROSS") || item.on == null
               ? "cross"
               : "on";
-    const alias = label(item.as);
+    // A column list ("v(id, label)") comes back inside the alias string.
+    const alias = label(item.as)?.replace(/\s*\([^()]*\)\s*$/, "") ?? null;
+    const using = Array.isArray(item.using)
+      ? item.using.map(label).filter((c): c is string => c !== null)
+      : undefined;
     if (node(item.expr)) {
+      const before = this.blocks.length;
       if (isStatement(item.expr)) this.statement(item.expr.ast, ctes, depth + 1);
       else this.covered = false;
-      return { alias: alias ?? `#${index}`, joinedBy };
+      return { alias: alias ?? `#${index}`, joinedBy, using, inner: this.blocks.slice(before) };
     }
     const table = label(item.table);
     if (!table) {
       this.covered = false;
-      return { alias: alias ?? `#${index}`, joinedBy };
+      return { alias: alias ?? `#${index}`, joinedBy, using };
     }
     const schema = label(item.db);
-    if (schema === null && ctes.has(table)) return { alias: alias ?? table, joinedBy };
-    return { alias: alias ?? table, rel: { schema, table }, joinedBy };
+    if (schema === null && ctes.has(table))
+      return { alias: alias ?? table, joinedBy, using, inner: ctes.get(table) };
+    return { alias: alias ?? table, rel: { schema, table }, joinedBy, using };
   }
 
   private block(
     from: unknown[],
     where: unknown,
-    ctes: Set<string>,
+    ctes: Ctes,
     depth: number,
     extra: Partial<Block> = {},
   ): Block {
@@ -329,6 +370,7 @@ class Walker {
       where: noWhere ? null : where,
       ons,
       noWhere,
+      empty: contradiction(where),
       limited: false,
       preview: false,
       ...extra,
@@ -338,7 +380,7 @@ class Walker {
     return block;
   }
 
-  private nested(expr: unknown, ctes: Set<string>, depth: number): void {
+  private nested(expr: unknown, ctes: Ctes, depth: number): void {
     if (Array.isArray(expr)) {
       for (const item of expr) this.nested(item, ctes, depth);
       return;
@@ -351,15 +393,14 @@ class Walker {
     for (const value of Object.values(expr)) this.nested(value, ctes, depth);
   }
 
-  private select(ast: Node, ctes: Set<string>, depth: number): void {
+  private select(ast: Node, ctes: Ctes, depth: number): void {
     const branch = ast._next != null || ast.set_op != null;
     const from = Array.isArray(ast.from) ? ast.from : [];
     const { count, offset } = limitParts(ast.limit);
+    // A small LIMIT with no WHERE, order or aggregate lets PostgreSQL stop early, joins included.
     const preview =
       !branch &&
-      from.length === 1 &&
-      node(from[0]) &&
-      from[0].join == null &&
+      from.length > 0 &&
       ast.where == null &&
       ast.groupby == null &&
       ast.having == null &&
@@ -376,7 +417,7 @@ class Walker {
     if (node(ast._next)) this.statement(ast._next, ctes, depth + 1);
   }
 
-  private write(ast: Node, ctes: Set<string>, depth: number): void {
+  private write(ast: Node, ctes: Ctes, depth: number): void {
     const op = ast.type as "update" | "delete";
     const table = Array.isArray(ast.table) ? ast.table : [];
     const from = Array.isArray(ast.from) ? ast.from : [];
@@ -426,8 +467,8 @@ function pgCommandLocks(sql: string): Lock[] {
       text,
     );
   if (reindex) {
-    if (reindex[3] || /concurrently/.test(reindex[1] ?? "")) return [];
-    // REINDEX INDEX names an index, which has no row estimate of its own.
+    // REINDEX INDEX names an index, whose table and size are unknown here: no claim either way.
+    if (reindex[3] || /concurrently/.test(reindex[1] ?? "") || reindex[2] === "index") return [];
     return [
       {
         rel: reindex[2] === "table" ? relation(text.slice(reindex[0].length)) : undefined,
@@ -495,6 +536,8 @@ function bind(
 
 interface Usage {
   referenced: boolean[];
+  // Restricted by a condition on this source alone. A join condition filters neither side.
+  filtered: boolean[];
   columns: Set<string>[];
   ambiguous: boolean;
   // Groups of sources no comparison links, each listed by member index.
@@ -504,6 +547,7 @@ interface Usage {
 function usage(block: Block, facts: Facts | null): Usage {
   const n = block.sources.length;
   const referenced = new Array<boolean>(n).fill(false);
+  const filtered = new Array<boolean>(n).fill(false);
   const columns = Array.from({ length: n }, () => new Set<string>());
   let ambiguous = false;
   const parent = Array.from({ length: n }, (_, i) => i);
@@ -514,40 +558,43 @@ function usage(block: Block, facts: Facts | null): Usage {
   const link = (a: number, b: number) => {
     parent[find(a)] = find(b);
   };
-  const owner = (expr: unknown): number | null => {
-    const owners = new Set<number>();
-    for (const ref of columnRefs(expr)) {
-      const at = bind(block, ref, facts);
-      if (typeof at === "number") owners.add(at);
-    }
-    return owners.size === 1 ? [...owners][0] : null;
-  };
-  // USING compares the new item with the side it joins, the source just before it.
-  for (const [i, s] of block.sources.entries()) if (s.joinedBy === "using") link(i, i - 1);
+  // USING compares the new item with the side it joins, the source just before it, on the
+  // columns it names, as the equivalent ON would.
+  for (const [i, s] of block.sources.entries()) {
+    if (s.joinedBy !== "using") continue;
+    link(i, i - 1);
+    for (const column of s.using ?? [])
+      for (const side of [i, i - 1]) {
+        referenced[side] = true;
+        columns[side].add(column);
+      }
+  }
   for (const part of [...block.ons, block.where].flatMap(conjuncts)) {
+    const owners = new Set<number>();
     for (const ref of columnRefs(part)) {
       const at = bind(block, ref, facts);
       if (at === "unresolved") {
         ambiguous = true;
         referenced.fill(true);
+        filtered.fill(true);
       } else if (at !== "outer") {
         referenced[at] = true;
         columns[at].add(ref.column);
+        owners.add(at);
       }
     }
-    if (
-      node(part) &&
-      part.type === "binary_expr" &&
-      COMPARISONS.has(String(part.operator).toUpperCase())
-    ) {
-      const left = owner(part.left);
-      const right = owner(part.right);
-      if (left !== null && right !== null && left !== right) link(left, right);
+    // Any condition naming two sources links them (=, BETWEEN, IN, a function call): reading
+    // a real join as missing would block it, while missing a rare odd one only skips an alert.
+    // An OR operand can hold without the other one, so it never links.
+    if (!hasOr(part)) {
+      const [first, ...rest] = owners;
+      for (const other of rest) link(first, other);
     }
+    if (owners.size === 1) filtered[[...owners][0]] = true;
   }
   const groups = new Map<number, number[]>();
   for (let i = 0; i < n; i++) groups.set(find(i), [...(groups.get(find(i)) ?? []), i]);
-  return { referenced, columns, ambiguous, groups: [...groups.values()] };
+  return { referenced, filtered, columns, ambiguous, groups: [...groups.values()] };
 }
 
 // Reads the SQL text only. Never throws: what it cannot read leaves covered false.
@@ -560,6 +607,7 @@ export function planLoad(sql: string, dialect: string): LoadPlan {
     hints: [],
     relations: [],
     covered: true,
+    dependent: new Set(),
   };
   const explain = stripExplain(sql);
   // A plain EXPLAIN only plans the statement it wraps; EXPLAIN ANALYZE runs it.
@@ -571,7 +619,7 @@ export function planLoad(sql: string, dialect: string): LoadPlan {
     const ast = input.restoreAst(parser.astify(input.sql, { database: dialect }));
     const statements = Array.isArray(ast) ? ast : [ast];
     if (statements.length !== 1) throw new Incomplete();
-    walker.statement(statements[0], new Set(), 0);
+    walker.statement(statements[0], new Map(), 0);
     plan.covered = walker.covered;
   } catch {
     plan.covered = false;
@@ -586,6 +634,16 @@ export function planLoad(sql: string, dialect: string): LoadPlan {
   for (const l of plan.locks) if (l.rel) seen.set(relKey(l.rel), l.rel);
   plan.relations = [...seen.values()];
   if (plan.relations.length > MAX_RELATIONS) plan.covered = false;
+  // An inner block the enclosing query filters or previews is not read in full: PostgreSQL
+  // pushes the filter down or stops early.
+  for (const b of plan.blocks) {
+    const u = usage(b, null);
+    for (const [i, s] of b.sources.entries()) {
+      const group = u.groups.find((g) => g.includes(i)) ?? [i];
+      if (s.inner && (b.preview || group.some((j) => u.filtered[j])))
+        for (const inner of s.inner) plan.dependent.add(inner);
+    }
+  }
   // Computed before any catalog fact exists, so a hint never tells the agent about the data.
   plan.hints = hintsFor(plan);
   return plan;
@@ -594,11 +652,21 @@ export function planLoad(sql: string, dialect: string): LoadPlan {
 // The first group holding a comma-joined source, against the group of the first source: a
 // missing join condition is a bug at any size, while an explicit CROSS JOIN is intended.
 function unlinkedPair(b: Block, u: Usage): { a: Source; c: Source; comma: boolean } | null {
-  if (u.groups.length < 2) return null;
-  const firsts = u.groups.map((g) => g[0]);
-  const comma = firsts.slice(1).find((i) => b.sources[i].joinedBy === "comma");
-  const other = comma ?? firsts[1];
-  return { a: b.sources[firsts[0]], c: b.sources[other], comma: comma !== undefined };
+  const tabled = tableGroups(b, u);
+  if (tabled.length < 2) return null;
+  const firsts = tabled.map((g) => g.find((i) => b.sources[i].rel) ?? g[0]);
+  const missing = tabled.findIndex((g, k) => k > 0 && b.sources[g[0]].joinedBy !== "cross");
+  return {
+    a: b.sources[firsts[0]],
+    c: b.sources[firsts[missing > 0 ? missing : 1]],
+    comma: missing > 0,
+  };
+}
+
+// Only groups holding a table count: a function, a LATERAL item, a derived table or a CTE in
+// FROM is usually correlated with or bounded by its siblings, so pairing with it is no finding.
+function tableGroups(b: Block, u: Usage): number[][] {
+  return u.groups.filter((g) => g.some((i) => b.sources[i].rel));
 }
 
 function hintsFor(plan: LoadPlan): string[] {
@@ -607,7 +675,13 @@ function hintsFor(plan: LoadPlan): string[] {
   for (const w of plan.writes)
     if (w.block.noWhere) hints.add(`The ${w.op.toUpperCase()} has no WHERE clause.`);
   for (const b of plan.blocks) {
-    if (!writeBlocks.has(b) && b.noWhere && !b.preview && b.sources.some((s) => s.rel))
+    if (
+      !writeBlocks.has(b) &&
+      !plan.dependent.has(b) &&
+      b.noWhere &&
+      !b.preview &&
+      b.sources.some((s) => s.rel)
+    )
       hints.add("The query reads a table without a WHERE clause.");
     const u = usage(b, null);
     const pair = u.ambiguous ? null : unlinkedPair(b, u);
@@ -619,7 +693,10 @@ function hintsFor(plan: LoadPlan): string[] {
 
 // The operator's note first, then the SQL-only hints; undefined when there is nothing.
 export function agentMessage(prefix: string | undefined, hints: string[]): string | undefined {
-  const text = [prefix?.trim(), ...hints].filter(Boolean).join(" ");
+  let note = prefix?.trim() ?? "";
+  // A typed note without a final stop must not run into the first hint.
+  if (note && hints.length && !/[.!?]$/.test(note)) note += ".";
+  const text = [note, ...hints].filter(Boolean).join(" ");
   return text || undefined;
 }
 
@@ -667,7 +744,7 @@ export function checkLoad(plan: LoadPlan, facts: Facts | Pending): LoadResult {
 
   for (const w of plan.writes) {
     const target = w.block.sources[w.target]?.rel;
-    if (!target) continue;
+    if (!target || w.block.empty) continue;
     // Every row only when nothing else in the statement can limit the target.
     if (w.block.noWhere && w.block.sources.length === 1) {
       rowsChanged.push(
@@ -687,10 +764,14 @@ export function checkLoad(plan: LoadPlan, facts: Facts | Pending): LoadResult {
     for (const part of conjuncts(w.block.where)) {
       if (!node(part) || part.type !== "binary_expr") continue;
       const op = String(part.operator).toUpperCase();
-      const ref = node(part.left) && part.left.type === "column_ref" ? part.left : null;
-      const list = node(part.right) && Array.isArray(part.right.value) ? part.right.value : null;
+      // "id = 7" and "7 = id" pin the same key.
+      const flipped = op === "=" && literal(part.left);
+      const side = flipped ? part.right : part.left;
+      const other = flipped ? part.left : part.right;
+      const ref = node(side) && side.type === "column_ref" ? side : null;
+      const list = node(other) && Array.isArray(other.value) ? other.value : null;
       const fixed =
-        (op === "=" && literal(part.right)) ||
+        (op === "=" && literal(other)) ||
         (op === "IN" && list !== null && list.length > 0 && list.every(literal));
       const column = ref ? label(ref.column) : null;
       if (
@@ -716,13 +797,17 @@ export function checkLoad(plan: LoadPlan, facts: Facts | Pending): LoadResult {
   }
 
   for (const b of plan.blocks) {
+    if (b.empty) continue;
     const write = writeOf.get(b);
     const u = usage(b, known);
     if (u.ambiguous && b.sources.some((s) => s.rel)) unbound = true;
     for (const [i, s] of b.sources.entries()) {
-      if (!s.rel) continue;
+      if (!s.rel || plan.dependent.has(b)) continue;
       const f = factsOf(s.rel);
-      if (!u.referenced[i]) {
+      // A join reads every matching row: unless some member of the joined group is filtered
+      // on its own, every member is read in full, whatever index the join uses.
+      const group = u.groups.find((g) => g.includes(i)) ?? [i];
+      if (!group.some((j) => u.filtered[j])) {
         // The rows-changed line already speaks for an unfiltered write target.
         if (write?.target === i) continue;
         if (b.preview && f && f.rows !== null && !f.kind && f.rls === false) continue;
@@ -741,7 +826,9 @@ export function checkLoad(plan: LoadPlan, facts: Facts | Pending): LoadResult {
       }
       const indexed = f.indexed;
       const cols = [...u.columns[i]];
-      if (!cols.length || cols.some((c) => indexed.has(c))) continue;
+      // An expression index (lower(email)) may serve a wrapped filter; the list cannot say which.
+      const expressions = [...indexed].some((name) => name.includes("("));
+      if (!cols.length || expressions || cols.some((c) => indexed.has(c))) continue;
       const line: Line = ["Filter on "];
       cols.forEach((c, k) => {
         if (k) line.push(", ");
@@ -761,7 +848,7 @@ export function checkLoad(plan: LoadPlan, facts: Facts | Pending): LoadResult {
       });
       return rows.some((r) => r == null) ? null : Math.max(...(rows as number[]));
     };
-    const sizes = u.groups.map(size);
+    const sizes = tableGroups(b, u).map(size);
     const product = sizes.some((s) => s === null)
       ? null
       : (sizes as number[]).reduce((p, s) => p * s, 1);

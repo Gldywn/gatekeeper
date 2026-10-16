@@ -1499,7 +1499,7 @@ describe("load check binding", () => {
     }
   });
 
-  it("releases a card re-offered while its rejection was in flight, undecided", async () => {
+  it("records a delivered rejection even if the schema changed while it was in flight", async () => {
     const { app, card } = harness();
     const delivered = deferred<boolean>();
     app.broker.result.mockReturnValueOnce(delivered.promise);
@@ -1507,11 +1507,51 @@ describe("load check binding", () => {
     settled.resolve(HEAVY);
     await flush();
     expect(card.state).toBe("rejecting");
-    card.leaseId = "fresh-lease";
+    app.connGeneration++;
     delivered.resolve(true);
     await flush();
-    // Released for the new lease, never recorded as decided.
+    expect(app.finish).toHaveBeenCalledWith(
+      card.id,
+      "rejected",
+      "heavy query, auto-denied",
+      undefined,
+      undefined,
+      expect.objectContaining({ autoDenied: true }),
+    );
+  });
+
+  it("releases an undelivered rejection without leaving Auto mode's evaluating status", async () => {
+    const { app, card } = harness();
+    app.broker.result.mockResolvedValueOnce(false);
+    const { settled } = start(app, card);
+    card.autoStatus = "Evaluating with Jev";
+    settled.resolve(HEAVY);
+    await flush();
     expect(card.state).toBe("ready");
+    expect(card.autoStatus).toBe("Needs review: Heavy query");
     expect(app.finish).not.toHaveBeenCalled();
+  });
+});
+
+describe("load check after a re-pair", () => {
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it("restarts a check cut short once the card is claimed again", async () => {
+    const { app, card } = harness();
+    vi.stubGlobal("CSS", { escape: (s: string) => s });
+    app.settingsStore = {
+      get: () => ({ confirmWrites: true, resultCacheMb: 4, autoDenyHeavy: true }),
+      loadedForConnection: () => true,
+    };
+    const inspect = vi.spyOn(app.annotator, "inspectLoad").mockResolvedValueOnce(undefined);
+    app.startLoad(card, true);
+    await flush();
+    expect(card.loadStale).toBe(true);
+    inspect.mockResolvedValueOnce(LIGHT);
+    app.claim({ ...card });
+    await flush();
+    expect(inspect).toHaveBeenCalledTimes(2);
+    expect(card.loadStale).toBe(false);
+    expect(card.loadResult).toBe(LIGHT);
   });
 });

@@ -551,9 +551,25 @@ describe("coverage", () => {
     ]);
   });
 
-  it("does not take a column named in a CASE for a join condition", () => {
-    const sql = "SELECT * FROM public.a, public.b WHERE CASE WHEN a.x = 1 THEN b.y ELSE 0 END = 1";
-    expect(check(sql).lines).toHaveLength(1);
+  it("links two sources through any condition naming both, never through an OR", () => {
+    for (const sql of [
+      "SELECT * FROM public.s, public.e WHERE e.ts BETWEEN s.start_at AND s.end_at AND s.id = 3",
+      "SELECT * FROM public.a JOIN public.b ON b.id IN (a.x, a.y)",
+      "SELECT * FROM public.a JOIN public.b ON st_dwithin(a.geom, b.geom, 100)",
+    ])
+      expect(check(sql).lines).toEqual([]);
+    expect(
+      check("SELECT * FROM public.a, public.b WHERE a.id = b.a_id OR b.y = 1").lines,
+    ).toHaveLength(1);
+  });
+
+  it("never reads a function, LATERAL item, derived table or CTE in FROM as a missing join", () => {
+    for (const sql of [
+      "SELECT o.id FROM public.orders o, jsonb_array_elements(o.items) AS i WHERE o.id = 42",
+      "SELECT u.id FROM public.users u, LATERAL (SELECT count(*) AS n FROM public.orders WHERE orders.user_id = u.id) x WHERE u.id = 42",
+      "SELECT o.id FROM public.orders o, (SELECT max(total) AS m FROM public.orders) top WHERE o.id = 1",
+    ])
+      expect(check(sql).lines).toEqual([]);
   });
 
   it("sizes an explicit CROSS JOIN over every group, and stays silent when a size is unknown", () => {
@@ -578,9 +594,90 @@ describe("coverage", () => {
     expect(check("TRUNCATE public.t").complete).toBe(false);
   });
 
-  it("does not size REINDEX INDEX against the index", () => {
-    expect(check("REINDEX INDEX public.t_pkey").lines).toEqual([
-      "REINDEX without CONCURRENTLY blocks writes on the tables it covers",
+  it("makes no claim on REINDEX INDEX or on an ALTER that is not ALTER TABLE", () => {
+    for (const sql of [
+      "REINDEX INDEX public.t_pkey",
+      "ALTER SEQUENCE public.orders_id_seq RESTART WITH 1000",
+    ])
+      expect(check(sql).lines).toEqual([]);
+  });
+});
+
+describe("no false alert on bounded queries", () => {
+  const BIG_ROWS = 2_000_000;
+  const big = facts({
+    "public.a": { rows: BIG_ROWS },
+    "public.b": { rows: BIG_ROWS },
+    "public.t": { rows: BIG_ROWS },
+  });
+
+  it("counts USING columns as a condition on both sides, like ON", () => {
+    expect(
+      check("SELECT a.id FROM public.a a JOIN public.b b USING (id) WHERE b.id = 7", big).lines,
+    ).toEqual([]);
+  });
+
+  it("lets the enclosing query filter or preview a derived table or CTE", () => {
+    for (const sql of [
+      "SELECT p.id FROM (SELECT id FROM public.t) p WHERE p.id = 7",
+      "WITH p AS (SELECT id FROM public.t) SELECT id FROM p WHERE id = 7",
+      "SELECT * FROM (SELECT * FROM public.t) p LIMIT 10",
+    ])
+      expect(check(sql, big).lines).toEqual([]);
+    // Nothing filters the CTE, so it is still read in full.
+    expect(check("WITH p AS (SELECT * FROM public.t) SELECT count(*) FROM p", big).lines).toEqual([
+      "Reads every row of `t` without a `WHERE` clause",
     ]);
+  });
+
+  it("reads WHERE FALSE and WHERE 1 = 0 as reading nothing", () => {
+    for (const sql of [
+      "SELECT * FROM public.t WHERE FALSE",
+      "SELECT id FROM public.t WHERE 1 = 0",
+      "UPDATE public.t SET x = 1 WHERE FALSE",
+    ])
+      expect(check(sql, big).lines).toEqual([]);
+  });
+
+  it("pins a primary key written either way round", () => {
+    expect(check("UPDATE public.t SET x = 1 WHERE 7 = id", big).lines).toEqual([]);
+    expect(check("DELETE FROM public.t WHERE 7 = id", big).lines).toEqual([]);
+  });
+});
+
+describe("joins without a filter", () => {
+  const BIG_ROWS = 40_000_000;
+  const f = facts({
+    "public.orders": { rows: BIG_ROWS, indexed: new Set(["id", "customer_id"]) },
+    "public.customers": { rows: 50_000, indexed: new Set(["id"]) },
+  });
+
+  it("reads every row of a large table joined without any filter", () => {
+    const sql =
+      "SELECT c.country, count(*) FROM public.orders o JOIN public.customers c ON c.id = o.customer_id GROUP BY c.country";
+    expect(check(sql, f).lines).toEqual([
+      "Reads every row of `orders` since no condition filters it",
+    ]);
+  });
+
+  it("stays silent once one side is filtered, or with a small LIMIT and no order", () => {
+    for (const sql of [
+      "SELECT o.id FROM public.orders o JOIN public.customers c ON c.id = o.customer_id WHERE c.id = 5",
+      "SELECT o.id FROM public.orders o JOIN public.customers c ON c.id = o.customer_id LIMIT 10",
+    ])
+      expect(check(sql, f).lines).toEqual([]);
+  });
+
+  it("binds a column-list alias to its source", () => {
+    const sql =
+      "SELECT o.id FROM public.orders o, (VALUES (1, 'a')) AS v(id, label) WHERE o.customer_id = v.id AND o.id = 3";
+    expect(check(sql, f).lines).toEqual([]);
+  });
+
+  it("separates a typed note from the hints", () => {
+    expect(agentMessage("wrong table", ["The DELETE has no WHERE clause."])).toBe(
+      "wrong table. The DELETE has no WHERE clause.",
+    );
+    expect(agentMessage("wrong table", [])).toBe("wrong table");
   });
 });

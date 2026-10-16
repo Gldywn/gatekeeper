@@ -293,7 +293,14 @@ describe("SchemaAnnotator.schemaFor", () => {
 describe("SchemaAnnotator.inspectLoad", () => {
   const PATH = [{ path: '["pg_catalog","public"]' }];
   const stats = (rows: number) => [
-    { i: 0, schema: "public", kind: "r", rls: false, parts: JSON.stringify([["r", rows, 0]]) },
+    {
+      i: 0,
+      schema: "public",
+      kind: "r",
+      rls: false,
+      deeper: false,
+      parts: JSON.stringify([["r", rows, 0]]),
+    },
   ];
   const text = (line: (string | { code: string })[]) =>
     line.map((s) => (typeof s === "string" ? s : s.code)).join("");
