@@ -121,6 +121,15 @@ itself is in neither the URL nor the prompt.
 - **Loopback only.** The broker binds `127.0.0.1`.
 - **DNS-rebinding defense.** It rejects any request whose `Host` header is not the
   expected loopback host (`421`).
+- **One request beyond loopback, read-only.** A release build of the plugin asks GitHub
+  for the latest Gatekeeper release once when it starts:
+  `GET https://api.github.com/repos/Gldywn/gatekeeper/releases/latest`, a constant in
+  `packages/plugin/src/version.ts`, with a 5-second timeout, no cookies and no referrer.
+  Gatekeeper attaches no token, no session or build identifier, nothing about your
+  connections and no SQL; GitHub receives the usual network and browser metadata (IP
+  address, User-Agent, Origin). The plugin keeps only the release tag from the answer. No
+  release asset or code is downloaded, nothing is installed, and Gatekeeper never updates
+  itself: updating stays a manual step. Dev builds skip the request.
 
 ## Data at rest and in flight
 

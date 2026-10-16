@@ -72,6 +72,13 @@ describe("server instructions", () => {
     expect(instructions).toBe(SERVER_INSTRUCTIONS);
   });
 
+  it("introduces itself with the package version", () => {
+    const { version } = JSON.parse(
+      readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+    ) as { version: string };
+    expect(client.getServerVersion()?.version).toBe(version);
+  });
+
   it("states the whole waiting contract within Codex's guaranteed window", () => {
     const window = SERVER_INSTRUCTIONS.slice(0, CODEX_INSTRUCTIONS_WINDOW);
     expect(window).toContain("set_session_label first");

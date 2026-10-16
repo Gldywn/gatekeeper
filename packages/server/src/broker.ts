@@ -36,6 +36,7 @@ import {
   type RequestStore,
   StoreError,
 } from "./store.js";
+import { SERVER_IDENTITY } from "./version.js";
 
 const CORS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -44,7 +45,11 @@ const CORS: Record<string, string> = {
   // The plugin runs on a secure plugin:// origin; Chromium's Private Network
   // Access gates its fetch to loopback unless the preflight grants this.
   "Access-Control-Allow-Private-Network": "true",
+  // Only names the header; its value is set after the bearer check, never before.
+  "Access-Control-Expose-Headers": "X-Gatekeeper-Server",
 };
+// The plugin reads this off its 1 Hz poll, so a new broker owner shows within a second.
+const IDENTITY_HEADER = encodeURIComponent(JSON.stringify(SERVER_IDENTITY));
 const MAX_BODY_BYTES = 32 * 1024 * 1024;
 const ACTIVITY_PAGE = 200;
 const PAIRING_BODY_BYTES = 1024;
@@ -157,6 +162,7 @@ async function handle(broker: Broker, req: IncomingMessage, res: ServerResponse)
     send(res, 401, { error: "unauthorized" });
     return;
   }
+  res.setHeader("X-Gatekeeper-Server", IDENTITY_HEADER);
 
   // A live token holder is a paired plugin: that presence is what stops the agent-facing
   // tools asking for a code, and what stops a fresh code being handed out.

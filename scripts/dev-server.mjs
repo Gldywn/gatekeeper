@@ -9,6 +9,7 @@ import { createRequire } from "node:module";
 import { createConnection } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildIdentity } from "./build-identity.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const watch = process.argv.includes("--watch");
@@ -97,7 +98,16 @@ if (!existsSync(serverEntry)) {
 killOthers();
 await waitPortFree(2000);
 
-const child = spawn(process.execPath, args, { stdio: "inherit" });
+// A server watched from src/ has no dist/build.json, so it gets the stamp a build would write.
+const identity = buildIdentity(
+  join(root, "packages", "server"),
+  serverRequire("./package.json").version,
+  undefined,
+);
+const child = spawn(process.execPath, args, {
+  stdio: "inherit",
+  env: { ...process.env, GATEKEEPER_BUILD_IDENTITY: JSON.stringify(identity) },
+});
 const forward = (sig) => {
   try {
     child.kill(sig);

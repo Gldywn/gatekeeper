@@ -90,6 +90,21 @@ The plugin caps the rows it forwards to the agent (by count and bytes) so a bulk
 floods the agent context or the LLM provider. The agent still learns the true size:
 `terminal.truncated` says it capped and `terminal.rowCount` is the true pre-cap total.
 
+## Versions
+
+Every build is stamped by `scripts/build-identity.mjs`: a release only when a release
+workflow built it (`GATEKEEPER_RELEASE_TAG`), otherwise dev, with its commit and branch when
+git can tell. The server sends its stamp on every authenticated broker answer as the
+`X-Gatekeeper-Server` header (URI-encoded JSON, set after the bearer check, so an unpaired
+caller never sees it). The plugin reads it off its 1 Hz `/pending` poll, so a new broker
+owner shows within a second. A release build of the plugin also asks GitHub once per start
+for the latest release (see [`SECURITY.md`](../SECURITY.md), Network).
+
+The bottom-left indicator and Settings > Version compare the three. A side behind the other
+is a warning, with what to do; both sides behind the latest release is only news; a dev
+build on either side gets no advice. A server that sends no header, or one the plugin
+cannot reach, shows as unknown.
+
 ## Retention
 
 The agent-facing technical audit records the lifecycle (decision, timestamps, SQL digest,

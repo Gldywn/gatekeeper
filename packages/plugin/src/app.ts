@@ -11,7 +11,12 @@ import {
   runQuery,
   setTabTitle,
 } from "@beekeeperstudio/plugin";
-import type { AutoEvaluation, AutoHold, SensitivityRecord } from "@gatekeeper/shared";
+import type {
+  AutoEvaluation,
+  AutoHold,
+  BuildIdentity,
+  SensitivityRecord,
+} from "@gatekeeper/shared";
 import { enter, type Loop, pulse, reveal } from "./anim";
 import { SchemaAnnotator } from "./annotate";
 import { clock, countsLabel, escapeHtml, relAge } from "./html";
@@ -42,6 +47,13 @@ import { historyRow } from "./render/history";
 import { type CardGate, cardGate, queueHtml, readyActions, schemaInner } from "./render/queue";
 import { type LayerState, readOnlyView } from "./render/readonly";
 import { presence, rosterRow } from "./render/roster";
+import {
+  UPDATE_SKILL_URL,
+  updatePrompt,
+  versionDockHtml,
+  versionDockTitle,
+  versionGroupHtml,
+} from "./render/version";
 import { capResult, type Field, type HistResult } from "./result";
 import { collectSchema } from "./schema-collect";
 import { filterSchema, resultBudgetBytes, type Settings, SettingsStore } from "./settings";
@@ -63,6 +75,13 @@ import type {
   RequestState,
   SessionRoster,
 } from "./types";
+import {
+  fetchLatestRelease,
+  parseServerIdentity,
+  SERVER_IDENTITY_HEADER,
+  type VersionStatus,
+  versionStatus,
+} from "./version";
 import { ActivityView } from "./views/activity";
 import { DetailView } from "./views/detail";
 import { SettingsView } from "./views/settings";
@@ -164,6 +183,7 @@ function newInstanceId(): string {
 
 const REPO_URL = "https://github.com/Gldywn/gatekeeper";
 const ISSUES_URL = `${REPO_URL}/issues/new/choose`;
+const RELEASES_URL = `${REPO_URL}/releases`;
 const STARRED_KEY = "gatekeeper.starred";
 
 // The rows forwarded to the agent are capped independently of the local history budget:
@@ -284,6 +304,12 @@ export class Gatekeeper {
   // demotion bails before it starts polling (a standby must never touch the broker).
   private activeGen = 0;
   private connectionState: ConnectionState = "connecting";
+  // The raw X-Gatekeeper-Server value last seen: undefined until the broker first answers
+  // (the corner indicator stays hidden), null once it is missing or the broker is gone.
+  private serverHeader: string | null | undefined = undefined;
+  private serverIdentity: BuildIdentity | null = null;
+  private latestRelease: string | null = null;
+  private latestChecked = false;
   private readonly root: HTMLElement;
   private readonly broker = new BrokerClient({ baseUrl: BROKER_URL, tokenKey: TOKEN_KEY });
   private readonly settingsStore = new SettingsStore();
@@ -317,6 +343,7 @@ export class Gatekeeper {
       mode: () => this.mode,
       auto: () => this.autoEnabled,
       keySaved: () => this.keySaved,
+      version: () => versionGroupHtml(this.versionStatus()),
     });
     root.addEventListener("click", (e) => {
       // The confirm overlay is rebuilt on every open, so its copy button delegates off
@@ -444,6 +471,7 @@ export class Gatekeeper {
 
   private async activate(): Promise<void> {
     const gen = ++this.activeGen;
+    void this.checkLatestRelease();
     this.token = await this.broker.loadToken();
     try {
       const connection = await getConnectionInfo();
@@ -501,6 +529,9 @@ export class Gatekeeper {
     this.activeGen++;
     this.polling = false;
     this.pollGeneration++;
+    // Another tab may own a different broker by the time this one is promoted again.
+    this.serverHeader = undefined;
+    this.serverIdentity = null;
     if (this.pollTimer !== undefined) {
       window.clearTimeout(this.pollTimer);
       this.pollTimer = undefined;
@@ -1116,6 +1147,7 @@ export class Gatekeeper {
         <div class="detail settings-overlay" id="settings" hidden></div>
         <div class="detail confirm-overlay" id="confirm" hidden></div>
         <div class="detail db-notice-overlay" id="notice" hidden></div>
+        <button class="ver-dock" id="verDock" type="button" hidden></button>
         <div class="cta-cluster" id="ctaCluster">
           <button class="cta-fab star${this.starred ? "" : " twinkle"}" type="button" data-gh-star aria-label="Star Gatekeeper on GitHub">${starGlyph}<span class="cta-lbl">Star on GitHub</span></button>
           <button class="cta-fab fb" type="button" data-gh-feedback aria-label="Request a feature">${feedbackGlyph}<span class="cta-lbl">Request a feature</span></button>
@@ -1264,6 +1296,10 @@ export class Gatekeeper {
         this.root.querySelector<HTMLElement>('#settings [data-setting="schemaAccess"]')?.focus();
       }
     });
+    this.root
+      .querySelector<HTMLButtonElement>("#verDock")
+      ?.addEventListener("click", () => this.openVersionSettings());
+    this.renderVersion();
     this.root.querySelector<HTMLElement>("#ctaCluster")?.addEventListener("click", (e) => {
       const target = e.target as HTMLElement;
       if (target.closest("[data-gh-star]")) {
@@ -1290,6 +1326,19 @@ export class Gatekeeper {
       }
       if (target.closest("[data-gh-feedback]")) {
         void openExternal(ISSUES_URL);
+        return;
+      }
+      if (target.closest("[data-releases]")) {
+        void openExternal(RELEASES_URL);
+        return;
+      }
+      if (target.closest("[data-skill-link]")) {
+        void openExternal(UPDATE_SKILL_URL);
+        return;
+      }
+      const copyPrompt = target.closest<HTMLElement>("[data-copy-prompt]");
+      if (copyPrompt) {
+        void this.copyUpdatePrompt(copyPrompt);
         return;
       }
       if (target.closest("[data-reset-settings]")) {
@@ -1511,6 +1560,73 @@ export class Gatekeeper {
     section
       ?.querySelector<HTMLElement>("[data-auto-key], [data-auto-toggle]")
       ?.focus({ preventScroll: true });
+  }
+
+  private versionInputs(): [BuildIdentity, BuildIdentity | null, string | null] {
+    return [__GK_BUILD__, this.serverIdentity, this.latestRelease];
+  }
+
+  private versionStatus(): VersionStatus {
+    return versionStatus(...this.versionInputs());
+  }
+
+  private setServerHeader(raw: string | null): void {
+    if (raw === this.serverHeader) return;
+    this.serverHeader = raw;
+    this.serverIdentity = parseServerIdentity(raw);
+    this.renderVersion();
+  }
+
+  // Touches only the corner indicator and the Version group, so an open Settings keeps
+  // whatever else is being edited.
+  private renderVersion(): void {
+    const status = this.versionStatus();
+    const dock = this.root.querySelector<HTMLButtonElement>("#verDock");
+    if (dock) {
+      const { cls, html } = versionDockHtml(status.dock);
+      const title = versionDockTitle(...this.versionInputs());
+      dock.className = `ver-dock${cls ? ` ${cls}` : ""}`;
+      dock.innerHTML = html;
+      dock.title = title;
+      dock.setAttribute("aria-label", `${title}. Open version settings.`);
+      dock.hidden = this.serverHeader === undefined;
+    }
+    const group = this.root.querySelector<HTMLElement>("#settings:not([hidden]) #versionSettings");
+    if (group) group.innerHTML = versionGroupHtml(status);
+  }
+
+  // Once per plugin start, and never from a dev build: Vite reloads would otherwise spend
+  // GitHub's anonymous rate limit, and a dev build gets no update advice anyway.
+  private async checkLatestRelease(): Promise<void> {
+    if (this.latestChecked || __GK_BUILD__.dev) return;
+    this.latestChecked = true;
+    this.latestRelease = await fetchLatestRelease();
+    this.renderVersion();
+  }
+
+  private openVersionSettings(): void {
+    this.setSettingsOpen(false);
+    this.settingsView.open();
+    const section = this.root.querySelector<HTMLElement>("#versionSettings");
+    section?.scrollIntoView({ block: "center" });
+    section?.focus({ preventScroll: true });
+  }
+
+  private async copyUpdatePrompt(button: HTMLElement): Promise<void> {
+    let copied = true;
+    try {
+      await clipboard.writeText(updatePrompt(...this.versionInputs()));
+    } catch {
+      copied = false;
+    }
+    button.classList.toggle("copied", copied);
+    button.innerHTML = copied
+      ? `${checkIcon}<span>Copied</span>`
+      : `${copyIcon}<span>Copy failed, try again</span>`;
+    window.setTimeout(() => {
+      button.classList.remove("copied");
+      button.innerHTML = `${copyIcon}<span>Copy prompt</span>`;
+    }, 1600);
   }
 
   private resetAuto(reason: string): void {
@@ -1906,6 +2022,8 @@ export class Gatekeeper {
       if (res.status === 401) {
         this.polling = false;
         this.token = null;
+        this.serverHeader = undefined;
+        this.serverIdentity = null;
         this.resetAuto("Pairing lost");
         this.activeGen++;
         this.mode = "read";
@@ -1913,6 +2031,9 @@ export class Gatekeeper {
         this.renderPairing("This tab was unpaired. Enter a fresh code to reconnect.");
         return;
       }
+      // The broker stamps every authenticated answer, its errors included, so each one is
+      // current; one without the header is not from a Gatekeeper that reports its version.
+      this.setServerHeader(res.headers.get(SERVER_IDENTITY_HEADER));
       if (res.status === 200) {
         claimed = true;
         const proposal = (await res.json()) as Proposal;
@@ -1927,6 +2048,7 @@ export class Gatekeeper {
       this.pollFailures++;
       if (this.pollFailures >= 3) {
         this.setConnectionState("error", `Broker unreachable at ${BROKER_URL}. Retrying...`);
+        if (active === this.activeGen) this.setServerHeader(null);
       } else if (this.connectionState !== "connecting") {
         this.setConnectionState("reconnecting");
       }

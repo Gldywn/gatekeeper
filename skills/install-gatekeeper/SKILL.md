@@ -54,7 +54,7 @@ On Linux and Windows, ask the human for the version rather than hunting for it: 
 
 **The easy path, if it exists yet.** If the human already has Beekeeper open, one look at Manage Plugins settles it: a Gatekeeper entry there installs in one click and this whole step disappears. The registry submission was still in progress when this was written, so expect it to be absent. Do not block on the answer: the manual route below works either way.
 
-**The manual route.** If a `gatekeeper/manifest.json` already sits in the plugins folder at the latest version, there is nothing to do here: go to step 2. Otherwise find the latest release, download the zip, and extract it straight into the plugins folder under the exact folder name `gatekeeper`:
+**The manual route.** If a `gatekeeper/manifest.json` already sits in the plugins folder, this is not an install: at the latest version there is nothing to do here, so go to step 2; at an older one, hand the plugin to `update-gatekeeper`, which defers it until npm serves the matching server, then come back for step 2. Otherwise find the latest release, download the zip, and extract it straight into the plugins folder under the exact folder name `gatekeeper`:
 
 ```bash
 tmp="${TMPDIR:-/tmp}"
@@ -82,7 +82,7 @@ unzip -o "$tmp/gatekeeper-$version.zip" -d "$plugins/gatekeeper"
 
 Extracting with `-d .../plugins/gatekeeper` is the whole trick: the folder ends up named exactly `gatekeeper` and the manifest sits directly inside it, which is what Beekeeper requires. **Beekeeper matches the folder name against the plugin id and skips any folder that disagrees without a word**: no error, no entry in Manage Plugins, nothing to click. That silent skip is the single most common reason a manual install appears to do nothing. Double-clicking the zip in Finder is what produces the wrong shape, because macOS wraps a multi-file archive in a `gatekeeper-<version>/` folder; the command above avoids the rename entirely.
 
-**Upgrading over an existing install.** `unzip -o` on its own leaves the old build behind: asset filenames carry a content hash, so a new bundle lands beside the previous one instead of replacing it, and `-o` only overwrites what the archive names. Clear `dist` first, with `rm -rf "$plugins/gatekeeper/dist"`, and let the archive restore it, but only after you have confirmed with your own eyes that the path ends in `/plugins/gatekeeper` and holds a Gatekeeper `manifest.json`. Never delete a path you have not just listed. `update-gatekeeper` carries the full sequence.
+**An older install is an update.** Do not extract over it here: `update-gatekeeper` clears the previous build safely (asset filenames carry a content hash, so `unzip -o` alone would leave the old bundle beside the new one) and checks npm first, so the plugin never moves ahead of the server.
 
 **Check:**
 
@@ -142,7 +142,7 @@ args = ["-y", "@gldywn/gatekeeper-mcp-server"]
 }
 ```
 
-Two choices worth putting to the human rather than deciding for them. **Pinning:** unpinned, `npx` re-resolves the latest release at every agent launch, which keeps them current but means a process with a path to their database changes under them; `@gldywn/gatekeeper-mcp-server@<version>` trades that for an upgrade they audit. **pnpm:** `pnpm dlx @gldywn/gatekeeper-mcp-server` is the direct equivalent of the `npx` line, and `pnpm add -g @gldywn/gatekeeper-mcp-server` resolves it once and puts a `gatekeeper-mcp-server` binary on `PATH` to point the client at. If the human is on a machine where installs go through their own review, hand them the command instead of running it.
+Two choices worth putting to the human rather than deciding for them. **Pinning:** unpinned, `npx` re-resolves the latest release at every agent launch, which keeps them current but means a process with a path to their database changes under them; `@gldywn/gatekeeper-mcp-server@<version>` trades that for an upgrade they audit, pinned only to a version npm already serves (`npm view` or `pnpm view` prints it back). **pnpm:** `pnpm dlx @gldywn/gatekeeper-mcp-server` is the direct equivalent of the `npx` line, and `pnpm add -g @gldywn/gatekeeper-mcp-server` resolves it once and puts a `gatekeeper-mcp-server` binary on `PATH` to point the client at. If the human is on a machine where installs go through their own review, hand them the command instead of running it.
 
 **Check:** read the config file back, confirm it parses, confirm the `gatekeeper` entry is there and every pre-existing server still is. For Claude Code, `claude mcp list` shows it. Do not expect the tools to work yet: a server registered mid-session is not connected in that session.
 
@@ -211,6 +211,6 @@ Anything you were blocked on goes under the last heading with the exact command,
 
 ## Updating and removing
 
-**Update:** the `update-gatekeeper` skill does it across all three pieces, and knows which ones need nothing. The short version: re-run step 1 against the new release and restart Beekeeper, since an unpinned `npx` line picks the matching server up on its own at the next agent launch while a pinned one needs its version bumped by hand. Plugin and server ship under one version and are meant to match, and an in-place plugin update keeps the pairing.
+**Update:** hand it to the `update-gatekeeper` skill. It does it across all three pieces, knows which ones need nothing, and defers the plugin and the server until npm serves a new release, so they never end up on different versions. An in-place plugin update keeps the pairing.
 
 **Remove:** delete the `gatekeeper` folder from the plugins directory, drop the `gatekeeper` entry from the MCP client config, and delete `~/.gatekeeper` (the capability token and the local SQLite queue). The skills come out with `npx skills remove gatekeeper install-gatekeeper`, or by deleting their folders. Nothing else was ever written outside those three places.

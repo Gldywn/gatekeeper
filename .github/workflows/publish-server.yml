@@ -57,6 +57,9 @@ jobs:
   publish:
     needs: notifier
     runs-on: ubuntu-latest
+    # Job-wide so any rebuild during packing also stamps dist/build.json as this release.
+    env:
+      GATEKEEPER_RELEASE_TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
     steps:
       # Both halves live under the always-available `github` context: the `inputs`
       # context is only populated for workflow_dispatch and workflow_call, and this
@@ -110,6 +113,8 @@ jobs:
           mode="$(tar -tvf "$tarball" | grep 'MacOS/gatekeeper-notify' | awk '{print $1}')"
           echo "packed as $mode"
           case "$mode" in *x*) ;; *) echo "::error::execute bit stripped by pack"; exit 1 ;; esac
+          tar -xOf "$tarball" package/dist/build.json | jq -e 'has("dev") | not' \
+            || { echo "::error::dist/build.json is not stamped as a release"; exit 1; }
 
       # Staged publishing needs npm 11.15.0+; Node 24's bundled npm can be older. Pinned
       # exact, like every other dependency; bump it deliberately.
