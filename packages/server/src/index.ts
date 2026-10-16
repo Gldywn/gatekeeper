@@ -2,7 +2,7 @@
 // The npm `bin` entry points at the compiled dist/index.js; tsc preserves this
 // shebang, so `npx @gldywn/gatekeeper-mcp-server` execs it directly.
 import { randomBytes } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createBroker } from "./broker.js";
@@ -88,9 +88,10 @@ async function main(): Promise<void> {
 
   const broker = createBroker(store, pluginId, token, undefined, undefined, notifier);
   const port = brokerPort();
-  // A child tsx had to SIGKILL leaves this file behind, so the next one runs MCP-only
-  // until the dev launcher restarts; a clean close unlinks it.
+  // Only a clean close unlinks the socket, so a child that crashed leaves it behind. The
+  // launcher's dir is private and tsx starts one child at a time: the file is never live.
   const socket = brokerSocket();
+  if (socket) rmSync(socket, { force: true });
   let brokerOwner = false;
   let shuttingDown = false;
 
