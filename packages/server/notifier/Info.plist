@@ -14,5 +14,8 @@
   <key>CFBundleShortVersionString</key><string>1.0</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>LSMinimumSystemVersion</key><string>11.0</string>
+  <!-- A click on a banner relaunches the helper through LaunchServices, which would
+       otherwise show a Dock icon for the instant it takes to open Beekeeper. -->
+  <key>LSUIElement</key><true/>
 </dict>
 </plist>

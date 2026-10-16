@@ -52,6 +52,11 @@ from one source of truth.
                                               └──────────────────────────────────┘
 ```
 
+Both release workflows set `GATEKEEPER_RELEASE_TAG` for the whole job. It stamps the plugin
+bundle and the server's `dist/build.json` as that release, and the build fails if the tag and
+the package version disagree. Without it a release would call itself a dev build in the
+plugin's version indicator, so `publish-server.yml` checks the stamp in the packed tarball.
+
 Three things about that shape are deliberate, not accidental:
 
 - **The draft.** Assets are attached before a human ever sees the release, so an incomplete
@@ -100,7 +105,10 @@ These need a human with account access. None of them are in the repo.
    **stages** `@gldywn/gatekeeper-mcp-server` on npm with provenance. Staged means uploaded
    and invisible: nobody can install it yet, and the version number is now taken.
 6. Approve the staged version with 2FA (`npm stage approve`, or the package page on
-   npmjs.com). That approval is what makes it installable.
+   npmjs.com). That approval is what makes it installable. Approve it as soon as the
+   workflow is done: from the moment of Publish, every plugin that starts shows the
+   release as available, and the update skill defers updating the plugin and the server
+   until npm serves it.
 7. Verify (below).
 
 If a step needs a retry, both workflows have a `workflow_dispatch` entry point that takes
@@ -142,6 +150,10 @@ gh release download v0.1.0 --pattern manifest.json --output - | jq '{id, version
 npx -y @gldywn/gatekeeper-mcp-server@0.1.0 < /dev/null
 #   expect: "[gatekeeper] broker on http://127.0.0.1:9999" then a clean exit
 ```
+
+Once the plugin is installed from the release, Settings > Version shows the release version
+on the Plugin row, never `dev`. The bottom-left indicator sums up plugin and server
+together, so it can read `dev` or a mismatch when the server comes from a checkout.
 
 ## Submitting to the Beekeeper Studio plugin registry
 

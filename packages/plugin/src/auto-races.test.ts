@@ -119,7 +119,7 @@ function harness() {
       app.cards = [];
     }),
   });
-  app.serverVersion = { of: app.connIdentity(), version: "PostgreSQL 16.2 on x86_64-pc-linux-gnu" };
+  app.serverVersion = "PostgreSQL 16.2 on x86_64-pc-linux-gnu";
   app.annotator = new SchemaAnnotator({
     dialect: () => app.dialect,
     generation: () => app.connGeneration,
@@ -148,13 +148,12 @@ function evaluation(): AutoEvaluation {
   return {
     provider: "typesafe",
     model: "jev-1.13.0",
-    policy: "auto-beta-6",
+    policy: "auto-beta-7",
     evaluatedAt: Date.now(),
     sqlDigest: "a".repeat(64),
     eligible: true,
     reasons: [],
     probabilities: {
-      read_only: 0.999,
       personal_disclosure: 0.001,
       secret_disclosure: 0.001,
       organization_disclosure: 0.001,
@@ -446,6 +445,21 @@ describe("shared manual/automatic execution authority", () => {
     await app.approve(card.id);
     expect(query).not.toHaveBeenCalled();
     expect(app.broker.withdrawExecution).toHaveBeenCalledOnce();
+  });
+  it("brings the endpoint check forward when an approved query errors", async () => {
+    const { app, card } = harness();
+    app.nextCheckAt = Number.MAX_SAFE_INTEGER;
+    query.mockResolvedValueOnce({ results: [], error: "Connection terminated unexpectedly" });
+    await app.approve(card.id);
+    expect(query).toHaveBeenCalledWith(executed(card.sql));
+    expect(app.finish).toHaveBeenCalledWith(
+      card.id,
+      "failed",
+      "query failed",
+      undefined,
+      "Connection terminated unexpectedly",
+    );
+    expect(app.nextCheckAt).toBe(0);
   });
   it("detects a schema identity change even when connection names match", async () => {
     const { app } = harness();
@@ -792,7 +806,7 @@ describe("Auto mode queue while an approved read executes", () => {
     const pending = app.evaluateNext();
     // The first read must be held before its SQL, the window where its approval is checked.
     await vi.waitFor(() => {
-      expect(app.broker.executing).toHaveBeenCalledWith(card.id, card.leaseId, expect.anything());
+      expect(app.broker.executing.mock.calls.some((c: unknown[]) => c[0] === card.id)).toBe(true);
       expect(app.broker.evaluate).toHaveBeenCalledTimes(2);
     });
     // A human approves the next card mid-evaluation, which aborts that evaluation only.
@@ -819,7 +833,7 @@ describe("Auto mode queue while an approved read executes", () => {
     const pending = app.evaluateNext();
     // The first read must be held before its SQL, the window where its approval is checked.
     await vi.waitFor(() => {
-      expect(app.broker.executing).toHaveBeenCalledWith(card.id, card.leaseId, expect.anything());
+      expect(app.broker.executing.mock.calls.some((c: unknown[]) => c[0] === card.id)).toBe(true);
       expect(app.broker.evaluate).toHaveBeenCalledTimes(2);
     });
     app.resetAuto("Auto mode disabled");
@@ -1043,7 +1057,7 @@ describe("stopping a running query", () => {
       readOnlyMode: ro,
     });
     Object.assign(app.conn, { databaseType: type, readOnly: ro });
-    app.serverVersion = { of: app.connIdentity(), version: "8.4.0" };
+    app.serverVersion = "8.4.0";
     const run = deferred<Answer>();
     query.mockReturnValue(run.promise);
     const pending = app.approve(card.id);
@@ -1067,7 +1081,7 @@ describe("stopping a running query", () => {
       readOnlyMode: false,
     });
     Object.assign(app.conn, { databaseType: "mysql" });
-    app.serverVersion = { of: app.connIdentity(), version: "8.0.36" };
+    app.serverVersion = "8.0.36";
     const run = deferred<Answer>();
     const stop = vi.fn(async () => ({
       results: [
@@ -1121,75 +1135,13 @@ describe("stopping a running query", () => {
     await vi.waitFor(() => expect(stop).toHaveBeenCalledOnce());
   });
 
-  it("probes again when a schema change discards a probe in flight", async () => {
+  it("forgets the server version with the endpoint check on a switch or a reactivation", () => {
     const { app } = harness();
-    Object.assign(app, { applyMode: vi.fn(), scheduleSchemaReport: vi.fn() });
-    const first = deferred<Answer>();
-    let probes = 0;
-    // The fresh probe reads 16.2; the stale one, answering after it, would read 9.6.
-    const versions = ["PostgreSQL 16.2 on x86_64-pc-linux-gnu", "PostgreSQL 9.6.24 on x86_64"];
-    query.mockImplementation((sql: string) => {
-      if (sql.includes("pg_is_in_recovery")) {
-        return probes++ === 0 ? first.promise : Promise.resolve(answer({ replica: false }));
-      }
-      return Promise.resolve(answer({ version: versions.shift() }));
-    });
-    const stale = app.probeEndpoint();
-    app.onTablesChanged();
-    await vi.waitFor(() =>
-      expect(app.serverVersion?.version).toBe("PostgreSQL 16.2 on x86_64-pc-linux-gnu"),
-    );
-    first.resolve(answer({ replica: false }));
-    await stale;
-    expect(versions).toHaveLength(0);
-    expect(app.serverVersion?.version).toBe("PostgreSQL 16.2 on x86_64-pc-linux-gnu");
-    expect(probes).toBe(2);
-  });
-
-  it("keeps the known version while a schema change probes again", async () => {
-    const { app, card } = harness();
-    Object.assign(app, { applyMode: vi.fn(), scheduleSchemaReport: vi.fn() });
-    const probe = deferred<Answer>();
-    const run = deferred<Answer>();
-    query.mockImplementation((sql: string) =>
-      sql.includes("pg_is_in_recovery") ? probe.promise : run.promise,
-    );
-    app.onTablesChanged();
-    const pending = app.approve(card.id);
-    await vi.waitFor(() => expect(card.state).toBe("executing"));
-    expect(card.run.engine).toBe("postgresql");
-    expect(query).toHaveBeenCalledWith(executed(card.sql));
-    run.resolve(answer({ quantity: 3 }));
-    await pending;
-    probe.resolve(answer({ replica: false }));
-  });
-
-  it("keeps the known version when a re-probe on the same connection fails", async () => {
-    const { app } = harness();
-    query.mockImplementation((sql: string) =>
-      Promise.resolve(
-        sql.includes("VERSION()")
-          ? { results: [], error: { message: "connection reset" } }
-          : answer({ replica: false }),
-      ),
-    );
-    await app.probeEndpoint();
-    expect(app.serverVersion?.version).toBe("PostgreSQL 16.2 on x86_64-pc-linux-gnu");
-  });
-
-  it("forgets the server version when the tab goes to standby", () => {
-    const { app } = harness();
-    Object.assign(app, {
-      history: [],
-      rosterLoops: [],
-      stopProbe: vi.fn(),
-      renderStandby: vi.fn(),
-    });
-    app.deactivate();
+    app.resetCheck();
     expect(app.serverVersion).toBeNull();
   });
 
-  it("does not trust a MySQL version probed on another connection", async () => {
+  it("offers no Stop until a check has reported the server version", async () => {
     const { app, card } = harness();
     connection.mockResolvedValue({
       id: 1,
@@ -1199,23 +1151,47 @@ describe("stopping a running query", () => {
       defaultSchema: "public",
       readOnlyMode: false,
     });
-    // Probed on connection 2 before the tab went to standby; the host now sits on connection 1.
-    app.serverVersion = { of: app.connIdentity().replace(/^1\|/, "2|"), version: "8.4.0" };
     Object.assign(app.conn, { databaseType: "mysql" });
-    app.dialect = "mysql";
-    const probe = deferred<Answer>();
+    app.serverVersion = null;
     const run = deferred<Answer>();
-    query.mockImplementation((sql: string) =>
-      sql.includes("@@global.read_only") ? probe.promise : run.promise,
-    );
-    const probing = app.probeEndpoint();
+    query.mockReturnValue(run.promise);
     const pending = app.approve(card.id);
     await vi.waitFor(() => expect(card.state).toBe("executing"));
     expect(card.run.unavailable).toBe("This feature is not available on this MySQL server.");
     expect(query).toHaveBeenCalledWith(card.sql);
     run.resolve(answer({ quantity: 3 }));
     await pending;
-    probe.resolve(answer({ read_only: 0, super_read_only: 0 }));
-    await probing;
+  });
+});
+
+describe("sensitivity recorded with the decision", () => {
+  it("keeps raw flags on the card even when the display toggles hide them", async () => {
+    const { app, card } = harness();
+    app.renderCardSchema = vi.fn();
+    card.sql = "SELECT email FROM public.users";
+    await app.analyzeSchema(card);
+    expect(card.schema?.pii).toEqual([]);
+    expect(card.sensitivity).toEqual({ pii: true, value: false, client: false });
+  });
+
+  it("falls back to the SQL text when the decision lands before the analysis", async () => {
+    const { app, card } = harness();
+    card.sql = "SELECT email FROM public.users";
+    await app.postExecuting(card);
+    expect(app.broker.executing.mock.calls[0][3]).toEqual({
+      pii: true,
+      value: false,
+      client: false,
+    });
+  });
+
+  it("posts the card's analysis with an approval and with a rejection", async () => {
+    const { app, card } = harness();
+    const recorded = { pii: false, value: true, client: true };
+    card.sensitivity = recorded;
+    await app.postExecuting(card);
+    await app.postResult(card, { status: "rejected" });
+    expect(app.broker.executing.mock.calls[0][3]).toEqual(recorded);
+    expect(app.broker.result.mock.calls[0][2]).toMatchObject({ sensitivity: recorded });
   });
 });

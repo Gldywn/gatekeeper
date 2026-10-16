@@ -2,7 +2,7 @@
 
 The [evaluation bench](../packages/server/evals/README.md) holds synthetic reference
 cases and the retained source-focused prompt. It compares recorded thresholds
-without further inference. Policy `auto-beta-6` pairs the dependency-resolving PostgreSQL
+without further inference. Policy `auto-beta-7` pairs the dependency-resolving PostgreSQL
 analysis (`shared-read-2`) with the retained candidate 4 questions and a personal
 disclosure cutoff of 0.20. It permits commercial amounts without personal or company
 identity when every check passes. Its questions were compared live on authored synthetic
@@ -65,7 +65,7 @@ ORDER BY pi."updatedAt";
 SELECT status, count(*) AS n FROM payment_orchestrator.payment_intent GROUP BY status ORDER BY status;
 ```
 
-Reaching Jev is not approval: Jev and its five cutoffs still decide.
+Reaching Jev is not approval: its four cutoffs still decide.
 
 Schema, table, column and alias names follow PostgreSQL quoting rules. Unquoted ASCII
 names fold to lowercase, while quoted names retain their exact case and may contain
@@ -301,18 +301,23 @@ and never forwards provider error bodies. The plugin aborts outstanding evaluati
 deactivation and applies its own 15-second deadline. There is no retry or provider fallback.
 
 The native endpoint is `POST https://api.typesafe.ai/v1/systemone`, using Bearer auth and
-`model`, `state`, `questions`. Model `jev-1.13.0` and policy `auto-beta-6` are pinned.
-Five focused Noul questions are batched: read-only behavior, personal disclosure,
-organization disclosure, access secret disclosure and insufficient context. Noul is a
-probability of yes, not a Choice/Score confidence value. All five conditions must pass:
+`model`, `state`, `questions`. Model `jev-1.13.0` and policy `auto-beta-7` are pinned.
+Four focused Noul questions are batched: personal disclosure, organization disclosure,
+access secret disclosure and insufficient context. Noul is a probability of yes, not a
+Choice/Score confidence value. All four conditions must pass:
 
 | Axis | Required probability |
 | :--- | :--- |
-| `read_only` | >= 0.95 |
 | `personal_disclosure` | <= 0.20 |
 | `organization_disclosure` | <= 0.15 |
 | `secret_disclosure` | <= 0.15 |
 | `insufficient_context` | <= 0.45 |
+
+Jev is not asked about read-only behavior. Auto mode's read-only eligibility is decided by
+the local deterministic analysis: it checks the supported SQL expressions, resolves their
+functions, operators and casts against the catalog, and holds unsupported or unresolved
+queries before calling Jev. A future database engine gets Auto mode only with its own local
+read-only analysis.
 
 Missing, malformed, out-of-range, wrong-model and uncertain answers require manual
 review. The plugin independently checks the same cutoffs before execution. Model concern
@@ -324,18 +329,14 @@ alias does not remove a source value's access authority. Ordinary commercial amo
 without identity are not prohibited solely for commercial confidentiality. Withheld rows
 and unselected sensitive columns alone do not imply insufficient context.
 
-`auto-beta-6` keeps the read-only question and expands the disclosure questions to
-separate identity from opaque references: names, contacts, government, tax or bank
+The disclosure questions separate identity from opaque references: names, contacts, government, tax or bank
 identifiers and private facts identify a person, while UUIDs, foreign keys and account,
 wallet or provider references are pseudonymous and add no identity when combined with
 dates, statuses or amounts. Private facts stay sensitive even when keyed only by an
 opaque identifier. A named JSON key is read like a column name, and a JSON value cast to
 boolean, number or date can only return that type. Prices, tariffs and pay bands are
 business values, not an individual's salary, and hardware models, credential formats and
-record identifiers describe access without granting it. Its predecessor `auto-beta-5` rewrote the
-positive read-only criterion to name the SQL shapes and
-ordinary built-in transformations the local analysis now admits, and asks Jev to judge
-what functions do rather than their presence. The disclosure questions state that
+record identifiers describe access without granting it. They also state that
 withheld literals include projection and function arguments, and that a control
 dependency can still disclose through row presence, counts or booleans. Jev cannot
 verify side effects or hidden sources. Those stay local and deterministic, and Jev never
@@ -371,8 +372,8 @@ union) were not provider observations and are not part of either figure. Candida
 cover 239 provider observations and 33 local holds after that metadata was added.
 Candidate questions were then compared live on that corpus, `auto-beta-5-cases.json` and `auto-export-cases.json` (synthetic versions of 15
 distinct exported investigations, with inferred catalog types).
-`auto-beta-6` is candidate 4 with the personal cutoff at 0.20, the other cutoffs unchanged
-(snapshots `auto-beta-6-questions.json` and `auto-beta-6-thresholds.json`): no expected
+`auto-beta-7` uses the candidate 4 questions without the read-only question, with the personal cutoff at 0.20
+(snapshots `auto-beta-7-questions.json` and `auto-beta-7-thresholds.json`): no expected
 review case auto-approved, 4 unnecessary holds on the full corpus with a weakest review
 margin of 0.17, and 14 of 15 export allows passing. The remaining unnecessary holds are
 one consultation tariff (personal) and three access-hardware or format descriptions
@@ -384,7 +385,7 @@ clarify the returned type; every local and evaluator check would still apply, an
 Gatekeeper never rewrites the submitted SQL. These are authored, correlated synthetic cases, not a calibration, and the export catalog types have not been
 checked against a real database.
 
-Decisions from `auto-beta-1` through `auto-beta-5` cannot authorize automatic execution,
+Decisions from `auto-beta-1` through `auto-beta-6` cannot authorize automatic execution,
 but remain readable in history and can accompany a human approval. Reload the plugin
 and reconnect the MCP server after updating both components, then activate Auto mode
 again. Mixed policy versions fail to manual review.
@@ -415,6 +416,11 @@ provider, pinned model, policy, evaluation time and SQL digest are retained in `
 and shown in details and Audit Trail. They survive result-row purging and remain indefinitely
 with the decided request. Older records without attribution are
 not retroactively labelled as human approvals.
+
+On macOS, Auto mode does not silence the submission alert. When a query it approved runs
+successfully and no other proposal is still waiting for a decision or being run by Auto mode,
+the server also plays a distinct sound, without a banner. See
+[Desktop notifications](CONFIGURATION.md#desktop-notifications-macos).
 
 The plugin can attach `autoHold: { sent: boolean, reason: string }` to `POST /result`
 when a read held by Auto mode is resolved. The broker stores it atomically alongside

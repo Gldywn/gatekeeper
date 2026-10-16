@@ -235,9 +235,10 @@ parser cannot read says so in standing text and is treated as destructive.
 Under the SQL, an annotation names the tables the query reads and the sensitive columns among
 them: person data in one accent, company and commercial data in another, a sensitive value
 flagged even when it only appears in a `WHERE` filter, and a `SELECT *` expanded against the
-real columns so nothing hides behind the star. A header badge stacks the three read-only
-layers, the armed mode, the Beekeeper connection and the database endpoint, and warns you
-when not one of them would block a write.
+real columns so nothing hides behind the star. A dot on the header's database icon shows
+whether the last connection check passed, and the icon opens the details: that check, then
+the three read-only layers (the armed mode, the Beekeeper connection and the database
+endpoint).
 
 Each detector is a toggle in the plugin settings, they all run on your machine, and none of
 what they surface is ever sent to the agent. They match column names and value shapes, so

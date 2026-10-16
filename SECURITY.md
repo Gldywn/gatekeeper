@@ -164,6 +164,15 @@ itself is in neither the URL nor the prompt.
 - **Loopback only.** The broker binds `127.0.0.1`.
 - **DNS-rebinding defense.** It rejects any request whose `Host` header is not the
   expected loopback host (`421`).
+- **One request beyond loopback, read-only.** A release build of the plugin asks GitHub
+  for the latest Gatekeeper release once when it starts:
+  `GET https://api.github.com/repos/Gldywn/gatekeeper/releases/latest`, a constant in
+  `packages/plugin/src/version.ts`, with a 5-second timeout, no cookies and no referrer.
+  Gatekeeper attaches no token, no session or build identifier, nothing about your
+  connections and no SQL; GitHub receives the usual network and browser metadata (IP
+  address, User-Agent, Origin). The plugin keeps only the release tag from the answer. No
+  release asset or code is downloaded, nothing is installed, and Gatekeeper never updates
+  itself: updating stays a manual step. Dev builds skip the request.
 
 ## Data at rest and in flight
 
@@ -180,12 +189,21 @@ itself is in neither the URL nor the prompt.
   decision. Decided requests remain indefinitely with SQL, intent, state, timestamps,
   referenced session metadata, Auto mode attribution and available `rowCount` and
   `affectedRows` scalars. Technical lifecycle events in `audit` and inactive sessions
-  unreferenced by any request expire after 24 hours. The Audit Trail currently displays
-  only the latest 200 entries for the connection. There is no pagination or manual
-  deletion feature yet. Previously deleted requests and purged counts cannot be recovered.
+  unreferenced by any request expire after 24 hours. The Audit Trail pages through the
+  connection's whole retained history. There is no manual deletion feature yet. Versions
+  up to 0.2.0 deleted decided requests after 24 hours, also when such a server kept running
+  beside a newer one on the same database, so stop every server when upgrading (the
+  `update-gatekeeper` skill does). Requests they deleted and counts they purged cannot be
+  recovered.
 - **Engine errors.** A failed query's engine error is returned to the agent and recorded
   in the audit trail. Engine errors can echo fragments of the query or schema; treat them
   as query-derived data, not as a trusted channel.
+- **Connection check.** On PostgreSQL, MySQL and MariaDB the plugin runs one fixed scalar
+  query on the connection, outside the approval gate, to read whether the endpoint is
+  read-only: up to once every 15 seconds while Beekeeper's window is visible and the
+  Gatekeeper view has a size on screen, plus right after an approved query fails. It can run
+  alongside an approved query. It reads no table. Its result and any driver error stay in the plugin
+  popover and are never sent to the broker or the agent.
 
 ## Audit trail
 
@@ -195,6 +213,10 @@ itself is in neither the URL nor the prompt.
   connection scoping) does show the raw SQL, because it is the operator's own review view.
   Its Markdown, CSV, and JSON exports carry the SQL with formula-injection and
   trojan-source guards applied, and never include result rows.
+- Its PII, Value and Client flags never query the connected database. The plugin posts them
+  with the decision as three booleans (`policy_json.sensitivity`), never a table, column or
+  value; requests decided before that, or never shown on a card, are
+  flagged from their SQL text alone, which cannot see the columns behind a `SELECT *`.
 
 ## Supply-chain policy
 
@@ -208,7 +230,9 @@ itself is in neither the URL nor the prompt.
 - **The macOS notification helper.** The package ships one executable, a small signed
   `.app` built from `packages/server/notifier/main.swift` in CI. It is ad-hoc signed, which
   carries no Team ID, so another ad-hoc binary claiming the same bundle identifier could
-  post notifications under this name once you have granted the permission.
+  post notifications under this name once you have granted the permission. A click on a
+  banner relaunches the helper without arguments, and the shipped helper then opens Beekeeper
+  Studio by its fixed bundle identifier, interpreting nothing from the notification.
 
 ## Reporting a vulnerability
 

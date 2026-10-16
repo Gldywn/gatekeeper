@@ -33,6 +33,10 @@ and nothing else. It never gets a component of its own: the active state is the
 armed chip in cyan, the entry is the Schema access hint with a cyan dot, and the
 card note and history glyph reuse theirs.
 
+Versions follow the same rule: amber only when the plugin and the server are out of step,
+on the side that has to act. A newer release while both agree is good news: green, with an
+up arrow that nudges in the corner indicator now and then; the installed version stays plain.
+
 Feature hints (Schema access, Auto mode) share one shape: an icon with a pulsing
 dot while off, and a popover on hover or keyboard focus with one direct action,
 filled to enable and tinted to disable. Clicking the icon opens its Settings section,
@@ -95,7 +99,11 @@ dialect, database. Two rules hold it:
 - **No schema.** A proposal can target any schema, so the session's current one
   would describe the connection rather than the queries the queue governs.
 
-The header wraps it as a bordered object. The audit-trail head renders the same
+The header wraps it as a bordered object and makes its database glyph live: a dot on
+the glyph is the last endpoint check (green passed, amber failed and pulsing, red three
+failures in a row, none when the engine has no check), and hovering or focusing the
+glyph opens the popover with that check, then the read-only layers. The header shows no
+other check or read-only word; the detail lives in the popover. The audit-trail head renders the same
 chip flat (no border, no fill, middot-separated, no amber on the dialect): its
 seated title bar already frames it, and a bordered chip beside the title only
 stacked edge on edge.
@@ -104,7 +112,7 @@ stacked edge on edge.
 
 The shell is fluid, not a fixed 560px column: `.gk` caps at `min(94vw, 1180px)`
 and centres, with fluid `padding-inline`. It stacks in one column: the header
-(which carries the sole connection context: name, dialect, database, read-only),
+(which carries the sole connection context: name, dialect, database, connection check),
 then a full-width **band** (`.rail`, the connected-agents roster),
 then the queue and history. The band is reference context read at a glance; the
 queue owns the width, because the SQL blocks and result tables benefit from it.
@@ -144,7 +152,7 @@ Rules:
   under reduce; CSS keyframes live inside `@media (prefers-reduced-motion:
   no-preference)`).
 - Infinite loops are for functional liveness or waiting indicators only, kept
-  subtle: the active-agent dot and the connecting status dot pulse, the "waiting
+  subtle: the active-agent dot, the connecting status dot and a failed connection check dot pulse, the "waiting
   for a proposal" empty state breathes. Nothing decorative loops, and data never
   pulses (the expiry countdown shifts to amber under 45s, it does not pulse).
 - Content is always visible by default. Never gate a card or control on an

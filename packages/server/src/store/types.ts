@@ -105,6 +105,7 @@ export interface ActivityEntry {
   approval?: import("@gatekeeper/shared").ApprovalAttribution;
   evaluation?: import("@gatekeeper/shared").AutoEvaluation;
   autoHold?: import("@gatekeeper/shared").AutoHold;
+  sensitivity?: import("@gatekeeper/shared").SensitivityRecord;
 }
 
 export interface StoreOptions {

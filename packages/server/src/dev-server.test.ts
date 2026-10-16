@@ -59,7 +59,7 @@ it("takes over compiled and watched servers, then watches this checkout's source
       "--clear-screen=false",
       fileURLToPath(new URL("./index.ts", import.meta.url)),
     ],
-    { stdio: "inherit" },
+    expect.objectContaining({ stdio: "inherit" }),
   );
 });
 
@@ -69,8 +69,16 @@ it("keeps the existing compiled MCP launch when watch is absent", async () => {
   expect(spawn).toHaveBeenCalledWith(
     process.execPath,
     [expect.stringContaining("/packages/server/dist/index.js")],
-    { stdio: "inherit" },
+    expect.objectContaining({ stdio: "inherit" }),
   );
+});
+
+it("hands the server a dev stamp, so a watched build never passes for a release", async () => {
+  await import(launcher);
+  const env = spawn.mock.calls[0][2].env as Record<string, string>;
+  const identity = JSON.parse(env.GATEKEEPER_BUILD_IDENTITY);
+  expect(identity.version).toMatch(/^\d+\.\d+\.\d+$/);
+  expect(identity.dev).toBeTypeOf("object");
 });
 
 it("stops before takeover when process discovery fails", async () => {

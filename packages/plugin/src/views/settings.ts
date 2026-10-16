@@ -16,6 +16,7 @@ interface SettingsViewDeps {
   mode: () => RiskMode;
   auto?: () => boolean;
   keySaved?: () => boolean;
+  version?: () => string;
 }
 
 interface ToggleSpec {
@@ -59,6 +60,7 @@ export class SettingsView {
   private readonly mode: () => RiskMode;
   private readonly auto: () => boolean;
   private readonly keySaved: () => boolean;
+  private readonly version: () => string;
 
   constructor(deps: SettingsViewDeps) {
     this.root = deps.root;
@@ -66,6 +68,7 @@ export class SettingsView {
     this.mode = deps.mode;
     this.auto = deps.auto ?? (() => false);
     this.keySaved = deps.keySaved ?? (() => false);
+    this.version = deps.version ?? (() => "");
   }
 
   open(): void {
@@ -158,6 +161,7 @@ export class SettingsView {
             <span class="set-control">${cacheSelectHtml(s.resultCacheMb)}</span>
           </div>
         </section>
+        <section class="set-group" id="versionSettings" tabindex="-1">${this.version()}</section>
         <section class="set-group danger-zone">
           <div class="set-group-head"><span class="set-group-name">Danger zone</span></div>
           <div class="set-row">

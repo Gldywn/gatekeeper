@@ -1,7 +1,7 @@
 import type { ConnectionSnapshot } from "./connection.js";
 import type { SchemaSnapshot } from "./schema.js";
-import { claimAlert } from "./store/alerts.js";
-import { listActivity, readAudit } from "./store/audit.js";
+import { claimAlert, claimAutoAlert } from "./store/alerts.js";
+import { type ActivityCursor, listActivity, readAudit } from "./store/audit.js";
 import { getConnection, setConnection } from "./store/connection.js";
 import { createContext, migrate, type StoreContext } from "./store/db.js";
 import {
@@ -49,6 +49,7 @@ import type {
   StoreOptions,
 } from "./store/types.js";
 
+export type { ActivityCursor } from "./store/audit.js";
 export type { PairingCode, PairingLimits, RedeemResult } from "./store/pairing.js";
 export type { SubmitOutcome } from "./store/requests.js";
 export type {
@@ -101,6 +102,11 @@ export class RequestStore {
     return claimAlert(this.ctx, cooldownMs);
   }
 
+  /** True when an alert rang since the last Auto sound and no proposal is still open. */
+  claimAutoAlert(): boolean {
+    return claimAutoAlert(this.ctx);
+  }
+
   claimNext(
     pluginId: string,
     leaseMs: number,
@@ -117,8 +123,9 @@ export class RequestStore {
     id: string,
     leaseId: string,
     approval?: import("@gatekeeper/shared").ApprovalAttribution,
+    sensitivity?: import("@gatekeeper/shared").SensitivityRecord,
   ): GatekeeperRequest {
-    return markExecuting(this.ctx, id, leaseId, approval);
+    return markExecuting(this.ctx, id, leaseId, approval, sensitivity);
   }
 
   withdrawExecution(id: string, leaseId: string): void {
@@ -138,8 +145,9 @@ export class RequestStore {
     leaseId: string,
     outcome: Outcome,
     autoHold?: import("@gatekeeper/shared").AutoHold,
+    sensitivity?: import("@gatekeeper/shared").SensitivityRecord,
   ): GatekeeperRequest {
-    return resolve(this.ctx, id, leaseId, outcome, autoHold);
+    return resolve(this.ctx, id, leaseId, outcome, autoHold, sensitivity);
   }
 
   cancel(id: string, sessionId: string): GatekeeperRequest {
@@ -149,7 +157,6 @@ export class RequestStore {
   get(id: string): GatekeeperRequest | null {
     return get(this.ctx, id);
   }
-
   getForSession(id: string, sessionId: string): GatekeeperRequest {
     return getForSession(this.ctx, id, sessionId);
   }
@@ -213,8 +220,8 @@ export class RequestStore {
     return listSessions(this.ctx, connection);
   }
 
-  listActivity(connection: string | null, limit = 200): ActivityEntry[] {
-    return listActivity(this.ctx, connection, limit);
+  listActivity(connection: string | null, limit = 200, before?: ActivityCursor): ActivityEntry[] {
+    return listActivity(this.ctx, connection, limit, before);
   }
 
   listInflight(pluginId: string, connection: string | null): GatekeeperRequest[] {

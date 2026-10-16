@@ -1,15 +1,7 @@
 import type { RunQueryResult } from "@beekeeperstudio/plugin";
 import { describe, expect, it } from "vitest";
 import type { RunState } from "../types";
-import {
-  newStopToken,
-  readStop,
-  serverVersion,
-  stopNote,
-  stopStatement,
-  stopTag,
-  stopUnavailable,
-} from "./stop";
+import { newStopToken, readStop, stopNote, stopStatement, stopTag, stopUnavailable } from "./stop";
 
 const rows = (...r: Record<string, unknown>[]) =>
   ({ results: [{ rows: r, fields: [] }] }) as unknown as RunQueryResult;
@@ -57,18 +49,6 @@ describe("where stopping is available", () => {
     ["sqlite", false, null, "This feature is not available on SQLite."],
   ])("%s, read-only %s, version %s", (type, readOnly, version, expected) => {
     expect(stopUnavailable(type, "SQLite", readOnly, version)).toBe(expected);
-  });
-
-  it("reads the server version and fails closed", async () => {
-    expect(await serverVersion(async () => rows({ version: "8.0.36" }))).toBe("8.0.36");
-    expect(
-      await serverVersion(async () => ({ results: [], error: "denied" }) as RunQueryResult),
-    ).toBeNull();
-    expect(
-      await serverVersion(async () => {
-        throw new Error("host down");
-      }),
-    ).toBeNull();
   });
 });
 

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { isDeepStrictEqual } from "node:util";
-import type { AccessMode, ActivityEntry, Proposal, SessionRoster } from "@gatekeeper/shared";
+import type { AccessMode, ActivityPage, Proposal, SessionRoster } from "@gatekeeper/shared";
 import { z } from "zod";
 import {
   BROKER_HOST,
@@ -26,8 +26,17 @@ import {
   evaluationInput,
   type KeyChecker,
 } from "./evaluator.js";
+import type { Notifier } from "./notify.js";
 import { pairingPage } from "./pairing-page.js";
-import { type Outcome, type RequestStore, StoreError } from "./store.js";
+import { sensitivityRecord } from "./store/audit.js";
+import {
+  type ActivityCursor,
+  type GatekeeperRequest,
+  type Outcome,
+  type RequestStore,
+  StoreError,
+} from "./store.js";
+import { SERVER_IDENTITY } from "./version.js";
 
 const CORS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -36,8 +45,13 @@ const CORS: Record<string, string> = {
   // The plugin runs on a secure plugin:// origin; Chromium's Private Network
   // Access gates its fetch to loopback unless the preflight grants this.
   "Access-Control-Allow-Private-Network": "true",
+  // Only names the header; its value is set after the bearer check, never before.
+  "Access-Control-Expose-Headers": "X-Gatekeeper-Server",
 };
+// The plugin reads this off its 1 Hz poll, so a new broker owner shows within a second.
+const IDENTITY_HEADER = encodeURIComponent(JSON.stringify(SERVER_IDENTITY));
 const MAX_BODY_BYTES = 32 * 1024 * 1024;
+const ACTIVITY_PAGE = 200;
 const PAIRING_BODY_BYTES = 1024;
 // The plugin polls at 1 Hz; coalesce its presence writes to this cadence.
 const PRESENCE_STAMP_MS = 15_000;
@@ -57,6 +71,7 @@ interface Broker {
   stampedAt: number;
   evaluator: Evaluator;
   keyChecker: KeyChecker;
+  notifier?: Notifier;
   evaluating: boolean;
   evaluations: Map<
     string,
@@ -75,6 +90,7 @@ export function createBroker(
   token: string,
   evaluator: Evaluator = evaluate,
   keyChecker: KeyChecker = checkKey,
+  notifier?: Notifier,
 ): Server {
   const port = brokerPort();
   const broker: Broker = {
@@ -85,6 +101,7 @@ export function createBroker(
     stampedAt: 0,
     evaluator,
     keyChecker,
+    notifier,
     evaluating: false,
     evaluations: new Map(),
   };
@@ -145,6 +162,7 @@ async function handle(broker: Broker, req: IncomingMessage, res: ServerResponse)
     send(res, 401, { error: "unauthorized" });
     return;
   }
+  res.setHeader("X-Gatekeeper-Server", IDENTITY_HEADER);
 
   // A live token holder is a paired plugin: that presence is what stops the agent-facing
   // tools asking for a code, and what stops a fresh code being handed out.
@@ -164,8 +182,22 @@ async function handle(broker: Broker, req: IncomingMessage, res: ServerResponse)
   // connection scoping as /sessions. Never an MCP tool; the SQL it carries can
   // hold PII literals, so no agent-facing surface exposes it.
   if (req.method === "GET" && url.pathname === "/activity") {
-    const activity: ActivityEntry[] = store.listActivity(resolveConnection(store, req));
-    send(res, 200, { activity });
+    const before = activityCursor(url.searchParams);
+    if (before === "invalid") {
+      send(res, 400, { error: "Invalid activity cursor" });
+      return;
+    }
+    // One lookahead row tells the plugin whether anything older exists, without a count.
+    const rows = store.listActivity(
+      resolveConnection(store, req),
+      ACTIVITY_PAGE + 1,
+      before ?? undefined,
+    );
+    const page: ActivityPage = {
+      activity: rows.slice(0, ACTIVITY_PAGE),
+      more: rows.length > ACTIVITY_PAGE,
+    };
+    send(res, 200, page);
     return;
   }
 
@@ -215,6 +247,8 @@ async function handle(broker: Broker, req: IncomingMessage, res: ServerResponse)
 
   if (req.method === "POST" && url.pathname === "/executing") {
     const body = await readJson(req);
+    // An unreadable record is dropped, never a reason to refuse the decision it rides on.
+    const sensitivity = sensitivityRecord.safeParse(body.sensitivity).data;
     guarded(res, () => {
       const approval =
         body.approval === undefined
@@ -244,7 +278,7 @@ async function handle(broker: Broker, req: IncomingMessage, res: ServerResponse)
           return;
         }
       }
-      store.markExecuting(String(body.id), String(body.leaseId), approval);
+      store.markExecuting(String(body.id), String(body.leaseId), approval, sensitivity);
       broker.evaluations.delete(String(body.id));
       send(res, 200, { ok: true });
     });
@@ -375,9 +409,18 @@ async function handle(broker: Broker, req: IncomingMessage, res: ServerResponse)
       send(res, 400, { error: "Invalid Auto mode hold" });
       return;
     }
+    // An unreadable record is dropped, never a reason to refuse the decision it rides on.
+    const sensitivity = sensitivityRecord.safeParse(body.sensitivity).data;
     guarded(res, () => {
-      store.resolve(String(body.id), String(body.leaseId), toOutcome(body), hold.data);
+      const resolved = store.resolve(
+        String(body.id),
+        String(body.leaseId),
+        toOutcome(body),
+        hold.data,
+        sensitivity,
+      );
       send(res, 200, { ok: true });
+      soundAutoApproval(broker, resolved);
     });
     return;
   }
@@ -467,6 +510,23 @@ function exchange(
   );
 }
 
+// The Audit Trail's older-page cursor: both halves or neither, each given once, in the
+// exact shape the store mints (`token("req")`), so a plugin bug fails loudly as a 400.
+function activityCursor(params: URLSearchParams): ActivityCursor | null | "invalid" {
+  const at = params.getAll("before");
+  const id = params.getAll("beforeId");
+  if (!at.length && !id.length) {
+    return null;
+  }
+  if (at.length !== 1 || id.length !== 1 || !/^\d+$/.test(at[0])) {
+    return "invalid";
+  }
+  const decidedAt = Number(at[0]);
+  return Number.isSafeInteger(decidedAt) && /^req_[0-9a-f]{12}$/.test(id[0])
+    ? { decidedAt, id: id[0] }
+    : "invalid";
+}
+
 // The plugin's header carries the composite scope key for the tab making the
 // request; only when it is absent do we fall back to the last-posted snapshot
 // (shared, so it can lag behind a multi-tab caller's real connection).
@@ -512,6 +572,28 @@ function guarded(
       return;
     }
     send(res, 500, { error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+// Sounds on the terminal result, not on /executing: the plugin can still withdraw a
+// reservation, and a failed query was not handled for anyone. Skipped while another
+// proposal is still open, where it would read as an all-clear.
+function soundAutoApproval(broker: Broker, request: GatekeeperRequest): void {
+  const approval = (request.policy as { approval?: { source?: unknown } } | null)?.approval;
+  if (
+    !broker.notifier?.autoActive ||
+    request.state !== "approved" ||
+    approval?.source !== "automatic"
+  ) {
+    return;
+  }
+  try {
+    if (!broker.store.claimAutoAlert()) {
+      return;
+    }
+    broker.notifier.notifyAuto();
+  } catch {
+    // The result is already accepted and answered; a lost sound must not touch it.
   }
 }
 

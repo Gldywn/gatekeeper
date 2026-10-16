@@ -19,6 +19,9 @@ export interface SchemaTable {
   name: string;
   columns: SchemaColumn[];
   foreignKeys: SchemaForeignKey[];
+  // The plugin could not read this table's columns, or a cap cut them: an empty or short
+  // column list then means "not collected", never "has none".
+  incomplete?: true;
 }
 
 export interface SchemaSnapshot {
@@ -33,7 +36,15 @@ export interface SchemaSnapshot {
   // Engine catalogs the plugin left out, named so the agent reads an omission rather than
   // an absence.
   excludedSchemas: string[];
+  // Liveness: bumped by every plugin heartbeat, so it says the plugin is open, not how old
+  // the structure is.
   capturedAt: number;
+  // When the plugin last posted a collected structure. Absent on snapshots stored by an
+  // older server, which then reads as unknown.
+  collectedAt?: number;
+  // false when a table or column listing failed, or a cap cut tables, columns, keys or a
+  // name; null when an older plugin did not say. Keys are best effort either way.
+  complete?: boolean | null;
 }
 
 const MAX_TABLES = 5000;
@@ -66,21 +77,40 @@ function foreignKey(input: unknown): SchemaForeignKey {
 
 function table(input: unknown): SchemaTable {
   const t = (input ?? {}) as Record<string, unknown>;
+  const columns = arr(t.columns);
+  const foreignKeys = arr(t.foreignKeys);
+  // A cut type (a long MySQL enum list) or name would read as the real one.
+  const cut = (v: unknown) => typeof v === "string" && v.length > MAX_STR;
+  const incomplete =
+    t.incomplete === true ||
+    columns.length > MAX_COLUMNS ||
+    foreignKeys.length > MAX_FKS ||
+    cut(t.name) ||
+    cut(t.schema) ||
+    columns.some((c) => {
+      const col = (c ?? {}) as Record<string, unknown>;
+      return cut(col.name) || cut(col.type);
+    });
   return {
     schema: t.schema == null ? null : str(t.schema),
     name: str(t.name),
-    columns: arr(t.columns).slice(0, MAX_COLUMNS).map(column),
-    foreignKeys: arr(t.foreignKeys).slice(0, MAX_FKS).map(foreignKey),
+    columns: columns.slice(0, MAX_COLUMNS).map(column),
+    foreignKeys: foreignKeys.slice(0, MAX_FKS).map(foreignKey),
+    ...(incomplete ? { incomplete: true as const } : {}),
   };
 }
 
 export function sanitizeSchema(input: Record<string, unknown>, capturedAt: number): SchemaSnapshot {
   const access = input.access === true;
+  const raw = arr(input.tables);
+  const tables = access ? raw.slice(0, MAX_TABLES).map(table) : [];
+  const gaps = raw.length > MAX_TABLES || tables.some((t) => t.incomplete);
+  const reported = typeof input.complete === "boolean" ? input.complete : null;
   return {
     connectionName: str(input.connectionName),
     scope: str(input.scope),
     access,
-    tables: access ? arr(input.tables).slice(0, MAX_TABLES).map(table) : [],
+    tables,
     excludedSchemas: access
       ? arr(input.excludedSchemas)
           .slice(0, MAX_EXCLUDED)
@@ -88,5 +118,7 @@ export function sanitizeSchema(input: Record<string, unknown>, capturedAt: numbe
           .filter((s) => s.length > 0)
       : [],
     capturedAt,
+    collectedAt: capturedAt,
+    complete: gaps ? false : reported,
   };
 }

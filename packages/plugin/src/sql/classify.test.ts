@@ -167,6 +167,20 @@ describe("classifyQuery", () => {
     expect(classifyQuery("REPLACE INTO users (id) VALUES (1)", "mysql").class).toBe("destructive");
   });
 
+  // The skill sends agents without Schema access to these SQLite introspection forms, so
+  // they must stay approvable in Read mode, while the bare PRAGMA statement stays strict.
+  it("reads the SQLite catalog forms the skill recommends, never a bare PRAGMA", () => {
+    for (const sql of [
+      "SELECT name, type FROM pragma_table_info('users')",
+      "SELECT name FROM sqlite_master WHERE type = 'table'",
+    ]) {
+      const v = classifyQuery(sql, "sqlite");
+      expect(v.class, sql).toBe("read");
+      expect(v.blocked, sql).toBe(false);
+    }
+    expect(classifyQuery("PRAGMA table_info(users)", "sqlite").class).toBe("destructive");
+  });
+
   it("blocks empty or comment-only input", () => {
     for (const sql of ["", "   ", "-- just a comment"]) {
       expect(classifyQuery(sql, pg).blocked, sql).toBe(true);

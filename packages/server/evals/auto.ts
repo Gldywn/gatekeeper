@@ -29,10 +29,7 @@ const questionSchema = z
       })
       .strict(),
   )
-  .refine(
-    (q) => Object.keys(q).length === 5 && "read_only" in q,
-    "Five questions including read_only required",
-  );
+  .refine((q) => Object.keys(q).length > 0, "At least one question required");
 const caseSchema = z
   .object({
     id: identifier,

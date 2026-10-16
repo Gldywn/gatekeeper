@@ -895,6 +895,52 @@ describe("alert cooldown", () => {
   });
 });
 
+describe("claimAutoAlert", () => {
+  it("refuses while no submission alert has ever rung", () => {
+    const { store } = makeStore();
+    expect(store.claimAutoAlert()).toBe(false);
+  });
+
+  it("answers one submission alert, then reopens its window", () => {
+    const { store } = makeStore();
+    expect(store.claimAlert(10_000)).toBe(true);
+    expect(store.claimAutoAlert()).toBe(true);
+    expect(store.claimAutoAlert()).toBe(false);
+    expect(store.claimAlert(10_000)).toBe(true);
+  });
+
+  it("refuses while a proposal is pending, leased or executing automatically", () => {
+    const { store } = makeStore();
+    store.claimAlert(10_000);
+    store.submit({ sessionId: "s1", sql: "SELECT 1" });
+    expect(store.claimAutoAlert()).toBe(false);
+    const lease = store.claimNext("plugin", LEASE)!;
+    expect(store.claimAutoAlert()).toBe(false);
+    store.markExecuting(lease.id, lease.leaseId!, { source: "automatic" });
+    expect(store.claimAutoAlert()).toBe(false);
+    store.resolve(lease.id, lease.leaseId!, { status: "approved", rows: [], fields: [] });
+    expect(store.claimAutoAlert()).toBe(true);
+  });
+
+  it("does not wait for a query a human approved, however long it runs", () => {
+    const { store } = makeStore();
+    store.claimAlert(10_000);
+    store.submit({ sessionId: "s1", sql: "SELECT 1" });
+    const lease = store.claimNext("plugin", LEASE)!;
+    store.markExecuting(lease.id, lease.leaseId!, { source: "human" });
+    expect(store.claimAutoAlert()).toBe(true);
+  });
+
+  // Reads do not sweep, so the row still says pending once its TTL has passed.
+  it("ignores an expired proposal still marked pending", () => {
+    const { store, clock } = makeStore();
+    store.claimAlert(10_000);
+    store.submit({ sessionId: "s1", sql: "SELECT 1" });
+    clock.t += 10_000;
+    expect(store.claimAutoAlert()).toBe(true);
+  });
+});
+
 describe("submitNew", () => {
   it("reports a fresh proposal as created, so it can raise an alert", () => {
     const { store } = makeStore();
@@ -908,5 +954,57 @@ describe("submitNew", () => {
     expect(first.created).toBe(true);
     expect(again.created).toBe(false);
     expect(again.request.id).toBe(first.request.id);
+  });
+});
+
+describe("sensitivity record", () => {
+  const sql = { pii: true, value: false, client: false };
+  const schema = { pii: false, value: true, client: true };
+
+  it("keeps the record frozen at execution when the result brings a later one", () => {
+    const { store } = makeStore();
+    store.submit({ sessionId: "s1", sql: "SELECT email FROM users" });
+    const c = store.claimNext("p", LEASE)!;
+    store.markExecuting(c.id, c.leaseId!, undefined, sql);
+    store.resolve(
+      c.id,
+      c.leaseId!,
+      { status: "approved", rows: [], fields: [] },
+      undefined,
+      schema,
+    );
+    expect(store.listActivity(null)[0].sensitivity).toEqual(sql);
+  });
+
+  it("records a rejection's flags", () => {
+    const { store } = makeStore();
+    store.submit({ sessionId: "s1", sql: "SELECT email FROM users" });
+    const c = store.claimNext("p", LEASE)!;
+    store.resolve(c.id, c.leaseId!, { status: "rejected", reason: "no" }, undefined, schema);
+    expect(store.listActivity(null)[0].sensitivity).toEqual(schema);
+  });
+
+  it.each([
+    ["the rejection's", schema],
+    ["no", undefined],
+  ])("keeps %s record when a withdrawn approval ends in a rejection", (_label, record) => {
+    const { store } = makeStore();
+    store.submit({ sessionId: "s1", sql: "SELECT email FROM users" });
+    const c = store.claimNext("p", LEASE)!;
+    store.markExecuting(c.id, c.leaseId!, undefined, sql);
+    store.withdrawExecution(c.id, c.leaseId!);
+    store.resolve(c.id, c.leaseId!, { status: "rejected", reason: "no" }, undefined, record);
+    expect(store.listActivity(null)[0].sensitivity).toEqual(record);
+  });
+
+  it("drops a withdrawn attempt's record when the next attempt carries none", () => {
+    const { store } = makeStore();
+    store.submit({ sessionId: "s1", sql: "SELECT email FROM users" });
+    const c = store.claimNext("p", LEASE)!;
+    store.markExecuting(c.id, c.leaseId!, undefined, sql);
+    store.withdrawExecution(c.id, c.leaseId!);
+    store.markExecuting(c.id, c.leaseId!);
+    store.resolve(c.id, c.leaseId!, { status: "approved", rows: [], fields: [] });
+    expect(store.listActivity(null)[0].sensitivity).toBeUndefined();
   });
 });

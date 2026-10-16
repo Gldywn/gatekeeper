@@ -65,6 +65,18 @@ metadata, local sensitivity checks and a pinned Jev evaluation. Provider errors 
 leave manual controls available. The plugin and broker revalidate authority after awaited
 operations. See [Auto mode](AUTO-MODE.md) for the supported subset and sharing boundary.
 
+## Connection check
+
+Beekeeper's plugin API has no connection event, so the plugin checks itself. It re-reads
+`getConnectionInfo()` every 5 seconds (switches, Beekeeper's read-only mode) and, on
+PostgreSQL, MySQL and MariaDB, runs one fixed scalar read-only probe every 15 seconds while
+Beekeeper's window is visible and the Gatekeeper view has a size on screen, never two at
+once. `runQuery` takes no connection id, so each check re-reads the connection first and
+picks its SQL from the engine it gets back. The probe's verdict feeds the endpoint
+read-only layer and the card gates; its outcome (passed, failed, three failures in a row) is
+the dot on the header's database icon. A failure says only that the check failed, not why.
+See [`SECURITY.md`](../SECURITY.md).
+
 ## Where the risk gate lives
 
 The plugin is the only component that can call `runQuery`, so the gate lives there:
@@ -99,6 +111,21 @@ The plugin caps the rows it forwards to the agent (by count and bytes) so a bulk
 floods the agent context or the LLM provider. The agent still learns the true size:
 `terminal.truncated` says it capped and `terminal.rowCount` is the true pre-cap total.
 
+## Versions
+
+Every build is stamped by `scripts/build-identity.mjs`: a release only when a release
+workflow built it (`GATEKEEPER_RELEASE_TAG`), otherwise dev, with its commit and branch when
+git can tell. The server sends its stamp on every authenticated broker answer as the
+`X-Gatekeeper-Server` header (URI-encoded JSON, set after the bearer check, so an unpaired
+caller never sees it). The plugin reads it off its 1 Hz `/pending` poll, so a new broker
+owner shows within a second. A release build of the plugin also asks GitHub once per start
+for the latest release (see [`SECURITY.md`](../SECURITY.md), Network).
+
+The bottom-left indicator and Settings > Version compare the three. A side behind the other
+is a warning, with what to do; both sides behind the latest release is only news; a dev
+build on either side gets no advice. A server that sends no header, or one the plugin
+cannot reach, shows as unknown.
+
 ## Retention
 
 The agent-facing technical audit records the lifecycle (decision, timestamps, SQL digest,
@@ -111,7 +138,16 @@ result contains `purged: true` and any known `rowCount` (returned rows) and `aff
 (changed rows). Late agent reads still receive those scalars. Missing counts remain unknown,
 including for results purged by older versions. A known zero remains zero.
 
-The host-side Audit Trail returns at most 200 entries, scoped to the current connection
-plus unscoped requests. Indexed, bounded reads avoid scanning the retained history.
-Pagination is deferred. A separate partial index covers results awaiting purge. See
+The host-side Audit Trail reads the retained history in pages of 200 entries, scoped to the
+current connection plus unscoped requests. `GET /activity` answers `{ activity, more }`, and
+`?before=<decidedAt>&beforeId=<id>` continues strictly older than that entry, as an index range
+seek in both scopes, so a deep page costs the same as the first. The plugin shows whole days
+only: it holds back the oldest day of a page until a later page or the end of history proves it
+complete, and loads the next days as the list end scrolls into reach. A folded day ships as its
+header only; its rows are built the first time it opens. The PII, Value and Client flags come
+from `policy_json.sensitivity`, three booleans the plugin freezes from its card analysis when
+`/executing` or `/result` records the decision (while the request is executing, a later
+`/result` never overwrites the `/executing` one), or from the SQL text alone when nothing was recorded, so opening the trail
+never queries the connected database. A separate partial index covers results awaiting purge.
+See
 [`SECURITY.md`](../SECURITY.md) for local data handling.

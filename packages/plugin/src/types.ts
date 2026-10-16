@@ -32,6 +32,9 @@ export interface Card extends Proposal {
   // Host-side only: which tables/PII the query touches, for the human's eyes.
   // Never posted to the broker, so the agent never learns the schema.
   schema?: SchemaContext | null;
+  // Raw flags from that analysis, posted with the decision for the audit trail: presence
+  // only, so no table or column name ever reaches the broker.
+  sensitivity?: import("@gatekeeper/shared").SensitivityRecord;
   run?: RunState;
 }
 

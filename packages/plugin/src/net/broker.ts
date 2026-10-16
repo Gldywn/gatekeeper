@@ -1,11 +1,13 @@
 import { appStorage } from "@beekeeperstudio/plugin";
 import type {
+  ActivityPage,
   ApprovalAttribution,
   AutoEvaluation,
   ConnectionInput,
   EvaluationInput,
   KeyStatus,
   RequestState,
+  SensitivityRecord,
 } from "@gatekeeper/shared";
 import { AUTO_MODEL, AUTO_POLICY } from "../sql/auto";
 import type { ActivityEntry, Proposal, SessionRoster } from "../types";
@@ -130,12 +132,22 @@ export class BrokerClient {
     return ((await res.json()) as { sessions: SessionRoster[] }).sessions;
   }
 
-  async activity(connectionName?: string): Promise<ActivityEntry[] | null> {
-    const res = await this.request("/activity", { headers: this.connHeader(connectionName) });
+  // One page, newest first; `before` is the last entry already fetched, so the page starts
+  // strictly older than it.
+  async activity(
+    connectionName?: string,
+    before?: Pick<ActivityEntry, "decidedAt" | "id">,
+  ): Promise<ActivityPage | null> {
+    const query = before
+      ? `?before=${before.decidedAt}&beforeId=${encodeURIComponent(before.id)}`
+      : "";
+    const res = await this.request(`/activity${query}`, {
+      headers: this.connHeader(connectionName),
+    });
     if (res.status !== 200) {
       return null;
     }
-    return ((await res.json()) as { activity: ActivityEntry[] }).activity;
+    return (await res.json()) as ActivityPage;
   }
 
   async renew(id: string, leaseId: string): Promise<RenewResult> {
@@ -156,11 +168,16 @@ export class BrokerClient {
     return { ok: true, leaseExpiresAt };
   }
 
-  async executing(id: string, leaseId: string, approval?: ApprovalAttribution): Promise<boolean> {
+  async executing(
+    id: string,
+    leaseId: string,
+    approval?: ApprovalAttribution,
+    sensitivity?: SensitivityRecord,
+  ): Promise<boolean> {
     const res = await this.request("/executing", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, leaseId, approval }),
+      body: JSON.stringify({ id, leaseId, approval, sensitivity }),
     });
     return res.ok;
   }

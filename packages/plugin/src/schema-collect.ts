@@ -24,6 +24,7 @@ interface CollectedTable {
   name: string;
   columns: CollectedColumn[];
   foreignKeys: CollectedForeignKey[];
+  incomplete?: true;
 }
 export interface CollectedSchema {
   connectionName: string;
@@ -31,6 +32,9 @@ export interface CollectedSchema {
   // only when it still matches the live connection, so a switch never leaks the wrong db.
   scope: string;
   access: boolean;
+  // false when a schema, table or column listing failed, so the agent reads a missing table
+  // as "not collected" rather than "does not exist".
+  complete?: boolean;
   tables: CollectedTable[];
   // Named so the agent knows the catalogs exist and were omitted, rather than concluding
   // the database has none.
@@ -68,12 +72,12 @@ function isSystemTable(name: string, databaseType: string): boolean {
 }
 
 // Some engines/drivers don't implement every introspection call; treat any failure as an
-// empty result rather than aborting the whole collection.
-async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
+// empty result rather than aborting the whole collection, and report whether it failed.
+async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<[T, boolean]> {
   try {
-    return await fn();
+    return [await fn(), true];
   } catch {
-    return fallback;
+    return [fallback, false];
   }
 }
 
@@ -86,24 +90,29 @@ export async function collectSchema(
   scope: string,
   databaseType: string,
 ): Promise<CollectedSchema> {
-  const schemas = await safe(() => getSchemas(), [] as string[]);
+  const [schemas, schemasOk] = await safe(() => getSchemas(), [] as string[]);
+  let complete = schemasOk;
   const excludedSchemas = schemas.filter((s) => isSystemSchema(s, databaseType));
   const kept = schemas.filter((s) => !isSystemSchema(s, databaseType));
   // A single undefined pass covers engines with no schema concept (SQLite, MySQL).
   const passes: (string | undefined)[] = kept.length > 0 ? kept : [undefined];
   const tables: CollectedTable[] = [];
   for (const schema of passes) {
-    const list = await safe(() => getTables(schema), []);
+    const [list, listOk] = await safe(() => getTables(schema), []);
+    complete &&= listOk;
     for (const t of list) {
       if (isSystemTable(t.name, databaseType) || isSystemSchema(t.schema ?? "", databaseType)) {
         continue;
       }
       const tableSchema = t.schema ?? schema;
-      const [cols, pks, fks] = await Promise.all([
+      // Key failures stay silent: an engine without key introspection would otherwise mark
+      // every table, and a wrong column name, not a missing key, is what fails a query.
+      const [[cols, colsOk], [pks], [fks]] = await Promise.all([
         safe(() => getColumns(t.name, tableSchema), []),
         safe(() => getPrimaryKeys(t.name, tableSchema), []),
         safe(() => getOutgoingKeys(t.name, tableSchema), []),
       ]);
+      complete &&= colsOk;
       const pk = new Set(pks.map((p) => p.columnName));
       tables.push({
         schema: tableSchema ?? null,
@@ -114,8 +123,9 @@ export async function collectSchema(
           refTable: f.toSchema ? `${f.toSchema}.${f.toTable}` : f.toTable,
           refColumn: joinCols(f.toColumn),
         })),
+        ...(colsOk ? {} : { incomplete: true as const }),
       });
     }
   }
-  return { connectionName, scope, access: true, tables, excludedSchemas };
+  return { connectionName, scope, access: true, complete, tables, excludedSchemas };
 }

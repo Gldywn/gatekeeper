@@ -11,7 +11,12 @@ import {
   runQuery,
   setTabTitle,
 } from "@beekeeperstudio/plugin";
-import type { AutoEvaluation, AutoHold } from "@gatekeeper/shared";
+import type {
+  AutoEvaluation,
+  AutoHold,
+  BuildIdentity,
+  SensitivityRecord,
+} from "@gatekeeper/shared";
 import { enter, type Loop, pulse, reveal } from "./anim";
 import { SchemaAnnotator } from "./annotate";
 import { clock, countsLabel, escapeHtml, relAge } from "./html";
@@ -38,6 +43,7 @@ import { AUTO_APPROVED, autoIcon, autoPopHtml, SAVED_KEY_MASK } from "./render/a
 import { ConfirmModal } from "./render/confirm";
 import { connChipInner } from "./render/connchip";
 import { modeDropdown, switchInput } from "./render/controls";
+import { type DbCheck, dbLink, dbLinkLabel, dbStatusHtml, nextCheckText } from "./render/dblink";
 import { historyRow } from "./render/history";
 import {
   type CardGate,
@@ -49,6 +55,13 @@ import {
 } from "./render/queue";
 import { type LayerState, readOnlyView } from "./render/readonly";
 import { presence, rosterRow } from "./render/roster";
+import {
+  UPDATE_SKILL_URL,
+  updatePrompt,
+  versionDockHtml,
+  versionDockTitle,
+  versionGroupHtml,
+} from "./render/version";
 import { capResult, type Field, type HistResult } from "./result";
 import { collectSchema } from "./schema-collect";
 import { filterSchema, resultBudgetBytes, type Settings, SettingsStore } from "./settings";
@@ -58,14 +71,13 @@ import { formatSql } from "./sql/format";
 import { highlight } from "./sql/highlight";
 import { modeRank, type RiskMode } from "./sql/mode";
 import { mapDialect } from "./sql/readonly";
-import { type EndpointReadOnly, probeReadOnly } from "./sql/readonly-probe";
+import { type EndpointReadOnly, hasProbe, probeReadOnly, runErrorText } from "./sql/readonly-probe";
+import { sensitivityOf, textSchema } from "./sql/schema";
 import {
-  errorText,
   newStopToken,
   readStop,
   type StopEngine,
   type StopOutcome,
-  serverVersion,
   stopNote,
   stopStatement,
   stopTag,
@@ -82,6 +94,13 @@ import type {
   RunState,
   SessionRoster,
 } from "./types";
+import {
+  fetchLatestRelease,
+  parseServerIdentity,
+  SERVER_IDENTITY_HEADER,
+  type VersionStatus,
+  versionStatus,
+} from "./version";
 import { ActivityView } from "./views/activity";
 import { DetailView } from "./views/detail";
 import { SettingsView } from "./views/settings";
@@ -115,6 +134,10 @@ const ROSTER_POLL_MS = 2000;
 // The human starts their agent while looking at the no-broker screen, so re-probe
 // on this cadence and move them on to pairing by themselves.
 const PROBE_MS = 3000;
+// One scalar endpoint check on the user's database, possibly prod, while the tab is visible.
+// The operator's bound: a dropped connection must show within about 15 s.
+const CHECK_MS = 15_000;
+const BROKER_TITLE = "Link to the Gatekeeper server, where agents send their queries";
 
 // The read-only layer help sentences, revealed by each row's "?" affordance. The
 // Gatekeeper one tracks the armed mode: read-only by default, wider once armed.
@@ -157,7 +180,7 @@ async function runApprovedQuery(
   // rejects the query or the connection is down; surface it as a failure so the
   // agent gets "failed + reason", not a silent empty result.
   if (result.error) {
-    throw new Error(errorText(result.error));
+    throw new Error(runErrorText(result.error));
   }
   const first = result.results[0];
   return {
@@ -180,6 +203,7 @@ function newInstanceId(): string {
 
 const REPO_URL = "https://github.com/Gldywn/gatekeeper";
 const ISSUES_URL = `${REPO_URL}/issues/new/choose`;
+const RELEASES_URL = `${REPO_URL}/releases`;
 const STARRED_KEY = "gatekeeper.starred";
 
 // The rows forwarded to the agent are capped independently of the local history budget:
@@ -282,18 +306,30 @@ export class Gatekeeper {
   private lastConnCheck = 0;
   private connCheckInFlight = false;
   private connGeneration = 0;
-  // Host-side endpoint read-only probe result, reset per connection. null once
-  // probed means "not verified" (non-Postgres or error); endpointProbed keeps the
-  // pending state distinct from a probe that ran and could not confirm.
+  // Host-side endpoint check, reset per connection. endpointRO is the last verdict a passed
+  // check confirmed (null: none yet); a later failure keeps it and only adds to the count.
   private endpointRO: EndpointReadOnly | null = null;
-  private endpointProbed = false;
-  // PostgreSQL 10+ and MySQL 8.0.19+ only can be stopped, see sql/stop.ts. Kept with the
-  // connection it was read on, so a re-probe after a schema change does not blank it.
-  private serverVersion: { of: string; version: string | null } | null = null;
+  // PostgreSQL 10+ and MySQL 8.0.19+ only can be stopped, see sql/stop.ts. Read once per
+  // connection by the endpoint check and reset with it (resetCheck); a failed or dropped
+  // re-check keeps it, so a schema change never blanks it.
+  private serverVersion: string | null = null;
+  private checkedAt = 0;
+  private nextCheckAt = 0;
+  private checkFailures = 0;
+  private checkError: string | null = null;
+  // Owned by the host call itself and released only when it settles, never by a reset, so a
+  // connection switch can never stack a second check on a hung one.
+  private checkInFlight = false;
+  // What the header chip and its two popover parts last rendered (see renderConnLabel).
+  private connEl: Element | null = null;
+  private connHtml = "";
+  private statusHtml = "";
+  private layersHtml = "";
   private renewTimer?: number;
   private tickTimer?: number;
   private schemaTimer?: number;
   private schemaReportTimer?: number;
+  private schemaReportSeq = 0;
   private pollTimer?: number;
   private probeTimer?: number;
   private pollFailures = 0;
@@ -305,6 +341,12 @@ export class Gatekeeper {
   // demotion bails before it starts polling (a standby must never touch the broker).
   private activeGen = 0;
   private connectionState: ConnectionState = "connecting";
+  // The raw X-Gatekeeper-Server value last seen: undefined until the broker first answers
+  // (the corner indicator stays hidden), null once it is missing or the broker is gone.
+  private serverHeader: string | null | undefined = undefined;
+  private serverIdentity: BuildIdentity | null = null;
+  private latestRelease: string | null = null;
+  private latestChecked = false;
   private readonly root: HTMLElement;
   private readonly broker = new BrokerClient({ baseUrl: BROKER_URL, tokenKey: TOKEN_KEY });
   private readonly settingsStore = new SettingsStore();
@@ -330,10 +372,6 @@ export class Gatekeeper {
         const data = this.connChipData();
         return data ? `<span class="conn-chip">${connChipInner(data)}</span>` : "";
       },
-      // The raw annotator, deliberately not filterSchema: the audit trail is a durable
-      // security record, so it always flags PII/client/values even on a connection whose
-      // detection toggles are off (unlike the pending cards and the detail, which honour them).
-      schemaFor: (sql) => this.annotator.schemaFor(sql),
       dialect: () => this.dialect,
     });
     this.settingsView = new SettingsView({
@@ -342,6 +380,7 @@ export class Gatekeeper {
       mode: () => this.mode,
       auto: () => this.autoEnabled,
       keySaved: () => this.keySaved,
+      version: () => versionGroupHtml(this.versionStatus()),
     });
     root.addEventListener("click", (e) => {
       // The confirm overlay is rebuilt on every open, so its copy button delegates off
@@ -469,6 +508,7 @@ export class Gatekeeper {
 
   private async activate(): Promise<void> {
     const gen = ++this.activeGen;
+    void this.checkLatestRelease();
     this.token = await this.broker.loadToken();
     try {
       const connection = await getConnectionInfo();
@@ -491,11 +531,19 @@ export class Gatekeeper {
     if (gen !== this.activeGen) {
       return;
     }
+    // A promotion may land on another connection than the last one this tab checked.
+    this.resetCheck();
     this.renderShell();
     // The schema annotation caches columns per table; a DDL change invalidates it.
     if (!this.wiredNotifications) {
       this.wiredNotifications = true;
-      addNotificationListener("tablesChanged", () => this.onTablesChanged());
+      addNotificationListener("tablesChanged", () => {
+        this.resetAuto("Schema changed. Enable Auto mode again after review");
+        this.applyMode("read");
+        this.connGeneration++;
+        this.annotator.clearCache();
+        this.scheduleSchemaReport();
+      });
     }
     this.polling = true;
     void this.loadInflight();
@@ -503,8 +551,8 @@ export class Gatekeeper {
     void this.pollRoster(++this.pollGeneration);
     void this.reportConnection();
     void this.reportSchema();
-    void this.probeEndpoint();
     this.startTimers();
+    this.maybeCheckEndpoint();
     void this.maybeShowDbNotice();
   }
 
@@ -517,12 +565,12 @@ export class Gatekeeper {
     this.cards.length = 0;
     this.history.length = 0;
     this.annotator.clearCache();
-    // While on standby the saved connection can be edited to another server under the same
-    // id and name; only a schema re-probe within one active period may keep the version.
-    this.serverVersion = null;
     this.activeGen++;
     this.polling = false;
     this.pollGeneration++;
+    // Another tab may own a different broker by the time this one is promoted again.
+    this.serverHeader = undefined;
+    this.serverIdentity = null;
     if (this.pollTimer !== undefined) {
       window.clearTimeout(this.pollTimer);
       this.pollTimer = undefined;
@@ -725,11 +773,6 @@ export class Gatekeeper {
     return this.conn ? connectionScopeKey(this.conn) : undefined;
   }
 
-  // Which server a probed version belongs to: Beekeeper's connection id plus its scope.
-  private connIdentity(): string {
-    return `${this.conn?.id ?? ""}|${this.connScopeKey() ?? ""}`;
-  }
-
   // No connectionChanged notification exists, so a switch is caught by re-reading
   // getConnectionInfo(): a postMessage round-trip, throttled to ~5s on the tick
   // (a switch is rare) rather than paid every second.
@@ -771,7 +814,15 @@ export class Gatekeeper {
       this.connScopeKey() === nextKey &&
       this.conn.schema === (conn.defaultSchema ?? null)
     ) {
+      const flipped = this.conn.readOnly !== conn.readOnlyMode;
       this.applyConnection(conn);
+      // Beekeeper's own read-only switch is not an identity change, but the layers, the card
+      // gates and the agent's snapshot all read it.
+      if (flipped) {
+        this.renderConnLabel();
+        this.renderQueue();
+        void this.reportConnection();
+      }
       return true;
     }
     this.applyConnection(conn);
@@ -801,9 +852,8 @@ export class Gatekeeper {
     this.activityView.reset();
     this.roster = [];
     this.rosterSig = "";
-    // The endpoint belongs to the old database; re-probe the new one from scratch.
-    this.endpointRO = null;
-    this.endpointProbed = false;
+    // The endpoint belongs to the old database; check the new one from scratch.
+    this.resetCheck();
     // Settings are per connection; the overlay now shows a different scope, so close
     // it and reload (which re-syncs the quick-menu switches and the activity trigger).
     this.settingsView.close();
@@ -811,7 +861,7 @@ export class Gatekeeper {
     this.renderConnLabel();
     this.renderModeSurfaces();
     void this.reportConnection();
-    void this.probeEndpoint();
+    this.maybeCheckEndpoint();
     // Load the NEW connection's settings before reporting its schema, so schema access is
     // read from the connection the human is now on, never from the previous one's consent.
     void (async () => {
@@ -853,25 +903,60 @@ export class Gatekeeper {
       return;
     }
     const data = this.connChipData();
-    if (!data) {
-      el.innerHTML = this.connectionName ? escapeHtml(this.connectionName) : "";
-      return;
+    el.dataset.link = this.conn ? dbLink(this.dbCheck()) : "";
+    // The chip and its glyph are rebuilt only when the identity changes, and each popover
+    // part only when its own content does, so a check landing every 15 s never drops the
+    // keyboard focus or the hover.
+    const chip = data
+      ? `${connChipInner(data, true)}<span class="ro-pop" id="connPop" role="tooltip"><div class="db-slot"></div><div class="ro-layers"></div></span>`
+      : this.connectionName
+        ? escapeHtml(this.connectionName)
+        : "";
+    if (el !== this.connEl || chip !== this.connHtml) {
+      el.innerHTML = chip;
+      this.connEl = el;
+      this.connHtml = chip;
+      this.statusHtml = "";
+      this.layersHtml = "";
     }
-    el.innerHTML = `${connChipInner(data)}<span class="dsep"></span>${this.readOnlyBadge()}`;
+    const engine = dbDisplayName(this.conn?.databaseType ?? "");
+    el.querySelector(".chip-db")?.setAttribute("aria-label", dbLinkLabel(this.dbCheck(), engine));
+    const slot = el.querySelector(".db-slot");
+    const status = dbStatusHtml(this.dbCheck(), engine);
+    if (slot && status !== this.statusHtml) {
+      slot.innerHTML = status;
+      this.statusHtml = status;
+    }
+    const layers = el.querySelector(".ro-layers");
+    const rows = this.layerRows();
+    if (layers && rows !== this.layersHtml) {
+      const focused = [...layers.querySelectorAll(".ro-help")].indexOf(
+        document.activeElement as Element,
+      );
+      layers.innerHTML = rows;
+      this.layersHtml = rows;
+      if (focused >= 0) {
+        layers.querySelectorAll<HTMLElement>(".ro-help")[focused]?.focus();
+      }
+    }
+    this.renderCheckTimes();
   }
 
-  // Aggregate over the three layers (Gatekeeper mode, Beekeeper mode, endpoint): green
-  // when any blocks writes, amber when all would accept one, muted when it cannot be told.
-  private readOnlyBadge(): string {
-    // The Gatekeeper layer is read-only only while the armed mode is "read"; a raised
-    // mode makes it a writer, so the aggregate rides the lower layers.
-    const view = readOnlyView(
-      this.mode === "read",
-      this.conn?.readOnly ?? false,
-      this.endpointRO,
-      this.endpointProbed,
-    );
-    const rows =
+  private dbCheck(): DbCheck {
+    return {
+      supported: hasProbe(this.conn?.databaseType ?? ""),
+      checkedAt: this.checkedAt,
+      failures: this.checkFailures,
+      error: this.checkError,
+    };
+  }
+
+  // The popover's lower part, under the last check. The Gatekeeper layer is read-only only
+  // while the armed mode is "read".
+  private layerRows(): string {
+    const view = readOnlyView(this.mode === "read", this.conn?.readOnly ?? false, this.endpointRO);
+    return (
+      '<div class="ro-pop-head">Read-only layers</div>' +
       this.roRow(
         "Gatekeeper",
         helpGatekeeper(this.mode),
@@ -879,23 +964,8 @@ export class Gatekeeper {
         view.gatekeeper.state,
       ) +
       this.roRow("Beekeeper", HELP_BEEKEEPER, view.beekeeper.label, view.beekeeper.state) +
-      this.roRow("Endpoint", HELP_ENDPOINT, view.endpoint.label, view.endpoint.state);
-
-    const { kind, label } = view.chip;
-    const title =
-      kind === "ok"
-        ? "Read-only: a layer blocks writes, hover for details"
-        : kind === "warn"
-          ? "Writable: every layer would accept a write, hover for details"
-          : "Read-only status unknown, hover for details";
-    // The chevron signals the badge expands into the layer breakdown on hover/focus.
-    return `<span class="ro-wrap" tabindex="0">
-      <span class="ro ${kind}" title="${title}">${layerGlyph(kind)}${label}<span class="ro-caret" aria-hidden="true">${chevronDown}</span></span>
-      <span class="ro-pop" role="tooltip">
-        <div class="ro-pop-head">Read-only layers</div>
-        ${rows}
-      </span>
-    </span>`;
+      this.roRow("Endpoint", HELP_ENDPOINT, view.endpoint.label, view.endpoint.state)
+    );
   }
 
   // A layer row: name, a "?" help affordance revealing the explanation on hover and
@@ -926,13 +996,18 @@ export class Gatekeeper {
     const scope = this.connScopeKey() ?? "";
     const name = this.connectionName;
     const on = this.settingsStore.get().schemaAccess;
+    const seq = ++this.schemaReportSeq;
     try {
       const payload = on
         ? await collectSchema(name, scope, this.conn.databaseType)
         : { connectionName: name, scope, access: false, tables: [], excludedSchemas: [] };
-      // Re-validate after the (possibly slow) collect: a connection switch or a toggle flip
-      // in between must never post a schema for the wrong database, or one without consent.
-      if ((this.connScopeKey() ?? "") !== scope || this.settingsStore.get().schemaAccess !== on) {
+      // Re-validate after the slow collect: a switch, a toggle flip or a newer report since
+      // must not post a wrong-database, unconsented or superseded schema.
+      if (
+        seq !== this.schemaReportSeq ||
+        (this.connScopeKey() ?? "") !== scope ||
+        this.settingsStore.get().schemaAccess !== on
+      ) {
         return;
       }
       await this.broker.postSchema(payload);
@@ -950,40 +1025,89 @@ export class Gatekeeper {
     this.schemaReportTimer = window.setTimeout(() => void this.reportSchema(), SCHEMA_DEBOUNCE_MS);
   }
 
-  private onTablesChanged(): void {
-    this.resetAuto("Schema changed. Enable Auto mode again after review");
-    this.applyMode("read");
-    this.connGeneration++;
-    this.annotator.clearCache();
-    this.scheduleSchemaReport();
-    // The generation bump discards a probe in flight; without a fresh one, Stop would stay
-    // unavailable for the rest of the session.
-    void this.probeEndpoint();
+  // Leaves checkInFlight alone: a call still pending belongs to the old connection and
+  // releases the guard itself when it settles.
+  private resetCheck(): void {
+    this.endpointRO = null;
+    this.serverVersion = null;
+    this.checkedAt = 0;
+    this.nextCheckAt = 0;
+    this.checkFailures = 0;
+    this.checkError = null;
   }
 
-  // connGeneration-guarded like the annotator: a switch mid-probe discards the
-  // result. Runs via runQuery directly (host-side, not the approval gate) and is
-  // stored on the class only, never posted to the broker.
-  private async probeEndpoint(): Promise<void> {
-    if (!this.conn) {
+  // A Gatekeeper tab behind another Beekeeper tab still has a visible document (it follows
+  // the window); a hidden iframe is expected to have no viewport, so size gates it too.
+  private checkEligible(): boolean {
+    return (
+      this.polling &&
+      Boolean(this.token) &&
+      document.visibilityState === "visible" &&
+      window.innerHeight > 0
+    );
+  }
+
+  private maybeCheckEndpoint(): void {
+    if (
+      this.checkInFlight ||
+      Date.now() < this.nextCheckAt ||
+      !this.checkEligible() ||
+      !hasProbe(this.conn?.databaseType ?? "")
+    ) {
       return;
     }
+    void this.checkEndpoint();
+  }
+
+  // Runs via runQuery directly (host-side, not the approval gate); the outcome stays on the
+  // class, never posted to the broker. A result for an older connection or tab ownership is
+  // dropped and leaves the check due, so the next tick runs it for the current one.
+  private async checkEndpoint(): Promise<void> {
     const gen = this.connGeneration;
-    const type = this.conn.databaseType;
-    const identity = this.connIdentity();
-    const result = await probeReadOnly(this.dialect, runQuery);
-    const version =
-      type === "mysql" || type === "postgresql" ? await serverVersion(runQuery) : null;
-    if (gen !== this.connGeneration) {
+    const active = this.activeGen;
+    this.checkInFlight = true;
+    let outcome: Awaited<ReturnType<typeof probeReadOnly>> = null;
+    try {
+      // runQuery takes no connection id and the 5 s refresh may not have seen a switch yet:
+      // re-read the connection first so the probe's SQL fits the engine it lands on.
+      if (!(await this.checkConnection()) || !this.checkEligible()) {
+        return;
+      }
+      outcome = await probeReadOnly(this.conn?.databaseType ?? "", runQuery);
+    } finally {
+      this.checkInFlight = false;
+    }
+    if (!outcome || gen !== this.connGeneration || active !== this.activeGen) {
       return;
     }
-    // A failed re-probe on the same connection must not blank a version already read there.
-    if (version !== null || this.serverVersion?.of !== identity) {
-      this.serverVersion = { of: identity, version };
+    this.checkedAt = Date.now();
+    this.nextCheckAt = this.checkedAt + CHECK_MS;
+    if ("error" in outcome) {
+      this.checkFailures++;
+      this.checkError = outcome.error;
+    } else {
+      const wasReadOnly = this.connectionReadOnly();
+      this.checkFailures = 0;
+      this.checkError = null;
+      this.endpointRO = outcome.readOnly;
+      if (outcome.version) this.serverVersion = outcome.version;
+      // A failover can turn a replica into a primary or back, which moves the card gates.
+      if (this.connectionReadOnly() !== wasReadOnly) {
+        this.renderQueue();
+      }
     }
-    this.endpointRO = result;
-    this.endpointProbed = true;
     this.renderConnLabel();
+  }
+
+  private renderCheckTimes(): void {
+    const age = this.root.querySelector<HTMLElement>("#conn .db-age");
+    if (age) {
+      age.textContent = relAge(this.checkedAt);
+    }
+    const next = this.root.querySelector<HTMLElement>("#conn .db-next");
+    if (next) {
+      next.textContent = nextCheckText(this.nextCheckAt, Date.now());
+    }
   }
 
   // Recreated on every (re-)pair; clear the old handles so re-pairing does not
@@ -1051,14 +1175,15 @@ export class Gatekeeper {
         return;
       }
       this.polling = true;
+      this.resetCheck();
       this.renderShell();
       void this.loadInflight();
       void this.poll();
       void this.pollRoster(++this.pollGeneration);
       void this.reportConnection();
       void this.reportSchema();
-      void this.probeEndpoint();
       this.startTimers();
+      this.maybeCheckEndpoint();
     };
     this.root
       .querySelector<HTMLButtonElement>("#pair-btn")!
@@ -1157,6 +1282,7 @@ export class Gatekeeper {
         <div class="detail settings-overlay" id="settings" hidden></div>
         <div class="detail confirm-overlay" id="confirm" hidden></div>
         <div class="detail db-notice-overlay" id="notice" hidden></div>
+        <button class="ver-dock" id="verDock" type="button" hidden></button>
         <div class="cta-cluster" id="ctaCluster">
           <button class="cta-fab star${this.starred ? "" : " twinkle"}" type="button" data-gh-star aria-label="Star Gatekeeper on GitHub">${starGlyph}<span class="cta-lbl">Star on GitHub</span></button>
           <button class="cta-fab fb" type="button" data-gh-feedback aria-label="Request a feature">${feedbackGlyph}<span class="cta-lbl">Request a feature</span></button>
@@ -1309,6 +1435,10 @@ export class Gatekeeper {
         this.root.querySelector<HTMLElement>('#settings [data-setting="schemaAccess"]')?.focus();
       }
     });
+    this.root
+      .querySelector<HTMLButtonElement>("#verDock")
+      ?.addEventListener("click", () => this.openVersionSettings());
+    this.renderVersion();
     this.root.querySelector<HTMLElement>("#ctaCluster")?.addEventListener("click", (e) => {
       const target = e.target as HTMLElement;
       if (target.closest("[data-gh-star]")) {
@@ -1335,6 +1465,19 @@ export class Gatekeeper {
       }
       if (target.closest("[data-gh-feedback]")) {
         void openExternal(ISSUES_URL);
+        return;
+      }
+      if (target.closest("[data-releases]")) {
+        void openExternal(RELEASES_URL);
+        return;
+      }
+      if (target.closest("[data-skill-link]")) {
+        void openExternal(UPDATE_SKILL_URL);
+        return;
+      }
+      const copyPrompt = target.closest<HTMLElement>("[data-copy-prompt]");
+      if (copyPrompt) {
+        void this.copyUpdatePrompt(copyPrompt);
         return;
       }
       if (target.closest("[data-reset-settings]")) {
@@ -1414,6 +1557,10 @@ export class Gatekeeper {
         this.activityView.toggle(sql.getAttribute("data-act-sql")!);
         return;
       }
+      if (target.closest("[data-act-retry]")) {
+        void this.activityView.loadOlder();
+        return;
+      }
       if (target === activity || target.closest("[data-close]")) {
         this.activityView.close();
       }
@@ -1438,7 +1585,7 @@ export class Gatekeeper {
     if (el) {
       el.dataset.state = state;
       el.textContent = CONNECTION_LABEL[state];
-      el.title = detail;
+      el.title = detail || BROKER_TITLE;
     }
   }
 
@@ -1552,6 +1699,73 @@ export class Gatekeeper {
     section
       ?.querySelector<HTMLElement>("[data-auto-key], [data-auto-toggle]")
       ?.focus({ preventScroll: true });
+  }
+
+  private versionInputs(): [BuildIdentity, BuildIdentity | null, string | null] {
+    return [__GK_BUILD__, this.serverIdentity, this.latestRelease];
+  }
+
+  private versionStatus(): VersionStatus {
+    return versionStatus(...this.versionInputs());
+  }
+
+  private setServerHeader(raw: string | null): void {
+    if (raw === this.serverHeader) return;
+    this.serverHeader = raw;
+    this.serverIdentity = parseServerIdentity(raw);
+    this.renderVersion();
+  }
+
+  // Touches only the corner indicator and the Version group, so an open Settings keeps
+  // whatever else is being edited.
+  private renderVersion(): void {
+    const status = this.versionStatus();
+    const dock = this.root.querySelector<HTMLButtonElement>("#verDock");
+    if (dock) {
+      const { cls, html } = versionDockHtml(status.dock);
+      const title = versionDockTitle(...this.versionInputs());
+      dock.className = `ver-dock${cls ? ` ${cls}` : ""}`;
+      dock.innerHTML = html;
+      dock.title = title;
+      dock.setAttribute("aria-label", `${title}. Open version settings.`);
+      dock.hidden = this.serverHeader === undefined;
+    }
+    const group = this.root.querySelector<HTMLElement>("#settings:not([hidden]) #versionSettings");
+    if (group) group.innerHTML = versionGroupHtml(status);
+  }
+
+  // Once per plugin start, and never from a dev build: Vite reloads would otherwise spend
+  // GitHub's anonymous rate limit, and a dev build gets no update advice anyway.
+  private async checkLatestRelease(): Promise<void> {
+    if (this.latestChecked || __GK_BUILD__.dev) return;
+    this.latestChecked = true;
+    this.latestRelease = await fetchLatestRelease();
+    this.renderVersion();
+  }
+
+  private openVersionSettings(): void {
+    this.setSettingsOpen(false);
+    this.settingsView.open();
+    const section = this.root.querySelector<HTMLElement>("#versionSettings");
+    section?.scrollIntoView({ block: "center" });
+    section?.focus({ preventScroll: true });
+  }
+
+  private async copyUpdatePrompt(button: HTMLElement): Promise<void> {
+    let copied = true;
+    try {
+      await clipboard.writeText(updatePrompt(...this.versionInputs()));
+    } catch {
+      copied = false;
+    }
+    button.classList.toggle("copied", copied);
+    button.innerHTML = copied
+      ? `${checkIcon}<span>Copied</span>`
+      : `${copyIcon}<span>Copy failed, try again</span>`;
+    window.setTimeout(() => {
+      button.classList.remove("copied");
+      button.innerHTML = `${copyIcon}<span>Copy prompt</span>`;
+    }, 1600);
   }
 
   private resetAuto(reason: string): void {
@@ -1961,6 +2175,8 @@ export class Gatekeeper {
       if (res.status === 401) {
         this.polling = false;
         this.token = null;
+        this.serverHeader = undefined;
+        this.serverIdentity = null;
         this.resetAuto("Pairing lost");
         this.activeGen++;
         this.mode = "read";
@@ -1968,6 +2184,9 @@ export class Gatekeeper {
         this.renderPairing("This tab was unpaired. Enter a fresh code to reconnect.");
         return;
       }
+      // The broker stamps every authenticated answer, its errors included, so each one is
+      // current; one without the header is not from a Gatekeeper that reports its version.
+      this.setServerHeader(res.headers.get(SERVER_IDENTITY_HEADER));
       if (res.status === 200) {
         claimed = true;
         const proposal = (await res.json()) as Proposal;
@@ -1982,6 +2201,7 @@ export class Gatekeeper {
       this.pollFailures++;
       if (this.pollFailures >= 3) {
         this.setConnectionState("error", `Broker unreachable at ${BROKER_URL}. Retrying...`);
+        if (active === this.activeGen) this.setServerHeader(null);
       } else if (this.connectionState !== "connecting") {
         this.setConnectionState("reconnecting");
       }
@@ -2105,9 +2325,9 @@ export class Gatekeeper {
     void this.evaluateNext();
   }
 
-  // Annotate the card with the tables and PII-suspect columns the query touches.
-  // Runs entirely host-side and stores the result on the card only; nothing here
-  // ever reaches the broker, so the agent gains no schema knowledge.
+  // Annotate the card with the tables and PII-suspect columns the query touches. Only the
+  // presence flags derived from it ride the decision to the broker, never a table or column
+  // name, so the agent gains no schema knowledge.
   private async analyzeSchema(card: Card): Promise<void> {
     const settings = this.settingsStore.get();
     const schema = await this.annotator.schemaFor(card.sql);
@@ -2117,6 +2337,11 @@ export class Gatekeeper {
       return;
     }
     card.schema = filterSchema(schema, settings);
+    // Raw, before the display toggles: the audit trail is a durable security record, so it
+    // keeps every flag even on a connection whose detection toggles are off.
+    if (schema) {
+      card.sensitivity = sensitivityOf(schema);
+    }
     this.renderCardSchema(card);
   }
 
@@ -2170,6 +2395,8 @@ export class Gatekeeper {
 
   private tick(): void {
     this.maybeCheckConnection();
+    this.maybeCheckEndpoint();
+    this.renderCheckTimes();
     for (const card of [...this.cards]) {
       if (card.state === "ready" && card.expiresAt - Date.now() <= 0) {
         this.finish(card.id, "expired", "expired");
@@ -2435,6 +2662,8 @@ export class Gatekeeper {
       );
     } catch (err) {
       const message = stopNote(run, err instanceof Error ? err.message : String(err));
+      // The failure may be the connection itself: check on the next tick, not in 15 s.
+      this.nextCheckAt = 0;
       await this.postResult(card, { status: "approved", error: message });
       this.finish(id, "failed", "query failed", undefined, message);
     }
@@ -2447,13 +2676,11 @@ export class Gatekeeper {
       limitMs: (this.settingsStore.get().autoStopMinutes ?? 0) * 60_000,
       ended: false,
     };
-    // A version probed on another connection (a switch, a reactivated tab) counts as unknown.
-    const probed = this.serverVersion;
     const unavailable = stopUnavailable(
       type,
       dbDisplayName(type),
       this.conn?.readOnly ?? false,
-      probed?.of === this.connIdentity() ? probed.version : null,
+      this.serverVersion,
     );
     if (unavailable) {
       run.unavailable = unavailable;
@@ -2500,7 +2727,7 @@ export class Gatekeeper {
     try {
       outcome = readStop(run.engine, await runQuery(stopStatement(run.engine, run.tag)));
     } catch (err) {
-      outcome = { kind: "error", message: errorText(err) };
+      outcome = { kind: "error", message: runErrorText(err) };
     }
     stop.inFlight = false;
     // A switched connection or a query that already settled makes the answer moot.
@@ -2625,9 +2852,24 @@ export class Gatekeeper {
       : "Blocked: write mode is not armed.";
   }
 
+  // Frozen as the decision is recorded, never awaited: the card's schema analysis if it has
+  // finished, else what the SQL text alone shows (none when it will not parse).
+  private sensitivity(card: Card): SensitivityRecord | undefined {
+    if (card.sensitivity) {
+      return card.sensitivity;
+    }
+    const text = textSchema(card.sql, this.dialect);
+    return text ? sensitivityOf(text) : undefined;
+  }
+
   private async postExecuting(card: Card): Promise<boolean> {
     try {
-      return await this.broker.executing(card.id, card.leaseId, card.approval);
+      return await this.broker.executing(
+        card.id,
+        card.leaseId,
+        card.approval,
+        this.sensitivity(card),
+      );
     } catch (err) {
       log.error(err instanceof Error ? err : String(err));
       return false;
@@ -2651,6 +2893,7 @@ export class Gatekeeper {
       return await this.broker.result(card.id, card.leaseId, {
         ...body,
         autoHold: this.autoHold(card),
+        sensitivity: this.sensitivity(card),
       });
     } catch (err) {
       log.error(err instanceof Error ? err : String(err));

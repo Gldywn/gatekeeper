@@ -37,6 +37,9 @@ permissions:
 jobs:
   build-and-attach:
     runs-on: ubuntu-latest
+    # Stamps the bundle as this release; without it the plugin would call itself a dev build.
+    env:
+      GATEKEEPER_RELEASE_TAG: ${{ inputs.tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:

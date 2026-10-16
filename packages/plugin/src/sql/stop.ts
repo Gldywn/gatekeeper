@@ -1,5 +1,6 @@
 import type { RunQueryResult } from "@beekeeperstudio/plugin";
 import type { RunState } from "../types";
+import { runErrorText } from "./readonly-probe";
 
 // Beekeeper's plugin API cannot cancel a runQuery, so a stop asks the database itself,
 // through a second runQuery, to cancel the session whose current statement starts with
@@ -10,8 +11,6 @@ export type StopOutcome =
   | { kind: "sent" }
   | { kind: "notFound" }
   | { kind: "error"; message: string };
-
-type RunQuery = (sql: string) => Promise<RunQueryResult>;
 
 const REQUEST_ID = /^req_[0-9a-f]{12}$/;
 const TAG = /^\/\* gatekeeper (req_[0-9a-f]{12} )?[0-9a-f]{12} \*\/$/;
@@ -57,16 +56,6 @@ function mysqlServerBelowMin(version: string | null): string | null {
   return n >= MYSQL_MIN ? null : `MySQL ${m[0]}`;
 }
 
-export async function serverVersion(run: RunQuery): Promise<string | null> {
-  try {
-    const result = await run("SELECT VERSION() AS version");
-    const version = result.error ? undefined : result.results[0]?.rows[0]?.version;
-    return typeof version === "string" ? version : null;
-  } catch {
-    return null;
-  }
-}
-
 // Fresh for every execution, so a stop can only ever match this execution's text.
 export function newStopToken(): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) =>
@@ -107,7 +96,7 @@ export function stopStatement(engine: StopEngine, tag: string): string {
 }
 
 export function readStop(engine: StopEngine, result: RunQueryResult): StopOutcome {
-  if (result.error) return { kind: "error", message: errorText(result.error) };
+  if (result.error) return { kind: "error", message: runErrorText(result.error) };
   const row = result.results.map((r) => r.rows[0]).find((r) => r && "matches" in r);
   const matches = Number(row?.matches);
   if (!row || !Number.isInteger(matches)) {
@@ -136,12 +125,4 @@ export function stopNote(run: RunState | undefined, error: string): string {
 function duration(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
-}
-
-export function errorText(error: unknown): string {
-  if (typeof error === "string") return error;
-  if (error && typeof error === "object" && "message" in error) {
-    return String((error as { message: unknown }).message);
-  }
-  return "Query execution failed";
 }
