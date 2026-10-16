@@ -48,6 +48,12 @@ export function brokerPort(): number {
   return Number(process.env.GATEKEEPER_BROKER_PORT ?? 9999);
 }
 
+// Set only by scripts/dev-server.mjs, which keeps brokerPort() itself across watch restarts
+// and relays it here. Host checks and the pairing URL stay on brokerPort().
+export function brokerSocket(): string | undefined {
+  return process.env.GATEKEEPER_BROKER_SOCKET || undefined;
+}
+
 export function dbPath(): string {
   return process.env.GATEKEEPER_DB ?? join(homedir(), ".gatekeeper", "requests.db");
 }

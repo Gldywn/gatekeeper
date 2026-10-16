@@ -26,7 +26,7 @@ pnpm dev         # test databases + Vite hot reload + Gatekeeper server with wat
 pnpm dev:server  # take over the broker and restart the server on source changes
 pnpm dev:link    # symlink Beekeeper's plugin + the agent skill at this checkout (builds first)
 pnpm dev:unlink  # remove those dev symlinks and stop repo-build servers
-pnpm dev:status  # show what points where (plugin, skill, broker, token)
+pnpm dev:status  # show what points where (plugin, skill, broker port owner, token)
 pnpm dev:reset   # clear the pairing token (add -- --all to also wipe the results DB)
 pnpm db:up       # start the Postgres and MySQL test containers
 pnpm db:down     # stop them (add -- -v to wipe the data)
@@ -45,17 +45,27 @@ The repo ships its dev wiring, so a clone is ready without hand-editing config:
 - **Server, live:** run `pnpm run dev:server` from the checkout you want to test.
   It stops other detected Gatekeeper servers and watchers, then runs the local TypeScript
   sources with the installed `tsx watch`. Saving an imported source file restarts the
-  server without a build. Keep the terminal open. Existing MCP connections may need
-  reconnecting after takeover or restart. A client configured with `dev-server.mjs`
-  takes control again when reconnected, replacing this watcher with its configured run.
-  This command does not start Vite or change the plugin link. It fails if process
-  discovery is blocked or the broker port remains occupied. See [tsx watch](https://tsx.is/watch-mode).
+  server without a build. Keep the terminal open. Agent sessions whose server it stopped
+  need an MCP reconnect. This command does not start Vite or change the plugin link. It
+  fails if process discovery is blocked or the broker port remains occupied. See
+  [tsx watch](https://tsx.is/watch-mode).
+- **The dev server keeps the broker until you stop it.** `scripts/dev-server.mjs` (behind
+  both commands above) listens on the broker port itself for as long as it runs and relays
+  each connection to the watched server over a private Unix socket. A save restarts the
+  server behind it without ever freeing the port, so no other Gatekeeper server (a published
+  one in another project, a build in another worktree) can take the plugin over in between;
+  during the restart the plugin's requests fail briefly, as before. To switch checkouts, stop
+  it and run `pnpm dev` (after `pnpm dev:link`) in the other one; starting it there without
+  stopping the first one replaces it, so the last one started wins. `pnpm dev:status` names
+  the process holding the port. macOS and Linux only.
 - **Claude Code and OpenCode** read the committed `.mcp.json` / `opencode.jsonc` when you run
-  the agent inside the repo, spawning your local build automatically (Claude Code prompts
-  once to trust the workspace). Both launch `scripts/dev-server.mjs`, which first kills any
-  other running Gatekeeper server, so your build is the sole broker and the only writer of
-  the shared `~/.gatekeeper/requests.db` (mixed builds corrupt it), then execs the local
-  server. A reconnect re-runs it.
+  the agent inside the repo, starting this checkout's `packages/server/dist/index.js` (Claude
+  Code prompts once to trust the workspace). It takes over nothing: next to a dev server it
+  runs MCP-only on the shared `~/.gatekeeper/requests.db`, and it takes the broker only when
+  nobody holds the port. The agent gets the branch's last build, not its current sources, so
+  an MCP change needs `pnpm build` and a reconnect; a worktree with no build has no
+  Gatekeeper tools. Builds share the database on purpose; a build that changes its schema
+  incompatibly needs every other server stopped.
 - **Codex** has no project-local config; add the server by hand to `~/.codex/config.toml`
   under `[mcp_servers.gatekeeper]` with `command = "node"` and an absolute `args` path to
   `packages/server/dist/index.js`.
