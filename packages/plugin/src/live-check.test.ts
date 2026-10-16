@@ -328,6 +328,94 @@ describe("check lifecycle", () => {
   });
 });
 
+describe("server link", () => {
+  it("dates the last answer on a 2xx only, though an error status still reads connected", async () => {
+    const T = 1_800_000_000_000;
+    const now = vi.spyOn(Date, "now").mockReturnValue(T);
+    try {
+      vi.stubGlobal("window", { innerHeight: 800, setTimeout: vi.fn() });
+      const app = harness();
+      const pending = vi.fn().mockResolvedValue({ status: 204, ok: true, headers: new Headers() });
+      Object.assign(app, {
+        broker: { pending },
+        setServerHeader: vi.fn(),
+        connectionState: "connecting",
+        brokerAnsweredAt: 0,
+        pollFailures: 0,
+      });
+      await app.poll();
+      expect(app.connectionState).toBe("connected");
+      expect(app.brokerAnsweredAt).toBe(T);
+      now.mockReturnValue(T + 6_000);
+      pending.mockResolvedValue({ status: 500, ok: false, headers: new Headers() });
+      await app.poll();
+      expect(app.connectionState).toBe("connected");
+      expect(app.brokerAnsweredAt).toBe(T);
+    } finally {
+      now.mockRestore();
+    }
+  });
+});
+
+describe("status popovers", () => {
+  it("hides the open server popover once, and leaves Escape alone over the database one", () => {
+    const app = harness();
+    const attrs = new Set<string>();
+    const link = {
+      hasAttribute: (name: string) => attrs.has(name),
+      toggleAttribute: (name: string) => attrs.add(name),
+      querySelector: () => ({}),
+    };
+    let dbHovered = true;
+    app.root = {
+      querySelector: (s: string) => (s === "#agentLink" ? link : dbHovered ? {} : null),
+    };
+    expect(app.dismissAgentPop()).toBe(false);
+    dbHovered = false;
+    expect(app.dismissAgentPop()).toBe(true);
+    expect(attrs.has("data-dismissed")).toBe(true);
+    // Already hidden: this Escape goes on to whatever overlay is open.
+    expect(app.dismissAgentPop()).toBe(false);
+  });
+
+  it("rearms the hidden server popover only when its glyph is entered from outside", () => {
+    const app = harness();
+    app.root = { querySelector: () => null };
+    const link = { removeAttribute: vi.fn() };
+    const inner = { closest: () => glyph };
+    const glyph = { contains: (node: unknown) => node === inner, closest: () => link };
+    app.enterAgentGlyph({ target: inner, relatedTarget: inner });
+    expect(link.removeAttribute).not.toHaveBeenCalled();
+    app.enterAgentGlyph({ target: inner, relatedTarget: null });
+    expect(link.removeAttribute).toHaveBeenCalledWith("data-dismissed");
+  });
+
+  it("opens the server popover leftwards only when rightwards would cross the header", () => {
+    const app = harness();
+    const rect = (left: number, right: number) => ({
+      getBoundingClientRect: () => ({ left, right }),
+    });
+    const pop = {
+      offsetWidth: 200,
+      flip: false,
+      toggleAttribute(_: string, on: boolean) {
+        this.flip = on;
+      },
+    };
+    const parts: Record<string, unknown> = {
+      ".ag-ico": rect(450, 466),
+      "#agentPop": pop,
+      ".bar": rect(0, 600),
+    };
+    app.root = { querySelector: (s: string) => parts[s] ?? null };
+    app.placeAgentPop();
+    expect(pop.flip).toBe(true);
+    parts[".ag-ico"] = rect(300, 316);
+    app.placeAgentPop();
+    expect(pop.flip).toBe(false);
+  });
+});
+
 type Fake = ReturnType<typeof fakeEl>;
 
 // Just enough of an element for renderConnLabel: counted innerHTML writes, attributes, and

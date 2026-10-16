@@ -561,7 +561,7 @@ body {
   height: 12px;
 }
 
-/* Right cluster: live status, a divider, and the settings gear. */
+/* Right cluster: the feature hints, a divider, and the settings gear. */
 .bar-right {
   margin-left: auto;
   display: inline-flex;
@@ -570,43 +570,134 @@ body {
   flex: none;
 }
 
-.conn-status {
-  align-self: center;
+/* The link to the Gatekeeper server, right after the database chip: statuses sit on the
+   left, settings on the right. A bare glyph with no fill, so it never reads as one of the
+   buttons on the right; the 28 px box is its hit area. The state lives in the dot, the glyph
+   and its name. */
+.agent-link {
+  position: relative;
+  z-index: 1;
   display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-  color: color-mix(in oklch, var(--text) 84%, transparent);
-  font-size: 11.5px;
   flex: none;
 }
-.conn-status::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--faint);
-  flex: none;
+.ag-ico {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  color: var(--muted);
 }
-.conn-status[data-state="connecting"]::before,
-.conn-status[data-state="reconnecting"]::before {
-  background: var(--amber);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--amber) 22%, transparent);
+.ag-ico:hover,
+.ag-ico:focus-visible {
+  color: var(--text);
 }
-.conn-status[data-state="connected"]::before {
-  background: var(--ok);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--ok) 20%, transparent);
+.ag-ico:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
 }
-.conn-status[data-state="error"] {
+.ag-ico svg {
+  width: 16px;
+  height: 16px;
+}
+.ag-ico svg + svg,
+.agent-link[data-state="error"] .ag-ico svg:first-child {
+  display: none;
+}
+.agent-link[data-state="error"] .ag-ico svg + svg {
+  display: block;
+}
+.agent-link[data-state="error"] .ag-ico {
   color: var(--danger);
 }
-.conn-status[data-state="error"]::before {
+.ag-ico::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--faint);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.agent-link[data-state="connected"] .ag-ico::after {
+  background: var(--ok);
+}
+.agent-link[data-state="connecting"] .ag-ico::after,
+.agent-link[data-state="reconnecting"] .ag-ico::after {
+  background: var(--amber);
+}
+.agent-link[data-state="error"] .ag-ico::after {
   background: var(--danger);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--danger) 20%, transparent);
+}
+/* The check popover's shell, its arrow on the glyph, and only the status inside. */
+.ag-pop {
+  left: -3.5px;
+}
+.ag-pop[data-flip] {
+  left: auto;
+  right: -3.5px;
+}
+.ag-pop[data-flip]::before {
+  left: auto;
+  right: 12px;
+}
+.ag-pop .db-status {
+  padding-bottom: 0;
+  margin-bottom: 0;
+  border-bottom: 0;
+}
+.ag-ico:hover ~ .ag-pop,
+.ag-ico:focus-visible ~ .ag-pop,
+.ag-pop:hover {
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity var(--dur) var(--ease),
+    visibility 0s;
+}
+/* Escape hides the server popover until its glyph is entered again, and only one status
+   popover shows at a time: the hovered glyph wins over the focus left on the other one. */
+#agentLink[data-dismissed] .ag-pop,
+.bar:has(#agentLink .ag-ico:hover, #agentPop:hover) #connPop,
+.bar:has(#conn .chip-db:hover, #connPop:hover) .ag-pop {
+  opacity: 0;
+  visibility: hidden;
+  transition: none;
+}
+/* Narrow: hang the popover from the header's left edge so it cannot run off the right one. */
+@media (max-width: 540px) {
+  .agent-link {
+    position: static;
+  }
+  .ag-ico {
+    z-index: 1;
+  }
+  .ag-pop,
+  .ag-pop[data-flip] {
+    left: var(--s3);
+    right: auto;
+  }
+  .ag-pop::before {
+    display: none;
+  }
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 @media (prefers-reduced-motion: no-preference) {
-  .conn-status[data-state="connecting"]::before,
-  .conn-status[data-state="reconnecting"]::before,
+  .agent-link[data-state="connecting"] .ag-ico::after,
+  .agent-link[data-state="reconnecting"] .ag-ico::after,
   #conn[data-link="failed"] .chip-db::after {
     animation: conn-pulse 1.4s var(--ease-in-out) infinite;
   }
@@ -618,8 +709,8 @@ body {
 }
 
 /* Settings gear + its safeguards popover, anchored at the bar's right edge. */
-/* The "schema access is off" header nudge: a database glyph with a pulsing amber dot and
-   a hover popover; shown only while the setting is off, hidden the moment it is on. */
+/* The Schema access header hint: the map glyph with a pulsing amber dot while off,
+   a green check while on, and a hover popover. */
 .sa-hint-wrap {
   position: relative;
   display: inline-flex;

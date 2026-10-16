@@ -238,7 +238,9 @@ flagged even when it only appears in a `WHERE` filter, and a `SELECT *` expanded
 real columns so nothing hides behind the star. A dot on the header's database icon shows
 whether the last connection check passed, and the icon opens the details: that check, then
 the three read-only layers (the armed mode, the Beekeeper connection and the database
-endpoint).
+endpoint). The robot beside it shows the link to the Gatekeeper server that your agents send
+their queries to. It is green while the server answers, amber while connecting, and crossed
+out in red when unreachable, and hovering it shows when the server last answered.
 
 Each detector is a toggle in the plugin settings, they all run on your machine, and none of
 what they surface is ever sent to the agent. They match column names and value shapes, so

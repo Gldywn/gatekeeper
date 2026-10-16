@@ -32,8 +32,11 @@ describe("dbStatusHtml", () => {
     expect(dbStatusHtml({ ...base, checkedAt: 0 }, "PostgreSQL")).toBe("");
   });
 
-  it("shows a passed check with no error box", () => {
+  it("shows a passed check under a Database heading, with no error box", () => {
     const html = dbStatusHtml({ ...base, error: "stale" }, "PostgreSQL");
+    expect(html.startsWith('<div class="ro-pop-head" aria-hidden="true">Database</div>')).toBe(
+      true,
+    );
     expect(html).toContain('class="db-status passed"');
     expect(html).toContain("Last check passed");
     expect(html).not.toContain("db-err");

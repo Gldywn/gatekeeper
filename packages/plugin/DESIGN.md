@@ -108,10 +108,18 @@ dialect, database. Two rules hold it:
   would describe the connection rather than the queries the queue governs.
 
 The header wraps it as a bordered object and makes its database glyph live: a dot on
-the glyph is the last endpoint check (green passed, amber failed and pulsing, red three
-failures in a row, none when the engine has no check), and hovering or focusing the
-glyph opens the popover with that check, then the read-only layers. The header shows no
-other check or read-only word; the detail lives in the popover. The audit-trail head renders the same
+the glyph is the last endpoint check (green passed and still, amber failed and pulsing, red
+three failures in a row, none when the engine has no check), and hovering or focusing the
+glyph opens the popover, headed "Database", with that check, then the read-only layers. The header shows no other check or read-only word; the detail
+lives in the popover.
+
+Right after the chip, the link to the Gatekeeper server follows the same pattern in its own
+place: a bare robot glyph with no fill, so it never reads as one of the buttons on the right,
+with the same dot bottom right (green and still while answering; amber connecting or retrying,
+pulsing; crossed-out red robot once unreachable), no word in
+any state, and a popover with the status alone. Statuses sit on the left, settings (Auto
+mode, Schema access, the gear) on the right. Only one status popover shows at a time, and
+Escape hides the server one. The audit-trail head renders the same
 chip flat (no border, no fill, middot-separated, no amber on the dialect): its
 seated title bar already frames it, and a bordered chip beside the title only
 stacked edge on edge.
@@ -160,8 +168,9 @@ Rules:
   under reduce; CSS keyframes live inside `@media (prefers-reduced-motion:
   no-preference)`).
 - Infinite loops are for functional liveness or waiting indicators only, kept
-  subtle: the active-agent dot, the connecting status dot and a failed connection check dot pulse, the "waiting
-  for a proposal" empty state breathes. Nothing decorative loops, and data never
+  subtle: the active-agent dot, the server dot while connecting and a failed connection check
+  dot pulse, the "waiting for a proposal" empty state breathes. A green status dot holds still:
+  all being well needs no motion. Nothing decorative loops, and data never
   pulses (the expiry countdown shifts to amber under 45s, it does not pulse).
 - Content is always visible by default. Never gate a card or control on an
   animation completing.

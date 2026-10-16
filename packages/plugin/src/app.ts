@@ -22,6 +22,8 @@ import { SchemaAnnotator } from "./annotate";
 import { clock, countsLabel, escapeHtml, relAge } from "./html";
 import {
   alertTriangleIcon,
+  botIcon,
+  botOffIcon,
   checkIcon,
   chevronDown,
   copyIcon,
@@ -30,6 +32,7 @@ import {
   historyIcon,
   keyIcon,
   pencilIcon,
+  schemaIcon,
   shieldCheckIcon,
   shieldQuestionIcon,
   terminalIcon,
@@ -39,6 +42,7 @@ import {
 import { BrokerClient } from "./net/broker";
 import { connectionScopeKey } from "./net/scope";
 import { SingleInstance, type SingleInstanceWire } from "./net/singleinstance";
+import { agentLinkAge, agentLinkLabel, agentLinkStatusHtml } from "./render/agentlink";
 import { AUTO_APPROVED, autoIcon, autoPopHtml, SAVED_KEY_MASK } from "./render/auto";
 import { ConfirmModal } from "./render/confirm";
 import { connChipInner } from "./render/connchip";
@@ -137,7 +141,6 @@ const PROBE_MS = 3000;
 // One scalar endpoint check on the user's database, possibly prod, while the tab is visible.
 // The operator's bound: a dropped connection must show within about 15 s.
 const CHECK_MS = 15_000;
-const BROKER_TITLE = "Link to the Gatekeeper server, where agents send their queries";
 
 // The read-only layer help sentences, revealed by each row's "?" affordance. Each says where
 // the layer sits between this plugin and the database, then what makes it read-only; the
@@ -149,12 +152,10 @@ const HELP_BEEKEEPER =
 const HELP_ENDPOINT =
   "The database server at the end of the connection. A read replica or a read-only server rejects every write.";
 
-const CONNECTION_LABEL: Record<ConnectionState, string> = {
-  connecting: "connecting...",
-  reconnecting: "reconnecting...",
-  connected: "connected",
-  error: "unreachable",
-};
+// The badge says on or off only in colour and shape, so the button's name carries it too.
+function schemaAccessLabel(on: boolean): string {
+  return `Schema access is ${on ? "on" : "off"}`;
+}
 
 const PRESENCE_ORDER: Record<Presence, number> = { active: 0, idle: 1, gone: 2 };
 
@@ -335,6 +336,8 @@ export class Gatekeeper {
   // demotion bails before it starts polling (a standby must never touch the broker).
   private activeGen = 0;
   private connectionState: ConnectionState = "connecting";
+  // The last 2xx from the broker, 0 before the first one.
+  private brokerAnsweredAt = 0;
   // The raw X-Gatekeeper-Server value last seen: undefined until the broker first answers
   // (the corner indicator stays hidden), null once it is missing or the broker is gone.
   private serverHeader: string | null | undefined = undefined;
@@ -419,7 +422,7 @@ export class Gatekeeper {
         }
         // An open mode or flyout menu swallows the first Escape so it dismisses without
         // also tearing down the overlay or popover it sits inside.
-        if (this.closeModeMenus() || this.closeFlyoutMenus()) {
+        if (this.closeModeMenus() || this.closeFlyoutMenus() || this.dismissAgentPop()) {
           return;
         }
         this.activityView.close();
@@ -428,6 +431,8 @@ export class Gatekeeper {
         this.setSettingsOpen(false);
       }
     });
+    document.addEventListener("mouseover", (e) => this.enterAgentGlyph(e));
+    document.addEventListener("focusin", (e) => this.enterAgentGlyph(e));
     // A click anywhere outside the gear or the open popover dismisses it. Bound
     // once (the gear/popover are re-created per render, so this reads them live).
     document.addEventListener("click", (e) => {
@@ -1198,6 +1203,11 @@ export class Gatekeeper {
   <header class="bar">
     <span class="hive-wrap" aria-hidden="true"><span class="hive"></span></span>
     <span class="conn-chip" id="conn"></span>
+    <span class="agent-link" id="agentLink">
+      <span class="ag-ico" tabindex="0" role="img" aria-describedby="agentPop">${botIcon}${botOffIcon}</span>
+      <span class="ro-pop ag-pop" id="agentPop" role="tooltip"><div class="ro-pop-head" aria-hidden="true">Gatekeeper server</div><div class="ag-slot"></div></span>
+      <span class="sr-only" id="agentLive" aria-live="polite"></span>
+    </span>
     <span class="armed" id="armed"></span>
     <span class="bar-right">
       <span class="sa-hint-wrap auto" id="autoHint" data-on="${this.autoEnabled}">
@@ -1205,25 +1215,24 @@ export class Gatekeeper {
         ${autoPopHtml()}
       </span>
       <span class="sa-hint-wrap" id="schemaHint" data-on="${s.schemaAccess}">
-        <button class="sa-hint" type="button" data-schema-settings aria-label="Schema access">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3"/></svg>
+        <button class="sa-hint" type="button" data-schema-settings aria-label="${schemaAccessLabel(s.schemaAccess)}">
+          ${schemaIcon}
           <span class="sa-dot"></span>
           <span class="sa-check">${checkIcon}</span>
         </button>
         <span class="sa-pop">
           <span class="sa-body sa-off">
-            <span class="sa-pt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg>Schema access</span>
+            <span class="sa-pt">${schemaIcon}Schema access</span>
             <p>Without this, agents guess your table and column names. Turn it on so they read the real structure through <code>get_schema</code> and write sharper queries. <b>No row data is ever exposed.</b></p>
             <button class="sa-enable" type="button" data-schema-toggle>Enable Schema access</button>
           </span>
           <span class="sa-body sa-on">
-            <span class="sa-pt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/></svg>Schema access</span>
+            <span class="sa-pt">${schemaIcon}Schema access</span>
             <p>Agents now read your tables, columns, types and keys through <code>get_schema</code>, which is what makes their queries sharper. <b>No row data is ever exposed.</b></p>
             <button class="sa-enable tonal" type="button" data-schema-toggle>Disable Schema access</button>
           </span>
         </span>
       </span>
-      <span class="conn-status" id="connStatus" aria-live="polite"></span>
       <span class="dsep"></span>
       <span class="gear-wrap">
         <button class="gear" id="settingsGear" type="button" aria-label="Settings" aria-haspopup="true" aria-expanded="false">${gearIcon}</button>
@@ -1556,26 +1565,90 @@ export class Gatekeeper {
     });
     this.renderQueue();
     this.renderHistory();
-    this.renderRoster(); // Rebuilt DOM has a blank pill; force it back to the initial state (the
+    this.renderRoster(); // Rebuilt DOM has a blank glyph; force it back to the initial state (the
     // guard in setConnectionState would otherwise skip writing the new node).
-    this.setConnectionState("connecting", "", true);
+    this.setConnectionState("connecting", true);
     const gk = this.root.querySelector(".gk");
     if (gk) {
       reveal([...gk.children].filter((c) => !(c as HTMLElement).hidden));
     }
   }
 
-  private setConnectionState(state: ConnectionState, detail = "", force = false): void {
+  // Updated in place, never rebuilt, so the live node stays mounted and the glyph keeps the
+  // keyboard focus.
+  private setConnectionState(state: ConnectionState, force = false): void {
     if (!force && this.connectionState === state) {
       return;
     }
     this.connectionState = state;
-    const el = this.root.querySelector<HTMLSpanElement>("#connStatus");
+    const el = this.root.querySelector<HTMLElement>("#agentLink");
     if (el) {
+      const label = agentLinkLabel(state);
       el.dataset.state = state;
-      el.textContent = CONNECTION_LABEL[state];
-      el.title = detail || BROKER_TITLE;
+      el.querySelector(".ag-ico")?.setAttribute("aria-label", label);
+      const live = el.querySelector("#agentLive");
+      if (live) {
+        live.textContent = label;
+      }
+      const slot = el.querySelector(".ag-slot");
+      if (slot) {
+        slot.innerHTML = agentLinkStatusHtml(state);
+      }
     }
+    this.renderAgentLinkTimes();
+  }
+
+  private renderAgentLinkTimes(): void {
+    const el = this.root.querySelector<HTMLElement>("#agentLink");
+    if (!el) {
+      return;
+    }
+    const age = el.querySelector(".db-age");
+    if (age) {
+      age.textContent = agentLinkAge(this.connectionState, this.brokerAnsweredAt, Date.now());
+    }
+    this.placeAgentPop();
+  }
+
+  // Escape hides the open server popover. A hovered database glyph wins over it (the CSS shows
+  // one status popover at a time), and then this Escape is not the server popover's.
+  private dismissAgentPop(): boolean {
+    const link = this.root.querySelector<HTMLElement>("#agentLink");
+    if (
+      !link ||
+      link.hasAttribute("data-dismissed") ||
+      this.root.querySelector("#conn .chip-db:hover, #connPop:hover") ||
+      !link.querySelector(".ag-ico:hover, .ag-pop:hover, .ag-ico:focus-visible")
+    ) {
+      return false;
+    }
+    link.toggleAttribute("data-dismissed", true);
+    return true;
+  }
+
+  // The server popover Escape hid stays hidden until its glyph is entered again from outside,
+  // by the pointer or the focus, whatever else still holds it open.
+  private enterAgentGlyph(e: MouseEvent | FocusEvent): void {
+    const glyph = (e.target as Element | null)?.closest?.(".ag-ico");
+    if (!glyph || glyph.contains(e.relatedTarget as Node | null)) {
+      return;
+    }
+    glyph.closest("[data-dismissed]")?.removeAttribute("data-dismissed");
+    this.placeAgentPop();
+  }
+
+  // The server popover opens leftwards when rightwards would cross the header's edge (a long
+  // connection name). Measured on entry and on every tick, so a resize with the focus kept on
+  // the glyph is corrected within a second; a geometry fix only, nothing is rebuilt.
+  private placeAgentPop(): void {
+    const glyph = this.root.querySelector(".ag-ico");
+    const pop = this.root.querySelector<HTMLElement>("#agentPop");
+    const bar = this.root.querySelector(".bar");
+    if (!glyph || !pop || !bar) {
+      return;
+    }
+    const room = bar.getBoundingClientRect().right - glyph.getBoundingClientRect().left;
+    pop.toggleAttribute("data-flip", pop.offsetWidth > room);
   }
 
   // Show or hide the safeguards popover, keeping the gear's aria-expanded and
@@ -2119,7 +2192,9 @@ export class Gatekeeper {
     this.syncSettingControls();
     const hint = this.root.querySelector<HTMLElement>("#schemaHint");
     if (hint) {
-      hint.dataset.on = String(this.settingsStore.get().schemaAccess);
+      const on = this.settingsStore.get().schemaAccess;
+      hint.dataset.on = String(on);
+      hint.querySelector(".sa-hint")?.setAttribute("aria-label", schemaAccessLabel(on));
     }
     this.trimHistory();
     this.renderHistory();
@@ -2176,6 +2251,11 @@ export class Gatekeeper {
       // The broker stamps every authenticated answer, its errors included, so each one is
       // current; one without the header is not from a Gatekeeper that reports its version.
       this.setServerHeader(res.headers.get(SERVER_IDENTITY_HEADER));
+      // Only a 2xx is an answer: an error status still counts as connected below, but the
+      // popover's "Last answer" age keeps growing.
+      if (res.ok) {
+        this.brokerAnsweredAt = Date.now();
+      }
       if (res.status === 200) {
         claimed = true;
         const proposal = (await res.json()) as Proposal;
@@ -2189,7 +2269,7 @@ export class Gatekeeper {
       // MCP reconnect); only surface the error once it has actually persisted.
       this.pollFailures++;
       if (this.pollFailures >= 3) {
-        this.setConnectionState("error", `Broker unreachable at ${BROKER_URL}. Retrying...`);
+        this.setConnectionState("error");
         if (active === this.activeGen) this.setServerHeader(null);
       } else if (this.connectionState !== "connecting") {
         this.setConnectionState("reconnecting");
@@ -2386,6 +2466,7 @@ export class Gatekeeper {
     this.maybeCheckConnection();
     this.maybeCheckEndpoint();
     this.renderCheckTimes();
+    this.renderAgentLinkTimes();
     for (const card of [...this.cards]) {
       if (card.state === "ready" && card.expiresAt - Date.now() <= 0) {
         this.finish(card.id, "expired", "expired");

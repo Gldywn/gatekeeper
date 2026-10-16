@@ -1,5 +1,5 @@
 import { escapeHtml } from "../html";
-import { gearIcon, xIcon } from "../icons";
+import { gearIcon, schemaIcon, xIcon } from "../icons";
 import { autoSettingsHtml } from "../render/auto";
 import { modeDropdown, switchInput } from "../render/controls";
 import {
@@ -135,7 +135,7 @@ export class SettingsView {
           <div id="autoSettings" data-on="${this.auto()}">${autoSettingsHtml(this.auto(), this.keySaved())}</div>
           <div class="set-row recommend">
             <div class="set-text">
-              <span class="set-name"><span class="set-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3"/></svg></span>Schema access <span class="set-rec">recommended</span></span>
+              <span class="set-name"><span class="set-ico">${schemaIcon}</span>Schema access <span class="set-rec">recommended</span></span>
               <span class="set-desc">Give connected agents your database structure (tables, columns, types, keys) so they write more accurate, valid SQL instead of guessing names. Never exposes any row data. <span class="set-note">Off by default.</span></span>
             </div>
             <span class="set-control">${switchInput("schemaAccess", "Schema access", s.schemaAccess)}</span>

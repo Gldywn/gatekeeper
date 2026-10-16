@@ -24,12 +24,16 @@ export function dbLink(check: DbCheck): DbLink {
   return check.failures < 3 ? "failed" : "failing";
 }
 
+// Names the popover's subject, like "Gatekeeper server" on the server one; the glyph's own
+// name already says it to screen readers.
+const HEAD = '<div class="ro-pop-head" aria-hidden="true">Database</div>';
+
 // The age and the countdown are left empty here and filled by the 1 s tick, so the popover
 // is never rebuilt under the cursor or the keyboard focus.
 export function dbStatusHtml(check: DbCheck, engine: string): string {
   const link = dbLink(check);
   if (link === "none") {
-    return `<div class="db-note">${alertTriangleIcon}This feature is not available on ${escapeHtml(engine)}.</div>`;
+    return `${HEAD}<div class="db-note">${alertTriangleIcon}This feature is not available on ${escapeHtml(engine)}.</div>`;
   }
   if (link === "pending") {
     return "";
@@ -44,7 +48,7 @@ export function dbStatusHtml(check: DbCheck, engine: string): string {
     link !== "passed" && check.error
       ? `<span class="db-err">${escapeHtml(check.error.slice(0, ERROR_CHARS))}</span>`
       : "";
-  return `<div class="db-status ${link}"><span class="db-dot"></span><span class="db-stack"><span class="db-title">${title}</span>${error}<span class="db-next"></span></span></div>`;
+  return `${HEAD}<div class="db-status ${link}"><span class="db-dot"></span><span class="db-stack"><span class="db-title">${title}</span>${error}<span class="db-next"></span></span></div>`;
 }
 
 // The glyph's accessible name, since the dot alone says it only in colour.
