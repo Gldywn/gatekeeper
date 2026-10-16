@@ -30,6 +30,7 @@ Rules that follow from the contract:
 - `expired` means the proposal outlived its window (about 15 minutes waiting unclaimed) before the human got to it. Re-submit it once and resume waiting, rather than dropping the task.
 - `rejected` is an answer: read the reviewer's message, adjust, then either propose again or explain the blocker to your user.
 - `failed` is an answer too: `terminal.error` says why, usually in the database's own words. Read it before anything else (see "When a query fails").
+- A `failed` whose error starts with `Stop requested` means the human asked to stop the query while it ran, by hand or through an auto-stop limit they set, and the query then failed; the message says who asked, then quotes what the database returned, which may or may not be the cancellation itself. Never resubmit the same statement: propose a cheaper one (narrower filter, `LIMIT`, an indexed column) or ask your user. If it was a write, its effect is unknown, so check the data before anything else. A query that finished despite a stop request comes back `approved` as usual.
 
 ### Harness notes on waiting
 

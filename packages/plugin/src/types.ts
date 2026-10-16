@@ -35,6 +35,35 @@ export interface Card extends Proposal {
   // Raw flags from that analysis, posted with the decision for the audit trail: presence
   // only, so no table or column name ever reaches the broker.
   sensitivity?: import("@gatekeeper/shared").SensitivityRecord;
+  run?: RunState;
+}
+
+// One approved execution, from the moment its SQL leaves for the host until it settles.
+export interface RunState {
+  startedAt: number;
+  // Captured at start, so a later settings change cannot stop a query approved under
+  // another limit. 0 means no auto-stop.
+  limitMs: number;
+  // Either both engine and tag (stopping is available) or the reason it is not.
+  engine?: import("./sql/stop").StopEngine;
+  tag?: string;
+  unavailable?: string;
+  // Set the moment the host answers, before any posting, so no stop is sent after it.
+  ended: boolean;
+  stop?: StopState;
+}
+
+export interface StopState {
+  // The first request wins: a later auto-stop never relabels the operator's click.
+  by: "operator" | "limit";
+  atMs: number;
+  // pending: keep trying (not found yet); sent: the database accepted the cancel;
+  // idle: nothing in progress, Stop is clickable again.
+  state: "pending" | "sent" | "idle";
+  inFlight: boolean;
+  attempts: number;
+  sentAt?: number;
+  error?: string;
 }
 
 export interface HistItem {

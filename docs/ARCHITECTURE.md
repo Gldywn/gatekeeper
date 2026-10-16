@@ -96,6 +96,15 @@ If final authority checks stop a reserved execution before `runQuery`, the plugi
 `POST /execution/withdraw` to return it to `leased`. Available evaluation and approval
 attribution are kept in `policy_json`, independently of result-row retention.
 
+## Stopping a running query
+
+The plugin API has no cancel, so on PostgreSQL and MySQL the approved statement runs behind a
+comment tag and the human's Stop (or their auto-stop limit) sends a second, fixed `runQuery`
+that asks the database to cancel the session running the tagged statement. The broker sees
+no new state: a query that fails after a stop request ends `failed` with an error starting
+"Stop requested", and one that completes anyway returns its result. Details and the
+residual case are in [`SECURITY.md`](../SECURITY.md#stopping-a-running-query).
+
 ## Result caps
 
 The plugin caps the rows it forwards to the agent (by count and bytes) so a bulk read never

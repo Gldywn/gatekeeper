@@ -43,6 +43,14 @@ describe("settings/normalizeSettings", () => {
     expect(normalizeSettings({ resultCacheMb: "nope" }).resultCacheMb).toBe(512);
   });
 
+  it("keeps a valid auto-stop option and turns anything else off", () => {
+    expect(defaultSettings().autoStopMinutes).toBe(0);
+    expect(normalizeSettings({ autoStopMinutes: 15 }).autoStopMinutes).toBe(15);
+    expect(normalizeSettings({ autoStopMinutes: 7 }).autoStopMinutes).toBe(0);
+    expect(normalizeSettings({ autoStopMinutes: "5" }).autoStopMinutes).toBe(5);
+    expect(normalizeSettings({ autoStopMinutes: -1 }).autoStopMinutes).toBe(0);
+  });
+
   it("derives the serialized byte budget from the RAM ceiling (heap factor 3)", () => {
     expect(resultBudgetBytes(defaultSettings())).toBe(Math.floor((512 * 1024 * 1024) / 3));
   });

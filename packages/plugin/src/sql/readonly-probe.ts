@@ -10,8 +10,12 @@ export interface EndpointReadOnly {
 }
 
 // The driver's error stays local: it explains a failed check in the popover, never reaches
-// the broker.
-export type ProbeOutcome = { readOnly: EndpointReadOnly } | { error: string };
+// the broker. The server version rides along for Stop's minimum-version rule (sql/stop.ts).
+export type ProbeOutcome = { readOnly: EndpointReadOnly; version?: string } | { error: string };
+
+function withVersion(readOnly: EndpointReadOnly, row: Record<string, unknown>): ProbeOutcome {
+  return typeof row.version === "string" ? { readOnly, version: row.version } : { readOnly };
+}
 
 type RunQuery = (sql: string) => Promise<RunQueryResult>;
 
@@ -52,24 +56,24 @@ async function firstRow(
 async function probePostgres(run: RunQuery): Promise<ProbeOutcome> {
   const r = await firstRow(
     run,
-    "SELECT pg_is_in_recovery() AS replica, current_setting('transaction_read_only') = 'on' AS session_read_only",
+    "SELECT pg_is_in_recovery() AS replica, current_setting('transaction_read_only') = 'on' AS session_read_only, version() AS version",
   );
   if ("error" in r) return r;
   const replica = readFlag(r.row, "replica");
   if (typeof replica !== "boolean") return replica;
   const sessionReadOnly = readFlag(r.row, "session_read_only");
   if (typeof sessionReadOnly !== "boolean") return sessionReadOnly;
-  return { readOnly: { replica, sessionReadOnly } };
+  return withVersion({ replica, sessionReadOnly }, r.row);
 }
 
 // read_only alone: super_read_only forces it on anyway, and MariaDB (even under Beekeeper's
 // MySQL type) and MySQL before 5.7.8 lack super_read_only, which would fail every check.
 async function probeMysql(run: RunQuery): Promise<ProbeOutcome> {
-  const r = await firstRow(run, "SELECT @@global.read_only AS read_only");
+  const r = await firstRow(run, "SELECT @@global.read_only AS read_only, VERSION() AS version");
   if ("error" in r) return r;
   const replica = readFlag(r.row, "read_only");
   if (typeof replica !== "boolean") return replica;
-  return { readOnly: { replica, sessionReadOnly: false } };
+  return withVersion({ replica, sessionReadOnly: false }, r.row);
 }
 
 // Keyed by Beekeeper's raw databaseType, never the parser dialect: mapDialect() folds every

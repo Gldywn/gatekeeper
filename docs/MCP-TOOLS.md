@@ -16,7 +16,11 @@ instead of running.
 - `poll_results({ wait_ms? })` -> `{ results, pending }`. The state of every query the
   session proposed recently, in one call, optionally waiting (same 25s bound) until any
   pending one resolves. States only; fetch a resolved one's rows with `get_query_result`.
-- `cancel_query({ request_id })` -> ticket. Withdraws a pending or leased proposal.
+- `cancel_query({ request_id })` -> ticket. Withdraws a pending or leased proposal. It
+  cannot stop a query that is already executing; only the human can ask to, from the plugin.
+  If the query then fails, its error starts with `Stop requested`, followed by what the
+  database returned; if it completes anyway, its result comes back as usual (see
+  [SECURITY.md](../SECURITY.md#stopping-a-running-query)).
 - `run_query({ sql, intent? })` -> ticket. Convenience wrapper that submits and waits once,
   under the same 25s bound, so it can return a still-pending proposal rather than the result.
   It serializes one query at a time; prefer `submit_query` + `poll_results` /

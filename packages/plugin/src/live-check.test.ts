@@ -461,3 +461,35 @@ describe("read-only layers popover", () => {
     expect(gatekeeperRow()).toContain("read-only");
   });
 });
+
+describe("server version for Stop", () => {
+  const passing = (version: string) => ({
+    results: [{ fields: [], rows: [{ replica: false, session_read_only: false, version }] }],
+  });
+
+  it("keeps the version of a passing check through a failed one and forgets it on a reset", async () => {
+    const app = harness();
+    app.serverVersion = null;
+    query.mockResolvedValueOnce(passing("PostgreSQL 16.2 on x86_64"));
+    await app.checkEndpoint();
+    expect(app.serverVersion).toBe("PostgreSQL 16.2 on x86_64");
+    query.mockResolvedValueOnce({ results: [], error: "connection reset" });
+    await app.checkEndpoint();
+    expect(app.serverVersion).toBe("PostgreSQL 16.2 on x86_64");
+    app.resetCheck();
+    expect(app.serverVersion).toBeNull();
+  });
+
+  it("takes no version from a check a schema change discarded", async () => {
+    const app = harness();
+    app.serverVersion = null;
+    const pending = deferred<ReturnType<typeof passing>>();
+    query.mockReturnValueOnce(pending.promise);
+    app.maybeCheckEndpoint();
+    await settle();
+    app.connGeneration++;
+    pending.resolve(passing("PostgreSQL 16.2 on x86_64"));
+    await settle();
+    expect(app.serverVersion).toBeNull();
+  });
+});

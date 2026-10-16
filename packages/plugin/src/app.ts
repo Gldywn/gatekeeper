@@ -39,13 +39,20 @@ import {
 import { BrokerClient } from "./net/broker";
 import { connectionScopeKey } from "./net/scope";
 import { SingleInstance, type SingleInstanceWire } from "./net/singleinstance";
-import { autoIcon, autoPopHtml, SAVED_KEY_MASK } from "./render/auto";
+import { AUTO_APPROVED, autoIcon, autoPopHtml, SAVED_KEY_MASK } from "./render/auto";
 import { ConfirmModal } from "./render/confirm";
 import { connChipInner } from "./render/connchip";
 import { modeDropdown, switchInput } from "./render/controls";
 import { type DbCheck, dbLink, dbLinkLabel, dbStatusHtml, nextCheckText } from "./render/dblink";
 import { historyRow } from "./render/history";
-import { type CardGate, cardGate, queueHtml, readyActions, schemaInner } from "./render/queue";
+import {
+  type CardGate,
+  cardGate,
+  LONG_RUN_MS,
+  queueHtml,
+  readyActions,
+  schemaInner,
+} from "./render/queue";
 import { type LayerState, readOnlyView } from "./render/readonly";
 import { presence, rosterRow } from "./render/roster";
 import {
@@ -66,6 +73,16 @@ import { modeRank, type RiskMode } from "./sql/mode";
 import { mapDialect } from "./sql/readonly";
 import { type EndpointReadOnly, hasProbe, probeReadOnly, runErrorText } from "./sql/readonly-probe";
 import { sensitivityOf, textSchema } from "./sql/schema";
+import {
+  newStopToken,
+  readStop,
+  type StopEngine,
+  type StopOutcome,
+  stopNote,
+  stopStatement,
+  stopTag,
+  stopUnavailable,
+} from "./sql/stop";
 import type {
   Card,
   CardState,
@@ -74,6 +91,7 @@ import type {
   Presence,
   Proposal,
   RequestState,
+  RunState,
   SessionRoster,
 } from "./types";
 import {
@@ -91,6 +109,13 @@ const BROKER_URL = "http://localhost:9999";
 const POLL_MS = 1000;
 const RENEW_MS = 15_000;
 const TICK_MS = 1000;
+// A query that started but is not in the database's activity yet gets a few ticks to appear.
+const STOP_ATTEMPTS = 5;
+const STOP_RETRY_MS = 10_000;
+// Auto mode starts no new evaluation while this many automatic reads run. Beekeeper's default
+// PostgreSQL pool holds 8 connections; this leaves room for Stop and the operator's own tabs,
+// without reserving any.
+const AUTO_RUNS_MAX = 3;
 const CONN_CHECK_MS = 5000;
 // Printable ASCII only, so a pasted key can never smuggle whitespace or control bytes.
 const API_KEY_FORMAT = /^[\x21-\x7e]{1,4096}$/;
@@ -114,21 +139,15 @@ const PROBE_MS = 3000;
 const CHECK_MS = 15_000;
 const BROKER_TITLE = "Link to the Gatekeeper server, where agents send their queries";
 
-// The read-only layer help sentences, revealed by each row's "?" affordance. The
-// Gatekeeper one tracks the armed mode: read-only by default, wider once armed.
-function helpGatekeeper(mode: RiskMode): string {
-  if (mode === "write") {
-    return "With Write mode armed, Gatekeeper may run an approved INSERT or UPDATE, still one human approval at a time.";
-  }
-  if (mode === "destructive") {
-    return "With Destructive mode armed, Gatekeeper may run an approved write, up to DELETE, DROP, or TRUNCATE, still one human approval at a time.";
-  }
-  return "Gatekeeper only ever runs read-only SELECT queries. It never sends a write to the database, whatever the connection would allow.";
-}
+// The read-only layer help sentences, revealed by each row's "?" affordance. Each says where
+// the layer sits between this plugin and the database, then what makes it read-only; the
+// badge beside it gives the live state, so the text never changes with the mode.
+const HELP_GATEKEEPER =
+  "This plugin's approval gate, before Beekeeper. In Read-only or Auto mode it lets only reads through.";
 const HELP_BEEKEEPER =
-  "Beekeeper's own connection read-only mode. When on, Beekeeper blocks any write on this connection by itself.";
+  "The saved connection in Beekeeper, between this plugin and the database. With its read-only mode on, it blocks every write.";
 const HELP_ENDPOINT =
-  "The database endpoint this connection actually reaches. A read replica (such as an Aurora reader) rejects writes at the server, even if the credentials could write.";
+  "The database server at the end of the connection. A read replica or a read-only server rejects every write.";
 
 const CONNECTION_LABEL: Record<ConnectionState, string> = {
   connecting: "connecting...",
@@ -232,6 +251,9 @@ export class Gatekeeper {
   private autoGeneration = 0;
   private autoKey = "";
   private autoBusy = false;
+  // Automatic executions still running. Never reset: each run decrements its own count when
+  // it settles, even after a switch or a disable.
+  private autoRuns = 0;
   private autoAbort?: AbortController;
   private autoCard?: Card;
   // Proposals already waiting when Auto mode was switched on. Enabling delegates the
@@ -281,6 +303,10 @@ export class Gatekeeper {
   // Host-side endpoint check, reset per connection. endpointRO is the last verdict a passed
   // check confirmed (null: none yet); a later failure keeps it and only adds to the count.
   private endpointRO: EndpointReadOnly | null = null;
+  // PostgreSQL 10+ and MySQL 8.0.19+ only can be stopped, see sql/stop.ts. Read once per
+  // connection by the endpoint check and reset with it (resetCheck); a failed or dropped
+  // re-check keeps it, so a schema change never blanks it.
+  private serverVersion: string | null = null;
   private checkedAt = 0;
   private nextCheckAt = 0;
   private checkFailures = 0;
@@ -925,12 +951,7 @@ export class Gatekeeper {
     const view = readOnlyView(this.mode === "read", this.conn?.readOnly ?? false, this.endpointRO);
     return (
       '<div class="ro-pop-head">Read-only layers</div>' +
-      this.roRow(
-        "Gatekeeper",
-        helpGatekeeper(this.mode),
-        view.gatekeeper.label,
-        view.gatekeeper.state,
-      ) +
+      this.roRow("Gatekeeper", HELP_GATEKEEPER, view.gatekeeper.label, view.gatekeeper.state) +
       this.roRow("Beekeeper", HELP_BEEKEEPER, view.beekeeper.label, view.beekeeper.state) +
       this.roRow("Endpoint", HELP_ENDPOINT, view.endpoint.label, view.endpoint.state)
     );
@@ -997,6 +1018,7 @@ export class Gatekeeper {
   // releases the guard itself when it settles.
   private resetCheck(): void {
     this.endpointRO = null;
+    this.serverVersion = null;
     this.checkedAt = 0;
     this.nextCheckAt = 0;
     this.checkFailures = 0;
@@ -1057,6 +1079,7 @@ export class Gatekeeper {
       this.checkFailures = 0;
       this.checkError = null;
       this.endpointRO = outcome.readOnly;
+      if (outcome.version) this.serverVersion = outcome.version;
       // A failover can turn a replica into a primary or back, which moves the card gates.
       if (this.connectionReadOnly() !== wasReadOnly) {
         this.renderQueue();
@@ -1292,8 +1315,12 @@ export class Gatekeeper {
       const r = target.closest<HTMLElement>("[data-reject]");
       const denyOpen = target.closest<HTMLElement>("[data-deny-open]");
       const deny = target.closest<HTMLElement>("[data-deny]");
+      const stop = target.closest<HTMLElement>("[data-stop]");
       if (copy) {
         this.copySql(copy);
+      } else if (stop) {
+        const card = this.cards.find((c) => c.id === stop.getAttribute("data-stop"));
+        if (card) this.requestStop(card, "operator");
       } else if (a) {
         void this.approve(a.getAttribute("data-approve")!);
       } else if (r) {
@@ -1879,7 +1906,7 @@ export class Gatekeeper {
   }
 
   private async evaluateNext(): Promise<void> {
-    if (!this.autoEnabled || this.autoBusy) return;
+    if (!this.autoEnabled || this.autoBusy || this.autoRuns >= AUTO_RUNS_MAX) return;
     const card = this.cards.find(
       (c) =>
         c.state === "ready" &&
@@ -1915,6 +1942,7 @@ export class Gatekeeper {
       controller.abort();
       if (valid()) this.reviewCard(card, "Evaluation timed out. Approve manually");
     }, 15000);
+    let run: Promise<void> | undefined;
     try {
       card.autoStatus = "Evaluating with Jev";
       this.renderQueue();
@@ -1951,7 +1979,11 @@ export class Gatekeeper {
         );
         return;
       }
-      await this.approve(card.id, false, evaluation);
+      card.autoStatus = AUTO_APPROVED;
+      // approve() reserves the card before its first await, so the finally below frees the
+      // evaluator for the next read while this one executes.
+      this.autoRuns++;
+      run = this.approve(card.id, false, evaluation);
     } catch {
       if (valid()) this.reviewCard(card, "Evaluator or metadata unavailable. Approve manually");
     } finally {
@@ -1960,6 +1992,15 @@ export class Gatekeeper {
       this.autoCard = undefined;
       if (card.state === "ready" && card.autoStatus === "Evaluating with Jev")
         this.reviewCard(card, "Evaluation cancelled or authority changed");
+      void this.evaluateNext();
+    }
+    if (!run) return;
+    try {
+      await run;
+    } catch (err) {
+      log.error(err instanceof Error ? err : String(err));
+    } finally {
+      this.autoRuns--;
       void this.evaluateNext();
     }
   }
@@ -2357,6 +2398,7 @@ export class Gatekeeper {
         leaseEl.textContent = clock(remaining);
       }
     }
+    this.tickRuns(Date.now());
     // Keep the resolved-history and roster ages current without re-rendering.
     this.root.querySelectorAll<HTMLSpanElement>("#hist .hage, #roster .rage").forEach((el) => {
       const t = Number(el.dataset.age);
@@ -2472,6 +2514,9 @@ export class Gatekeeper {
       return;
     }
     if (!evaluation && this.autoCard === card) this.autoAbort?.abort();
+    // this.autoAbort moves on to the next read's evaluation once this card is reserved, so
+    // keep the signal of the evaluation that cleared this one.
+    const autoSignal = evaluation ? this.autoAbort?.signal : undefined;
     const gen = this.connGeneration;
     const active = this.activeGen;
     const auto = this.autoGeneration;
@@ -2490,7 +2535,7 @@ export class Gatekeeper {
         (this.autoEnabled &&
           auto === this.autoGeneration &&
           this.mode === "read" &&
-          !this.autoAbort?.signal.aborted &&
+          !autoSignal?.aborted &&
           currentEvaluation(evaluation)));
     // Reserve synchronously, before the host round-trip, for both approval sources.
     this.setCardState(id, "approving");
@@ -2557,12 +2602,19 @@ export class Gatekeeper {
       this.reviewCard(card, "Execution stopped before SQL ran. Approval authority changed");
       return;
     }
+    const run = this.startRun(card);
+    card.run = run;
     this.setCardState(id, "executing");
     try {
-      const { rows, fields, affectedRows } = await runApprovedQuery(card.sql);
-      // The query may have hit the new database after a switch; never deliver its
-      // rows against the old proposal.
-      if (gen !== this.connGeneration || active !== this.activeGen) {
+      // The tag is a plain leading comment: the statement the gate classified is unchanged.
+      const { rows, fields, affectedRows } = await runApprovedQuery(
+        run.tag ? `${run.tag} ${sql}` : sql,
+      ).finally(() => {
+        run.ended = true;
+      });
+      // A switch drops the cards, so never deliver rows to an old proposal; a schema change
+      // bumps connGeneration but keeps them, and must not strand this card running.
+      if (!this.cards.includes(card) || active !== this.activeGen) {
         return;
       }
       this.setCardState(id, "posting");
@@ -2598,12 +2650,128 @@ export class Gatekeeper {
         capResult(rows, fields, resultBudgetBytes(this.settingsStore.get()), undefined, changed),
       );
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = stopNote(run, err instanceof Error ? err.message : String(err));
       // The failure may be the connection itself: check on the next tick, not in 15 s.
       this.nextCheckAt = 0;
       await this.postResult(card, { status: "approved", error: message });
       this.finish(id, "failed", "query failed", undefined, message);
     }
+  }
+
+  private startRun(card: Card): RunState {
+    const type = this.conn?.databaseType ?? "";
+    const run: RunState = {
+      startedAt: Date.now(),
+      limitMs: (this.settingsStore.get().autoStopMinutes ?? 0) * 60_000,
+      ended: false,
+    };
+    const unavailable = stopUnavailable(
+      type,
+      dbDisplayName(type),
+      this.conn?.readOnly ?? false,
+      this.serverVersion,
+    );
+    if (unavailable) {
+      run.unavailable = unavailable;
+    } else {
+      run.engine = type as StopEngine;
+      run.tag = stopTag(card.id, newStopToken());
+    }
+    return run;
+  }
+
+  // The operator's click or the auto-stop limit. The first request is the one reported.
+  private requestStop(card: Card, by: "operator" | "limit"): void {
+    const run = card.run;
+    if (card.state !== "executing" || !run?.engine || run.ended || !this.cards.includes(card)) {
+      return;
+    }
+    if (run.stop && (run.stop.state !== "idle" || run.stop.inFlight)) return;
+    if (run.stop) {
+      Object.assign(run.stop, { state: "pending", attempts: 0, error: undefined });
+    } else {
+      run.stop = {
+        by,
+        atMs: Date.now() - run.startedAt,
+        state: "pending",
+        inFlight: false,
+        attempts: 0,
+      };
+    }
+    this.renderQueue();
+    void this.sendStop(card);
+  }
+
+  // At most one stop request in flight per card; "not found yet" is retried by the tick.
+  private async sendStop(card: Card): Promise<void> {
+    const run = card.run;
+    const stop = run?.stop;
+    if (!run?.engine || !run.tag || !stop || stop.state !== "pending" || stop.inFlight) return;
+    if (run.ended || !this.cards.includes(card)) return;
+    const gen = this.connGeneration;
+    const active = this.activeGen;
+    stop.inFlight = true;
+    stop.attempts++;
+    let outcome: StopOutcome;
+    try {
+      outcome = readStop(run.engine, await runQuery(stopStatement(run.engine, run.tag)));
+    } catch (err) {
+      outcome = { kind: "error", message: runErrorText(err) };
+    }
+    stop.inFlight = false;
+    // A switched connection or a query that already settled makes the answer moot.
+    if (
+      gen !== this.connGeneration ||
+      active !== this.activeGen ||
+      !this.cards.includes(card) ||
+      card.run !== run ||
+      run.ended ||
+      stop.state !== "pending"
+    ) {
+      return;
+    }
+    if (outcome.kind === "sent") {
+      stop.state = "sent";
+      stop.sentAt = Date.now();
+    } else if (outcome.kind === "error") {
+      stop.state = "idle";
+      stop.error = outcome.message;
+    } else if (stop.attempts >= STOP_ATTEMPTS) {
+      stop.state = "idle";
+      stop.error = "The running query was not found in the database's activity";
+    } else {
+      return;
+    }
+    this.renderQueue();
+  }
+
+  private tickRuns(now: number): void {
+    let rerender = false;
+    for (const card of [...this.cards]) {
+      const run = card.state === "executing" ? card.run : undefined;
+      if (!run || run.ended) continue;
+      const elapsed = now - run.startedAt;
+      const stop = run.stop;
+      if (run.engine && run.limitMs && !stop && elapsed >= run.limitMs) {
+        this.requestStop(card, "limit");
+        continue;
+      }
+      if (stop?.state === "pending" && !stop.inFlight) void this.sendStop(card);
+      // An accepted cancel normally ends the query at once; if it did not, let the
+      // operator try again rather than leave Stop disabled for the rest of the run.
+      if (stop?.state === "sent" && now - (stop.sentAt ?? now) >= STOP_RETRY_MS) {
+        stop.state = "idle";
+        rerender = true;
+      }
+      const el = this.root.querySelector<HTMLElement>(`[data-card="${card.id}"]`);
+      if (!el) continue;
+      el.classList.toggle("long", elapsed >= LONG_RUN_MS);
+      const elapsedEl = el.querySelector<HTMLElement>(".run-clock");
+      if (elapsedEl) elapsedEl.textContent = clock(elapsed);
+      const leftEl = el.querySelector<HTMLElement>(".autostop-clock");
+      if (leftEl) leftEl.textContent = clock(run.limitMs - elapsed);
+    }
+    if (rerender) this.renderQueue();
   }
 
   private async reject(id: string, reason?: string): Promise<void> {

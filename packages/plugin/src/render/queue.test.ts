@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import type { Card, SessionMeta } from "../types";
-import { cardHtml, groupHtml } from "./queue";
+import type { Card, RunState, SessionMeta } from "../types";
+import { cardHtml, groupHtml, runningActions } from "./queue";
 
 // Byte-for-byte lock on the extracted builders: one ready read-only card whose
 // schema annotation and open deny draft exercise every conditional branch.
@@ -214,5 +214,103 @@ describe("render/queue", () => {
 
     // A parsed statement says nothing at all.
     expect(cardHtml(card, "postgresql", denyDrafts)).not.toContain("could not parse");
+  });
+});
+
+describe("render/queue running row", () => {
+  const noDrafts = new Map<string, string>();
+  const base: Card = {
+    id: "req_0123456789ab",
+    sql: "SELECT 1",
+    createdAt: T - 60_000,
+    expiresAt: T + 90_000,
+    leaseId: "l",
+    leaseExpiresAt: T + 90_000,
+    sessionId: "s1",
+    session: null,
+    state: "executing",
+  };
+  const tagged: RunState = {
+    startedAt: T - 4_000,
+    limitMs: 0,
+    engine: "postgresql",
+    tag: "/* gatekeeper req_0123456789ab a1b2c3d4e5f6 */",
+    ended: false,
+  };
+  const card = (run: Partial<RunState>, state: Card["state"] = "executing"): Card => ({
+    ...base,
+    state,
+    run: { ...tagged, ...run },
+  });
+
+  it("shows a live Stop in Approve's place with the elapsed clock, and no expiry clock", () => {
+    const html = cardHtml(card({}), "postgresql", noDrafts);
+    expect(html).toContain('class="card  running"');
+    expect(html).toContain(
+      '<button class="btn stop" type="button" data-stop="req_0123456789ab"><span class="sq" aria-hidden="true"></span>Stop</button>',
+    );
+    expect(html).toContain('<span class="clock run-clock">0:04</span>');
+    expect(html).not.toContain('class="lease');
+    expect(html).not.toContain("btn approve");
+  });
+
+  it("reads as long from 45 s", () => {
+    expect(cardHtml(card({ startedAt: T - 44_000 }), "postgresql", noDrafts)).not.toContain(
+      "running long",
+    );
+    expect(cardHtml(card({ startedAt: T - 45_000 }), "postgresql", noDrafts)).toContain(
+      'class="card  running long"',
+    );
+  });
+
+  it("counts down to the auto-stop until a stop is requested", () => {
+    const limited = runningActions("q", { ...tagged, limitMs: 300_000, startedAt: T - 192_000 });
+    expect(limited).toContain('Auto-stop in<span class="clock autostop-clock">1:48</span>');
+    const requested = runningActions("q", {
+      ...tagged,
+      limitMs: 300_000,
+      stop: { by: "operator", atMs: 1, state: "pending", inFlight: true, attempts: 1 },
+    });
+    expect(requested).not.toContain("Auto-stop in");
+    expect(requested).toContain(
+      'disabled><span class="sq" aria-hidden="true"></span>Stopping&hellip;',
+    );
+  });
+
+  it("disables Stop with the standard warning where it is unavailable", () => {
+    const html = runningActions("q", {
+      startedAt: T,
+      limitMs: 300_000,
+      unavailable: "This feature is not available on SQLite.",
+      ended: false,
+    });
+    expect(html).toContain('data-stop="q" disabled>');
+    expect(html).toContain('<span class="approve-pop warn" role="tooltip">');
+    expect(html).toContain("This feature is not available on SQLite.</span>");
+    expect(html).not.toContain("Auto-stop in");
+  });
+
+  it("shows a failed stop as an error note with the database's raw text", () => {
+    const html = runningActions("q", {
+      ...tagged,
+      stop: {
+        by: "operator",
+        atMs: 1,
+        state: "idle",
+        inFlight: false,
+        attempts: 1,
+        error: "permission <denied>",
+      },
+    });
+    expect(html).toContain('data-stop="q"><span');
+    expect(html).toContain('<div class="cs-unparsed stop-error" role="status">');
+    expect(html).toContain("<span>An error occurred while stopping the query.</span>");
+    expect(html).toContain('<span class="stop-raw">permission &lt;denied&gt;</span>');
+  });
+
+  it("names the other transient states in the UI face", () => {
+    const html = cardHtml({ ...base, state: "approving" }, "postgresql", noDrafts);
+    expect(html).toContain('<span class="busy"><span class="spin"></span>Approving&hellip;</span>');
+    expect(html).not.toContain('class="lease');
   });
 });

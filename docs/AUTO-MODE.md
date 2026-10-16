@@ -405,6 +405,12 @@ returns to manual review. The broker only accepts an automatic decision it recen
 for that lease and SQL digest. The plugin remains the execution authority. Broker snapshots
 are a further consistency check, not independently trusted connection evidence.
 
+Evaluation does not wait for an automatically approved read to finish: the next read is
+evaluated while the previous one runs. Auto mode starts no new evaluation while three
+automatic reads are still running, which keeps it from filling Beekeeper's connection pool
+(8 connections by default for PostgreSQL) on its own. It reserves nothing: the operator's
+own work can still take the remaining connections.
+
 History records Approved automatically or Approved by you. Available evaluator output,
 provider, pinned model, policy, evaluation time and SQL digest are retained in `policy_json`
 and shown in details and Audit Trail. They survive result-row purging and remain indefinitely

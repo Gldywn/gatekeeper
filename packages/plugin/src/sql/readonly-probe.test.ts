@@ -13,7 +13,7 @@ describe("probeReadOnly", () => {
       readOnly: { replica: true, sessionReadOnly: false },
     });
     expect(run).toHaveBeenCalledWith(
-      "SELECT pg_is_in_recovery() AS replica, current_setting('transaction_read_only') = 'on' AS session_read_only",
+      "SELECT pg_is_in_recovery() AS replica, current_setting('transaction_read_only') = 'on' AS session_read_only, version() AS version",
     );
   });
 
@@ -80,7 +80,9 @@ describe("probeReadOnly", () => {
     expect(await probeReadOnly(type, run)).toEqual({
       readOnly: { replica: true, sessionReadOnly: false },
     });
-    expect(run).toHaveBeenCalledWith("SELECT @@global.read_only AS read_only");
+    expect(run).toHaveBeenCalledWith(
+      "SELECT @@global.read_only AS read_only, VERSION() AS version",
+    );
     run.mockResolvedValueOnce(ok({ read_only: 0 }));
     expect(await probeReadOnly(type, run)).toEqual({
       readOnly: { replica: false, sessionReadOnly: false },
@@ -120,5 +122,25 @@ describe("probeReadOnly", () => {
   it("passes a MariaDB error through", async () => {
     const run = vi.fn(async () => ({ results: [], error: "Lost connection to server" }));
     expect(await probeReadOnly("mariadb", run)).toEqual({ error: "Lost connection to server" });
+  });
+});
+
+describe("server version for Stop", () => {
+  it.each([
+    [
+      "postgresql",
+      { replica: false, session_read_only: false, version: "PostgreSQL 16.2 on x86_64" },
+    ],
+    ["mysql", { read_only: 0, version: "8.0.36" }],
+  ])("returns the %s server version with a passing check", async (type, row) => {
+    const run = vi.fn(async () => ok(row));
+    expect(await probeReadOnly(type, run)).toMatchObject({ version: row.version });
+  });
+
+  it("leaves the version out when the driver returns none", async () => {
+    const run = vi.fn(async () => ok({ read_only: 0, version: null }));
+    expect(await probeReadOnly("mysql", run)).toEqual({
+      readOnly: { replica: false, sessionReadOnly: false },
+    });
   });
 });

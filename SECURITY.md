@@ -76,6 +76,49 @@ plugin surfaces every such character as a visible `[U+XXXX]` marker in the card,
 Trail, and every export, so the human sees exactly what was submitted. The executed SQL is
 never altered by this display step.
 
+## Stopping a running query
+
+Beekeeper's plugin API cannot cancel a query it is running, so on PostgreSQL and MySQL the
+plugin asks the database itself. On those connections the approved statement is sent behind
+an ordinary leading comment, `/* gatekeeper <request id> <random token> */`, with a token
+drawn fresh for each execution. The statement after it is the one the human approved and the
+classifier read, byte for byte. The comment is visible to anyone who can see the database's
+running queries or its logs.
+
+A stop is triggered only by the operator: the Stop button, or an auto-stop limit they set per
+connection in Settings. An agent cannot trigger one, and `cancel_query` still refuses an
+executing query. The stop is fixed SQL built by the plugin, not by an agent, and runs
+through `runQuery` outside the approval gate, like the endpoint read-only probe:
+
+- **PostgreSQL 10 and later**: one `SELECT` that reads `pg_catalog.pg_stat_activity` and calls
+  `pg_cancel_backend` only when exactly one active client session of the same login role is
+  running a statement that starts with this execution's comment. Parallel workers report the
+  leader's text, so they are left out of the count; cancelling the leader stops them.
+- **MySQL 8.0.19 and later**: one batch that looks the session up in
+  `information_schema.PROCESSLIST` the same way and prepares `KILL QUERY` for it, or a no-op
+  when anything other than exactly one session matches. `KILL QUERY` stops the statement and
+  leaves the connection open. Older MySQL, MariaDB, TiDB and MySQL connections in Beekeeper's
+  read-only mode (which refuses `KILL`) do not offer Stop.
+- PostgreSQL before 10 and every other database type do not offer Stop.
+
+Both servers ignore a cancel that reaches a session sitting idle, and do not carry it over to
+the session's next statement (PostgreSQL `postgres.c`, MySQL 8.0.19+ `sql_class.cc` and
+`sql_parse.cc`). One case remains that no plugin can rule out: the cancel signal targets a
+session, not a statement. If the query ends on its own between the moment the database finds
+it and the moment the signal is sent, and that same session has already started another
+statement, that other statement is cancelled instead. With a direct connection the other
+statement can only come from the same Beekeeper connection pool; behind a pooling proxy
+(PgBouncer in transaction mode, RDS Proxy, ProxySQL) it can belong to another application.
+Beekeeper's own Cancel button has the same property, since it also cancels by session.
+
+When a query fails after a stop was requested, the agent sees `failed` with an error that
+starts with "Stop requested", says who asked, then quotes what the database returned.
+Gatekeeper never claims the request caused the failure, and the effect of a write that failed
+this way is unknown. A query that completes despite the request returns its result as usual,
+since a stop that lands late changes nothing. Auto-stop is an attempt, not a guaranteed
+time limit: it runs only while the Gatekeeper tab is open, and the stop itself waits for a free
+connection in Beekeeper's pool.
+
 ## Same-user trust boundary
 
 The broker requires an `Authorization: Bearer` capability token on every request. It is
