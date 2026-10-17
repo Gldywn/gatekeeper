@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.4.0](https://github.com/Gldywn/gatekeeper/compare/v0.3.1...v0.4.0) (2026-10-17)
+
+
+### Features
+
+* **auto:** drop Jev's read_only check from Auto mode ([#47](https://github.com/Gldywn/gatekeeper/issues/47)) ([9766bd8](https://github.com/Gldywn/gatekeeper/commit/9766bd8d300e72ed90460862f7fd55ff87a9e6d4))
+* bound get_schema and report schema gaps ([#48](https://github.com/Gldywn/gatekeeper/issues/48)) ([157a3dd](https://github.com/Gldywn/gatekeeper/commit/157a3dd642c3196c9ba377950d6652f7afd0b682))
+* bring Beekeeper forward when a notification is clicked ([#46](https://github.com/Gldywn/gatekeeper/issues/46)) ([0adf17a](https://github.com/Gldywn/gatekeeper/commit/0adf17aeac2050b3820797748697ff0c8094cea5))
+* page the Audit Trail and stop it querying the connected database ([#50](https://github.com/Gldywn/gatekeeper/issues/50)) ([3966a07](https://github.com/Gldywn/gatekeeper/commit/3966a077f9b2180898354c38d1f756319248769c))
+* **plugin:** check the database connection live in the header ([#53](https://github.com/Gldywn/gatekeeper/issues/53)) ([6bce327](https://github.com/Gldywn/gatekeeper/commit/6bce327493d86e8342ba7d8b546ed8dafc5fd59c))
+* **plugin:** rework the header status glyphs ([#57](https://github.com/Gldywn/gatekeeper/issues/57)) ([84eec51](https://github.com/Gldywn/gatekeeper/commit/84eec51f61bc0385f3e057db329bc1faebfd12d4))
+* **plugin:** stop a running query from its card ([#52](https://github.com/Gldywn/gatekeeper/issues/52)) ([e7c0fe2](https://github.com/Gldywn/gatekeeper/commit/e7c0fe22992359e4b693fbcfa96d75b8ce63604a))
+* **server:** play a distinct sound when Auto mode approves a query ([#49](https://github.com/Gldywn/gatekeeper/issues/49)) ([8f49d1d](https://github.com/Gldywn/gatekeeper/commit/8f49d1dea587b1b85415890e294b6e1c85984269))
+* show plugin and server versions with update guidance ([#51](https://github.com/Gldywn/gatekeeper/issues/51)) ([f3de54c](https://github.com/Gldywn/gatekeeper/commit/f3de54c702f3b08940001a950afd35fb5abaa5d7))
+
+
+### Bug Fixes
+
+* **dev:** keep the dev server in charge of the broker port ([#56](https://github.com/Gldywn/gatekeeper/issues/56)) ([71edcf7](https://github.com/Gldywn/gatekeeper/commit/71edcf7219daab674d0804a63d4716d4056993a2))
+* stop stale Gatekeeper servers on dev unlink and update ([#44](https://github.com/Gldywn/gatekeeper/issues/44)) ([5f5a0e4](https://github.com/Gldywn/gatekeeper/commit/5f5a0e4a968078f1585276a81c5588fee66c9570))
+
 ## [0.3.1](https://github.com/Gldywn/gatekeeper/compare/v0.3.0...v0.3.1) (2026-09-23)
 
 
