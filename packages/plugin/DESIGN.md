@@ -128,11 +128,11 @@ Inbox panes scroll; the header and the status line stay on screen.
 
 The header carries the sole connection context (name, dialect, database, connection
 check). Under it, the agents strip is one line of chips, one per agent: presence dot, tool
-icon (the tool is never spelled out, the icon is enough), project, the active/idle meta, and
-"N pending" in amber while proposals of theirs wait. Agents with work waiting come first.
-Chips that do not fit fold into "+N more", which opens the full roster in a popover; the strip
-never grows a second line. With no agent, the strip says so in one line, with what makes one
-appear.
+icon (the tool is never spelled out, the icon is enough), project and the active/idle meta,
+ordered by presence then recent activity. It shows no count of what waits: the queue owns
+that, with its own definition. Chips that do not fit fold into "+N more", which opens the
+full roster in a popover; the strip never grows a second line. With no agent, the strip says
+so in one line, with what makes one appear.
 
 The Inbox puts the list and the open item side by side. The list pane has two tabs, Queue
 (Pending approval, then Recently resolved) and Audit Trail, and each tab keeps its own

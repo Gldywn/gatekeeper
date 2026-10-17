@@ -4107,11 +4107,6 @@ p.auto-message[data-tone="busy"] {
 .ac-meta {
   color: var(--faint);
 }
-.ac-n {
-  color: var(--amber);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
 .more-wrap {
   position: relative;
   flex: none;

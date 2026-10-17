@@ -2556,7 +2556,7 @@ export class Gatekeeper {
     // Skip the rebuild (and the pulse restart) when only the relative ages moved;
     // tick() keeps those fresh in place.
     const sig = JSON.stringify(
-      rows.map((r) => [r.s.sessionId, r.p, r.s.pendingCount, r.s.sessionLabel, r.s.lastIntent]),
+      rows.map((r) => [r.s.sessionId, r.p, r.s.sessionLabel, r.s.lastIntent]),
     );
     if (sig === this.rosterSig) {
       return;
@@ -2565,12 +2565,7 @@ export class Gatekeeper {
     const live = rows.filter((r) => r.p !== "gone").length;
     const open = this.root.querySelector<HTMLElement>("#agentsPop")?.hidden === false;
     const focused = el.contains(document.activeElement);
-    // Work waiting for the human first, then presence, so the chips that fit are the ones
-    // that matter.
-    const strip = [...rows].sort(
-      (a, b) => Number(b.s.pendingCount > 0) - Number(a.s.pendingCount > 0),
-    );
-    el.innerHTML = agentsStripHtml(strip, live);
+    el.innerHTML = agentsStripHtml(rows, live);
     this.layoutStrip();
     if (open) this.setAgentsPopOpen(true);
     if (focused) this.refocusStrip();

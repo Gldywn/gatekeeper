@@ -21,12 +21,11 @@ export function rosterRow(s: SessionRoster, p: Presence): string {
   // Every listed session has a non-empty label (the roster query filters the
   // rest out), so render it directly with no placeholder branch.
   const scope = capitalize(s.sessionLabel?.trim() ?? "");
-  const pending = s.pendingCount > 0 ? ` &middot; ${s.pendingCount} pending` : "";
   const meta =
     p === "active"
-      ? `active${pending}`
+      ? "active"
       : p === "idle"
-        ? `idle <span class="rage" data-age="${s.lastActive}">${relAge(s.lastActive)}</span>${pending}`
+        ? `idle <span class="rage" data-age="${s.lastActive}">${relAge(s.lastActive)}</span>`
         : `left <span class="rage" data-age="${s.leftAt ?? s.lastSeen}">${relAge(s.leftAt ?? s.lastSeen)}</span>`;
   return `
       <div class="roster-row" data-presence="${p}">

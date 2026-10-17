@@ -154,8 +154,8 @@ export function auditItem(e: ActivityEntry, connection: string | null): HistItem
   };
 }
 
-// One chip per agent in the strip: presence, harness, project, what it is doing, and how many
-// of its proposals wait for you.
+// One chip per agent in the strip: presence, harness, project and whether it is active. What
+// waits for a decision is the queue.s to say, with its own count.
 export function agentChipHtml(s: SessionRoster, p: Presence): string {
   const name = escapeHtml(s.project?.trim() || s.harness?.trim() || s.sessionId);
   const meta =
@@ -164,9 +164,8 @@ export function agentChipHtml(s: SessionRoster, p: Presence): string {
       : p === "idle"
         ? `idle <span class="rage" data-age="${s.lastActive}">${relAge(s.lastActive)}</span>`
         : `left <span class="rage" data-age="${s.leftAt ?? s.lastSeen}">${relAge(s.leftAt ?? s.lastSeen)}</span>`;
-  const pending = s.pendingCount > 0 ? `<span class="ac-n">${s.pendingCount} pending</span>` : "";
   const task = s.sessionLabel?.trim();
-  return `<span class="agent-chip" data-presence="${p}"${task ? ` title="${escapeHtml(capitalize(task))}"` : ""}><span class="presence-dot"></span><span class="harness-badge">${harnessIcon(s.harness?.trim() || null)}</span><span class="ac-name">${name}</span><span class="ac-meta">${meta}</span>${pending}</span>`;
+  return `<span class="agent-chip" data-presence="${p}"${task ? ` title="${escapeHtml(capitalize(task))}"` : ""}><span class="presence-dot"></span><span class="harness-badge">${harnessIcon(s.harness?.trim() || null)}</span><span class="ac-name">${name}</span><span class="ac-meta">${meta}</span></span>`;
 }
 
 export function agentsEmptyHtml(): string {
