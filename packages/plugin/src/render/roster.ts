@@ -18,9 +18,9 @@ export function rosterRow(s: SessionRoster, p: Presence): string {
   const harness = s.harness?.trim() || null;
   const project = s.project?.trim();
   const who = project ? escapeHtml(project) : escapeHtml(harness || s.sessionId);
-  // Every listed session has a non-empty label (the roster query filters the
-  // rest out), so render it directly with no placeholder branch.
-  const scope = capitalize(s.sessionLabel?.trim() ?? "");
+  // The session task shows on hover only, as on the strip's chips: the popover lists the same
+  // agents with the same facts.
+  const task = capitalize(s.sessionLabel?.trim() ?? "");
   const meta =
     p === "active"
       ? "active"
@@ -28,11 +28,10 @@ export function rosterRow(s: SessionRoster, p: Presence): string {
         ? `idle <span class="rage" data-age="${s.lastActive}">${relAge(s.lastActive)}</span>`
         : `left <span class="rage" data-age="${s.leftAt ?? s.lastSeen}">${relAge(s.leftAt ?? s.lastSeen)}</span>`;
   return `
-      <div class="roster-row" data-presence="${p}">
+      <div class="roster-row" data-presence="${p}"${task ? ` title="${escapeHtml(task)}"` : ""}>
         <span class="presence-dot"></span>
         <span class="harness-badge">${harnessIcon(harness)}</span>
         <span class="roster-label">${who}</span>
-        <span class="roster-intent" title="${escapeHtml(scope)}">${escapeHtml(scope)}</span>
         <span class="roster-meta">${meta}</span>
       </div>`;
 }

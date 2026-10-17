@@ -155,7 +155,7 @@ export function auditItem(e: ActivityEntry, connection: string | null): HistItem
 }
 
 // One chip per agent in the strip: presence, harness, project and whether it is active. What
-// waits for a decision is the queue.s to say, with its own count.
+// waits for a decision is the queue's to say, with its own count.
 export function agentChipHtml(s: SessionRoster, p: Presence): string {
   const name = escapeHtml(s.project?.trim() || s.harness?.trim() || s.sessionId);
   const meta =

@@ -131,8 +131,9 @@ check). Under it, the agents strip is one line of chips, one per agent: presence
 icon (the tool is never spelled out, the icon is enough), project and the active/idle meta,
 ordered by presence then recent activity. It shows no count of what waits: the queue owns
 that, with its own definition. Chips that do not fit fold into "+N more", which opens the
-full roster in a popover; the strip never grows a second line. With no agent, the strip says
-so in one line, with what makes one appear.
+full roster in a popover with the same facts; the session task shows on hover only, in both.
+The strip never grows a second line. With no agent, it says so in one line, with what makes
+one appear.
 
 The Inbox puts the list and the open item side by side. The list pane has two tabs, Queue
 (Pending approval, then Recently resolved) and Audit Trail, and each tab keeps its own
