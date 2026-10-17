@@ -8,18 +8,14 @@ const NUMERIC_SAMPLE = 40;
 // Only clipped-enough strings earn a hover tooltip, so short cells stay quiet.
 const TOOLTIP_MIN_CHARS = 40;
 
-// Mount Tabulator on the detail overlay's grid host, fed the already-capped rows
-// (capResult stays the source of truth for the memory cap and the truncation footer).
-// Display only: no editing, sorting/resize/reorder are read-only affordances.
-export function mountResultGrid(host: HTMLElement, result: HistResult): TabulatorFull {
+// Display only: sorting, resize and reorder are read-only affordances. The caller sizes it to
+// the pane that scrolls it, so the column headers stay in view once the pane reaches the grid.
+export function mountResultGrid(
+  host: HTMLElement,
+  result: HistResult,
+  maxHeight: number,
+): TabulatorFull {
   const names = resultColumns(result);
-  // Size the grid to the space left below its host so the detail popup never overflows the
-  // viewport (only the tableholder scrolls); read from the host's live position, so a long
-  // or short query above it simply gives the grid less or more room.
-  const maxHeight = Math.max(
-    240,
-    Math.floor(window.innerHeight - host.getBoundingClientRect().top - 80),
-  );
   return new TabulatorFull(host, {
     data: result.rows,
     columns: names.map((name) => columnDef(name, result.rows)),

@@ -61,7 +61,7 @@ feature, so the reason never reads as a bug.
 
 An action that failed is an error: the card's boxed note (`.cs-unparsed`) with the red
 failed-outcome mark (`xCircleIcon`), one short sentence in the UI face, then the raw error
-from the host on its own mono line under it (`.stop-raw`), the way the detail overlay shows a
+from the host on its own mono line under it (`.stop-raw`), the way the detail pane shows a
 failed query. No narration of the cause in the sentence; the raw text carries the specifics.
 
 ## Running row
@@ -98,8 +98,7 @@ Headings are always roman (no italic display).
 
 ## Connection identity
 
-One chip, built once (`connChipInner`) and used by both surfaces that need it:
-the header and the audit-trail head. It reads database glyph, connection name,
+One chip, built once (`connChipInner`) for the header. It reads database glyph, connection name,
 dialect, database. Two rules hold it:
 
 - **The database is always spelled out**, even when it repeats the connection
@@ -119,40 +118,41 @@ with the same dot bottom right (green and still while answering; amber connectin
 pulsing; crossed-out red robot once unreachable), no word in
 any state, and a popover with the status alone. Statuses sit on the left, settings (Auto
 mode, Schema access, the gear) on the right. Only one status popover shows at a time, and
-Escape hides the server one. The audit-trail head renders the same
-chip flat (no border, no fill, middot-separated, no amber on the dialect): its
-seated title bar already frames it, and a bordered chip beside the title only
-stacked edge on edge.
+Escape hides the server one.
 
-## Responsive
+## Layout
 
-The shell is fluid, not a fixed 560px column: `.gk` caps at `min(94vw, 1180px)`
-and centres, with fluid `padding-inline`. It stacks in one column: the header
-(which carries the sole connection context: name, dialect, database, connection check),
-then a full-width **band** (`.rail`, the connected-agents roster),
-then the queue and history. The band is reference context read at a glance; the
-queue owns the width, because the SQL blocks and result tables benefit from it.
+The shell fills the tab's height (`.gk`, `height: 100vh`, capped at 1440px wide) in three
+rows: the top (the header, then the agents strip), the Inbox, and the status line. Only the
+Inbox panes scroll; the header and the status line stay on screen.
 
-The roster is a grid of agent cells (`repeat(auto-fill, minmax(19rem, 1fr))`) so
-it flows into as many columns as fit and stays short. Each cell carries the
-presence dot, tool icon (the tool is never spelled out, the icon is enough),
-project, the active/idle meta, and the session task on its own wrapped line,
-never truncated. The cryptic `sess_…` tag lives only on the queue group header,
-where it maps a group of proposals back to its agent.
+The header carries the sole connection context (name, dialect, database, connection
+check). Under it, the agents strip is one line of chips, one per agent: presence dot, tool
+icon (the tool is never spelled out, the icon is enough), project, the active/idle meta, and
+"N pending" in amber while proposals of theirs wait. Agents with work waiting come first.
+Chips that do not fit fold into "+N more", which opens the full roster in a popover; the strip
+never grows a second line. With no agent, the strip says so in one line, with what makes one
+appear.
 
-Two named **container query** contexts remain, each reacting to its own width
-rather than the viewport:
+The Inbox puts the list and the open item side by side. The list pane has two tabs, Queue
+(Pending approval, then Recently resolved) and Audit Trail, and each tab keeps its own
+selection. A row opens in the right pane: a pending proposal as its full card, a decided
+request as its detail, the same detail for Recently resolved and the Audit Trail. Nothing
+opens by itself; with nothing selected, the right pane says what waits. Rows span the pane's
+full width, and the open row is marked by tone, never by a coloured bar.
 
-- `gk-main` on `.main`: the history row reveals the who / SQL columns as `main`
-  widens (`23.75rem`, then `40rem`), each tier keeping its grid track count equal
-  to its visible spans.
+The status line holds the version on the left and the star and feedback buttons on the
+right, docked in the layout rather than floating over the panes.
+
+Two named **container query** contexts, each reacting to its own box rather than the
+viewport:
+
+- `gk-inbox` on `.inbox` (size): at 640px wide or less the panes take turns, the list or
+  the open item with "Back to the list".
 - `gk-detail` on `.detail-card`: cell caps scale with the card width (`cqi`).
 
-`.gk` itself gets no `container-type` on purpose: that would apply layout
-containment and trap the fixed `.detail` overlay it wraps. A `@supports not
-(container-type: inline-size)` block mirrors the `gk-main` breakpoints as viewport
-media queries for browsers without container-query support (Beekeeper's Chromium
-has it since 105).
+`.gk` itself gets no `container-type` on purpose: that would apply layout containment and
+trap the fixed overlays it wraps (Settings, the confirm and notice dialogs).
 
 ## Motion
 
@@ -174,13 +174,13 @@ Rules:
   pulses (the expiry countdown shifts to amber under 45s, it does not pulse).
 - Content is always visible by default. Never gate a card or control on an
   animation completing.
-- Layout-tier changes are owned by CSS container queries (plus the one viewport
-  media query for the shell split), never a JS resize/`matchMedia` listener that
+- Layout-tier changes are owned by CSS container queries (plus the two viewport
+  media queries that rehang header popovers), never a JS resize/`matchMedia` listener that
   re-renders. A tier change must never retrigger `enter()` or `reveal()`; CSS
   alone decides visibility and cropping.
 
-The primitives: the executing spinner; the resolved card sliding down into history
-(`transform`, not opacity-to-0); a staggered fade-up of the panel blocks on mount
+The primitives: the executing spinner; the decided row fading down out of the queue list
+(`.leaving`); a staggered fade-up of the panel blocks on mount
 (`reveal`); a fade-up entrance for a fresh proposal card (`enter`); and the
 functional `pulse`/`breathe` loops above.
 

@@ -50,20 +50,29 @@ const rejected: ActivityEntry = {
 };
 
 describe("render/activity", () => {
-  it("renders an expanded approved entry", () => {
-    expect(activityEntryHtml(approved, new Set(["q_ab12"]), "postgresql")).toBe(
-      '\n          <div class="act-entry open" data-act="q_ab12">\n            <button class="act-row" type="button" data-act-sql="q_ab12" aria-expanded="true">\n              <span class="chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>\n              <span class="act-time">09:30 AM</span>\n              <span class="act-state approved">Approved</span>\n              <span class="act-intent">List account contacts</span>\n              <span class="act-flags"><span class="act-flag pii">PII</span></span>\n              <span class="act-metric">3 rows returned</span>\n            </button>\n            <div class="act-detail">\n              <div class="act-meta">q_ab12 &middot; 1/1/2026, 9:30:00 AM &middot; 3 rows returned</div>\n              \n              <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="SELECT email FROM audit.users" aria-label="Copy SQL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg></button><code><span class="kw">SELECT</span>\n  <span class="pii-col">email</span>\n<span class="kw">FROM</span> audit.users</code></pre>\n            </div>\n          </div>',
-    );
+  it("renders an approved entry as a selectable row: who, what came of it, flags and time", () => {
+    const html = activityEntryHtml(approved, true, "postgresql");
+    expect(html).toContain('data-row="q_ab12" data-select="audit" aria-current="true"');
+    expect(html).toContain('<span class="hstate approved" title="Approved"');
+    expect(html).toContain('<span class="ix-title">List account contacts</span>');
+    expect(html).toContain('<span class="ix-who">gatekeeper</span>');
+    expect(html).toContain('<span class="ix-note" title="3 rows returned">3 rows returned</span>');
+    expect(html).toContain('<span class="act-flag pii">PII</span>');
+    expect(html).toContain('<span class="act-time">09:30 AM</span>');
+    // The SQL opens on the right now, never inline under the row.
+    expect(html).not.toContain("act-detail");
   });
 
-  it("renders a collapsed rejected entry", () => {
-    expect(activityEntryHtml(rejected, new Set(), "postgresql")).toBe(
-      '\n          <div class="act-entry" data-act="q_cd34">\n            <button class="act-row" type="button" data-act-sql="q_cd34" aria-expanded="false">\n              <span class="chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>\n              <span class="act-time">09:29 AM</span>\n              <span class="act-state rejected">Declined</span>\n              <span class="act-risk destructive" title="Destructive"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M10 11v6"/><path d="M14 11v6"/></svg></span><span class="act-intent">Remove a user</span>\n              <span class="act-flags"></span>\n              <span class="act-metric"></span>\n            </button>\n            <div class="act-detail" hidden>\n              <div class="act-meta">q_cd34 &middot; 1/1/2026, 9:29:30 AM</div>\n              <div class="act-enote rejected">read-only only</div>\n              <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="DELETE FROM audit.users WHERE id = 1" aria-label="Copy SQL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg></button><code><span class="kw">DELETE</span>\n<span class="kw">FROM</span> audit.users\n<span class="kw">WHERE</span> id = 1</code></pre>\n            </div>\n          </div>',
-    );
+  it("renders a declined entry with its reason and its risk", () => {
+    const html = activityEntryHtml(rejected, false, "postgresql");
+    expect(html).toContain('aria-current="false"');
+    expect(html).toContain('<span class="hstate rejected" title="Declined"');
+    expect(html).toContain('<span class="ix-risk destructive">destructive</span>');
+    expect(html).toContain('<span class="ix-note" title="read-only only">read-only only</span>');
   });
 
   it("renders the export trigger and its Markdown/CSV/JSON format menu", () => {
-    const html = activityGroupHtml("2026-01-01", "s1", [approved], new Set(), "postgresql");
+    const html = activityGroupHtml("2026-01-01", "s1", [approved], null, "postgresql");
     expect(html).toContain('data-flyout-trigger="2026-01-01|s1"');
     expect(html).toContain("data-flyout-menu");
     expect(html).toContain(
@@ -186,21 +195,21 @@ describe("render/activity", () => {
       rowCount: 0,
     };
     // A write reports what it changed; the returned zero must not stand in for it.
-    const changed = activityEntryHtml({ ...base, affectedRows: 3 }, new Set(), "postgresql");
-    expect(changed).toContain('<span class="act-metric">3 rows changed</span>');
+    const changed = activityEntryHtml({ ...base, affectedRows: 3 }, false, "postgresql");
+    expect(changed).toContain('<span class="ix-note" title="3 rows changed">3 rows changed</span>');
     expect(changed).not.toContain("3 rows returned");
 
-    // No count reported: the column stays empty rather than showing a zero.
-    const unknown = activityEntryHtml({ ...base, rowCount: null }, new Set(), "postgresql");
-    expect(unknown).toContain('<span class="act-metric"></span>');
+    // No count reported: the row says nothing rather than a zero.
+    const unknown = activityEntryHtml({ ...base, rowCount: null }, false, "postgresql");
+    expect(unknown).not.toContain('class="ix-note"');
 
     // A read keeps its returned count, no longer relabelled as affected.
     const read = activityEntryHtml(
       { ...base, sql: "SELECT id FROM audit.users", rowCount: 5 },
-      new Set(),
+      false,
       "postgresql",
     );
-    expect(read).toContain('<span class="act-metric">5 rows returned</span>');
+    expect(read).toContain('<span class="ix-note" title="5 rows returned">5 rows returned</span>');
   });
 
   it("marks every row Auto mode touched, and colours the chip when it decided", () => {
@@ -230,38 +239,36 @@ describe("render/activity", () => {
       reasons: [],
       probabilities: { read_only: 0.98 },
     };
+    // Approved by Auto mode: the row's glyph is the bolt, not the green check.
     const automatic = activityEntryHtml(
       { ...base, approval: { source: "automatic", evaluation } },
-      new Set(),
+      false,
       "postgresql",
     );
-    expect(automatic).toContain('class="act-flag auto"');
-    // Approved, but not by a human: the chip carries Auto mode's colour, not the green.
-    expect(automatic).toContain('class="act-state approved auto"');
+    expect(automatic).toContain('<span class="hstate auto" title="Approved automatically"');
+    expect(automatic).not.toContain('class="act-flag auto"');
 
-    // Evaluated, then approved by a human: the row reads as a human decision, and the
-    // evaluation still shows in the panel below.
+    // Evaluated, then approved by a human: the check stays green and a quiet bolt says Auto
+    // mode was involved; the evaluation itself opens with the detail.
     const byHand = activityEntryHtml(
       { ...base, approval: { source: "human", evaluation } },
-      new Set(["q_a1"]),
+      true,
       "postgresql",
     );
-    // Auto mode evaluated, so the row is marked, but a human decided and the chip stays
-    // the ordinary green.
-    expect(byHand).toContain('class="act-flag auto"');
-    expect(byHand).toContain('class="act-state approved"');
-    expect(byHand).toContain("Auto mode:");
+    expect(byHand).toContain('<span class="hstate approved"');
+    expect(byHand).toContain(
+      'class="act-flag auto" title="Evaluated by Auto mode, decided by you"',
+    );
 
-    // Held locally, then declined by a human: same rule, no mark on the row.
+    // Stopped before evaluation, then declined by a human: marked, and the decline keeps its
+    // own glyph.
     const held = activityEntryHtml(
       { ...base, state: "rejected", autoHold: { sent: false, reason: "Sensitive source" } },
-      new Set(),
+      false,
       "postgresql",
     );
-    // Stopped before evaluation: still Auto mode's doing, so the row is marked, and the
-    // decline keeps its own colour.
     expect(held).toContain('class="act-flag auto"');
-    expect(held).toContain('class="act-state rejected"');
+    expect(held).toContain('<span class="hstate rejected"');
   });
 });
 
@@ -273,9 +280,9 @@ describe("audit flags without the database", () => {
     expect(entryFlags({ ...star, sensitivity: recorded }, textSchema(star.sql, "postgresql"))).toBe(
       recorded,
     );
-    expect(
-      activityEntryHtml({ ...star, sensitivity: recorded }, new Set(), "postgresql"),
-    ).toContain('<span class="act-flag pii">PII</span>');
+    expect(activityEntryHtml({ ...star, sensitivity: recorded }, false, "postgresql")).toContain(
+      '<span class="act-flag pii">PII</span>',
+    );
   });
 
   it("reads unrecorded entries from the SQL text alone", () => {
@@ -284,7 +291,7 @@ describe("audit flags without the database", () => {
       value: false,
       client: false,
     });
-    expect(activityEntryHtml(star, new Set(), "postgresql")).toContain(
+    expect(activityEntryHtml(star, false, "postgresql")).toContain(
       '<span class="act-flags"></span>',
     );
   });
@@ -299,9 +306,9 @@ describe("audit flags without the database", () => {
 
   it("ships folded days without their rows", () => {
     const older = { ...rejected, id: "q_old", decidedAt: T - 3 * 86_400_000 };
-    const html = activityDaysHtml([approved, older], new Set(), "postgresql");
-    expect(html).toContain('data-act="q_ab12"');
-    expect(html).not.toContain('data-act="q_old"');
+    const html = activityDaysHtml([approved, older], null, "postgresql");
+    expect(html).toContain('data-row="q_ab12"');
+    expect(html).not.toContain('data-row="q_old"');
     expect(html).toContain('<div class="act-day-body"></div>');
   });
 });

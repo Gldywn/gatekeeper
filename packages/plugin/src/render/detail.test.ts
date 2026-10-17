@@ -5,7 +5,7 @@ process.env.TZ = "UTC";
 import { describe, expect, it } from "vitest";
 import type { HistResult } from "../result";
 import type { HistItem } from "../types";
-import { detailHtml } from "./detail";
+import { CANCELLED_NOTE, detailHtml } from "./detail";
 
 const result: HistResult = {
   fields: [{ name: "email" }, { name: "company_name" }],
@@ -123,7 +123,7 @@ describe("render/detail", () => {
     );
   });
 
-  it("renders a decline outcome as a plain statement, no reason note", () => {
+  it("renders a decline as a plain statement, its typed reason boxed under it", () => {
     const declined = detailHtml({
       ...item,
       status: "rejected",
@@ -135,8 +135,29 @@ describe("render/detail", () => {
     expect(declined).toContain(
       '<div class="detail-oc-msg">You declined this proposal. Nothing ran against the database.</div>',
     );
-    // A decline carries no reason, so the boxed note is gone whatever the stored note.
-    expect(declined).not.toContain("detail-oc-note");
+    expect(declined).toContain(
+      '<div class="detail-oc-note">Please scope this to a single company.</div>',
+    );
+    // The default label of a decline without a typed reason is not a reason.
+    expect(detailHtml({ ...item, status: "rejected", note: "declined" })).not.toContain(
+      "detail-oc-note",
+    );
+  });
+
+  it("tells an agent cancellation apart from a timeout", () => {
+    const html = detailHtml({
+      ...item,
+      status: "expired",
+      note: CANCELLED_NOTE,
+      result: undefined,
+    });
+    expect(html).toContain('<span class="detail-oc-title">Cancelled</span>');
+    expect(html).toContain("The agent cancelled this proposal before a decision.");
+  });
+
+  it("copies the SQL with its invisible characters spelled out", () => {
+    const html = detailHtml({ ...item, sql: "SELECT 1 -- ‮evil" });
+    expect(html).toContain('data-copy-sql="SELECT 1 -- [U+202E]evil"');
   });
 
   it("renders an expired outcome that ran nothing against the database", () => {

@@ -11,6 +11,10 @@ html,
 body {
   overflow-x: clip;
 }
+/* The palette is dark whatever Beekeeper's theme, so native scrollbars and controls follow it. */
+html {
+  color-scheme: dark;
+}
 body {
   margin: 0;
   min-height: 100vh;
@@ -34,51 +38,25 @@ body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
+/* The plugin fills its tab like an app: the header and the agents line on top, the list and
+   what it has open side by side, a status line at the bottom. Only the panes scroll, so the
+   queue never scrolls away from what is being read. .gk gets no container type: that would
+   trap the fixed pop-ups it wraps (Settings, confirm, notice). */
 .gk {
-  max-width: min(94vw, 1180px);
+  height: 100vh;
+  max-width: min(100%, 1440px);
   margin-inline: auto;
   padding-inline: clamp(var(--s4), 2.4vw, var(--s5));
-  padding-block: var(--s4) var(--s5);
+  padding-block: var(--s4) var(--s2);
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
   grid-template-areas:
-    "header"
-    "rail"
-    "main";
-  /* No header/rail gap: the rail is welded to the header as one card (its own margin
-     re-opens the space before .main). */
-  row-gap: 0;
+    "top"
+    "inbox"
+    "status";
 }
-
-/* .main is the only container context (gk-main); .gk gets none so the fixed
-   .detail overlay it wraps is not trapped by layout containment. */
-.rail {
-  grid-area: rail;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--s2);
-  margin-bottom: var(--s4);
-  padding: var(--s3) var(--s4);
-  border: 1px solid var(--edge);
-  /* Welded under the header: no top border/radius/highlight so the header's bottom edge
-     is the single seam; only the bottom corners round. */
-  border-top: 0;
-  border-radius: 0 0 var(--r) var(--r);
-  background: var(--surface);
-  box-shadow:
-    inset 0 -1px 0 oklch(0% 0 0 / 0.18),
-    var(--elev-2);
-}
-.main {
-  grid-area: main;
-  min-width: 0;
-  container-type: inline-size;
-  container-name: gk-main;
-}
-
 .bar {
-  grid-area: header;
   min-width: 0;
   position: relative;
   display: flex;
@@ -1170,32 +1148,6 @@ label.qs-row {
   height: 15px;
 }
 
-.label {
-  font-size: 12px;
-  font-weight: 560;
-  color: var(--muted);
-  margin: var(--s5) 0 var(--s3);
-}
-/* Eyebrow section labels: uppercase, tracked micro-labels. Scoped to Pending approval
-   (the direct .main child); Connected agents and Recently resolved get the same look
-   from the shared .disclosure rule. Never a bare .label, so nothing else is uppercased. */
-.main > .label {
-  display: flex;
-  align-items: center;
-  gap: var(--s3);
-  font-size: var(--fs-eyebrow);
-  letter-spacing: var(--track-eyebrow);
-  color: var(--faint);
-  text-transform: uppercase;
-}
-/* Pending-approval carries its rule on the label, after its inline count badge. */
-.main > .label::after {
-  content: "";
-  flex: 1;
-  height: 1px;
-  background: linear-gradient(90deg, var(--edge), transparent);
-}
-
 .queue {
   display: flex;
   flex-direction: column;
@@ -1218,12 +1170,14 @@ label.qs-row {
     var(--elev-2);
 }
 @media (prefers-reduced-motion: no-preference) {
-  .card {
+  .card,
+  .ix-row {
     transition:
       opacity var(--dur) var(--ease),
       transform var(--dur) var(--ease);
   }
-  .card.leaving {
+  .card.leaving,
+  .ix-row.leaving {
     opacity: 0;
     transform: translateY(8px);
   }
@@ -1387,13 +1341,6 @@ label.qs-row {
   gap: var(--s2);
   min-width: 0;
   font-size: 11px;
-}
-.cs-k {
-  flex: none;
-  font-size: 9px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--faint);
 }
 .cs-list {
   min-width: 0;
@@ -1771,8 +1718,7 @@ label.qs-row {
   opacity: 0.4;
   cursor: not-allowed;
 }
-.btn:focus-visible,
-.disclosure:focus-visible {
+.btn:focus-visible {
   outline: 2px solid var(--amber);
   outline-offset: 2px;
   border-radius: 4px;
@@ -1894,12 +1840,6 @@ label.qs-row {
   color: color-mix(in oklch, var(--danger) 78%, var(--text));
 }
 
-.empty {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--faint);
-  padding: var(--s3) 0;
-}
 .waiting {
   display: flex;
   flex-direction: column;
@@ -1933,26 +1873,6 @@ label.qs-row {
   }
 }
 
-/* A faint container so each agent's group (header + its cards) reads as one block,
-   not a loose stack separated only by a title. Kept subtle, not a heavy card. */
-.group {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s3);
-  padding: var(--s2);
-  border: 1px solid color-mix(in oklch, var(--text) 7%, transparent);
-  border-radius: 8px;
-  background: color-mix(in oklch, var(--surface) 40%, transparent);
-  box-shadow:
-    inset 0 1px 0 var(--hi),
-    var(--elev-1);
-}
-.group-head {
-  display: flex;
-  align-items: baseline;
-  gap: var(--s2);
-  padding: 2px var(--s1) 0;
-}
 .harness-badge {
   display: inline-flex;
   width: 15px;
@@ -1975,122 +1895,6 @@ label.qs-row {
 .harness-badge svg,
 .harness-badge svg * {
   fill: currentColor;
-}
-.group-label {
-  min-width: 0;
-  overflow: hidden;
-  font-size: 12px;
-  font-weight: 560;
-  color: var(--text);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.group-intent {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
-  color: var(--faint);
-}
-.group-count {
-  margin-left: auto;
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: 11px;
-  color: var(--faint);
-  flex: none;
-}
-/* Shared pill for a live count: connected agents, a group's pending, the queue
-   total. Hidden when empty so an idle count leaves no stray dot. */
-.count-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  border-radius: 999px;
-  background: color-mix(in oklch, var(--text) 10%, transparent);
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: 10.5px;
-  line-height: 1;
-  flex: none;
-}
-.count-badge:empty {
-  display: none;
-}
-
-.roster {
-  margin: 0;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-}
-/* The head reuses the shared .disclosure eyebrow+chevron (like Recently resolved); the
-   list lives in a grid-rows accordion so folding animates instead of snapping. */
-.roster-fold {
-  display: grid;
-  grid-template-rows: 1fr;
-  transition: grid-template-rows var(--dur-short) var(--ease-in-out);
-}
-.roster-toggle[aria-expanded="false"] + .roster-fold {
-  grid-template-rows: 0fr;
-}
-.roster-fold-inner {
-  overflow: hidden;
-  min-height: 0;
-  /* The active dot's glow is a 3px ring on a row that starts flush left, so it reached
-     outside this box and the fold's clip sliced it. Overflow clips to the padding box:
-     widen that by the ring, and pull the same amount back so no row moves. */
-  padding-left: 4px;
-  margin-left: -4px;
-}
-@keyframes roster-row-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-/* A gone agent settles at its dimmed rest state, not full opacity. */
-@keyframes roster-row-in-gone {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 0.5;
-    transform: none;
-  }
-}
-.roster-toggle[aria-expanded="true"] + .roster-fold .roster-row.play {
-  animation: roster-row-in var(--dur-short) var(--ease-out) both;
-  animation-delay: calc(var(--i) * 40ms);
-}
-.roster-toggle[aria-expanded="true"] + .roster-fold .roster-row.play[data-presence="gone"] {
-  animation-name: roster-row-in-gone;
-}
-@media (prefers-reduced-motion: reduce) {
-  .roster-fold {
-    transition: none;
-  }
-  .roster-row.play {
-    animation: none !important;
-  }
-}
-.roster-count {
-  font-family: var(--font-mono);
-  font-weight: 400;
-  font-variant-numeric: tabular-nums;
-  color: var(--faint);
 }
 /* One agent per full-width line so the session task has the most room; it still
    ellipsises past the edge, with the full text on hover. */
@@ -2146,159 +1950,7 @@ label.qs-row {
   font-variant-numeric: tabular-nums;
 }
 
-.history {
-  margin-top: var(--s5);
-}
-.disclosure {
-  width: 100%;
-  text-align: left;
-  background: none;
-  border: none;
-  cursor: pointer;
-  font: inherit;
-  font-size: var(--fs-eyebrow);
-  letter-spacing: var(--track-eyebrow);
-  text-transform: uppercase;
-  color: var(--faint);
-  padding: var(--s2) 0;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-.disclosure .chev {
-  display: inline-flex;
-  width: 14px;
-  height: 14px;
-  flex: none;
-  transition: transform var(--dur) var(--ease);
-}
-.disclosure .chev svg {
-  width: 100%;
-  height: 100%;
-}
-.disclosure[aria-expanded="false"] .chev {
-  transform: rotate(-90deg);
-}
-.hist {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-top: var(--s1);
-}
-/* Track count MUST equal the number of non-display:none child spans at each
-   tier, or the columns misalign. Keep each visibility toggle in the same block
-   as its column-count change.
-   base: badge status intent time (hwho + hsql hidden). */
-.hrow {
-  display: grid;
-  grid-template-columns: 15px 22px 1fr auto;
-  gap: var(--s2);
-  align-items: baseline;
-  width: 100%;
-  padding: 5px var(--s1);
-  border: none;
-  border-radius: 4px;
-  background: none;
-  color: inherit;
-  font: inherit;
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-  opacity: 0.62;
-  transition: opacity var(--dur) var(--ease);
-}
-/* Outcome tint: a faint wash the row keeps at rest; hover restores the neutral. */
-.hrow.approved {
-  background: color-mix(in oklch, var(--ok) 12%, transparent);
-}
-.hrow.rejected {
-  background: color-mix(in oklch, var(--amber) 13%, transparent);
-}
-.hrow.failed {
-  background: color-mix(in oklch, var(--danger) 13%, transparent);
-}
-.hrow.expired {
-  background: color-mix(in oklch, var(--faint) 12%, transparent);
-}
-.hwho,
-.hlabel,
-.hsql {
-  display: none;
-}
-/* + who: badge who status intent time. */
-@container gk-main (min-width: 23.75rem) {
-  .hrow {
-    grid-template-columns: 15px 58px 110px 22px 1fr auto;
-  }
-  .hwho,
-  .hlabel {
-    display: block;
-  }
-}
-/* + sql: badge who status intent sql time. */
-@container gk-main (min-width: 40rem) {
-  .hrow {
-    grid-template-columns: 15px 58px 110px 22px minmax(0, 1.3fr) minmax(0, 1fr) auto;
-  }
-  .hsql {
-    display: block;
-  }
-}
-/* No standalone intent means .hintent already shows the SQL preview, so the
-   .hsql column is redundant: hide it and drop back one track at the wide tier. */
-.hrow[data-no-intent] .hsql {
-  display: none;
-}
-@container gk-main (min-width: 40rem) {
-  .hrow[data-no-intent] {
-    grid-template-columns: 15px 58px 110px 22px 1fr auto;
-  }
-}
-.hrow:hover {
-  opacity: 0.9;
-  background: var(--surface);
-}
-.hrow:focus-visible {
-  opacity: 1;
-  outline: 2px solid var(--amber);
-  outline-offset: -1px;
-}
-.hwho {
-  align-self: center;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-  font-size: 11px;
-  color: var(--muted);
-}
-.hlabel {
-  align-self: center;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-  font-size: 11px;
-  color: var(--faint);
-}
-.hstatus {
-  font-size: 11.5px;
-  font-weight: 560;
-}
-.hstatus.approved {
-  color: var(--ok);
-}
-.hstatus.rejected {
-  color: var(--amber);
-}
-.hstatus.failed {
-  color: var(--danger);
-}
-.hstatus.expired {
-  color: var(--faint);
-}
-/* The history row's status is a coloured glyph (the colour is the code); the word is on
-   the tooltip. Distinct from .hstatus, which the detail head still uses for its word. */
+/* Status as a coloured glyph (the colour is the code); the word is on its tooltip. */
 .hstate {
   align-self: center;
   display: inline-flex;
@@ -2321,44 +1973,6 @@ label.qs-row {
 .hstate.expired {
   color: var(--faint);
 }
-.hintent {
-  font-weight: 600;
-  color: var(--text);
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
-.hsql {
-  align-self: center;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--faint);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
-.htime {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--faint);
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-/* A long note (a failed query's error) ends in an ellipsis instead of squeezing the title;
-   the detail overlay keeps the whole text. */
-.hnote {
-  min-width: 0;
-  max-width: 42ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 /* ---- Result detail overlay ---- */
 .detail {
   position: fixed;
@@ -2456,7 +2070,7 @@ label.qs-row {
   border-radius: var(--r) var(--r) 0 0;
 }
 /* The title bar stays neutral; the outcome colour lives on the rail below, with the
-   status word (.hstatus) as the only tint up here. */
+   status glyph as the only tint up here. */
 /* The session task rides the head line next to the status; long ones ellipsise
    with the full text on hover. */
 .detail-scope {
@@ -2564,7 +2178,7 @@ label.qs-row {
   font-size: 12.5px;
   color: var(--muted);
 }
-/* A decline states its outcome in the outcome colour, no boxed reason under it. */
+/* A decline states its outcome in the outcome colour; a typed reason follows, boxed. */
 .detail-rail.rejected .detail-oc-msg {
   color: color-mix(in oklch, var(--amber) 82%, var(--text));
 }
@@ -2586,19 +2200,6 @@ label.qs-row {
 }
 .detail-rail.rejected .detail-oc-note {
   color: color-mix(in oklch, var(--amber) 82%, var(--text));
-}
-/* The row count / outcome for the activity overlay's inline note (its detail reuses
-   this class). The resolved-history detail now carries its own well above. */
-.detail-outcome {
-  margin: 0 0 var(--s2);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--muted);
-}
-.detail-id {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--faint);
 }
 /* The detail's project/who reads as the window title, harmonized with the seated
    bars (.panel-title); the rest of the detail head is unchanged. */
@@ -2880,92 +2481,14 @@ label.qs-row {
 }
 
 /* ---- Activity (connection-scoped audit) ---- */
-/* The disclosure now shares its row with the quiet activity trigger, so it no
-   longer spans the full width. */
-.history-head {
-  display: flex;
-  align-items: center;
-  gap: var(--s2);
-}
-.history-head .disclosure {
-  width: auto;
-  flex: 0 1 auto;
-}
-.activity-link {
-  margin-left: auto;
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: none;
-  border: none;
-  cursor: pointer;
-  font: inherit;
-  font-size: 12px;
-  color: var(--faint);
-  padding: var(--s2) 0;
-  transition: color var(--dur) var(--ease);
-}
-.activity-link:hover {
-  color: var(--text);
-}
-.activity-link:focus-visible {
-  outline: 2px solid var(--amber);
-  outline-offset: 2px;
-  border-radius: 4px;
-}
-.activity-link svg {
-  width: 13px;
-  height: 13px;
-}
-
-/* The overlay reuses the .detail backdrop; its card is a scrollable audit log. */
-.activity-card {
-  max-width: min(96vw, 1100px);
-}
-/* Optical size, not box size: this clock is drawn on a circle of radius 9 in a 24 grid,
-   so it inks 75% of its box where the settings gear reaches 92% and read visibly smaller.
-   Scaled rather than given a wider box, which would have pushed it away from the title:
-   the box stays 16px, so the gap does not move. */
-.activity-card .panel-head-ico svg {
-  transform: scale(1.1);
-}
-/* Flat connection here, unlike the header's bordered chip: the seated title bar already
-   frames it, so a second bordered object beside the title only stacked edge on edge.
-   Same parts, no container, separated by middots and demoted under the title. Scoped to
-   this head so the main header chip and the settings overlay are untouched. */
-.activity-card .panel-head .conn-chip {
-  gap: 7px;
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--faint);
-}
-.activity-card .panel-head .chip-name {
-  font-weight: 500;
-  color: var(--muted);
-}
-.activity-card .panel-head .badge {
-  padding: 0;
-  border-radius: 0;
-  color: var(--faint);
-  background: none;
-}
-.activity-card .panel-head .badge::before,
-.activity-card .panel-head .chip-path::before {
-  content: "· ";
-}
 .act-status {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--faint);
   margin: var(--s3) 0;
 }
-.act-body {
-  padding: 2px 0 var(--s1);
-}
-
-/* Day: a collapsible section with a count; today opens, older days start folded. */
+/* Day: a collapsible section with a count, its head sticky in the list pane; today opens,
+   older days start folded. */
 .act-day {
   border-top: 1px solid var(--hi);
 }
@@ -2973,12 +2496,15 @@ label.qs-row {
   border-top: none;
 }
 .act-day-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 9px;
   width: 100%;
-  padding: var(--s2) var(--s1) var(--s2);
-  background: none;
+  padding: 10px var(--s3) 8px;
+  background: var(--pane-bg);
   border: none;
   font: inherit;
   text-align: left;
@@ -3016,9 +2542,6 @@ label.qs-row {
   color: var(--faint);
   font-variant-numeric: tabular-nums;
 }
-.act-day-body {
-  padding: 0 var(--s1) var(--s1);
-}
 .act-day.collapsed .act-day-body {
   display: none;
 }
@@ -3030,7 +2553,7 @@ label.qs-row {
   align-items: center;
   gap: 9px;
   min-height: 36px;
-  padding: var(--s2) var(--s1);
+  padding: var(--s2) var(--s3);
   border-top: 1px solid var(--hi);
 }
 /* Nothing listed yet (first load, or it failed): the tail sits right under the head. */
@@ -3118,71 +2641,23 @@ label.qs-row {
   border-radius: 3px;
 }
 
-/* Session group: a bordered card, the session task as its hero. */
-.act-group {
-  margin: var(--s1) 0 var(--s2);
-  border: 1px solid var(--edge);
-  border-radius: var(--r);
-  background: color-mix(in oklch, var(--sunken) 30%, transparent);
-  overflow: hidden;
-}
+/* Session group: a one-line head (agent, session task, count, export) over its rows. */
 .act-group-head {
   display: flex;
   align-items: center;
-  gap: 11px;
-  padding: 11px 12px;
-  border-bottom: 1px solid var(--hi);
+  gap: var(--s2);
+  padding: 8px var(--s3) 4px;
 }
-/* The harness mascot, seated in its own tile and centred against the two-line block. */
-.act-avatar {
-  width: 32px;
-  height: 32px;
+.act-sess-name {
   flex: none;
-  display: grid;
-  place-items: center;
-  border-radius: 8px;
-  color: var(--amber);
-  /* A neutral plate, not an amber wash: the amber wash bled a fuzzy edge; keep the mascot
-     the only amber so it stays crisp. */
-  background: linear-gradient(
-    155deg,
-    color-mix(in oklch, var(--text) 7%, var(--surface)),
-    var(--sunken)
-  );
-  border: 1px solid var(--edge);
-}
-.act-avatar svg {
-  width: 16px;
-  height: 16px;
-}
-.act-avatar svg,
-.act-avatar svg * {
-  fill: currentColor;
-}
-.act-sess-idblock {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.act-sess-meta {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--faint);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.act-proj {
-  font-family: var(--font-ui);
+  font-size: 12px;
   font-weight: 600;
   color: var(--muted);
 }
 .act-sess-title {
-  font-size: 14.5px;
-  font-weight: 640;
-  color: var(--text);
+  flex: 1 1 auto;
+  font-size: 11.5px;
+  color: var(--faint);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3190,10 +2665,10 @@ label.qs-row {
 }
 .act-sess-n {
   flex: none;
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--faint);
   font-variant-numeric: tabular-nums;
-  padding: 2px 8px;
+  padding: 1px 7px;
   border: 1px solid var(--edge);
   border-radius: 20px;
 }
@@ -3296,123 +2771,10 @@ label.qs-row {
   color: var(--faint);
 }
 
-/* Entry: chevron, time, status pill, intent, sensitivity flags, latency. */
+/* Entries are Inbox rows (.ix-row); their flags and clock sit in the row's side slot. */
 .act-entries {
   display: flex;
   flex-direction: column;
-}
-.act-entry {
-  border-top: 1px solid var(--hi);
-}
-.act-entry:first-child {
-  border-top: none;
-}
-.act-row {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  width: 100%;
-  padding: 9px 12px;
-  border: none;
-  background: none;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: background var(--dur) var(--ease);
-}
-.act-row:hover {
-  background: color-mix(in oklch, var(--amber) 5%, transparent);
-}
-.act-row:focus-visible {
-  outline: 2px solid var(--amber);
-  outline-offset: -2px;
-}
-.act-row .chev {
-  display: inline-flex;
-  width: 13px;
-  height: 13px;
-  flex: none;
-  color: var(--faint);
-  transition: transform var(--dur) var(--ease);
-}
-.act-row .chev svg {
-  width: 100%;
-  height: 100%;
-}
-.act-row[aria-expanded="false"] .chev {
-  transform: rotate(-90deg);
-}
-.act-time {
-  flex: none;
-  min-width: 64px;
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
-/* Status pill: a tinted, coloured-text badge per outcome, fixed-width so the column
-   aligns. approved green, rejected amber, failed red, expired faint. */
-.act-state {
-  --sc: var(--faint);
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 74px;
-  padding: 2px 8px;
-  border-radius: 5px;
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--sc);
-  background: color-mix(in oklch, var(--sc) 15%, transparent);
-  border: 1px solid color-mix(in oklch, var(--sc) 32%, transparent);
-}
-.act-state.approved {
-  --sc: var(--ok);
-}
-/* Approved, but by Auto mode rather than by a human: the chip carries the feature's own
-   colour, so the exception reads from the status itself. */
-.act-state.approved.auto {
-  --sc: var(--auto);
-}
-.act-state.rejected {
-  --sc: var(--amber);
-}
-.act-state.failed {
-  --sc: var(--danger);
-}
-.act-state.expired {
-  --sc: var(--faint);
-}
-.act-intent {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13px;
-  color: var(--text);
-}
-/* Condensed sensitivity flags: micro-badges signalling presence, not the columns. */
-/* Risk marker: a pencil (write) or trash (destructive) between the status and the intent,
-   nothing for a read, so a data-changing entry stands out in a column of reads. */
-.act-risk {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-}
-.act-risk svg {
-  width: 14px;
-  height: 14px;
-}
-.act-risk.write {
-  color: var(--amber);
-}
-.act-risk.destructive {
-  color: var(--danger);
 }
 .act-flags {
   display: inline-flex;
@@ -3440,47 +2802,6 @@ label.qs-row {
 .act-flag.client {
   color: var(--client);
   background: color-mix(in oklch, var(--client) 16%, transparent);
-}
-.act-metric {
-  flex: none;
-  min-width: 46px;
-  text-align: right;
-  white-space: nowrap;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--faint);
-  font-variant-numeric: tabular-nums;
-}
-.act-detail {
-  padding: 2px 12px 12px 40px;
-}
-.act-meta {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--faint);
-  margin-bottom: 7px;
-}
-/* Expanded note, tinted toward the outcome for continuity with the detail overlay. */
-.act-enote {
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  line-height: 1.5;
-  color: var(--muted);
-  margin-bottom: 7px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.act-enote.rejected {
-  color: color-mix(in oklch, var(--amber) 82%, var(--text));
-}
-.act-enote.failed {
-  color: color-mix(in oklch, var(--danger) 78%, var(--text));
-}
-.act-enote.expired {
-  color: var(--muted);
-}
-.hstatus.mut {
-  color: var(--faint);
 }
 
 /* ---- Settings overlay ---- */
@@ -3710,34 +3031,6 @@ label.qs-row {
 }
 .pair-link:hover {
   color: var(--text);
-}
-
-/* Container queries are the source of truth for every tier above. Where a
-   browser lacks container-query support, mirror the gk-main breakpoints with
-   viewport-width media queries (the main column ~= the viewport once stacked or
-   at the two-column shell). The shell switch is already a viewport media query,
-   so it needs no restatement here. */
-@supports not (container-type: inline-size) {
-  @media (min-width: 380px) {
-    .hrow {
-      grid-template-columns: 15px 58px 110px 22px 1fr auto;
-    }
-    .hwho,
-    .hlabel {
-      display: block;
-    }
-  }
-  @media (min-width: 640px) {
-    .hrow {
-      grid-template-columns: 15px 58px 110px 22px minmax(0, 1.3fr) minmax(0, 1fr) auto;
-    }
-    .hsql {
-      display: block;
-    }
-    .hrow[data-no-intent] {
-      grid-template-columns: 15px 58px 110px 22px 1fr auto;
-    }
-  }
 }
 
 /* ---- Settings danger zone ---- */
@@ -4070,23 +3363,20 @@ label.qs-row {
   fill: var(--amber-ink);
   transform: rotate(-16deg) scale(1.1);
 }
+/* The star and feedback buttons, docked at the end of the status line. */
 .cta-cluster {
-  position: fixed;
-  right: 16px;
-  bottom: 16px;
-  z-index: 4;
+  margin-left: auto;
   display: flex;
-  flex-direction: column;
-  gap: 9px;
-  align-items: flex-end;
+  align-items: center;
+  gap: var(--s2);
 }
 .cta-fab {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0;
-  width: 36px;
-  height: 36px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   border-radius: 999px;
   cursor: pointer;
@@ -4098,8 +3388,6 @@ label.qs-row {
   color: var(--muted);
   background: color-mix(in oklch, var(--surface) 90%, transparent);
   border: 1px solid var(--edge-strong);
-  box-shadow: var(--elev-2);
-  backdrop-filter: blur(6px);
   transition:
     width 0.28s var(--ease-out),
     padding 0.28s var(--ease-out),
@@ -4108,8 +3396,8 @@ label.qs-row {
     background 0.18s;
 }
 .cta-fab svg {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   flex: none;
 }
 .cta-fab .cta-lbl {
@@ -4657,12 +3945,8 @@ p.auto-message[data-tone="busy"] {
   font-weight: 650;
   color: var(--text);
 }
-/* The FABs' floating material, smaller and quieter, in the empty bottom-left corner. */
+/* The version, docked at the start of the status line in the FABs' quieter material. */
 .ver-dock {
-  position: fixed;
-  left: 16px;
-  bottom: 16px;
-  z-index: 4;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -4676,7 +3960,6 @@ p.auto-message[data-tone="busy"] {
   background: color-mix(in oklch, var(--surface) 90%, transparent);
   border: 1px solid var(--edge);
   border-radius: 999px;
-  backdrop-filter: blur(6px);
   transition:
     color 0.18s,
     border-color 0.18s;
@@ -4736,4 +4019,580 @@ p.auto-message[data-tone="busy"] {
 }
 .ver-dock.unknown {
   color: var(--faint);
+}
+
+/* ==== Inbox ========================================================== */
+/* Above the panes, so the header's popovers and the agents list open over them. */
+.app-top {
+  grid-area: top;
+  position: relative;
+  z-index: 3;
+  min-width: 0;
+}
+
+/* The agents line, welded under the header like the band it replaces. */
+.agents-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-width: 0;
+  min-height: 42px;
+  padding: 7px var(--s3);
+  border: 1px solid var(--edge);
+  border-top: 0;
+  border-radius: 0 0 var(--r) var(--r);
+  background: var(--surface);
+  box-shadow:
+    inset 0 -1px 0 oklch(0% 0 0 / 0.18),
+    var(--elev-2);
+}
+.strip-label {
+  flex: none;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-right: 4px;
+  font-size: var(--fs-eyebrow);
+  letter-spacing: var(--track-eyebrow);
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.strip-n {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.agents-strip .chips {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  gap: var(--s2);
+  overflow: hidden;
+}
+.agent-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px 0 8px;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--sunken) 55%, transparent);
+  font-size: 11.5px;
+  color: var(--text);
+  white-space: nowrap;
+}
+/* The display above would otherwise beat the hidden attribute the strip's fitting uses. */
+.agent-chip[hidden] {
+  display: none;
+}
+.agent-chip .presence-dot {
+  width: 6px;
+  height: 6px;
+}
+.agent-chip[data-presence="active"] .presence-dot {
+  background: var(--ok);
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--ok) 20%, transparent);
+}
+.agent-chip[data-presence="gone"] {
+  opacity: 0.55;
+}
+.agent-chip .harness-badge {
+  width: 12px;
+  height: 12px;
+}
+.ac-name {
+  font-weight: 560;
+}
+.ac-meta {
+  color: var(--faint);
+}
+.ac-n {
+  color: var(--amber);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.more-wrap {
+  position: relative;
+  flex: none;
+  margin-left: auto;
+}
+.agent-chip.more {
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.agent-chip.more:hover,
+.agent-chip.more[aria-expanded="true"] {
+  color: var(--text);
+  border-color: var(--edge-strong);
+}
+.agent-chip.more:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 1px;
+}
+.agents-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 8;
+  width: min(560px, 86vw);
+  max-height: min(420px, 60vh);
+  overflow-y: auto;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--edge);
+  border-radius: 9px;
+  box-shadow:
+    var(--elev-pop),
+    inset 0 1px 0 var(--hi);
+}
+.agents-pop .roster-list {
+  margin-top: 6px;
+}
+/* No agent yet: three faint harness tiles say what belongs here, two lines say how it
+   fills, in the UI face. */
+.agents-empty {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  min-width: 0;
+}
+.ae-marks {
+  display: inline-flex;
+  flex: none;
+}
+.ae-tile {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-left: -5px;
+  border-radius: 6px;
+  border: 1px solid var(--edge-strong);
+  background: linear-gradient(
+    155deg,
+    color-mix(in oklch, var(--text) 6%, var(--surface)),
+    var(--sunken)
+  );
+  color: var(--faint);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.ae-tile:first-child {
+  margin-left: 0;
+}
+.ae-tile svg {
+  width: 11px;
+  height: 11px;
+}
+.ae-tile svg,
+.ae-tile svg * {
+  fill: currentColor;
+}
+.ae-text {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.ae-title {
+  flex: none;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.ae-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
+/* The two panes. .inbox is the size container its narrow layout queries; it wraps no fixed
+   overlay, so its containment traps nothing. */
+.inbox {
+  grid-area: inbox;
+  min-height: 0;
+  margin-top: var(--s3);
+  container-type: size;
+  container-name: gk-inbox;
+}
+.inbox-panes {
+  height: 100%;
+  display: grid;
+  grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+  gap: var(--s3);
+}
+.pane {
+  --pane-bg: color-mix(in oklch, var(--surface) 55%, var(--ground));
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--edge);
+  border-radius: var(--r);
+  background: var(--pane-bg);
+  box-shadow:
+    inset 0 1px 0 var(--hi),
+    var(--elev-1);
+  overflow: hidden;
+}
+.pane-head {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  gap: var(--s2);
+  min-height: 42px;
+  padding: 0 var(--s3);
+  border-bottom: 1px solid var(--edge);
+  background: color-mix(in oklch, var(--sunken) 45%, transparent);
+}
+.pane-tabs {
+  display: flex;
+  gap: var(--s4);
+}
+/* The count takes the label's own size, so it shares its baseline and never sits low. */
+.pane-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--faint);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 560;
+  cursor: pointer;
+}
+.pane-tab svg {
+  width: 14px;
+  height: 14px;
+}
+.pane-tab:hover,
+.pane-tab[aria-selected="true"] {
+  color: var(--text);
+}
+.pane-tab[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--amber);
+}
+.pane-tab:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.pane-tab .n {
+  color: var(--amber);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.pane-tab .n:empty {
+  display: none;
+}
+.pane-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+}
+.pane-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklch, var(--text) 16%, transparent) transparent;
+}
+.pane-list .pane-body {
+  padding-bottom: var(--s2);
+}
+.pane-detail .pane-body {
+  padding: var(--s3);
+}
+
+/* List rows: the state mark centred on the title's line, the title over who and what came
+   of it, one fact on the right. The open row lifts by tone, never by a coloured bar. */
+.ix-group {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 16px var(--s3) 7px;
+  background: var(--pane-bg);
+  font-size: var(--fs-eyebrow);
+  letter-spacing: var(--track-eyebrow);
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.ix-group:first-child {
+  padding-top: 12px;
+}
+.ix-group.hot {
+  color: var(--amber);
+}
+.ix-group .n {
+  font-variant-numeric: tabular-nums;
+}
+.ix-group .n:empty {
+  display: none;
+}
+.ix-none {
+  margin: 0;
+  padding: 2px var(--s3) 8px;
+  font-size: 12px;
+  color: var(--faint);
+}
+.ix-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 10px;
+  width: 100%;
+  padding: 9px var(--s3);
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ix-row:hover {
+  background: color-mix(in oklch, var(--text) 4%, transparent);
+}
+.ix-row[aria-current="true"] {
+  background: color-mix(in oklch, var(--text) 8%, transparent);
+}
+.ix-row:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: -2px;
+}
+.ix-mark {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 18px;
+}
+.ix-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--amber);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--amber) 20%, transparent);
+}
+.ix-bolt {
+  display: inline-flex;
+  color: var(--auto);
+}
+.ix-bolt svg {
+  width: 14px;
+  height: 14px;
+}
+.ix-mark .spin {
+  width: 10px;
+  height: 10px;
+}
+.ix-mark .hstate svg {
+  width: 15px;
+  height: 15px;
+}
+.ix-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.ix-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  line-height: 18px;
+  font-weight: 600;
+  color: var(--text);
+}
+.ix-row.done .ix-title {
+  font-weight: 500;
+  color: color-mix(in oklch, var(--text) 82%, transparent);
+}
+.ix-row.done[aria-current="true"] .ix-title {
+  color: var(--text);
+}
+.ix-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--faint);
+}
+.ix-meta .harness-badge {
+  width: 12px;
+  height: 12px;
+}
+.ix-who {
+  flex: none;
+}
+.ix-note {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ix-risk.write {
+  color: var(--amber);
+}
+.ix-risk.destructive {
+  color: var(--danger);
+}
+.ix-side {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 18px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--faint);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.ix-side.low {
+  color: var(--amber);
+}
+.ix-side.run {
+  color: var(--exec);
+}
+.ix-side.run.long {
+  color: var(--amber);
+}
+.ix-side.busy {
+  font-family: var(--font-ui);
+  font-size: 11px;
+}
+.ix-side .act-flags {
+  display: inline-flex;
+  gap: 3px;
+}
+
+/* The open item: who asked over the full card, or the decided request's detail. */
+.pd-who {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  min-width: 0;
+  margin: 0 2px var(--s3);
+}
+.pd-who .harness-badge {
+  width: 17px;
+  height: 17px;
+}
+.pd-name {
+  flex: none;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.pd-task {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--faint);
+}
+.detail-host .detail-card {
+  max-width: none;
+}
+/* The detail's title bar stays in view while its result scrolls. */
+.detail-host .detail-head {
+  position: sticky;
+  top: calc(-1 * var(--s3));
+  z-index: 2;
+  background: var(--surface);
+}
+.pane-empty-host:empty,
+.queue:empty {
+  display: none;
+}
+.pane-empty-host {
+  display: grid;
+  place-items: center;
+  min-height: 100%;
+}
+.pane-empty {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  text-align: center;
+}
+.pe-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.pe-sub {
+  font-size: 12px;
+  color: var(--faint);
+}
+.pane-back {
+  display: none;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 var(--s3) -4px;
+  padding: 3px 8px 3px 4px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.pane-back svg {
+  width: 15px;
+  height: 15px;
+}
+.pane-back:hover {
+  background: var(--hi);
+  color: var(--text);
+}
+.pane-back:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 1px;
+}
+
+/* The status line: the version left, the two community buttons right, docked instead of
+   floating over the panes. */
+.status-bar {
+  grid-area: status;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding-top: var(--s2);
+}
+
+/* A narrow tab shows one pane at a time: the list, or what it opened with Back to it. */
+@container gk-inbox (max-width: 640px) {
+  .inbox-panes {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .inbox[data-show="list"] .pane-detail,
+  .inbox[data-show="detail"] .pane-list {
+    display: none;
+  }
+  .pane-back {
+    display: inline-flex;
+  }
 }

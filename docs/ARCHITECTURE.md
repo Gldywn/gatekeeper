@@ -148,6 +148,8 @@ header only; its rows are built the first time it opens. The PII, Value and Clie
 from `policy_json.sensitivity`, three booleans the plugin freezes from its card analysis when
 `/executing` or `/result` records the decision (while the request is executing, a later
 `/result` never overwrites the `/executing` one), or from the SQL text alone when nothing was recorded, so opening the trail
-never queries the connected database. A separate partial index covers results awaiting purge.
+never queries the connected database. An entry opens in the same detail as Recently
+resolved; it shows rows only while this tab still holds them for that request, since
+`/activity` serves only the counts. A separate partial index covers results awaiting purge.
 See
 [`SECURITY.md`](../SECURITY.md) for local data handling.

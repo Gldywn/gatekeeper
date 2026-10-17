@@ -308,8 +308,11 @@ describe("check lifecycle", () => {
       confirmModal: { cancel: vi.fn() },
       annotator: { clearCache: vi.fn() },
       history: [],
-      activityView: { reset: vi.fn() },
+      activityView: { reset: vi.fn(), open: vi.fn() },
+      detailView: { close: vi.fn() },
       settingsView: { close: vi.fn() },
+      tab: "queue",
+      selection: { queue: { kind: "hist", id: "req_old" }, audit: { kind: "audit", id: "req_a" } },
       renderModeSurfaces: vi.fn(),
       renderHistory: vi.fn(),
       renderRoster: vi.fn(),
@@ -319,6 +322,10 @@ describe("check lifecycle", () => {
     });
     query.mockClear();
     app.onConnectionSwitch();
+    // Nothing the old connection had open stays on screen.
+    expect(app.selection).toEqual({ queue: null, audit: null });
+    expect(app.detailView.close).toHaveBeenCalled();
+    expect(app.activityView.reset).toHaveBeenCalled();
     expect(app.mode).toBe("read");
     expect(app.endpointRO).toBeNull();
     expect(app.layerRows()).toMatch(/Gatekeeper<\/span><span class="ro-state ok">/);

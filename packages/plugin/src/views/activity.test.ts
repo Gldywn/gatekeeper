@@ -80,9 +80,9 @@ function harness() {
     getBoundingClientRect: () => ({ top: tailTop, bottom: tailTop }),
   };
   const nodes: Record<string, unknown> = {
-    "#activity": panel,
-    "#activity .act-body": body,
-    "#activity .act-tail": tail,
+    "#listAudit": panel,
+    "#listAudit .act-body": body,
+    "#listAudit .act-tail": tail,
   };
   const activity = vi.fn<(scope?: string, before?: unknown) => Promise<ActivityPage | null>>();
   const view = new ActivityView({
@@ -90,7 +90,7 @@ function harness() {
     broker: { activity } as unknown as BrokerClient,
     connectionName: () => "conn",
     scope: () => "scope",
-    connChip: () => "",
+    selected: () => null,
     dialect: () => "postgresql",
   });
   const days = () => [...body.innerHTML.matchAll(/data-day="([^"]+)"/g)].map((m) => m[1]);
@@ -247,7 +247,7 @@ describe("ActivityView paging", () => {
     expect(activity).toHaveBeenCalledTimes(3);
   });
 
-  it("ignores an observer callback that outlived its overlay", async () => {
+  it("ignores an observer callback that outlived its list", async () => {
     const { view, activity } = harness();
     activity.mockResolvedValueOnce({ activity: [entry(0), entry(1)], more: true });
     await view.open();
@@ -315,8 +315,8 @@ describe("ActivityView paging", () => {
       getAttribute: () => "2026-10-08",
     } as unknown as HTMLElement;
     view.toggleDay(head);
-    expect(body.innerHTML).toContain('data-act="req_000000000002"');
-    expect(body.innerHTML).not.toContain('data-act="req_000000000001"');
+    expect(body.innerHTML).toContain('data-row="req_000000000002"');
+    expect(body.innerHTML).not.toContain('data-row="req_000000000001"');
 
     body.childElementCount = 1;
     body.innerHTML = "kept";
@@ -334,7 +334,7 @@ describe("ActivityView paging", () => {
     expect(activity).toHaveBeenCalledTimes(1);
   });
 
-  it("drops a chained load queued before the overlay closed", async () => {
+  it("drops a chained load queued before the list closed", async () => {
     const { view, activity } = harness();
     activity
       .mockResolvedValueOnce({ activity: [entry(0), entry(1)], more: true })

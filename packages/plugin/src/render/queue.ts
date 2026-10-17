@@ -4,7 +4,6 @@ import {
   clockIcon,
   copyIcon,
   dbReadsIcon,
-  harnessIcon,
   messageIcon,
   pencilIcon,
   sendIcon,
@@ -18,7 +17,7 @@ import { highlight } from "../sql/highlight";
 import { modeRank, type RiskMode } from "../sql/mode";
 import { visibleControls } from "../sql/sanitize";
 import { analyzeTableOps, type SchemaContext } from "../sql/schema";
-import type { Card, CardState, RunState, SessionMeta } from "../types";
+import type { Card, CardState, RunState } from "../types";
 import { AUTO_APPROVED, AUTO_LEADS, autoIcon, NOTHING_SENT } from "./auto";
 
 const WRITE_MODE_NOTE = "Write mode required to approve this query.";
@@ -98,62 +97,7 @@ function unparsedNote(gate: CardGate): string {
   return `<div class="cs-unparsed">${warnIcon}Gatekeeper could not parse this statement. ${UNPARSED_GUESS[gate.cls]} is a guess from its text, so read it yourself before approving.</div>`;
 }
 
-export function queueHtml(
-  cards: Card[],
-  dialect: string,
-  denyDrafts: Map<string, string>,
-  mode: RiskMode = "read",
-  connReadOnly = false,
-): string {
-  if (!cards.length) {
-    return `<div class="waiting"><span class="waiting-mark" aria-hidden="true"></span><span>Waiting for a query proposal...</span></div>`;
-  }
-  // Group by session, keeping the arrival order of both groups and cards.
-  // Always render the session header, even for a single session, so the human
-  // can see which agent is asking.
-  const groups: { session: SessionMeta | null; cards: Card[] }[] = [];
-  for (const card of cards) {
-    let group = groups.find((g) => g.cards[0]?.sessionId === card.sessionId);
-    if (!group) {
-      group = { session: card.session, cards: [] };
-      groups.push(group);
-    }
-    group.cards.push(card);
-  }
-  return groups
-    .map((g) => groupHtml(g.session, g.cards, dialect, denyDrafts, mode, connReadOnly))
-    .join("");
-}
-
-export function groupHtml(
-  session: SessionMeta | null,
-  cards: Card[],
-  dialect: string,
-  denyDrafts: Map<string, string>,
-  mode: RiskMode = "read",
-  connReadOnly = false,
-): string {
-  const project = session?.project?.trim();
-  const harness = session?.harness?.trim() || null;
-  const label = project
-    ? escapeHtml(project)
-    : harness
-      ? escapeHtml(harness)
-      : escapeHtml(cards[0].sessionId ?? "session");
-  const intent = session?.sessionLabel?.trim();
-  return `
-      <section class="group">
-        <div class="group-head">
-          <span class="harness-badge">${harnessIcon(harness)}</span>
-          <span class="group-label">${label}</span>
-          ${intent ? `<span class="group-intent" title="${escapeHtml(capitalize(intent))}">${escapeHtml(capitalize(intent))}</span>` : ""}
-          <span class="group-count count-badge">${cards.length}</span>
-        </div>
-        ${cards.map((c) => cardHtml(c, dialect, denyDrafts, mode, connReadOnly)).join("")}
-      </section>`;
-}
-
-const AUTO_EVALUATING = "Evaluating with Jev";
+export const AUTO_EVALUATING = "Evaluating with Jev";
 const EVAL_NOTE = "Auto mode is evaluating this read with Jev.";
 
 // One line that names Auto mode first, says where the read stands, and only then carries

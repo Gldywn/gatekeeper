@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 import { activityEntryHtml } from "./activity";
 import { approvalHtml, autoPopHtml, autoSettingsHtml } from "./auto";
 import { modeDropdown } from "./controls";
-import { historyRow } from "./history";
+import { detailHtml } from "./detail";
+import { auditItem, recentRowHtml } from "./inbox";
 import { cardHtml } from "./queue";
 
 describe("Auto mode surfaces", () => {
@@ -98,34 +99,32 @@ describe("Auto mode surfaces", () => {
       session: null,
       approval,
     };
-    expect(historyRow(item)).toContain("Approved automatically");
-    expect(historyRow({ ...item, approval: { source: "human" } })).not.toContain(
+    expect(recentRowHtml(item, false)).toContain("Approved automatically");
+    expect(recentRowHtml({ ...item, approval: { source: "human" } }, false)).not.toContain(
       "Approved automatically",
     );
     expect(approvalHtml(approval)).toContain("jev-1.13.0");
     expect(approvalHtml(approval)).toContain("auto-beta-1");
     expect(approvalHtml(approval)).toContain("read_only 0.999");
-    const activity = activityEntryHtml(
-      {
-        id: "r1",
-        createdAt: 1,
-        decidedAt: 2,
-        sessionId: "s1",
-        harness: null,
-        project: null,
-        sessionLabel: null,
-        sql: item.sql,
-        intent: null,
-        state: "approved",
-        reason: null,
-        error: null,
-        rowCount: 2,
-        approval,
-      },
-      new Set(["r1"]),
-      "postgresql",
-    );
-    expect(activity).toContain("Approved automatically");
-    expect(activity).toContain("auto-beta-1");
+    const entry = {
+      id: "r1",
+      createdAt: 1,
+      decidedAt: 2,
+      sessionId: "s1",
+      harness: null,
+      project: null,
+      sessionLabel: null,
+      sql: item.sql,
+      intent: null,
+      state: "approved" as const,
+      reason: null,
+      error: null,
+      rowCount: 2,
+      affectedRows: null,
+      approval,
+    };
+    // The row says who decided; the evaluation's details open with it on the right.
+    expect(activityEntryHtml(entry, true, "postgresql")).toContain("Approved automatically");
+    expect(detailHtml(auditItem(entry, null))).toContain("auto-beta-1");
   });
 });

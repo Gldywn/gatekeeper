@@ -19,13 +19,14 @@ import type {
 } from "@gatekeeper/shared";
 import { enter, type Loop, pulse, reveal } from "./anim";
 import { SchemaAnnotator } from "./annotate";
-import { clock, countsLabel, escapeHtml, relAge } from "./html";
+import { capitalize, clock, countsLabel, escapeHtml, relAge } from "./html";
 import {
+  agentBadge,
   alertTriangleIcon,
   botIcon,
   botOffIcon,
   checkIcon,
-  chevronDown,
+  chevronLeft,
   copyIcon,
   externalLinkIcon,
   gearIcon,
@@ -48,17 +49,25 @@ import { ConfirmModal } from "./render/confirm";
 import { connChipInner } from "./render/connchip";
 import { modeDropdown, switchInput } from "./render/controls";
 import { type DbCheck, dbLink, dbLinkLabel, dbStatusHtml, nextCheckText } from "./render/dblink";
-import { historyRow } from "./render/history";
+import { CANCELLED_NOTE } from "./render/detail";
+import {
+  agentsStripHtml,
+  auditItem,
+  groupHeadHtml,
+  paneEmptyHtml,
+  queueRowHtml,
+  recentRowHtml,
+} from "./render/inbox";
 import {
   type CardGate,
   cardGate,
+  cardHtml,
   LONG_RUN_MS,
-  queueHtml,
   readyActions,
   schemaInner,
 } from "./render/queue";
 import { type LayerState, readOnlyView } from "./render/readonly";
-import { presence, rosterRow } from "./render/roster";
+import { presence } from "./render/roster";
 import {
   UPDATE_SKILL_URL,
   updatePrompt,
@@ -158,6 +167,15 @@ function schemaAccessLabel(on: boolean): string {
 }
 
 const PRESENCE_ORDER: Record<Presence, number> = { active: 0, idle: 1, gone: 2 };
+
+type InboxTab = "queue" | "audit";
+// A card while it waits, a local result once decided (same id), or an Audit Trail entry, kept
+// with the item it showed so the pane survives the feed being fetched again.
+interface Selection {
+  kind: "card" | "hist" | "audit";
+  id: string;
+  item?: HistItem;
+}
 
 // The host sends affectedRows on every result (Beekeeper >= 5.4) but the SDK type does not
 // declare it, so read it defensively: an absent count must stay absent rather than become a
@@ -291,11 +309,15 @@ export class Gatekeeper {
   private readonly history: HistItem[] = [];
   private roster: SessionRoster[] = [];
   private rosterSig = "";
-  private rosterOpen = true;
-  private rosterLive = -1;
   private rosterLoops: Loop[] = [];
   private breatheLoop?: Loop;
   private prevCardIds = new Set<string>();
+  private stripObserver?: ResizeObserver;
+  // The Inbox: which list the left pane shows, and what each list has open on the right. Each
+  // list keeps its own selection, so coming back to a tab finds what was open there. Nothing
+  // is ever selected for the human: a new or next proposal never lands under the pointer.
+  private tab: InboxTab = "queue";
+  private readonly selection: Record<InboxTab, Selection | null> = { queue: null, audit: null };
   private polling = false;
   private lastTitle = "";
   private lastConnCheck = 0;
@@ -359,17 +381,15 @@ export class Gatekeeper {
       root,
       annotator: this.annotator,
       settings: () => this.settingsStore.get(),
+      dialect: () => this.dialect,
     });
     this.activityView = new ActivityView({
       root,
       broker: this.broker,
       connectionName: () => this.connectionName,
       scope: () => this.connScopeKey(),
-      connChip: () => {
-        const data = this.connChipData();
-        return data ? `<span class="conn-chip">${connChipInner(data)}</span>` : "";
-      },
       dialect: () => this.dialect,
+      selected: () => this.selection.audit?.id ?? null,
     });
     this.settingsView = new SettingsView({
       root,
@@ -422,17 +442,42 @@ export class Gatekeeper {
         }
         // An open mode or flyout menu swallows the first Escape so it dismisses without
         // also tearing down the overlay or popover it sits inside.
-        if (this.closeModeMenus() || this.closeFlyoutMenus() || this.dismissAgentPop()) {
+        if (
+          this.closeModeMenus() ||
+          this.closeFlyoutMenus() ||
+          this.dismissAgentPop() ||
+          this.setAgentsPopOpen(false)
+        ) {
           return;
         }
-        this.activityView.close();
-        this.detailView.close();
-        this.settingsView.close();
-        this.setSettingsOpen(false);
+        // Then one layer per press: Settings, the settings popover, and in a narrow tab the
+        // list behind an open item. The database notice stays until its own buttons.
+        const settings = this.root.querySelector<HTMLElement>("#settings");
+        if (settings && !settings.hidden) {
+          this.settingsView.close();
+          return;
+        }
+        const pop = this.root.querySelector<HTMLElement>("#settingsPop");
+        if (pop && !pop.hidden) {
+          this.setSettingsOpen(false);
+          return;
+        }
+        if (!this.root.querySelector<HTMLElement>("#notice")?.hidden) {
+          return;
+        }
+        const list = this.root.querySelector<HTMLElement>(".pane-list");
+        if (this.root.querySelector('#inbox[data-show="detail"]') && list?.offsetParent === null) {
+          this.showList();
+        }
       }
     });
     document.addEventListener("mouseover", (e) => this.enterAgentGlyph(e));
     document.addEventListener("focusin", (e) => this.enterAgentGlyph(e));
+    // The agents list folded behind "+N more" closes on any click outside it.
+    document.addEventListener("click", (e) => {
+      const target = e.target as Element;
+      if (!target.closest("#agentsPop, [data-agents-more]")) this.setAgentsPopOpen(false);
+    });
     // A click anywhere outside the gear or the open popover dismisses it. Bound
     // once (the gear/popover are re-created per render, so this reads them live).
     document.addEventListener("click", (e) => {
@@ -597,7 +642,7 @@ export class Gatekeeper {
     this.breatheLoop?.stop();
     this.breatheLoop = undefined;
     this.rosterSig = "";
-    this.rosterLive = -1;
+    this.resetInbox();
     this.stopProbe();
     this.renderStandby();
   }
@@ -844,11 +889,12 @@ export class Gatekeeper {
     // The new database has a different schema; drop cached columns so the next
     // card's annotation cannot describe the old connection.
     this.annotator.clearCache();
-    // History, activity, and roster are connection-scoped; reset so the old one
-    // cannot leak in. The roster re-fetches on its own timer; the activity overlay
-    // is closed because it now shows a different connection's audit trail.
+    // History, activity, roster and what the Inbox shows are connection-scoped; reset so the
+    // old one cannot leak in. The roster re-fetches on its own timer, and an open Audit Trail
+    // reloads for the new connection.
     this.history.length = 0;
-    this.activityView.reset();
+    this.resetInbox();
+    if (this.tab === "audit") void this.activityView.open();
     this.roster = [];
     this.rosterSig = "";
     // The endpoint belongs to the old database; check the new one from scratch.
@@ -1127,6 +1173,7 @@ export class Gatekeeper {
 
   private renderPairing(errorMessage = ""): void {
     this.stopProbe();
+    this.resetInbox();
     this.root.innerHTML = `
       <div class="standby">
         <div class="standby-card">
@@ -1258,148 +1305,65 @@ export class Gatekeeper {
   }
 
   private renderShell(): void {
+    // The fresh markup opens on the Queue with nothing selected, whatever the last shell showed.
+    this.tab = "queue";
+    this.resetInbox();
+    this.stripObserver?.disconnect();
     this.root.innerHTML = `
       <div class="gk">
-        ${this.headerHtml()}
-        <div class="rail" id="rail">
-          <section class="roster" id="roster"></section>
+        <div class="app-top">
+          ${this.headerHtml()}
+          <section class="agents-strip" id="roster" aria-label="Connected agents"></section>
         </div>
-        <div class="main" id="main">
-          <p class="label">Pending approval <span class="count-badge" id="pendingCount" aria-live="polite"></span></p>
-          <div class="queue" id="queue"></div>
-          <section class="history">
-            <div class="history-head">
-              <button class="disclosure" id="htoggle" aria-expanded="true"><span class="chev">${chevronDown}</span>Recently resolved</button>
-              <button class="activity-link" id="activityBtn" type="button">${historyIcon}Audit Trail</button>
+        <div class="inbox" id="inbox" data-show="list">
+          <div class="inbox-panes">
+          <section class="pane pane-list" aria-label="Queue and Audit Trail">
+            <div class="pane-head">
+              <div class="pane-tabs" role="tablist" aria-label="Lists">
+                <button class="pane-tab" role="tab" type="button" id="tabQueue" data-tab="queue" aria-selected="true" aria-controls="listQueue">Queue<span class="n" id="queueCount"></span></button>
+                <button class="pane-tab" role="tab" type="button" id="tabAudit" data-tab="audit" aria-selected="false" aria-controls="listAudit" tabindex="-1">${historyIcon}Audit Trail</button>
+              </div>
+              <span class="pane-actions" id="auditActions" hidden></span>
             </div>
-            <div class="hist" id="hist"></div>
+            <div class="pane-body" id="listQueue" role="tabpanel" aria-labelledby="tabQueue"></div>
+            <div class="pane-body" id="listAudit" role="tabpanel" aria-labelledby="tabAudit" hidden></div>
           </section>
+          <section class="pane pane-detail" aria-label="Selected">
+            <div class="pane-body" id="detailBody">
+              <button class="pane-back" type="button" data-back>${chevronLeft}Back to the list</button>
+              <div class="pane-empty-host" id="paneEmpty"></div>
+              <div class="queue" id="queue"></div>
+              <div class="detail-host" id="detail" hidden></div>
+            </div>
+          </section>
+          </div>
         </div>
-        <div class="detail" id="detail" hidden></div>
-        <div class="detail activity-overlay" id="activity" hidden></div>
+        <footer class="status-bar">
+          <button class="ver-dock" id="verDock" type="button" hidden></button>
+          <div class="cta-cluster" id="ctaCluster">
+            <button class="cta-fab star${this.starred ? "" : " twinkle"}" type="button" data-gh-star aria-label="Star Gatekeeper on GitHub">${starGlyph}<span class="cta-lbl">Star on GitHub</span></button>
+            <button class="cta-fab fb" type="button" data-gh-feedback aria-label="Request a feature">${feedbackGlyph}<span class="cta-lbl">Request a feature</span></button>
+          </div>
+        </footer>
         <div class="detail settings-overlay" id="settings" hidden></div>
         <div class="detail confirm-overlay" id="confirm" hidden></div>
         <div class="detail db-notice-overlay" id="notice" hidden></div>
-        <button class="ver-dock" id="verDock" type="button" hidden></button>
-        <div class="cta-cluster" id="ctaCluster">
-          <button class="cta-fab star${this.starred ? "" : " twinkle"}" type="button" data-gh-star aria-label="Star Gatekeeper on GitHub">${starGlyph}<span class="cta-lbl">Star on GitHub</span></button>
-          <button class="cta-fab fb" type="button" data-gh-feedback aria-label="Request a feature">${feedbackGlyph}<span class="cta-lbl">Request a feature</span></button>
-        </div>
       </div>`;
     this.renderConnLabel();
     this.renderArmed();
-    const toggle = this.root.querySelector<HTMLButtonElement>("#htoggle")!;
-    const hist = this.root.querySelector<HTMLDivElement>("#hist")!;
-    toggle.addEventListener("click", () => {
-      const open = hist.style.display !== "none";
-      hist.style.display = open ? "none" : "";
-      toggle.setAttribute("aria-expanded", String(!open));
-    });
-    const rosterEl = this.root.querySelector<HTMLElement>("#roster")!;
-    rosterEl.addEventListener("click", (e) => {
-      if (!(e.target as HTMLElement).closest("[data-roster-toggle]")) {
-        return;
-      }
-      this.rosterOpen = !this.rosterOpen;
-      rosterEl
-        .querySelector("[data-roster-toggle]")
-        ?.setAttribute("aria-expanded", String(this.rosterOpen));
-      if (this.rosterOpen) {
-        // Re-arm the cascade: drop .play, force one reflow, re-add so it replays.
-        const rows = [...rosterEl.querySelectorAll<HTMLElement>(".roster-row")];
-        for (const r of rows) {
-          r.classList.remove("play");
-        }
-        void rosterEl.offsetWidth;
-        for (const r of rows) {
-          r.classList.add("play");
-        }
+    const strip = this.root.querySelector<HTMLElement>("#roster")!;
+    strip.addEventListener("click", (e) => {
+      if ((e.target as HTMLElement).closest("[data-agents-more]")) {
+        const pop = strip.querySelector<HTMLElement>("#agentsPop");
+        this.setAgentsPopOpen(Boolean(pop?.hidden));
       }
     });
-    const queue = this.root.querySelector<HTMLDivElement>("#queue")!;
-    queue.addEventListener("click", (e) => {
-      const target = e.target as HTMLElement;
-      const copy = target.closest<HTMLElement>("[data-copy-sql]");
-      const a = target.closest<HTMLElement>("[data-approve]");
-      const r = target.closest<HTMLElement>("[data-reject]");
-      const denyOpen = target.closest<HTMLElement>("[data-deny-open]");
-      const deny = target.closest<HTMLElement>("[data-deny]");
-      const stop = target.closest<HTMLElement>("[data-stop]");
-      if (copy) {
-        this.copySql(copy);
-      } else if (stop) {
-        const card = this.cards.find((c) => c.id === stop.getAttribute("data-stop"));
-        if (card) this.requestStop(card, "operator");
-      } else if (a) {
-        void this.approve(a.getAttribute("data-approve")!);
-      } else if (r) {
-        void this.reject(r.getAttribute("data-reject")!);
-      } else if (denyOpen) {
-        this.openDeny(denyOpen.getAttribute("data-deny-open")!);
-      } else if (deny) {
-        this.confirmDeny(deny.getAttribute("data-deny")!);
-      }
-    });
-    queue.addEventListener("keydown", (e) => {
-      const input = (e.target as HTMLElement).closest<HTMLElement>("[data-deny-input]");
-      if (!input) {
-        return;
-      }
-      const id = input.getAttribute("data-deny-input")!;
-      if (e.key === "Enter") {
-        e.preventDefault();
-        this.confirmDeny(id);
-      } else if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        this.closeDeny(id);
-      }
-    });
-    hist.addEventListener("click", (e) => {
-      const row = (e.target as HTMLElement).closest<HTMLElement>("[data-hist]");
-      if (!row) {
-        return;
-      }
-      const item = this.history.find((h) => h.id === row.getAttribute("data-hist"));
-      if (item) {
-        this.detailView.open(item);
-      }
-    });
-    const detail = this.root.querySelector<HTMLDivElement>("#detail")!;
-    detail.addEventListener("click", (e) => {
-      const target = e.target as HTMLElement;
-      const copy = target.closest<HTMLElement>("[data-copy-sql]");
-      if (copy) {
-        this.copySql(copy);
-        return;
-      }
-      // A result copy/export option: dispatch by action, the view holds the open item.
-      const opt = target.closest<HTMLElement>("[data-flyout-action]");
-      if (opt) {
-        this.closeFlyoutMenus();
-        const fmt = opt.getAttribute("data-flyout-fmt")!;
-        if (opt.getAttribute("data-flyout-action") === "export") {
-          void this.detailView.exportResult(fmt as "csv" | "json");
-        } else {
-          void this.detailView.copyResult(fmt as "md");
-        }
-        return;
-      }
-      const trigger = target.closest<HTMLElement>("[data-flyout-trigger]");
-      if (trigger) {
-        this.toggleFlyoutMenu(trigger);
-        return;
-      }
-      // Any other click dismisses an open format menu.
-      this.closeFlyoutMenus();
-      // Close on the backdrop or the close button, not on the card itself.
-      if (target === detail || target.closest("[data-close]")) {
-        this.detailView.close();
-      }
-    });
-    this.root
-      .querySelector<HTMLButtonElement>("#activityBtn")!
-      .addEventListener("click", () => void this.activityView.open());
+    // Remeasured on width changes, so the chips that fit follow the tab's size.
+    this.stripObserver = new ResizeObserver(() => this.layoutStrip());
+    this.stripObserver.observe(strip);
+    const inbox = this.root.querySelector<HTMLElement>("#inbox")!;
+    inbox.addEventListener("click", (e) => this.onInboxClick(e));
+    inbox.addEventListener("keydown", (e) => this.onInboxKey(e));
     // The armed banner's X drops straight back to read-only (no confirm on a drop).
     this.root.querySelector<HTMLElement>("#armed")!.addEventListener("click", (e) => {
       if ((e.target as HTMLElement).closest("[data-disarm]")) {
@@ -1519,59 +1483,320 @@ export class Gatekeeper {
         void this.updateSetting(el.dataset.setting!, el.checked);
       }
     });
-    const activity = this.root.querySelector<HTMLDivElement>("#activity")!;
-    activity.addEventListener("click", (e) => {
-      const target = e.target as HTMLElement;
-      const copy = target.closest<HTMLElement>("[data-copy-sql]");
-      if (copy) {
-        this.copySql(copy);
-        return;
-      }
-      const opt = target.closest<HTMLElement>("[data-flyout-action]");
-      if (opt) {
-        this.closeFlyoutMenus();
-        if (opt.getAttribute("data-flyout-action") === "export") {
-          void this.activityView.exportSession(
-            opt.getAttribute("data-flyout-key")!,
-            opt.getAttribute("data-flyout-fmt") as "md" | "csv" | "json",
-          );
-        }
-        return;
-      }
-      const expTrigger = target.closest<HTMLElement>("[data-flyout-trigger]");
-      if (expTrigger) {
-        this.toggleFlyoutMenu(expTrigger);
-        return;
-      }
-      // Any other click in the panel dismisses an open format menu.
-      this.closeFlyoutMenus();
-      const dayHead = target.closest<HTMLElement>("[data-day]");
-      if (dayHead) {
-        this.activityView.toggleDay(dayHead);
-        return;
-      }
-      const sql = target.closest<HTMLElement>("[data-act-sql]");
-      if (sql) {
-        this.activityView.toggle(sql.getAttribute("data-act-sql")!);
-        return;
-      }
-      if (target.closest("[data-act-retry]")) {
-        void this.activityView.loadOlder();
-        return;
-      }
-      if (target === activity || target.closest("[data-close]")) {
-        this.activityView.close();
-      }
-    });
+    this.applyTab();
     this.renderQueue();
-    this.renderHistory();
-    this.renderRoster(); // Rebuilt DOM has a blank glyph; force it back to the initial state (the
-    // guard in setConnectionState would otherwise skip writing the new node).
+    this.renderRoster();
+    this.renderSelection(true);
+    // Rebuilt DOM has a blank glyph; force it back to the initial state (the guard in
+    // setConnectionState would otherwise skip writing the new node).
     this.setConnectionState("connecting", true);
     const gk = this.root.querySelector(".gk");
     if (gk) {
       reveal([...gk.children].filter((c) => !(c as HTMLElement).hidden));
     }
+  }
+
+  // One delegate for both panes: lists, the selected card's actions, the detail's menus, the
+  // Audit Trail's days and exports. Menus and copies come first so a click inside them never
+  // also selects a row.
+  private onInboxClick(e: MouseEvent): void {
+    const target = e.target as HTMLElement;
+    const copy = target.closest<HTMLElement>("[data-copy-sql]");
+    if (copy) {
+      this.copySql(copy);
+      return;
+    }
+    const opt = target.closest<HTMLElement>("[data-flyout-action]");
+    if (opt) {
+      this.closeFlyoutMenus();
+      const fmt = opt.getAttribute("data-flyout-fmt")!;
+      const action = opt.getAttribute("data-flyout-action");
+      if (opt.closest("#listAudit")) {
+        if (action === "export") {
+          void this.activityView.exportSession(
+            opt.getAttribute("data-flyout-key")!,
+            fmt as "md" | "csv" | "json",
+          );
+        }
+      } else if (action === "export") {
+        void this.detailView.exportResult(fmt as "csv" | "json");
+      } else {
+        void this.detailView.copyResult(fmt as "md");
+      }
+      return;
+    }
+    const trigger = target.closest<HTMLElement>("[data-flyout-trigger]");
+    if (trigger) {
+      this.toggleFlyoutMenu(trigger);
+      return;
+    }
+    this.closeFlyoutMenus();
+    const tab = target.closest<HTMLElement>("[data-tab]");
+    if (tab) {
+      this.setTab(tab.dataset.tab as InboxTab);
+      return;
+    }
+    const row = target.closest<HTMLElement>("[data-select]");
+    if (row) {
+      this.select({ kind: row.dataset.select as Selection["kind"], id: row.dataset.row! });
+      return;
+    }
+    if (target.closest("[data-back]")) {
+      this.showList();
+      return;
+    }
+    const dayHead = target.closest<HTMLElement>("[data-day]");
+    if (dayHead) {
+      this.activityView.toggleDay(dayHead);
+      return;
+    }
+    if (target.closest("[data-act-retry]")) {
+      void this.activityView.loadOlder();
+      return;
+    }
+    const a = target.closest<HTMLElement>("[data-approve]");
+    const r = target.closest<HTMLElement>("[data-reject]");
+    const denyOpen = target.closest<HTMLElement>("[data-deny-open]");
+    const deny = target.closest<HTMLElement>("[data-deny]");
+    const stop = target.closest<HTMLElement>("[data-stop]");
+    if (stop) {
+      const card = this.cards.find((c) => c.id === stop.getAttribute("data-stop"));
+      if (card) this.requestStop(card, "operator");
+    } else if (a) {
+      void this.approve(a.getAttribute("data-approve")!);
+    } else if (r) {
+      void this.reject(r.getAttribute("data-reject")!);
+    } else if (denyOpen) {
+      this.openDeny(denyOpen.getAttribute("data-deny-open")!);
+    } else if (deny) {
+      this.confirmDeny(deny.getAttribute("data-deny")!);
+    }
+  }
+
+  private onInboxKey(e: KeyboardEvent): void {
+    const target = e.target as HTMLElement;
+    const input = target.closest<HTMLElement>("[data-deny-input]");
+    if (input) {
+      const id = input.getAttribute("data-deny-input")!;
+      if (e.key === "Enter") {
+        e.preventDefault();
+        this.confirmDeny(id);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        this.closeDeny(id);
+      }
+      return;
+    }
+    // The arrow keys move between the tabs; Enter or Space opens one, since opening the Audit
+    // Trail fetches it and passing over it must not.
+    const tab = target.closest<HTMLElement>("[data-tab]");
+    if (tab && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+      e.preventDefault();
+      const other = tab.dataset.tab === "queue" ? "audit" : "queue";
+      this.root.querySelector<HTMLElement>(`[data-tab="${other}"]`)?.focus();
+    }
+  }
+
+  private setTab(tab: InboxTab): void {
+    if (tab === this.tab) {
+      return;
+    }
+    this.tab = tab;
+    this.applyTab();
+    // Fresh on every open, as before: decisions taken since then must show.
+    if (tab === "audit") {
+      void this.activityView.open();
+    } else {
+      this.activityView.close();
+    }
+    this.renderSelection(true);
+  }
+
+  private applyTab(): void {
+    for (const el of this.root.querySelectorAll<HTMLElement>("[data-tab]")) {
+      const on = el.dataset.tab === this.tab;
+      el.setAttribute("aria-selected", String(on));
+      el.tabIndex = on ? 0 : -1;
+    }
+    const queue = this.root.querySelector<HTMLElement>("#listQueue");
+    const audit = this.root.querySelector<HTMLElement>("#listAudit");
+    const actions = this.root.querySelector<HTMLElement>("#auditActions");
+    if (queue) queue.hidden = this.tab !== "queue";
+    if (audit) audit.hidden = this.tab !== "audit";
+    if (actions) actions.hidden = this.tab !== "audit";
+  }
+
+  private select(next: Selection): void {
+    if (next.kind === "audit") {
+      const entry = this.activityView.entry(next.id);
+      if (!entry) return;
+      // The server's record stays the fact; rows this tab still holds for the same approved
+      // request are attached, since /activity serves only the counts.
+      const item = auditItem(entry, this.connectionName || null);
+      const local = this.history.find((h) => h.id === next.id);
+      if (item.status === "approved" && local?.status === "approved" && local.result?.rows.length) {
+        item.result = local.result;
+      }
+      next.item = item;
+    }
+    this.selection[this.tab] = next;
+    for (const row of this.root.querySelectorAll<HTMLElement>(
+      `#${this.tab === "queue" ? "listQueue" : "listAudit"} [data-row]`,
+    )) {
+      row.setAttribute("aria-current", String(row.dataset.row === next.id));
+    }
+    // Shown before it renders: the grid sizes itself from the visible pane.
+    this.root.querySelector("#inbox")?.setAttribute("data-show", "detail");
+    this.renderSelection(true);
+    // Narrow: the list just hid under the focused row, so Back takes the focus.
+    if (this.root.querySelector<HTMLElement>(".pane-list")?.offsetParent === null) {
+      this.root.querySelector<HTMLElement>("[data-back]")?.focus({ preventScroll: true });
+    }
+  }
+
+  // Narrow tab: the list and the selection take turns; Back returns to the row it left.
+  private showList(): void {
+    this.root.querySelector("#inbox")?.setAttribute("data-show", "list");
+    const id = this.selection[this.tab]?.id;
+    if (id) {
+      this.root.querySelector<HTMLElement>(`[data-row="${id}"]`)?.focus({ preventScroll: true });
+    }
+  }
+
+  // The right pane shows exactly the current selection. A decided request reopens only when
+  // the selection changed (`force`), never on a poll, so its grid keeps its sort and page.
+  private renderSelection(force = false): void {
+    const sel = this.selection[this.tab];
+    const queue = this.root.querySelector<HTMLElement>("#queue");
+    const empty = this.root.querySelector<HTMLElement>("#paneEmpty");
+    if (!queue || !empty) {
+      return;
+    }
+    if (sel?.kind === "card") {
+      const card = this.cards.find((c) => c.id === sel.id);
+      if (!card) {
+        this.selection[this.tab] = null;
+        this.renderSelection(true);
+        return;
+      }
+      this.detailView.close();
+      empty.innerHTML = "";
+      this.renderSelectedCard(card);
+      return;
+    }
+    if (queue.childElementCount) {
+      this.captureDenyDrafts(queue);
+      queue.innerHTML = "";
+    }
+    const item =
+      sel?.kind === "hist" ? (this.history.find((h) => h.id === sel.id) ?? sel.item) : sel?.item;
+    if (sel?.kind === "hist" && item) sel.item = item;
+    if (item) {
+      empty.innerHTML = "";
+      if (force || this.detailView.showing() !== item.id) {
+        this.detailView.open(item, sel?.kind === "hist" ? "live" : "text");
+      }
+      return;
+    }
+    this.detailView.close();
+    this.breatheLoop?.stop();
+    this.breatheLoop = undefined;
+    const waiting = this.cards.filter((c) => c.state === "ready").length;
+    empty.innerHTML = paneEmptyHtml(waiting, this.tab);
+    const mark = empty.querySelector(".waiting-mark");
+    if (mark) this.breatheLoop = pulse(mark);
+  }
+
+  private renderSelectedCard(card: Card): void {
+    const queue = this.root.querySelector<HTMLElement>("#queue");
+    if (!queue) {
+      return;
+    }
+    // A rebuild must carry an open deny form's typed text and focus across.
+    const focusedDeny = this.captureDenyDrafts(queue);
+    const who = card.session?.project?.trim() || card.session?.harness?.trim() || card.sessionId;
+    const task = card.session?.sessionLabel?.trim();
+    queue.innerHTML = `<div class="pd-who">${agentBadge(card.session?.harness?.trim() || null)}<span class="pd-name">${escapeHtml(who)}</span>${task ? `<span class="pd-task" title="${escapeHtml(capitalize(task))}">${escapeHtml(capitalize(task))}</span>` : ""}</div>${cardHtml(card, this.dialect, this.denyDrafts, this.mode, this.connectionReadOnly())}`;
+    if (focusedDeny) {
+      const input = queue.querySelector<HTMLInputElement>(`[data-deny-input="${focusedDeny}"]`);
+      input?.focus();
+      input?.setSelectionRange(input.value.length, input.value.length);
+    }
+  }
+
+  // Saves every open deny form's text before its markup goes; returns the focused one.
+  private captureDenyDrafts(host: HTMLElement): string | null {
+    let focused: string | null = null;
+    for (const input of host.querySelectorAll<HTMLInputElement>(".deny-reason")) {
+      const id = input.getAttribute("data-deny-input");
+      if (id) {
+        this.denyDrafts.set(id, input.value);
+        if (input === document.activeElement) focused = id;
+      }
+    }
+    return focused;
+  }
+
+  // Connection switch, demotion and re-pair: nothing from before stays open.
+  private resetInbox(): void {
+    this.selection.queue = null;
+    this.selection.audit = null;
+    this.activityView.reset();
+    this.detailView.close();
+    this.root.querySelector("#inbox")?.setAttribute("data-show", "list");
+  }
+
+  private setAgentsPopOpen(open: boolean): boolean {
+    const pop = this.root.querySelector<HTMLElement>("#agentsPop");
+    const more = this.root.querySelector<HTMLElement>("[data-agents-more]");
+    if (!pop || pop.hidden === !open) {
+      return false;
+    }
+    pop.hidden = !open;
+    more?.setAttribute("aria-expanded", String(open));
+    return true;
+  }
+
+  // Hides the chips past the strip's end and counts them on "+N more", which stays visible
+  // itself: its own width is reserved before any chip is measured.
+  private layoutStrip(): void {
+    const box = this.root.querySelector<HTMLElement>("#roster .chips");
+    const more = this.root.querySelector<HTMLElement>("#roster [data-agents-more]");
+    if (!box || !more) {
+      return;
+    }
+    const focused = document.activeElement === more;
+    const chips = [...box.children] as HTMLElement[];
+    for (const c of chips) c.hidden = false;
+    more.hidden = true;
+    if (box.scrollWidth > box.clientWidth) {
+      more.textContent = `+${chips.length} more`;
+      more.hidden = false;
+      const limit = box.getBoundingClientRect().right;
+      let hidden = 0;
+      for (const c of chips) {
+        if (c.getBoundingClientRect().right > limit + 0.5) {
+          c.hidden = true;
+          hidden++;
+        }
+      }
+      more.textContent = `+${hidden} more`;
+    }
+    if (focused && more.hidden) this.refocusStrip();
+  }
+
+  // A keyboard user keeps "+N more" across a rebuild, or lands on the open tab once it goes.
+  private refocusStrip(): void {
+    const more = this.root.querySelector<HTMLElement>("#roster [data-agents-more]");
+    if (more && !more.hidden) more.focus({ preventScroll: true });
+    else this.focusOpenTab();
+  }
+
+  private focusOpenTab(): void {
+    this.root
+      .querySelector<HTMLElement>('[data-tab][aria-selected="true"]')
+      ?.focus({ preventScroll: true });
   }
 
   // Updated in place, never rebuilt, so the live node stays mounted and the glyph keeps the
@@ -2338,31 +2563,23 @@ export class Gatekeeper {
     }
     this.rosterSig = sig;
     const live = rows.filter((r) => r.p !== "gone").length;
-    // Cascade only when the roster grew (an agent joined) or first populated, never on a
-    // minor in-place update, so the list does not re-animate on every pending tick.
-    const grew = live > this.rosterLive;
-    this.rosterLive = live;
-    const list =
-      rows.map(({ s, p }) => rosterRow(s, p)).join("") ||
-      '<div class="empty">No agents connected.</div>';
-    el.innerHTML = `<button class="disclosure roster-toggle" type="button" data-roster-toggle aria-expanded="${this.rosterOpen}"><span class="chev">${chevronDown}</span>Connected agents<span class="roster-count count-badge">${live}</span></button><div class="roster-fold"><div class="roster-fold-inner"><div class="roster-list">${list}</div></div></div>`;
-    // Stagger index for the unfold cascade, set here so the row markup (and its test)
-    // stays free of presentation state.
-    const rowEls = [...el.querySelectorAll<HTMLElement>(".roster-row")];
-    rowEls.forEach((r, i) => {
-      r.style.setProperty("--i", String(i));
-    });
-    if (this.rosterOpen && grew) {
-      for (const r of rowEls) {
-        r.classList.add("play");
-      }
-    }
+    const open = this.root.querySelector<HTMLElement>("#agentsPop")?.hidden === false;
+    const focused = el.contains(document.activeElement);
+    // Work waiting for the human first, then presence, so the chips that fit are the ones
+    // that matter.
+    const strip = [...rows].sort(
+      (a, b) => Number(b.s.pendingCount > 0) - Number(a.s.pendingCount > 0),
+    );
+    el.innerHTML = agentsStripHtml(strip, live);
+    this.layoutStrip();
+    if (open) this.setAgentsPopOpen(true);
+    if (focused) this.refocusStrip();
     for (const loop of this.rosterLoops) {
       loop.stop();
     }
-    this.rosterLoops = [
-      ...el.querySelectorAll('.roster-row[data-presence="active"] .presence-dot'),
-    ].map((dot) => pulse(dot));
+    this.rosterLoops = [...el.querySelectorAll('[data-presence="active"] .presence-dot')].map(
+      (dot) => pulse(dot),
+    );
   }
 
   private claim(proposal: Proposal): void {
@@ -2389,7 +2606,7 @@ export class Gatekeeper {
     }
     const card: Card = { ...proposal, state: "ready" };
     this.cards.push(card);
-    this.renderQueue();
+    this.renderQueue(card.id);
     void this.analyzeSchema(card);
     void this.evaluateNext();
   }
@@ -2455,7 +2672,7 @@ export class Gatekeeper {
     }
     // No word of its own: the row would read as a timeout, so the note carries the truth.
     if (state === "cancelled") {
-      this.finish(card.id, "expired", "cancelled by the agent");
+      this.finish(card.id, "expired", CANCELLED_NOTE);
       return;
     }
     // Back in the pool (or the broker said nothing): the next poll re-offers it.
@@ -2467,21 +2684,30 @@ export class Gatekeeper {
     this.maybeCheckEndpoint();
     this.renderCheckTimes();
     this.renderAgentLinkTimes();
+    const now = Date.now();
     for (const card of [...this.cards]) {
-      if (card.state === "ready" && card.expiresAt - Date.now() <= 0) {
+      if (card.state === "ready" && card.expiresAt - now <= 0) {
         this.finish(card.id, "expired", "expired");
         continue;
       }
+      if (card.state !== "ready") continue;
+      const remaining = card.expiresAt - now;
       const leaseEl = this.root.querySelector<HTMLSpanElement>(`[data-card="${card.id}"] .lease`);
-      if (leaseEl && card.state === "ready") {
-        const remaining = card.expiresAt - Date.now();
+      if (leaseEl) {
         leaseEl.className = remaining <= 45_000 ? "lease low" : "lease";
         leaseEl.textContent = clock(remaining);
       }
+      const rowEl = this.root.querySelector<HTMLSpanElement>(
+        `[data-row="${card.id}"] [data-lease]`,
+      );
+      if (rowEl) {
+        rowEl.classList.toggle("low", remaining <= 45_000);
+        rowEl.textContent = clock(remaining);
+      }
     }
-    this.tickRuns(Date.now());
+    this.tickRuns(now);
     // Keep the resolved-history and roster ages current without re-rendering.
-    this.root.querySelectorAll<HTMLSpanElement>("#hist .hage, #roster .rage").forEach((el) => {
+    this.root.querySelectorAll<HTMLSpanElement>("#listQueue .hage, #roster .rage").forEach((el) => {
       const t = Number(el.dataset.age);
       if (!Number.isNaN(t)) {
         el.textContent = relAge(t);
@@ -2495,57 +2721,72 @@ export class Gatekeeper {
     return (this.conn?.readOnly ?? false) || this.endpointRO?.replica === true;
   }
 
-  private renderQueue(): void {
-    const count = this.root.querySelector<HTMLSpanElement>("#pendingCount");
+  // The queue list and, when a card is open on the right, that card. Counts: the tab says
+  // how many wait for the human (as the Beekeeper tab title does), the group how many it lists.
+  // `changed`: the one card this update is about. The open card is rebuilt only for its own
+  // changes, so a proposal arriving elsewhere never resets a selection, a tooltip or a scroll.
+  private renderQueue(changed?: string): void {
+    const ready = this.cards.filter((c) => c.state === "ready").length;
+    const count = this.root.querySelector<HTMLSpanElement>("#queueCount");
     if (count) {
-      const n = this.cards.length;
-      count.textContent = n > 0 ? String(n) : "";
+      count.textContent = ready > 0 ? String(ready) : "";
     }
-    const queue = this.root.querySelector<HTMLDivElement>("#queue");
-    if (queue) {
-      // A concurrent proposal rebuilds the whole queue; carry any open deny form's
-      // typed text and focus across the rebuild so a half-composed reason survives.
-      let focusedDeny: string | null = null;
-      for (const input of queue.querySelectorAll<HTMLInputElement>(".deny-reason")) {
-        const id = input.getAttribute("data-deny-input");
-        if (id) {
-          this.denyDrafts.set(id, input.value);
-          if (input === document.activeElement) {
-            focusedDeny = id;
-          }
-        }
-      }
-      this.breatheLoop?.stop();
-      this.breatheLoop = undefined;
-      queue.innerHTML = queueHtml(
-        this.cards,
-        this.dialect,
-        this.denyDrafts,
-        this.mode,
-        this.connectionReadOnly(),
-      );
-      if (focusedDeny) {
-        const input = queue.querySelector<HTMLInputElement>(`[data-deny-input="${focusedDeny}"]`);
-        input?.focus();
-        input?.setSelectionRange(input.value.length, input.value.length);
-      }
-      const waitingMark = queue.querySelector(".waiting-mark");
-      if (waitingMark) {
-        this.breatheLoop = pulse(waitingMark);
-      } else {
-        for (const card of queue.querySelectorAll<HTMLElement>(".card")) {
-          if (card.dataset.card && !this.prevCardIds.has(card.dataset.card)) {
-            enter(card);
-          }
-        }
-      }
-      this.prevCardIds = new Set(
-        [...queue.querySelectorAll<HTMLElement>(".card")]
-          .map((c) => c.dataset.card ?? "")
-          .filter(Boolean),
-      );
+    this.renderQueueList();
+    // The empty pane counts what waits, so it follows the queue too.
+    const sel = this.selection[this.tab];
+    if (!sel || (sel.kind === "card" && (changed === undefined || changed === sel.id))) {
+      this.renderSelection();
     }
     this.updateTabTitle();
+  }
+
+  private renderHistory(): void {
+    this.renderQueueList();
+  }
+
+  private renderQueueList(): void {
+    const list = this.root.querySelector<HTMLElement>("#listQueue");
+    if (!list) {
+      return;
+    }
+    const selected = this.selection.queue?.id ?? null;
+    const now = Date.now();
+    // What waits for a decision; running rows say their own state.
+    const ready = this.cards.filter((c) => c.state === "ready").length;
+    const pending = this.cards.length
+      ? this.cards
+          .map((c) =>
+            queueRowHtml(c, classifyQuery(c.sql, this.dialect).class, c.id === selected, now),
+          )
+          .join("")
+      : '<p class="ix-none">Nothing waiting.</p>';
+    // Defense in depth: a switch already clears history, but never render a row
+    // stamped under a different connection than the one on screen now.
+    const current = this.connectionName || null;
+    const recent = this.history.filter((h) => h.connection === current);
+    const focused = list.contains(document.activeElement)
+      ? (document.activeElement as HTMLElement).dataset.row
+      : undefined;
+    list.innerHTML = `${groupHeadHtml("Pending approval", ready, ready > 0)}${pending}${
+      recent.length
+        ? `${groupHeadHtml("Recently resolved", 0)}${recent
+            .map((h) =>
+              recentRowHtml(h, h.id === selected, classifyQuery(h.sql, this.dialect).class),
+            )
+            .join("")}`
+        : ""
+    }`;
+    for (const row of list.querySelectorAll<HTMLElement>('[data-select="card"]')) {
+      if (row.dataset.row && !this.prevCardIds.has(row.dataset.row)) enter(row);
+    }
+    // A keyboard user keeps the row they were on (a decided card is now its outcome row), or
+    // lands on the open tab once that row is gone.
+    if (focused !== undefined) {
+      const row = list.querySelector<HTMLElement>(`[data-row="${focused}"]`);
+      if (row) row.focus({ preventScroll: true });
+      else this.focusOpenTab();
+    }
+    this.prevCardIds = new Set(this.cards.map((c) => c.id));
   }
 
   // Surface the count of queries awaiting a decision in the Beekeeper tab so it
@@ -2585,7 +2826,7 @@ export class Gatekeeper {
     const card = this.cards.find((c) => c.id === id);
     if (card) {
       card.state = state;
-      this.renderQueue();
+      this.renderQueue(id);
     }
   }
 
@@ -2779,7 +3020,7 @@ export class Gatekeeper {
         attempts: 0,
       };
     }
-    this.renderQueue();
+    this.renderQueue(card.id);
     void this.sendStop(card);
   }
 
@@ -2823,7 +3064,7 @@ export class Gatekeeper {
     } else {
       return;
     }
-    this.renderQueue();
+    this.renderQueue(card.id);
   }
 
   private tickRuns(now: number): void {
@@ -2843,6 +3084,11 @@ export class Gatekeeper {
       if (stop?.state === "sent" && now - (stop.sentAt ?? now) >= STOP_RETRY_MS) {
         stop.state = "idle";
         rerender = true;
+      }
+      const rowClock = this.root.querySelector<HTMLElement>(`[data-run="${card.id}"]`);
+      if (rowClock) {
+        rowClock.textContent = clock(elapsed);
+        rowClock.classList.toggle("long", elapsed >= LONG_RUN_MS);
       }
       const el = this.root.querySelector<HTMLElement>(`[data-card="${card.id}"]`);
       if (!el) continue;
@@ -2976,7 +3222,7 @@ export class Gatekeeper {
     const index = this.cards.findIndex((c) => c.id === id);
     if (index !== -1) {
       this.cards.splice(index, 1);
-      this.renderQueue();
+      this.renderQueue(id);
     }
   }
 
@@ -2991,15 +3237,14 @@ export class Gatekeeper {
     if (!card) {
       return;
     }
-    const el = this.root.querySelector<HTMLElement>(`[data-card="${id}"]`);
-    // A custom reason replaces the terse default label; the row and detail
-    // overlay both read HistItem.note, so nothing here is hardcoded.
+    const el = this.root.querySelector<HTMLElement>(`[data-row="${id}"]`);
+    // A custom reason replaces the terse default label; the row and the detail both read
+    // HistItem.note, so nothing here is hardcoded.
     const displayNote = reason?.trim() || note;
     const generation = this.connGeneration;
     const commit = () => {
       if (generation !== this.connGeneration || !this.cards.includes(card)) return;
-      this.drop(id);
-      this.history.unshift({
+      const item: HistItem = {
         id,
         status,
         note: displayNote,
@@ -3012,12 +3257,20 @@ export class Gatekeeper {
         approval: card.approval,
         evaluation: card.evaluation,
         autoHold: this.autoHold(card),
-      });
+      };
+      // An open card stays open as its outcome: same request, now decided. The selection holds
+      // the item itself, so it outlives the Recently resolved cap while another tab shows.
+      const open = this.selection.queue?.kind === "card" && this.selection.queue.id === id;
+      if (open) this.selection.queue = { kind: "hist", id, item };
+      this.drop(id);
+      this.history.unshift(item);
       if (this.history.length > this.settingsStore.get().recentlyResolved) {
         this.history.pop();
       }
       this.enforceHistoryBudget();
       this.renderHistory();
+      // The Audit Trail's open entry, if that tab shows, keeps its grid's sort and page.
+      if (open && this.tab === "queue") this.renderSelection(true);
     };
     if (el && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       el.classList.add("leaving");
@@ -3043,20 +3296,6 @@ export class Gatekeeper {
         total += size;
       }
     }
-  }
-
-  private renderHistory(): void {
-    const hist = this.root.querySelector<HTMLDivElement>("#hist");
-    if (!hist) {
-      return;
-    }
-    // Defense in depth: a switch already clears history, but never render a row
-    // stamped under a different connection than the one on screen now.
-    const current = this.connectionName || null;
-    hist.innerHTML = this.history
-      .filter((h) => h.connection === current)
-      .map((h) => historyRow(h))
-      .join("");
   }
 
   private copySql(el: HTMLElement): void {

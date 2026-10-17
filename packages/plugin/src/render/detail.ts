@@ -16,15 +16,18 @@ import {
   markdownIcon,
   tableIcon,
   xCircleIcon,
-  xIcon,
 } from "../icons";
 import type { HistResult } from "../result";
 import { formatSql } from "../sql/format";
 import { highlight } from "../sql/highlight";
+import { visibleControls } from "../sql/sanitize";
 import type { HistItem } from "../types";
 import { approvalHtml } from "./auto";
 import { flyoutMenu } from "./controls";
 import { statusIcon } from "./status";
+
+// An agent cancellation is stored as an expiry; this note is what tells the two apart.
+export const CANCELLED_NOTE = "cancelled by the agent";
 
 export function detailHtml(item: HistItem): string {
   const harness = item.session?.harness?.trim() || null;
@@ -43,11 +46,10 @@ export function detailHtml(item: HistItem): string {
           <span class="detail-who">${escapeHtml(who)}</span>
           ${item.session?.sessionLabel ? `<span class="detail-scope" title="${escapeHtml(capitalize(item.session.sessionLabel))}">${escapeHtml(capitalize(item.session.sessionLabel))}</span>` : ""}
           ${statusIcon(item.status)}
-          <button class="detail-close" type="button" data-close aria-label="Close detail">${xIcon}</button>
         </div>
         <div class="detail-meta">${audit.join(" &middot; ")}</div>
         ${item.intent ? `<p class="detail-intent">${escapeHtml(capitalize(item.intent))}</p>` : ""}
-        <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(item.sql)}" aria-label="Copy SQL">${copyIcon}</button><code class="sql-body" id="detail-sqlbody">${highlight(formatSql(item.sql))}</code></pre>
+        <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(visibleControls(item.sql))}" aria-label="Copy SQL">${copyIcon}</button><code class="sql-body" id="detail-sqlbody">${highlight(formatSql(item.sql))}</code></pre>
         <div class="card-schema" id="detail-cs"></div>
         ${approvalHtml(item.approval, item.evaluation, item.autoHold)}${outcomeHtml(item)}
       </div>`;
@@ -70,10 +72,20 @@ function outcomeInner(item: HistItem): string {
     );
   }
   if (item.status === "rejected") {
-    // A decline carries no reason to show; state it plainly, no placeholder note.
+    // "declined" is the label a decline without a typed reason carries; only a real reason shows.
+    const reason = item.note?.trim();
     return (
       ocHead(xCircleIcon, "Declined", relAge(item.resolvedAt)) +
-      ocMsg("You declined this proposal. Nothing ran against the database.")
+      ocMsg("You declined this proposal. Nothing ran against the database.") +
+      (reason && reason !== "declined" ? ocNote(reason) : "")
+    );
+  }
+  if (item.note === CANCELLED_NOTE) {
+    return (
+      ocHead(clockIcon, "Cancelled", relAge(item.resolvedAt)) +
+      ocMsg(
+        "The agent cancelled this proposal before a decision. Nothing ran against the database.",
+      )
     );
   }
   return (
@@ -93,9 +105,12 @@ function approvedOutcome(item: HistItem): string {
     return head + ocMsg("The query returned no rows.");
   }
   // Rows returned but no longer here (retention or the byte budget): keep the scalar
-  // count honest without claiming the data is still around.
+  // count honest without claiming the data is still around. With no returned count known
+  // (a write's Audit Trail entry), the counts in the head say all there is.
   if (result.rows.length === 0) {
-    return head + ocMsg("The rows this query returned are no longer held in memory.");
+    return result.rowCount === null
+      ? head
+      : head + ocMsg("The rows this query returned are no longer held in memory.");
   }
   return `${head}<div class="detail-oc-body" id="detail-grid">${resultGrid(result)}</div>`;
 }
@@ -120,7 +135,8 @@ function resultGrid(result: HistResult): string {
 }
 
 export function gridFoot(result: HistResult): string {
-  const noun = result.rowCount === 1 ? "row" : "rows";
+  const total = result.rowCount ?? result.rows.length;
+  const noun = total === 1 ? "row" : "rows";
   const capTag = result.truncated
     ? ` <span class="cap-tag">first ${formatCount(result.rows.length)} held</span>`
     : "";
@@ -139,5 +155,5 @@ export function gridFoot(result: HistResult): string {
         { fmt: "json", icon: jsonIcon, name: "JSON" },
       ])}</span>`
     : "";
-  return `<div class="grid-foot"><span class="rc"><b>${formatCount(result.rowCount)}</b> ${noun}${capTag}</span>${actions}</div>`;
+  return `<div class="grid-foot"><span class="rc"><b>${formatCount(total)}</b> ${noun}${capTag}</span>${actions}</div>`;
 }
