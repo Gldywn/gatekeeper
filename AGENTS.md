@@ -37,10 +37,33 @@ One package at a time: `pnpm --filter @gatekeeper/plugin test` or
 `pnpm --filter @gldywn/gatekeeper-mcp-server test` (the server keeps its npm name, so
 `@gatekeeper/server` matches nothing and exits 0 without running a test).
 
-## Seeing a plugin change in Beekeeper Studio
+## Seeing a plugin change
 
-Judge UI work in the real plugin inside Beekeeper Studio, not in a standalone page or a
-mocked host.
+Agents judge UI work in the fixture preview: the real plugin, with its stylesheet and
+Tabulator, over a fake Beekeeper host and an in-memory broker fed with synthetic data
+(`packages/plugin/preview/`, see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)). It touches none
+of the machine-wide state below. It listens on port 5199 and refuses a taken port, so a second
+worktree adds `--port 5200` (any free port) and uses that port in its URLs.
+
+1. `pnpm --filter @gatekeeper/plugin preview:fixtures`, then open
+   `http://127.0.0.1:5199/preview/index.html` in a browser you can capture (in Orca, the
+   embedded browser and `orca-screenshot`).
+2. Render before calling it done. Capture the change wide and in
+   `preview/frame.html?w=440&h=760`, with the scenario that exercises it (`agents=20`,
+   `queue=0`, `history=0`...). Capture once the rows are in and the reveal animation is over;
+   a capture right after a load can show the page still fading in. A case the fixtures do not
+   cover gets its own synthetic fixture in `preview/fixtures.ts`.
+3. Check alignment on a magnified capture (a CSS transform on the page), against the
+   elements next to it: a count on its label's baseline, an icon centred in its button, row
+   edges on one line. Magnifying shows alignment; it does not test browser zoom or reflow.
+4. Drive interactions in the page (clicks, a narrow frame) and read the DOM state back.
+   Check keyboard paths with real key presses (`orca keypress`) and `document.activeElement`:
+   a scripted click or Escape proves nothing about the keyboard.
+5. For a substantive UI change, compare the behaviour with `origin/main` so nothing is lost
+   (features, keyboard paths, live updates), and have an agent of another model family
+   cross-read the diff before committing.
+
+The human checks the real plugin inside Beekeeper Studio once before merging:
 
 1. `pnpm dev:link` builds, then points Beekeeper's plugin slot at this checkout. An installed
    release is moved aside and `pnpm dev:unlink` puts it back. `pnpm dev:status` shows what
