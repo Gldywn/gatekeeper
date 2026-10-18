@@ -1,4 +1,4 @@
-import { escapeHtml } from "../html";
+import { escapeHtml, withSqlKeywords } from "../html";
 import { gearIcon, schemaIcon, xIcon } from "../icons";
 import { autoSettingsHtml } from "../render/auto";
 import { modeDropdown, switchInput } from "../render/controls";
@@ -191,7 +191,7 @@ function toggleRow(t: ToggleSpec, s: Settings): string {
           <div class="set-row">
             <div class="set-text">
               <span class="set-name-line"><span class="set-name">${escapeHtml(t.name)}</span>${example}</span>
-              <span class="set-desc">${escapeHtml(t.desc)}</span>
+              <span class="set-desc">${withSqlKeywords(t.desc)}</span>
             </div>
             <span class="set-control">${switchInput(t.key, t.name, Boolean(s[t.key]))}</span>
           </div>`;

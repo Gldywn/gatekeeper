@@ -1,4 +1,4 @@
-import { capitalize, clock, escapeHtml, relAge } from "../html";
+import { capitalize, clock, escapeHtml, relAge, withSqlKeywords } from "../html";
 import {
   buildingIcon,
   clockIcon,
@@ -129,7 +129,8 @@ function autoNote(card: Card): string {
         .filter(Boolean);
   const tags = reasons
     .map(
-      (reason) => `<span class="auto-reason over">${escapeHtml(reason.replace(/\.$/, ""))}</span>`,
+      (reason) =>
+        `<span class="auto-reason over">${withSqlKeywords(reason.replace(/\.$/, ""))}</span>`,
     )
     .join("");
   return `<div class="cs-unparsed auto" role="status">${autoIcon}<span><b>Auto mode:</b> ${lead}<span class="auto-reasons">${tags}</span></span></div>`;

@@ -3503,13 +3503,27 @@ label.qs-row {
   outline: 2px solid var(--text);
   outline-offset: 2px;
 }
-/* A SQL keyword or a tool name inside prose keeps the house voice: mono, in the colour
-   the highlighter gives keywords everywhere else. The feature popovers and the skill link share it. */
-.sa-pop code,
-.ver-skill {
+/* A SQL keyword named in prose (popovers, the mode menu, confirmations, settings): mono, in
+   the amber the highlighter gives keywords, so it reads as SQL wherever it appears. */
+code.kw {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 0.95em;
   color: var(--amber);
+}
+/* The mode menu's line is already mono, at its own size. */
+.o-allow code.kw {
+  font-size: inherit;
+}
+/* An agent tool or skill named in prose (get_schema, update-gatekeeper): mono on a faint
+   neutral chip, never the keyword amber, so a tool name never reads as SQL. */
+code.tool,
+.ver-skill {
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 0.95em;
+  color: var(--text);
+  background: color-mix(in oklch, var(--text) 8%, transparent);
 }
 .set-rec.auto {
   color: var(--auto);
@@ -3891,22 +3905,16 @@ p.auto-message[data-tone="busy"] {
 }
 /* A skill name is typed as one word: no break at its hyphen. */
 .ver-skill {
-  padding: 0;
-  background: none;
   border: 0;
   cursor: pointer;
   white-space: nowrap;
-  text-decoration: underline;
-  text-decoration-color: color-mix(in oklch, var(--amber) 40%, transparent);
-  text-underline-offset: 3px;
 }
 .ver-skill:hover {
-  text-decoration-color: var(--amber);
+  background: color-mix(in oklch, var(--text) 14%, transparent);
 }
 .ver-skill:focus-visible {
   outline: 2px solid var(--amber);
   outline-offset: 2px;
-  border-radius: 2px;
 }
 #versionSettings .sa-enable {
   margin-top: 0;

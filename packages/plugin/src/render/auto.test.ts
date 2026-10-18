@@ -38,7 +38,7 @@ describe("Auto mode surfaces", () => {
       expect(html).not.toContain("aria-disabled");
       // The menu keeps its ordinary labels; what a switch costs is explained in the
       // popover and in Settings, not repeated under every option.
-      expect(html).toContain("adds INSERT, UPDATE");
+      expect(html).toContain('adds <code class="kw">INSERT</code>, <code class="kw">UPDATE</code>');
       expect(html).not.toContain("Auto mode");
       expect(html).toContain('data-mode-opt="write"');
       expect(html).toContain('data-mode-opt="destructive"');

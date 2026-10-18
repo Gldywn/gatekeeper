@@ -8,6 +8,14 @@ export function escapeHtml(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
+const SQL_KEYWORDS = /\b(SELECT|INSERT|UPDATE|DELETE|DROP|TRUNCATE|WHERE)\b/g;
+
+// Prose that names SQL keywords, escaped, each keyword in the one style keywords take in
+// prose (`code.kw`), so no copy styles them by hand.
+export function withSqlKeywords(text: string): string {
+  return escapeHtml(text).replace(SQL_KEYWORDS, '<code class="kw">$1</code>');
+}
+
 // Display polish for an agent-written intent: force the first character upper,
 // in case it arrived lowercase. A non-letter first char is left as-is.
 export function capitalize(value: string): string {

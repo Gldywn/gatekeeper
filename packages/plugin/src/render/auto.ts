@@ -1,5 +1,5 @@
 import type { ApprovalAttribution, AutoEvaluation } from "@gatekeeper/shared";
-import { escapeHtml } from "../html";
+import { escapeHtml, withSqlKeywords } from "../html";
 import { AUTO_POLICY, AUTO_THRESHOLDS } from "../sql/auto";
 import type { AutoHold } from "../types";
 
@@ -32,13 +32,13 @@ export function autoPopHtml(): string {
   return `<span class="sa-pop auto-body">
           <span class="sa-body sa-off">
             ${title}
-            <p>Eligible <code>SELECT</code> reads run automatically and return their results to your agent. Everything else waits for you, and <b>Write and Destructive always need your approval</b>. TypeSafe receives the SQL structure and the schema names it reads, never result rows.</p>
+            <p>Eligible <code class="kw">SELECT</code> reads run automatically and return their results to your agent. Everything else waits for you, and <b>Write and Destructive always need your approval</b>. TypeSafe receives the SQL structure and the schema names it reads, never result rows.</p>
             <button class="sa-enable" type="button" data-auto-toggle>Enable Auto mode</button>
             <p class="auto-message" data-auto-message role="status"></p>
           </span>
           <span class="sa-body sa-on">
             ${title}
-            <p>Eligible <code>SELECT</code> reads now run without your approval. Everything else still waits for you, and <b>confirming Write or Destructive turns off Auto mode</b>.</p>
+            <p>Eligible <code class="kw">SELECT</code> reads now run without your approval. Everything else still waits for you, and <b>confirming Write or Destructive turns off Auto mode</b>.</p>
             <button class="sa-enable tonal" type="button" data-auto-toggle>Disable Auto mode</button>
           </span>
         </span>`;
@@ -80,7 +80,7 @@ export function approvalHtml(
     const lead = hold.sent ? `${AUTO_LEADS.unfinished}.` : `${AUTO_LEADS.local}. ${NOTHING_SENT}`;
     return `<div class="auto-trace">
       <div class="auto-trace-line">${autoIcon}<span><b>Auto mode:</b> ${lead}</span></div>
-      <div class="auto-reasons"><span class="auto-reason over">${escapeHtml(hold.reason.replace(/\.$/, ""))}</span></div>
+      <div class="auto-reasons"><span class="auto-reason over">${withSqlKeywords(hold.reason.replace(/\.$/, ""))}</span></div>
     </div>`;
   }
   const lead =
@@ -100,7 +100,7 @@ export function approvalHtml(
     })
     .join("");
   const reasons = e.reasons
-    .map((reason) => `<span class="auto-reason over">${escapeHtml(reason)}</span>`)
+    .map((reason) => `<span class="auto-reason over">${withSqlKeywords(reason)}</span>`)
     .join("");
   return `<div class="auto-trace">
       <div class="auto-trace-line">${autoIcon}<span><b>Auto mode:</b> ${lead}</span></div>

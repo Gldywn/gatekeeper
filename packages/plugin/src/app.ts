@@ -1270,12 +1270,12 @@ export class Gatekeeper {
         <span class="sa-pop">
           <span class="sa-body sa-off">
             <span class="sa-pt">${schemaIcon}Schema access</span>
-            <p>Without this, agents guess your table and column names. Turn it on so they read the real structure through <code>get_schema</code> and write sharper queries. <b>No row data is ever exposed.</b></p>
+            <p>Without this, agents guess your table and column names. Turn it on so they read the real structure through <code class="tool">get_schema</code> and write sharper queries. <b>No row data is ever exposed.</b></p>
             <button class="sa-enable" type="button" data-schema-toggle>Enable Schema access</button>
           </span>
           <span class="sa-body sa-on">
             <span class="sa-pt">${schemaIcon}Schema access</span>
-            <p>Agents now read your tables, columns, types and keys through <code>get_schema</code>, which is what makes their queries sharper. <b>No row data is ever exposed.</b></p>
+            <p>Agents now read your tables, columns, types and keys through <code class="tool">get_schema</code>, which is what makes their queries sharper. <b>No row data is ever exposed.</b></p>
             <button class="sa-enable tonal" type="button" data-schema-toggle>Disable Schema access</button>
           </span>
         </span>

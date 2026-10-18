@@ -1,4 +1,4 @@
-import { escapeHtml } from "../html";
+import { escapeHtml, withSqlKeywords } from "../html";
 import { copyIcon } from "../icons";
 import { formatSql } from "../sql/format";
 import { highlight } from "../sql/highlight";
@@ -58,7 +58,7 @@ export function confirmHtml(spec: ConfirmSpec): string {
   return `
       <div class="detail-card confirm-card ${spec.tone}">
         <h2 class="confirm-title ${spec.tone}">${escapeHtml(spec.heading)}</h2>
-        <p class="confirm-text">${escapeHtml(spec.body)}</p>
+        <p class="confirm-text">${withSqlKeywords(spec.body)}</p>
         ${sql}
         ${challenge}
         <div class="confirm-actions">

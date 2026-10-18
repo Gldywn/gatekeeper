@@ -1,4 +1,4 @@
-import { escapeHtml } from "../html";
+import { escapeHtml, withSqlKeywords } from "../html";
 import { checkIcon, chevronDown } from "../icons";
 import type { RiskMode } from "../sql/mode";
 
@@ -66,7 +66,7 @@ export function modeDropdown(mode: RiskMode, compact = false, _auto = false): st
     const check = sel ? `<span class="dd-check">${checkIcon}</span>` : "";
     return `<div class="dd-opt${sel ? " sel" : ""}" role="option" aria-selected="${sel}" data-mode-opt="${m.mode}">
               <span class="risk-dot ${m.risk}"></span>
-              <div><div class="o-name">${m.name}</div><div class="o-allow">${m.allow}</div></div>
+              <div><div class="o-name">${m.name}</div><div class="o-allow">${withSqlKeywords(m.allow)}</div></div>
               ${check}
             </div>`;
   }).join("");
