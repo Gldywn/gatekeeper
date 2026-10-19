@@ -109,10 +109,10 @@ function autoNote(card: Card): string {
     return `<div class="cs-unparsed auto" role="status">${autoIcon}<span><b>Auto mode:</b> ${AUTO_LEADS.automatic}.</span></div>`;
   }
   const lead = card.evaluation
-    ? `${AUTO_LEADS.refused}, waiting for your review.`
+    ? `${AUTO_LEADS.refused}. Waiting for your review.`
     : card.autoSent
-      ? `${AUTO_LEADS.unfinished}, waiting for your review.`
-      : `${AUTO_LEADS.local}, waiting for your review. ${NOTHING_SENT}`;
+      ? `${AUTO_LEADS.unfinished}. Waiting for your review.`
+      : `${AUTO_LEADS.local}. Waiting for your review. ${NOTHING_SENT}`;
   // Each reason reads as its own tag rather than as more sentence: Jev returns them as a
   // list, and a local refusal carries one.
   const reasons = card.evaluation?.reasons?.length

@@ -74,6 +74,9 @@ describe("Auto mode surfaces", () => {
       new Map(),
     );
     expect(review).toContain("Sensitive source &lt;email&gt;");
+    expect(review).toContain(
+      "A local check flagged this read before evaluation. Waiting for your review.",
+    );
   });
   it("distinguishes human and automatic history and includes durable details", () => {
     const approval: ApprovalAttribution = {
