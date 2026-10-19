@@ -55,9 +55,10 @@ again in 8s.", use the same voice.
 
 A feature a database cannot offer is a warning, not an error: its control stays visible but
 disabled, and the reason rides in the amber variant of the blocked-Approve popover
-(`.approve-pop.warn`), always worded `This feature is not available on <database>.`
-(`unavailableOn` in `sql/stop.ts`, with `dbDisplayName` for the name). One sentence for every
-feature, so the reason never reads as a bug.
+(`.approve-pop.warn`), worded as the requirement it misses: `<what> is required to <action>.`
+(`STOP_NEEDS` in `sql/stop.ts`, "PostgreSQL 10 or later is required to stop a query."). Blockers
+use the same form ("Write mode is required to approve this query."), so a reason states what
+would unlock the action instead of reading as a bug.
 
 An action that failed is an error: the card's boxed note (`.cs-unparsed`) with the red
 failed-outcome mark (`xCircleIcon`), one short sentence in the UI face, then the raw error

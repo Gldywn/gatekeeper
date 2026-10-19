@@ -967,7 +967,7 @@ export class Gatekeeper {
     const engine = dbDisplayName(this.conn?.databaseType ?? "");
     el.querySelector(".chip-db")?.setAttribute("aria-label", dbLinkLabel(this.dbCheck(), engine));
     const slot = el.querySelector(".db-slot");
-    const status = dbStatusHtml(this.dbCheck(), engine);
+    const status = dbStatusHtml(this.dbCheck());
     if (slot && status !== this.statusHtml) {
       slot.innerHTML = status;
       this.statusHtml = status;
@@ -2982,12 +2982,7 @@ export class Gatekeeper {
       limitMs: (this.settingsStore.get().autoStopMinutes ?? 0) * 60_000,
       ended: false,
     };
-    const unavailable = stopUnavailable(
-      type,
-      dbDisplayName(type),
-      this.conn?.readOnly ?? false,
-      this.serverVersion,
-    );
+    const unavailable = stopUnavailable(type, this.conn?.readOnly ?? false, this.serverVersion);
     if (unavailable) {
       run.unavailable = unavailable;
     } else {

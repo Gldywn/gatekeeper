@@ -30,10 +30,10 @@ const HEAD = '<div class="ro-pop-head" aria-hidden="true">Database</div>';
 
 // The age and the countdown are left empty here and filled by the 1 s tick, so the popover
 // is never rebuilt under the cursor or the keyboard focus.
-export function dbStatusHtml(check: DbCheck, engine: string): string {
+export function dbStatusHtml(check: DbCheck): string {
   const link = dbLink(check);
   if (link === "none") {
-    return `${HEAD}<div class="db-note">${alertTriangleIcon}This feature is not available on ${escapeHtml(engine)}.</div>`;
+    return `${HEAD}<div class="db-note">${alertTriangleIcon}PostgreSQL, MySQL or MariaDB is required to check the database.</div>`;
   }
   if (link === "pending") {
     return "";

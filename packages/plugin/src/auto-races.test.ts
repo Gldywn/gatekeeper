@@ -1044,8 +1044,8 @@ describe("stopping a running query", () => {
   });
 
   it.each([
-    ["sqlite", false, "This feature is not available on SQLite."],
-    ["mysql", true, "This feature is not available on read-only MySQL connections."],
+    ["sqlite", false, "PostgreSQL or MySQL is required to stop a query."],
+    ["mysql", true, "A writable connection is required to stop a MySQL query."],
   ])("runs the untouched SQL and offers no stop on %s (read-only %s)", async (type, ro, why) => {
     const { app, card } = harness();
     connection.mockResolvedValue({
@@ -1157,7 +1157,7 @@ describe("stopping a running query", () => {
     query.mockReturnValue(run.promise);
     const pending = app.approve(card.id);
     await vi.waitFor(() => expect(card.state).toBe("executing"));
-    expect(card.run.unavailable).toBe("This feature is not available on this MySQL server.");
+    expect(card.run.unavailable).toBe("MySQL 8.0.19 or later is required to stop a query.");
     expect(query).toHaveBeenCalledWith(card.sql);
     run.resolve(answer({ quantity: 3 }));
     await pending;

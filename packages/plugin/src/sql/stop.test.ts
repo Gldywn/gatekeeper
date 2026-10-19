@@ -34,21 +34,21 @@ describe("where stopping is available", () => {
       "postgresql",
       false,
       "PostgreSQL 9.6.24 on x86_64-pc-linux-gnu",
-      "This feature is not available on PostgreSQL 9.6.",
+      "PostgreSQL 10 or later is required to stop a query.",
     ],
-    ["postgresql", false, null, "This feature is not available on this PostgreSQL server."],
+    ["postgresql", false, null, "PostgreSQL 10 or later is required to stop a query."],
     ["postgresql", true, "PostgreSQL 15.4 on aarch64-unknown-linux-gnu", null],
     ["mysql", false, "8.0.19", null],
     ["mysql", false, "8.4.2-0ubuntu0.24.04.1", null],
-    ["mysql", false, "8.0.18", "This feature is not available on MySQL 8.0.18."],
-    ["mysql", false, "5.7.44-log", "This feature is not available on MySQL 5.7.44."],
-    ["mysql", false, "10.11.6-MariaDB", "This feature is not available on MariaDB."],
-    ["mysql", false, "8.0.11-TiDB-v7.5.0", "This feature is not available on TiDB."],
-    ["mysql", false, null, "This feature is not available on this MySQL server."],
-    ["mysql", true, "8.4.0", "This feature is not available on read-only MySQL connections."],
-    ["sqlite", false, null, "This feature is not available on SQLite."],
+    ["mysql", false, "8.0.18", "MySQL 8.0.19 or later is required to stop a query."],
+    ["mysql", false, "5.7.44-log", "MySQL 8.0.19 or later is required to stop a query."],
+    ["mysql", false, "10.11.6-MariaDB", "MySQL 8.0.19 or later is required to stop a query."],
+    ["mysql", false, "8.0.11-TiDB-v7.5.0", "MySQL 8.0.19 or later is required to stop a query."],
+    ["mysql", false, null, "MySQL 8.0.19 or later is required to stop a query."],
+    ["mysql", true, "8.4.0", "A writable connection is required to stop a MySQL query."],
+    ["sqlite", false, null, "PostgreSQL or MySQL is required to stop a query."],
   ])("%s, read-only %s, version %s", (type, readOnly, version, expected) => {
-    expect(stopUnavailable(type, "SQLite", readOnly, version)).toBe(expected);
+    expect(stopUnavailable(type, readOnly, version)).toBe(expected);
   });
 });
 

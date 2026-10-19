@@ -20,9 +20,9 @@ import { analyzeTableOps, type SchemaContext } from "../sql/schema";
 import type { Card, CardState, RunState } from "../types";
 import { AUTO_APPROVED, AUTO_LEADS, autoIcon, NOTHING_SENT } from "./auto";
 
-const WRITE_MODE_NOTE = "Write mode required to approve this query.";
-const DESTRUCTIVE_MODE_NOTE = "Destructive mode required to approve this query.";
-const CONNECTION_NOTE = "Connection is read-only; this write cannot run.";
+const WRITE_MODE_NOTE = "Write mode is required to approve this query.";
+const DESTRUCTIVE_MODE_NOTE = "Destructive mode is required to approve this query.";
+const CONNECTION_NOTE = "A writable connection is required to run this write.";
 const MULTI_STATEMENT_NOTE = "A single, non-empty SQL statement is required.";
 
 const ALERT_ICON =

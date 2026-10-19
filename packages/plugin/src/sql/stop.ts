@@ -18,42 +18,41 @@ const TAG = /^\/\* gatekeeper (req_[0-9a-f]{12} )?[0-9a-f]{12} \*\/$/;
 // (MySQL bug #29969769, fixed in 8.0.19), which is exactly the collateral a stop must avoid.
 const MYSQL_MIN = 8_000_019;
 
-export function unavailableOn(what: string): string {
-  return `This feature is not available on ${what}.`;
-}
+// What stopping needs, stated as a requirement when this connection does not meet it.
+const STOP_NEEDS = {
+  engine: "PostgreSQL or MySQL is required to stop a query.",
+  postgres: "PostgreSQL 10 or later is required to stop a query.",
+  mysql: "MySQL 8.0.19 or later is required to stop a query.",
+  writable: "A writable connection is required to stop a MySQL query.",
+};
 
 // Why stopping is unavailable on this connection, or null when it is available.
 export function stopUnavailable(
   databaseType: string,
-  displayName: string,
   readOnly: boolean,
   serverVersion: string | null,
 ): string | null {
-  if (databaseType === "postgresql") {
-    const server = postgresBelowMin(serverVersion);
-    return server ? unavailableOn(server) : null;
-  }
-  if (databaseType !== "mysql") return unavailableOn(displayName);
+  if (databaseType === "postgresql")
+    return postgresAtMin(serverVersion) ? null : STOP_NEEDS.postgres;
+  if (databaseType !== "mysql") return STOP_NEEDS.engine;
   // MySQL can only cancel through KILL, which Beekeeper's read-only mode refuses.
-  if (readOnly) return unavailableOn("read-only MySQL connections");
-  const server = mysqlServerBelowMin(serverVersion);
-  return server ? unavailableOn(server) : null;
+  if (readOnly) return STOP_NEEDS.writable;
+  return mysqlAtMin(serverVersion) ? null : STOP_NEEDS.mysql;
 }
 
-// The stop statement filters on pg_stat_activity.backend_type, which PostgreSQL 10 added.
-function postgresBelowMin(version: string | null): string | null {
-  const m = version ? /^PostgreSQL (\d+)(\.\d+)?/.exec(version) : null;
-  if (!m) return "this PostgreSQL server";
-  return Number(m[1]) >= 10 ? null : `PostgreSQL ${m[1]}${m[2] ?? ""}`;
+// The stop statement filters on pg_stat_activity.backend_type, which PostgreSQL 10 added; an
+// unknown version cannot be shown to meet it.
+function postgresAtMin(version: string | null): boolean {
+  const m = version ? /^PostgreSQL (\d+)/.exec(version) : null;
+  return m !== null && Number(m[1]) >= 10;
 }
 
-function mysqlServerBelowMin(version: string | null): string | null {
-  if (version && /mariadb/i.test(version)) return "MariaDB";
-  if (version && /tidb/i.test(version)) return "TiDB";
-  const m = version ? /^(\d+)\.(\d+)\.(\d+)/.exec(version) : null;
-  if (!m) return "this MySQL server";
-  const n = Number(m[1]) * 1_000_000 + Number(m[2]) * 1_000 + Number(m[3]);
-  return n >= MYSQL_MIN ? null : `MySQL ${m[0]}`;
+// MariaDB and TiDB answer as MySQL but are not the MySQL whose KILL behaviour this relies on.
+function mysqlAtMin(version: string | null): boolean {
+  if (!version || /mariadb|tidb/i.test(version)) return false;
+  const m = /^(\d+)\.(\d+)\.(\d+)/.exec(version);
+  if (!m) return false;
+  return Number(m[1]) * 1_000_000 + Number(m[2]) * 1_000 + Number(m[3]) >= MYSQL_MIN;
 }
 
 // Fresh for every execution, so a stop can only ever match this execution's text.

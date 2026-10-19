@@ -97,7 +97,7 @@ describe("render/queue", () => {
       "read",
     );
     expect(html).toContain('class="card write blocked"');
-    expect(html).toContain("Write mode required to approve this query.");
+    expect(html).toContain("Write mode is required to approve this query.");
     expect(html).toContain('data-approve="q3" disabled>Approve write</button>');
   });
 
@@ -119,7 +119,7 @@ describe("render/queue", () => {
   it("blocks a destructive card in write mode with the destructive-mode note", () => {
     const html = cardHtml(ready("q5", "DROP TABLE users"), "postgresql", noDrafts, "write");
     expect(html).toContain('class="card destructive blocked"');
-    expect(html).toContain("Destructive mode required to approve this query.");
+    expect(html).toContain("Destructive mode is required to approve this query.");
     expect(html).toContain("disabled>Approve destructive</button>");
   });
 
@@ -195,7 +195,7 @@ describe("render/queue", () => {
       true,
     );
     expect(html).toContain('class="card write blocked"');
-    expect(html).toContain("Connection is read-only; this write cannot run.");
+    expect(html).toContain("A writable connection is required to run this write.");
     expect(html).toContain('data-approve="q8" disabled>Approve write</button>');
   });
 
@@ -296,12 +296,12 @@ describe("render/queue running row", () => {
     const html = runningActions("q", {
       startedAt: T,
       limitMs: 300_000,
-      unavailable: "This feature is not available on SQLite.",
+      unavailable: "PostgreSQL or MySQL is required to stop a query.",
       ended: false,
     });
     expect(html).toContain('data-stop="q" disabled>');
     expect(html).toContain('<span class="approve-pop warn" role="tooltip">');
-    expect(html).toContain("This feature is not available on SQLite.</span>");
+    expect(html).toContain("PostgreSQL or MySQL is required to stop a query.</span>");
     expect(html).not.toContain("Auto-stop in");
   });
 
