@@ -23,7 +23,7 @@ import { AUTO_APPROVED, AUTO_LEADS, autoIcon, NOTHING_SENT } from "./auto";
 const WRITE_MODE_NOTE = "Write mode required to approve this query.";
 const DESTRUCTIVE_MODE_NOTE = "Destructive mode required to approve this query.";
 const CONNECTION_NOTE = "Connection is read-only; this write cannot run.";
-const MULTI_STATEMENT_NOTE = "Only a single statement can be approved.";
+const MULTI_STATEMENT_NOTE = "A single, non-empty SQL statement is required.";
 
 const ALERT_ICON =
   '<svg viewBox="0 0 16 16" fill="none"><path d="M8 1.7 1 14h14L8 1.7Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 6.3v3.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.7" r=".8" fill="currentColor"/></svg>';
@@ -82,19 +82,13 @@ export function cardGate(
 // The textual fallback can land on any class, not only destructive: a SELECT the parser
 // chokes on (an ambiguous backslash in a regex, say) still reads as a read. Name the class
 // it guessed rather than claim one.
-const UNPARSED_GUESS: Record<RiskClass, string> = {
-  read: "Reading it as a plain read",
-  write: "Treating it as a write",
-  destructive: "Treating it as destructive",
-};
-
-// Shown standing, not on hover: an unreadable statement is exactly the one the human must
-// read for themselves, so it cannot hide behind the Approve tooltip.
+// Shown standing, not on hover: an unparsed statement's class is a guess, so the note says so
+// where the reader looks, in the same voice as Auto mode's review notes.
 function unparsedNote(gate: CardGate): string {
   if (gate.parseOk) {
     return "";
   }
-  return `<div class="cs-unparsed">${warnIcon}Gatekeeper could not parse this statement. ${UNPARSED_GUESS[gate.cls]} is a guess from its text, so read it yourself before approving.</div>`;
+  return `<div class="cs-unparsed">${warnIcon}This statement could not be parsed. The ${gate.cls} classification is a guess. Waiting for your review.</div>`;
 }
 
 export const AUTO_EVALUATING = "Evaluating with Jev";
@@ -199,33 +193,8 @@ function riskBadge(cls: RiskClass): string {
   return "";
 }
 
-// The specific destructive verb from the parsed operation, so a DROP does not read
-// as "Delete"; falls back to a generic verb the rare time the op is unknown.
-function destructiveVerb(op: string | null): string {
-  switch (op) {
-    case "delete":
-      return "Delete";
-    case "drop":
-      return "Drop";
-    case "truncate":
-      return "Truncate";
-    case "alter":
-      return "Alter";
-    case "create":
-      return "Create";
-    // A MySQL INTO OUTFILE/DUMPFILE writes the rows out to a file, not to a table.
-    case "export":
-      return "Export";
-    case "rename":
-      return "Rename";
-    default:
-      return "Change";
-  }
-}
-
-// The tables written, named by the actual verb (Write / Delete / Drop / …) with a
-// pencil for a write and a trash for a destructive; plus the tables read on a mixed
-// statement (INSERT ... SELECT).
+// The tables a statement touches, by role in one word: Delete for what removes data (DELETE,
+// DROP, TRUNCATE), Write for every other change, Read for what a mixed statement reads.
 function riskAnnotation(sql: string, dialect: string, cls: RiskClass): string {
   if (cls === "read") {
     return "";
@@ -234,15 +203,15 @@ function riskAnnotation(sql: string, dialect: string, cls: RiskClass): string {
   if (!ops) {
     return "";
   }
-  const destructive = cls === "destructive";
-  const label = destructive ? destructiveVerb(ops.writeOp) : "Write";
-  const icon = destructive ? trashIcon : pencilIcon;
-  const tone = destructive ? "destructive" : "write";
+  const removes = ["delete", "drop", "truncate"].includes(ops.writeOp ?? "");
+  const label = removes ? "Delete" : "Write";
+  const icon = removes ? trashIcon : pencilIcon;
+  const tone = cls === "destructive" ? "destructive" : "write";
   const writesLine = ops.writes.length
     ? `<div class="cs-writes ${tone}"><span class="cs-writes-k">${icon}${label}</span>${tblChips(ops.writes)}</div>`
     : "";
   const readsLine = ops.reads.length
-    ? `<div class="cs-reads"><span class="cs-reads-k">${dbReadsIcon}Reads</span>${tblChips(ops.reads)}</div>`
+    ? `<div class="cs-reads"><span class="cs-reads-k">${dbReadsIcon}Read</span>${tblChips(ops.reads)}</div>`
     : "";
   if (!writesLine && !readsLine) {
     return "";
@@ -289,7 +258,7 @@ export function schemaInner(schema: SchemaContext | null | undefined, hideReads 
   }
   const tables =
     !hideReads && schema.tables.length
-      ? `<div class="cs-reads"><span class="cs-reads-k">${dbReadsIcon}Reads</span>${schema.tables.map((t) => `<span class="tbl-chip">${escapeHtml(t)}</span>`).join("")}</div>`
+      ? `<div class="cs-reads"><span class="cs-reads-k">${dbReadsIcon}Read</span>${schema.tables.map((t) => `<span class="tbl-chip">${escapeHtml(t)}</span>`).join("")}</div>`
       : "";
   const pii = schema.pii.length
     ? `<div class="cs-line cs-pii"><span class="cs-warn">${warnIcon}possible PII</span><span class="cs-list">${schema.pii.map(escapeHtml).join(" &middot; ")}</span></div>`
