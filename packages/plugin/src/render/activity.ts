@@ -123,7 +123,7 @@ function shortSession(id: string): string {
 // One agent session within a day: who it was and what it worked on, its count, and the export
 // of that session-day, then its decisions.
 export function activityGroupHtml(
-  day: string,
+  _day: string,
   sessionId: string,
   entries: ActivityEntry[],
   selected: string | null,
@@ -134,14 +134,14 @@ export function activityGroupHtml(
   const name = first.project?.trim() || harness || shortSession(sessionId);
   const title = first.sessionLabel?.trim();
   const titleText = title ? escapeHtml(capitalize(title)) : "";
+  // TODO(v1-19): count and export hidden during the Inbox redesign; a global export (pick the
+  // days) brings export back in its own PR, which can reuse `exportControl` below.
   return `
         <section class="act-group">
           <div class="act-group-head" title="${escapeHtml(sessionId)}">
             ${agentBadge(harness)}
             <span class="act-sess-name">${escapeHtml(name)}</span>
             ${title ? `<span class="act-sess-title" title="${titleText}">${titleText}</span>` : ""}
-            <span class="act-sess-n">${entries.length}</span>
-            ${exportControl(day, sessionId)}
           </div>
           <div class="act-entries">${entries.map((e) => activityEntryHtml(e, selected === e.id, dialect)).join("")}</div>
         </section>`;
@@ -149,7 +149,7 @@ export function activityGroupHtml(
 
 // The per-session-day export: the shared flyout keyed on the session-day so the click
 // handler stays stateless, offering the whole timeline as Markdown, CSV, or JSON.
-function exportControl(day: string, sessionId: string): string {
+export function exportControl(day: string, sessionId: string): string {
   return flyoutMenu("export", `${day}|${sessionId}`, downloadIcon, "Export", [
     { fmt: "md", icon: markdownIcon, name: "Markdown" },
     { fmt: "csv", icon: tableIcon, name: "CSV" },

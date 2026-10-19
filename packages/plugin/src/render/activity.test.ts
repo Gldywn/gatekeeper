@@ -13,6 +13,7 @@ import {
   activityJson,
   activityMarkdown,
   entryFlags,
+  exportControl,
 } from "./activity";
 
 const T = new Date("2026-01-01T09:30:00Z").getTime();
@@ -71,8 +72,14 @@ describe("render/activity", () => {
     expect(html).toContain('<span class="ix-note" title="read-only only">read-only only</span>');
   });
 
-  it("renders the export trigger and its Markdown/CSV/JSON format menu", () => {
+  it("shows no count or export in the session head during the redesign", () => {
     const html = activityGroupHtml("2026-01-01", "s1", [approved], null, "postgresql");
+    expect(html).not.toContain('class="act-sess-n"');
+    expect(html).not.toContain("data-flyout-trigger");
+  });
+
+  it("keeps the export trigger and its Markdown/CSV/JSON format menu for the global export", () => {
+    const html = exportControl("2026-01-01", "s1");
     expect(html).toContain('data-flyout-trigger="2026-01-01|s1"');
     expect(html).toContain("data-flyout-menu");
     expect(html).toContain(
