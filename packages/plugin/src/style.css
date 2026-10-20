@@ -1905,15 +1905,11 @@ label.qs-row {
   outline: 2px solid var(--amber);
   outline-offset: 1px;
 }
-/* The right pane's own close: pinned top-right while the item scrolls, its slot taken from the
-   first line so nothing runs under it, clear of the scroll thumb on the right. Wide only. */
+/* The right pane's own close, on the first line (the agent line, or the outcome) and scrolling
+   away with it; its slot is taken from that line, clear of the scroll thumb. Wide only. */
 .pane-close {
-  position: sticky;
-  top: -5px;
-  z-index: 5;
   float: right;
   margin: -5px 4px 0 var(--s2);
-  background: var(--pane-bg);
 }
 .pane-close[hidden] {
   display: none;
@@ -3923,7 +3919,7 @@ p.auto-message[data-tone="busy"] {
 
 /* The two panes. .inbox is the size container its narrow layout queries; it wraps no fixed
    overlay, so its containment traps nothing. */
-/* Isolated so its own layers (the pinned close, the scroll thumbs, the grid's header) stay under
+/* Isolated so its own layers (the scroll thumbs, the grid's header) stay under
    the header's menus and popovers, whatever their z-index. */
 .inbox {
   grid-area: inbox;
