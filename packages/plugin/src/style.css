@@ -1912,7 +1912,7 @@ label.qs-row {
   top: -5px;
   z-index: 5;
   float: right;
-  margin: -5px var(--s2) 0 var(--s2);
+  margin: -5px 4px 0 var(--s2);
   background: var(--pane-bg);
 }
 .pane-close[hidden] {
