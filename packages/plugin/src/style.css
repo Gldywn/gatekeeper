@@ -3923,12 +3923,15 @@ p.auto-message[data-tone="busy"] {
 
 /* The two panes. .inbox is the size container its narrow layout queries; it wraps no fixed
    overlay, so its containment traps nothing. */
+/* Isolated so its own layers (the pinned close, the scroll thumbs, the grid's header) stay under
+   the header's menus and popovers, whatever their z-index. */
 .inbox {
   grid-area: inbox;
   min-height: 0;
   margin-top: var(--s3);
   container-type: size;
   container-name: gk-inbox;
+  isolation: isolate;
 }
 .inbox-panes {
   height: 100%;
