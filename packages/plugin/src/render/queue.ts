@@ -1,4 +1,4 @@
-import { capitalize, clock, escapeHtml, relAge, withSqlKeywords } from "../html";
+import { capitalize, clock, escapeHtml, relAge } from "../html";
 import {
   buildingIcon,
   clockIcon,
@@ -19,6 +19,7 @@ import { visibleControls } from "../sql/sanitize";
 import { analyzeTableOps, type SchemaContext } from "../sql/schema";
 import type { Card, CardState, RunState } from "../types";
 import { AUTO_APPROVED, AUTO_LEADS, autoIcon, NOTHING_SENT } from "./auto";
+import { holdSentence, type ReasonContext, reasonHtml, reviewText } from "./autoreasons";
 
 const WRITE_MODE_NOTE = "Write mode is required to approve this query.";
 const DESTRUCTIVE_MODE_NOTE = "Destructive mode is required to approve this query.";
@@ -108,26 +109,29 @@ function autoNote(card: Card): string {
   if (card.autoStatus === AUTO_APPROVED) {
     return `<div class="cs-unparsed auto" role="status">${autoIcon}<span><b>Auto mode:</b> ${AUTO_LEADS.automatic}.</span></div>`;
   }
-  const lead = card.evaluation
-    ? `${AUTO_LEADS.refused}. Waiting for your review.`
-    : card.autoSent
-      ? `${AUTO_LEADS.unfinished}. Waiting for your review.`
-      : `${AUTO_LEADS.local}. Waiting for your review. ${NOTHING_SENT}`;
-  // Each reason reads as its own tag rather than as more sentence: Jev returns them as a
-  // list, and a local refusal carries one.
-  const reasons = card.evaluation?.reasons?.length
-    ? card.evaluation.reasons
-    : card.autoStatus
-        .replace(/^Needs review:\s*/, "")
-        .split(/\.\s+/)
-        .filter(Boolean);
-  const tags = reasons
-    .map(
-      (reason) =>
-        `<span class="auto-reason over">${withSqlKeywords(reason.replace(/\.$/, ""))}</span>`,
-    )
-    .join("");
-  return `<div class="cs-unparsed auto" role="status">${autoIcon}<span><b>Auto mode:</b> ${lead}<span class="auto-reasons">${tags}</span></span></div>`;
+  // The reason is the sentence: what held the read, then who decides, then whether anything left.
+  const sent = Boolean(card.autoSent);
+  const text = reviewText(card.autoStatus, card.evaluation, reasonContext(card));
+  const tail = ` Waiting for your review.${sent ? "" : ` ${NOTHING_SENT}`}`;
+  return `<div class="cs-unparsed auto" role="status">${autoIcon}<span><b>Auto mode:</b> ${reasonHtml(text, tail)}</span></div>`;
+}
+
+// A name the card already marks (PII or client) or values it already shows need no repeat.
+function reasonContext(card: Card): ReasonContext {
+  const names = [...(card.schema?.pii ?? []), ...(card.schema?.client ?? [])].map((n) =>
+    n.toLowerCase(),
+  );
+  return {
+    shown: (name) => names.includes(name.toLowerCase()),
+    valuesShown: Boolean(card.schema?.literals.length),
+  };
+}
+
+// Why the last human approval did not run, in its own words: never an Auto mode fact.
+function executionNote(card: Card): string {
+  if (!card.executionNotice) return "";
+  const text = holdSentence(card.executionNotice) || escapeHtml(card.executionNotice);
+  return `<div class="cs-unparsed" role="status">${warnIcon}<span>${text}</span></div>`;
 }
 
 export function cardHtml(
@@ -169,7 +173,7 @@ export function cardHtml(
         <div class="meta">${escapeHtml(card.id)} &middot; ${relAge(card.createdAt)}</div>
         <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(visibleControls(card.sql))}" aria-label="Copy SQL">${copyIcon}</button><code class="sql-body" id="sqlbody-${card.id}">${highlight(formatSql(card.sql), card.schema?.pii, card.schema?.client, card.schema?.literals)}</code></pre>
         ${unparsedNote(gate)}${riskAnno}<div class="card-schema" id="cs-${card.id}">${schemaInner(card.schema, gate.cls !== "read")}</div>
-        ${autoNote(card)}${actions}
+        ${autoNote(card)}${executionNote(card)}${actions}
       </div>`;
 }
 

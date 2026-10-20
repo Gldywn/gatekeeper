@@ -24,6 +24,8 @@ export interface Card extends Proposal {
   state: CardState;
   autoAttempt?: number;
   autoStatus?: string;
+  // Why the last human approval stopped before the SQL ran: a plain fact, never an Auto mode hold.
+  executionNotice?: string;
   /** Set once the query left for the provider, so the card can say what was shared. */
   autoSent?: boolean;
   evaluation?: import("@gatekeeper/shared").AutoEvaluation;

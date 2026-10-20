@@ -45,6 +45,7 @@ import { connectionScopeKey } from "./net/scope";
 import { SingleInstance, type SingleInstanceWire } from "./net/singleinstance";
 import { agentLinkAge, agentLinkLabel, agentLinkStatusHtml } from "./render/agentlink";
 import { AUTO_APPROVED, autoIcon, autoPopHtml, SAVED_KEY_MASK } from "./render/auto";
+import { refusalReason } from "./render/autoreasons";
 import { ConfirmModal } from "./render/confirm";
 import { connChipInner } from "./render/connchip";
 import { modeDropdown, switchInput } from "./render/controls";
@@ -2197,14 +2198,17 @@ export class Gatekeeper {
     }
   }
 
-  private reviewCard(card: Card, reason: string): void {
+  // `auto` false: a human approval stopped before the SQL ran. That is no Auto mode hold, so it
+  // reads as its own notice and never becomes an Auto status or an Audit Trail hold.
+  private reviewCard(card: Card, reason: string, auto = true): void {
     if (!this.cards.includes(card)) return;
     card.state = "ready";
     if (card.authorityLost) {
       this.drop(card.id);
       return;
     }
-    card.autoStatus = `Needs review: ${reason}`;
+    if (auto) card.autoStatus = `Needs review: ${reason}`;
+    else card.executionNotice = reason;
     this.renderQueue();
   }
 
@@ -2276,10 +2280,7 @@ export class Gatekeeper {
       }
       card.evaluation = evaluation;
       if (!currentEvaluation(evaluation)) {
-        this.reviewCard(
-          card,
-          evaluation.reasons?.join(". ") || "Evaluator uncertainty or stale policy/model",
-        );
+        this.reviewCard(card, refusalReason(evaluation));
         return;
       }
       card.autoStatus = AUTO_APPROVED;
@@ -2860,9 +2861,10 @@ export class Gatekeeper {
           !autoSignal?.aborted &&
           currentEvaluation(evaluation)));
     // Reserve synchronously, before the host round-trip, for both approval sources.
+    card.executionNotice = undefined;
     this.setCardState(id, "approving");
     if (!(await this.checkConnection()) || !valid()) {
-      this.reviewCard(card, "Connection or approval authority changed");
+      this.reviewCard(card, "Connection or approval authority changed", Boolean(evaluation));
       return;
     }
     // SAFETY-CRITICAL: the real gate. Never run a statement the armed mode cannot
@@ -2924,7 +2926,11 @@ export class Gatekeeper {
       // Withdrawn, the request is leased again: the broker keeps these flags until the next
       // decision posts its own, and an expiry or cancellation before then keeps them for good.
       if (card.decisionSensitivity) card.decisionSensitivity.standing = false;
-      this.reviewCard(card, "Execution stopped before SQL ran. Approval authority changed");
+      this.reviewCard(
+        card,
+        "Execution stopped before SQL ran. Approval authority changed",
+        Boolean(evaluation),
+      );
       return;
     }
     const run = this.startRun(card);
@@ -3195,13 +3201,16 @@ export class Gatekeeper {
   // What Auto mode did with a read it did not approve itself. It rides every result so the
   // audit trail can still say, later, whether anything ever left this machine.
   private autoHold(card: Card): AutoHold | undefined {
-    if (!card.autoStatus || card.evaluation) {
+    if (!card.autoStatus || card.autoStatus === AUTO_APPROVED) {
       return undefined;
     }
-    return {
-      sent: Boolean(card.autoSent),
-      reason: card.autoStatus.replace(/^Needs review:\s*/, "").slice(0, 200),
-    };
+    const reason = card.autoStatus.replace(/^Needs review:\s*/, "");
+    // A refusal is the evaluation record itself; a later hold, even after a favourable
+    // evaluation, is a fact of its own and rides along with it.
+    if (card.evaluation && reason === refusalReason(card.evaluation)) {
+      return undefined;
+    }
+    return { sent: Boolean(card.autoSent), reason: reason.slice(0, 200) };
   }
 
   private async postResult(card: Card, body: Record<string, unknown>): Promise<boolean> {

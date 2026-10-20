@@ -1288,3 +1288,29 @@ describe("decision-time flags", () => {
     expect(app.history[0].sensitivity).toEqual(recorded);
   });
 });
+
+describe("holds that are not Auto mode's", () => {
+  it("keeps a human approval's failed connection check out of Auto mode and the trail", async () => {
+    const { app, card } = harness();
+    app.autoEnabled = false;
+    app.checkConnection = vi.fn(async () => false);
+    await app.approve(card.id);
+    expect(card.state).toBe("ready");
+    expect(card.autoStatus).toBeUndefined();
+    expect(card.executionNotice).toBe("Connection or approval authority changed");
+    expect(app.autoHold(card)).toBeUndefined();
+  });
+
+  it("keeps a later hold beside a favourable evaluation, and none for a refusal", () => {
+    const { app, card } = harness();
+    card.evaluation = evaluation();
+    card.autoSent = true;
+    card.autoStatus = "Needs review: Execution stopped before SQL ran. Approval authority changed";
+    expect(app.autoHold(card)).toEqual({
+      sent: true,
+      reason: "Execution stopped before SQL ran. Approval authority changed",
+    });
+    card.autoStatus = "Needs review: Evaluator uncertainty or stale policy/model";
+    expect(app.autoHold(card)).toBeUndefined();
+  });
+});

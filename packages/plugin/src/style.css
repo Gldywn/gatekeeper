@@ -3594,6 +3594,21 @@ code.kw {
 .o-allow code.kw {
   font-size: inherit;
 }
+/* The stored diagnostic no authored sentence covers: kept on its own line, quieter than the note. */
+.auto-recorded {
+  display: block;
+  margin-top: 2px;
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+/* A column, table or alias named in prose: mono like the SQL it comes from, no colour of its own. */
+code.name {
+  font-family: var(--font-mono);
+  font-size: 0.95em;
+  color: var(--text);
+}
 /* An agent tool or skill named in prose (get_schema, update-gatekeeper): mono on a faint
    neutral chip, never the keyword amber, so a tool name never reads as SQL. */
 code.tool,

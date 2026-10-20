@@ -1,7 +1,8 @@
 import type { ApprovalAttribution, AutoEvaluation } from "@gatekeeper/shared";
-import { escapeHtml, withSqlKeywords } from "../html";
+import { escapeHtml } from "../html";
 import { AUTO_POLICY, AUTO_THRESHOLDS } from "../sql/auto";
 import type { AutoHold } from "../types";
+import { evaluationText, reasonHtml, reviewText } from "./autoreasons";
 
 export const autoIcon =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m13 3-9 11h7l-1 7 10-12h-7z"/></svg>';
@@ -73,22 +74,23 @@ export function approvalHtml(
   hold?: AutoHold,
 ): string {
   const e = approval?.evaluation ?? evaluation;
-  // No evaluation: either Auto mode held the read before it ever left, which is worth
-  // recording on its own, or Auto mode never touched it and there is nothing to say.
+  // A hold is its own fact, decided or not: its reason is the sentence, and it stands beside a
+  // completed evaluation rather than in place of it.
+  const holdLine = hold
+    ? `<div class="auto-trace-line">${autoIcon}<span><b>Auto mode:</b> ${reasonHtml(reviewText(hold.reason, e), hold.sent ? "" : ` ${NOTHING_SENT}`)}</span></div>`
+    : "";
   if (!e) {
-    if (!hold) return "";
-    const lead = hold.sent ? `${AUTO_LEADS.unfinished}.` : `${AUTO_LEADS.local}. ${NOTHING_SENT}`;
-    return `<div class="auto-trace">
-      <div class="auto-trace-line">${autoIcon}<span><b>Auto mode:</b> ${lead}</span></div>
-      <div class="auto-reasons"><span class="auto-reason over">${withSqlKeywords(hold.reason.replace(/\.$/, ""))}</span></div>
-    </div>`;
+    return hold ? `<div class="auto-trace">${holdLine}</div>` : "";
   }
+  // A refusal says what the evaluator flagged, in its own fixed labels, rather than a chip each.
   const lead =
     approval?.source === "automatic"
       ? `${AUTO_LEADS.automatic}.`
       : e.eligible && !e.reasons.length
         ? `${AUTO_LEADS.cleared}.`
-        : `${AUTO_LEADS.refused}.`;
+        : e.reasons.length
+          ? reasonHtml(evaluationText(e.reasons))
+          : `${AUTO_LEADS.refused}.`;
   // Cutoffs only mean something for the policy they were written for; an older
   // evaluation keeps its numbers without a verdict painted on them.
   const graded = e.policy === AUTO_POLICY;
@@ -99,13 +101,10 @@ export function approvalHtml(
       return `<span class="auto-reason metric${over ? " over" : ""}">${escapeHtml(id)} ${escapeHtml(String(value))}</span>`;
     })
     .join("");
-  const reasons = e.reasons
-    .map((reason) => `<span class="auto-reason over">${withSqlKeywords(reason)}</span>`)
-    .join("");
   return `<div class="auto-trace">
       <div class="auto-trace-line">${autoIcon}<span><b>Auto mode:</b> ${lead}</span></div>
-      ${reasons ? `<div class="auto-reasons">${reasons}</div>` : ""}
       <div class="auto-reasons">${axes}</div>
       <div class="auto-trace-meta">${escapeHtml(e.provider)} &middot; ${escapeHtml(e.model)} &middot; policy ${escapeHtml(e.policy)} &middot; ${escapeHtml(new Date(e.evaluatedAt).toISOString())} &middot; ${escapeHtml(e.sqlDigest)}</div>
+      ${holdLine}
     </div>`;
 }

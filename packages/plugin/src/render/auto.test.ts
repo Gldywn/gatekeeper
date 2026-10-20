@@ -68,15 +68,41 @@ describe("Auto mode surfaces", () => {
     expect(evaluating).toContain("Evaluating with Jev");
     expect(evaluating).toContain('data-approve="r1"');
     expect(evaluating).toContain('data-reject="r1"');
+    // The reason is the sentence; a name the card does not already mark is named, escaped.
     const review = cardHtml(
-      { ...card, autoStatus: "Needs review: Sensitive source <email>" },
+      { ...card, autoStatus: "Needs review: Sensitive source or alias: <email>" },
       "postgresql",
       new Map(),
     );
-    expect(review).toContain("Sensitive source &lt;email&gt;");
     expect(review).toContain(
+      'A local check flagged <code class="name">&lt;email&gt;</code> before evaluation. Waiting for your review.',
+    );
+    expect(review).not.toContain("auto-reason");
+    // Already marked as PII on the card: the legend says it, the note does not repeat it.
+    const marked = cardHtml(
+      {
+        ...card,
+        autoStatus: "Needs review: Sensitive source or alias: email",
+        schema: { tables: [], pii: ["email"], client: [], literals: [], star: false },
+      },
+      "postgresql",
+      new Map(),
+    );
+    expect(marked).toContain(
       "A local check flagged this read before evaluation. Waiting for your review.",
     );
+    // A timeout after the read left: the timeout, no claim about the provider.
+    const timeout = cardHtml(
+      {
+        ...card,
+        autoStatus: "Needs review: Evaluation timed out. Approve manually",
+        autoSent: true,
+      },
+      "postgresql",
+      new Map(),
+    );
+    expect(timeout).toContain("The evaluation timed out. Waiting for your review.");
+    expect(timeout).not.toContain("Nothing was sent");
   });
   it("distinguishes human and automatic history and includes durable details", () => {
     const approval: ApprovalAttribution = {
@@ -129,5 +155,39 @@ describe("Auto mode surfaces", () => {
     // The row says who decided; the evaluation's details open with it on the right.
     expect(activityEntryHtml(entry, true, "postgresql")).toContain("Approved automatically");
     expect(detailHtml(auditItem(entry, null))).toContain("auto-beta-1");
+  });
+});
+
+describe("the resolved Auto trace", () => {
+  const refusal = (reasons: string[]) => ({
+    provider: "typesafe",
+    model: "jev-1.13.0",
+    policy: "auto-beta-7",
+    evaluatedAt: 1,
+    sqlDigest: "a".repeat(64),
+    eligible: false,
+    reasons,
+    probabilities: { personal_disclosure: 0.9 },
+  });
+
+  it("keeps an unfamiliar evaluator label on the record under the generic lead", () => {
+    const html = approvalHtml({ source: "human", evaluation: refusal(["A <brand> new label"]) });
+    expect(html).toContain("The evaluation did not clear this read.");
+    expect(html).toContain("Recorded reason: A &lt;brand&gt; new label");
+  });
+
+  it("words a hold from an older plugin, and keeps a later hold beside the evaluation", () => {
+    expect(
+      approvalHtml(undefined, undefined, { sent: false, reason: "Unsupported projection" }),
+    ).toContain(
+      'This projection is not supported for automatic evaluation. <b class="auto-strong">Nothing was sent to TypeSafe.</b>',
+    );
+    const both = approvalHtml(
+      { source: "human", evaluation: { ...refusal([]), eligible: true } },
+      undefined,
+      { sent: true, reason: "Execution stopped before SQL ran. Approval authority changed" },
+    );
+    expect(both).toContain("The evaluation cleared this read.");
+    expect(both).toContain("Execution was stopped before the SQL ran");
   });
 });

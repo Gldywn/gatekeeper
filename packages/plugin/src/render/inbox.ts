@@ -104,14 +104,20 @@ function rowGlyph(item: HistItem, source: "hist" | "audit"): string {
 
 // Auto mode evaluated or held this read but a human decided: a quiet bolt says it was involved.
 // When Auto mode approved it, the row's own glyph is already the bolt.
-function autoFlag(item: Pick<HistItem, "approval" | "evaluation" | "autoHold">): string {
+function autoFlag(item: Pick<HistItem, "status" | "approval" | "evaluation" | "autoHold">): string {
   const evaluation = item.approval?.evaluation ?? item.evaluation;
   if (item.approval?.source === "automatic" || (!evaluation && !item.autoHold)) {
     return "";
   }
+  // Only what the record establishes: a human approval names its decider, an attempted
+  // submission is not a local stop.
   const label = evaluation
-    ? "Evaluated by Auto mode, decided by you"
-    : "Auto mode stopped this read before evaluation";
+    ? item.status === "approved" && item.approval?.source === "human"
+      ? "Evaluated by Auto mode, decided by you"
+      : "Evaluated by Auto mode"
+    : item.autoHold?.sent
+      ? "Auto mode did not finish evaluating this read"
+      : "Auto mode stopped this read before evaluation";
   return `<span class="act-flag auto" title="${label}" aria-label="${label}">${autoIcon}</span>`;
 }
 
