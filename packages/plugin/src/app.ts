@@ -2809,7 +2809,7 @@ export class Gatekeeper {
             queueRowHtml(c, classifyQuery(c.sql, this.dialect).class, c.id === selected, now),
           )
           .join("")
-      : '<p class="ix-none">Nothing waiting.</p>';
+      : emptyListHtml("pending", this.connectionName);
     // Defense in depth: a switch already clears history, but never render a row
     // stamped under a different connection than the one on screen now.
     const current = this.connectionName || null;

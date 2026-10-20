@@ -215,6 +215,9 @@ describe("empty states", () => {
     const queue = emptyListHtml("queue", "prd<db>");
     expect(queue).toContain("<b>Queue is empty</b>");
     expect(queue).not.toContain("ix-group");
+    // Over Recently resolved, Pending approval keeps its head over the smaller composition.
+    expect(emptyListHtml("pending", "")).toContain('<div class="em-hive-wrap compact">');
+    expect(emptyListHtml("pending", "")).toContain("<b>Nothing waiting</b>");
     expect(emptyListHtml("audit", "prd<db>")).toContain('Every decision on <span class="em-conn">');
     expect(emptyListHtml("audit", "prd<db>")).toContain("prd&lt;db&gt;</span> is kept here.");
     expect(emptyListHtml("audit", "")).toContain("Every decision on this connection is kept here.");

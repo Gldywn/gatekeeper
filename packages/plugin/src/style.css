@@ -4048,12 +4048,6 @@ p.auto-message[data-tone="busy"] {
 .ix-group .n:empty {
   display: none;
 }
-.ix-none {
-  margin: 0;
-  padding: 2px var(--s3) 8px;
-  font-size: 12px;
-  color: var(--faint);
-}
 .ix-row {
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr) auto;
@@ -4755,6 +4749,15 @@ p.auto-message[data-tone="busy"] {
   min-height: 100%;
   padding: 28px var(--s3);
   text-align: center;
+}
+/* Under Pending approval, with decisions below it: the same cells, smaller, not the whole pane. */
+.em-hive-wrap.compact {
+  min-height: 0;
+  gap: 10px;
+  padding: 6px var(--s3) 18px;
+}
+.em-hive-wrap.compact .em-hive {
+  zoom: 0.72;
 }
 #listAudit .act-body:has(> .em-hive-wrap) {
   display: grid;

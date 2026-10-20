@@ -296,17 +296,21 @@ function connTag(name: string): string {
 }
 
 // An empty list is one composition on the header's honeycomb; its group heads arrive with the
-// first row.
-export function emptyListHtml(list: "queue" | "audit", connection: string): string {
+// first row. With decisions below it, an empty Pending approval keeps its head over a smaller one.
+export function emptyListHtml(list: "queue" | "pending" | "audit", connection: string): string {
   const [icon, title, sub] =
-    list === "queue"
-      ? [clockIcon, "Queue is empty", "Proposals waiting for your review<br>show up here."]
-      : [
+    list === "audit"
+      ? [
           historyIcon,
           "Audit Trail is empty",
           `Every decision on ${connTag(connection)} is kept here.`,
+        ]
+      : [
+          clockIcon,
+          list === "queue" ? "Queue is empty" : "Nothing waiting",
+          "Proposals waiting for your review<br>show up here.",
         ];
-  return `<div class="em-hive-wrap">
+  return `<div class="em-hive-wrap${list === "pending" ? " compact" : ""}">
       <div class="em-hive" aria-hidden="true"><span class="hx a"></span><span class="hx b"></span><span class="hx c">${icon}</span><span class="hx d"></span><span class="hx e"></span></div>
       <div class="em-center"><b>${title}</b><span>${sub}</span></div>
     </div>`;
