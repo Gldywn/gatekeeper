@@ -1377,31 +1377,6 @@ label.qs-row {
   margin-top: 1px;
   color: var(--danger);
 }
-.cs-writes {
-  display: flex;
-  align-items: center;
-  gap: var(--s2);
-  flex-wrap: wrap;
-  min-width: 0;
-}
-.cs-writes-k {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  font-weight: 560;
-}
-.cs-writes-k svg {
-  width: 13px;
-  height: 13px;
-}
-.cs-writes.write .cs-writes-k {
-  color: var(--amber);
-}
-.cs-writes.destructive .cs-writes-k {
-  color: var(--danger);
-}
 
 /* The blocked reason rides in a hover popover above the disabled Approve button. */
 .approve-slot {
@@ -4251,9 +4226,6 @@ p.auto-message[data-tone="busy"] {
   white-space: nowrap;
   font-size: 12px;
   color: var(--faint);
-}
-.detail-host .detail-card {
-  max-width: none;
 }
 
 /* The decided request, result first: the status and who decided, the receipt and its rows, a

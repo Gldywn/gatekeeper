@@ -10,7 +10,8 @@ import {
   sessionDisplayName,
 } from "../html";
 import { agentBadge, clockIcon, harnessIcon, helpCircleIcon } from "../icons";
-import type { RiskClass } from "../sql/classify";
+import { classifyQuery, type RiskClass } from "../sql/classify";
+import { countsRows } from "../sql/schema";
 import type { ActivityEntry, Card, HistItem, Presence, SessionRoster } from "../types";
 import { autoIcon } from "./auto";
 import { CANCELLED_NOTE, EXECUTION_UNKNOWN, NOT_DELIVERED_NOTE } from "./detail";
@@ -69,35 +70,40 @@ export function queueRowHtml(
 }
 
 // Neither a success nor a failure: the query may have run, but its outcome was never confirmed.
-// Locally the plugin's own note says so; in the trail only the server's reserved error does,
-// since there the same words could be an execution error the server recorded.
-function unconfirmed(item: HistItem, source: "hist" | "audit"): boolean {
+// The server's reserved error says so, or locally the plugin's own outcome, never a note whose
+// words could be an execution error.
+function unconfirmed(item: HistItem): boolean {
   if (item.status !== "failed") return false;
-  return item.note === EXECUTION_UNKNOWN || (source === "hist" && item.note === NOT_DELIVERED_NOTE);
+  return item.note === EXECUTION_UNKNOWN || item.outcome === NOT_DELIVERED_NOTE;
 }
 
 // The one fact a decided row states, from a closed vocabulary: the outcome before any count,
 // the affected count before the returned one. The note stays whole for the detail.
-export function rowFact(item: HistItem, cls: RiskClass, source: "hist" | "audit"): string {
+export function rowFact(item: HistItem, dialect: string): string {
   if (item.status === "rejected") return "Declined";
-  if (item.status === "failed") return unconfirmed(item, source) ? "Unconfirmed" : "Failed";
+  if (item.status === "failed") return unconfirmed(item) ? "Unconfirmed" : "Failed";
   if (item.status === "expired") return item.note === CANCELLED_NOTE ? "Cancelled" : "Expired";
   const r = item.result;
-  if (r?.affectedRows != null) return `${formatCount(r.affectedRows)} affected`;
+  if (r?.affectedRows != null && countsRows(item.sql, dialect)) {
+    return `${formatCount(r.affectedRows)} affected`;
+  }
   // A write's empty result set says nothing about what it did.
-  if (r?.rowCount != null && (cls === "read" || r.rowCount > 0)) {
+  if (
+    r?.rowCount != null &&
+    (classifyQuery(item.sql, dialect).class === "read" || r.rowCount > 0)
+  ) {
     return `${formatCount(r.rowCount)} ${r.rowCount === 1 ? "row" : "rows"}`;
   }
   return "Completed";
 }
 
-function rowGlyph(item: HistItem, source: "hist" | "audit"): string {
+function rowGlyph(item: HistItem): string {
   const glyph = (cls: string, icon: string, label: string) =>
     `<span class="hstate ${cls}" title="${label}" aria-label="${label}">${icon}</span>`;
   if (item.status === "approved" && item.approval?.source === "automatic") {
     return glyph("auto", autoIcon, "Approved automatically");
   }
-  if (unconfirmed(item, source)) return glyph("expired", helpCircleIcon, "Unconfirmed");
+  if (unconfirmed(item)) return glyph("expired", helpCircleIcon, "Unconfirmed");
   if (item.status === "expired" && item.note === CANCELLED_NOTE) {
     return glyph("expired", clockIcon, "Cancelled");
   }
@@ -146,7 +152,7 @@ export function doneRowHtml(
   selected: boolean,
   select: "hist" | "audit",
   time: string,
-  cls: RiskClass = "read",
+  dialect = "postgresql",
   flags: SensitivityRecord | null = null,
   grouped = false,
 ): string {
@@ -156,20 +162,20 @@ export function doneRowHtml(
     ? ""
     : `<span class="ix-meta">${agentBadge(item.session?.harness?.trim() || null)}<span class="ix-who">${who(item.session, item.id)}</span></span>`;
   return `<button class="ix-row done${grouped ? " grouped" : ""}" type="button" data-row="${escapeHtml(item.id)}" data-select="${select}" aria-current="${selected}">
-      <span class="ix-mark">${rowGlyph(item, select)}</span>
+      <span class="ix-mark">${rowGlyph(item)}</span>
       <span class="ix-title">${escapeHtml(title)}</span>
       <span class="ix-top">${autoFlag(item)}${flagsHtml}${time}</span>
-      ${meta}<span class="ix-fact">${escapeHtml(rowFact(item, cls, select))}</span>
+      ${meta}<span class="ix-fact">${escapeHtml(rowFact(item, dialect))}</span>
     </button>`;
 }
 
-export function recentRowHtml(item: HistItem, selected: boolean, cls: RiskClass = "read"): string {
+export function recentRowHtml(item: HistItem, selected: boolean, dialect = "postgresql"): string {
   return doneRowHtml(
     item,
     selected,
     "hist",
     `<span class="hage" data-age="${item.resolvedAt}">${relAge(item.resolvedAt)}</span>`,
-    cls,
+    dialect,
     item.sensitivity ?? null,
   );
 }

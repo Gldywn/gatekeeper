@@ -78,6 +78,8 @@ export interface HistItem {
   id: string;
   status: "approved" | "rejected" | "failed" | "expired";
   note: string;
+  // How the plugin itself ended it ("blocked", "lease lost"...), never the raw error the note may be.
+  outcome?: string;
   sql: string;
   resolvedAt: number;
   connection: string | null;

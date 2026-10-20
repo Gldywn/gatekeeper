@@ -95,6 +95,25 @@ describe("Inbox selection", () => {
     expect(app.renderSelection).not.toHaveBeenCalled();
   });
 
+  it("lets the open detail go of rows Result memory sheds, and leaves other details alone", () => {
+    const app = harness();
+    const rows = () => ({ fields: [{ name: "a" }], rows: [{ a: 1 }], rowCount: 1, bytes: 10 });
+    const record = { id: "x", status: "approved", note: "", sql: "SELECT 1" };
+    app.tab = "audit";
+    app.selection.audit = { kind: "audit", id: "x", item: record };
+    app.history = [{ ...record, result: rows() }];
+    let shown = "y";
+    app.detailView = { showing: () => shown };
+    app.settingsStore = { get: () => ({ recentlyResolved: 20, resultCacheMb: 0 }) };
+    app.enforceHistoryBudget();
+    expect(app.renderSelection).not.toHaveBeenCalled();
+    app.history[0].result = rows();
+    shown = "x";
+    app.enforceHistoryBudget();
+    expect(app.renderSelection).toHaveBeenCalledWith(true);
+    expect(app.withLocalRows(record)).toBe(record);
+  });
+
   it("drops another card without touching the open one", () => {
     const app = harness();
     app.selection.queue = { kind: "card", id: "a" };

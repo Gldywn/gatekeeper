@@ -86,13 +86,13 @@ function outcome(item: HistItem, source: DetailSource): Outcome {
         err: false,
       });
     }
-    if (source === "hist" && item.note === NOT_DELIVERED_NOTE) {
+    if (item.outcome === NOT_DELIVERED_NOTE) {
       return failed("Result delivery unconfirmed", approver, {
         text: "The database returned successfully. Delivery to the server could not be confirmed.",
         err: false,
       });
     }
-    if (source === "hist" && (item.note === "blocked" || item.note === "lease lost")) {
+    if (item.outcome === "blocked" || item.outcome === "lease lost") {
       return {
         cls: "mut",
         icon: xCircleIcon,
@@ -100,7 +100,7 @@ function outcome(item: HistItem, source: DetailSource): Outcome {
         attr: approver,
         message: {
           text:
-            item.note === "blocked"
+            item.outcome === "blocked"
               ? "Execution was blocked."
               : "Execution could not be authorized.",
           err: false,

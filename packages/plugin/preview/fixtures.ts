@@ -313,6 +313,7 @@ export function seededHistory(): HistItem[] {
       id: "req_6f3d0a9c2e71",
       status: "failed",
       note: "result not delivered",
+      outcome: "result not delivered",
       sql: SQL.status,
       resolvedAt: NOW - 4 * MIN,
       session: session(1),

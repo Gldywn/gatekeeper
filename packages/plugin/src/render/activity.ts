@@ -18,15 +18,12 @@ import {
   markdownIcon,
   tableIcon,
 } from "../icons";
-import { classifyQuery } from "../sql/classify";
 import { visibleControls } from "../sql/sanitize";
 import { type SchemaContext, sensitivityOf, textSchema } from "../sql/schema";
 import type { ActivityEntry } from "../types";
 import { approvalLabel } from "./auto";
 import { flyoutMenu } from "./controls";
-import { activityFlagsHtml, auditItem, doneRowHtml } from "./inbox";
-
-export { activityFlagsHtml };
+import { auditItem, doneRowHtml } from "./inbox";
 
 // The Audit Trail in the Inbox's left pane: its rows, then the tail that loads older days.
 export function activityShell(): string {
@@ -243,7 +240,7 @@ export function activityEntryHtml(e: ActivityEntry, selected: boolean, dialect: 
     selected,
     "audit",
     `<span class="act-time">${escapeHtml(clockTime(ts))}</span>`,
-    classifyQuery(e.sql, dialect).class,
+    dialect,
     entryFlags(e, textSchema(e.sql, dialect)),
     true,
   );

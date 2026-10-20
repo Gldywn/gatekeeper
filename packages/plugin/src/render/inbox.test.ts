@@ -160,7 +160,7 @@ describe("recentRowHtml", () => {
         sensitivity: { pii: true, value: false, client: true },
       },
       false,
-      "destructive",
+      "postgresql",
     );
     expect(html).toContain('<span class="ix-who">billing</span>');
     expect(html).toContain('<span class="ix-fact">2 affected</span>');
@@ -168,11 +168,30 @@ describe("recentRowHtml", () => {
     expect(html).toContain('<span class="act-flag client">Client</span>');
     expect(html).not.toContain("ix-risk");
     expect(
-      recentRowHtml({ ...item, note: "result not delivered", status: "failed" }, false),
+      recentRowHtml(
+        {
+          ...item,
+          note: "result not delivered",
+          outcome: "result not delivered",
+          status: "failed",
+        },
+        false,
+      ),
     ).toContain('<span class="ix-fact">Unconfirmed</span>');
     expect(
       recentRowHtml({ ...item, note: "cancelled by the agent", status: "expired" }, false),
     ).toContain('<span class="ix-fact">Cancelled</span>');
+    // The same words as an execution error are a failure, and DDL's zero is no count.
+    expect(
+      recentRowHtml({ ...item, note: "result not delivered", status: "failed" }, false),
+    ).toContain('<span class="ix-fact">Failed</span>');
+    const ddl = {
+      ...item,
+      status: "approved" as const,
+      sql: "DROP TABLE tmp_imports",
+      result: { fields: [], rows: [], rowCount: 0, affectedRows: 0, truncated: false },
+    };
+    expect(recentRowHtml(ddl, false)).toContain('<span class="ix-fact">Completed</span>');
   });
 
   it("marks an automatic approval with the Auto glyph instead of the check", () => {

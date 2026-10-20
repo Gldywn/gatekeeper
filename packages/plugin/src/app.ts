@@ -1640,14 +1640,7 @@ export class Gatekeeper {
     if (next.kind === "audit") {
       const entry = this.activityView.entry(next.id);
       if (!entry) return;
-      // The server's record stays the fact; rows this tab still holds for the same approved
-      // request are attached, since /activity serves only the counts.
-      const item = auditItem(entry, this.connectionName || null);
-      const local = this.history.find((h) => h.id === next.id);
-      if (item.status === "approved" && local?.status === "approved" && local.result?.rows.length) {
-        item.result = local.result;
-      }
-      next.item = item;
+      next.item = auditItem(entry, this.connectionName || null);
     }
     this.selection[this.tab] = next;
     for (const row of this.root.querySelectorAll<HTMLElement>(
@@ -1664,13 +1657,26 @@ export class Gatekeeper {
     }
   }
 
-  // Narrow tab: the list and the selection take turns; Back returns to the row it left.
+  // The server's record stays the fact; rows this tab still holds for the same approved request
+  // are attached when it renders, so rows Result memory has since dropped are not shown here.
+  private withLocalRows(item: HistItem): HistItem {
+    const local = this.history.find((h) => h.id === item.id);
+    return item.status === "approved" && local?.status === "approved" && local.result?.rows.length
+      ? { ...item, result: local.result }
+      : item;
+  }
+
+  // Narrow tab: the list and the selection take turns; Back returns to the row it left, or to
+  // the open tab when that row is gone or folded away.
   private showList(): void {
     this.root.querySelector("#inbox")?.setAttribute("data-show", "list");
     const id = this.selection[this.tab]?.id;
-    if (id) {
-      this.root.querySelector<HTMLElement>(`[data-row="${id}"]`)?.focus({ preventScroll: true });
-    }
+    const list = this.tab === "queue" ? "#listQueue" : "#listAudit";
+    const row = id
+      ? this.root.querySelector<HTMLElement>(`${list} [data-row="${CSS.escape(id)}"]`)
+      : null;
+    if (row?.offsetParent) row.focus({ preventScroll: true });
+    else this.focusOpenTab();
   }
 
   // The right pane shows exactly the current selection. A decided request reopens only when
@@ -1699,7 +1705,9 @@ export class Gatekeeper {
       queue.innerHTML = "";
     }
     const item =
-      sel?.kind === "hist" ? (this.history.find((h) => h.id === sel.id) ?? sel.item) : sel?.item;
+      sel?.kind === "hist"
+        ? (this.history.find((h) => h.id === sel.id) ?? sel.item)
+        : sel?.item && this.withLocalRows(sel.item);
     if (sel?.kind === "hist" && item) sel.item = item;
     if (item) {
       empty.innerHTML = "";
@@ -2782,9 +2790,7 @@ export class Gatekeeper {
     list.innerHTML = `${groupHeadHtml("Pending approval", ready, ready > 0)}${pending}${
       recent.length
         ? `${groupHeadHtml("Recently resolved", 0)}${recent
-            .map((h) =>
-              recentRowHtml(h, h.id === selected, classifyQuery(h.sql, this.dialect).class),
-            )
+            .map((h) => recentRowHtml(h, h.id === selected, this.dialect))
             .join("")}`
         : ""
     }`;
@@ -3282,6 +3288,7 @@ export class Gatekeeper {
         id,
         status,
         note: displayNote,
+        outcome: note,
         sql: card.sql,
         resolvedAt: Date.now(),
         connection: this.connectionName || null,
@@ -3324,6 +3331,7 @@ export class Gatekeeper {
   private enforceHistoryBudget(): void {
     const budget = resultBudgetBytes(this.settingsStore.get());
     let total = 0;
+    let shownShed = false;
     for (const item of this.history) {
       if (!item.result || item.result.rows.length === 0) {
         continue;
@@ -3331,10 +3339,13 @@ export class Gatekeeper {
       const size = item.result.bytes ?? JSON.stringify(item.result.rows).length;
       if (total + size > budget) {
         item.result = { ...item.result, rows: [], truncated: true, bytes: 0 };
+        shownShed ||= item.id === this.detailView.showing();
       } else {
         total += size;
       }
     }
+    // The open detail lets go of rows just shed, from either tab, keeping its request and counts.
+    if (shownShed) this.renderSelection(true);
   }
 
   private copySql(el: HTMLElement): void {

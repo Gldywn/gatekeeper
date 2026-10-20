@@ -15,8 +15,6 @@ export const SAVED_KEY_MASK = "\u2022".repeat(24);
 
 // The same sentences on the pending card and on the kept record.
 export const AUTO_LEADS = {
-  local: "A local check flagged this read before evaluation",
-  unfinished: "The evaluation did not finish",
   refused: "The evaluation did not clear this read",
   cleared: "The evaluation cleared this read",
   automatic: "This read was approved automatically",

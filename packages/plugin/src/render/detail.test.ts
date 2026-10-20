@@ -171,8 +171,9 @@ describe("render/detail", () => {
   });
 
   it("tells unconfirmed and not-run outcomes apart from a failure", () => {
+    const local = (note: string) => ({ ...item, status: "failed" as const, note, outcome: note });
     const undelivered = detailHtml(
-      { ...item, status: "failed", note: "result not delivered", result: undefined },
+      { ...local("result not delivered"), result: undefined },
       "hist",
       pg,
     );
@@ -183,20 +184,17 @@ describe("render/detail", () => {
       pg,
     );
     expect(unknown).toContain(">Execution outcome unknown</span>");
-    const blocked = detailHtml(
-      { ...item, status: "failed", note: "blocked", result: undefined },
-      "hist",
-      pg,
-    );
+    const blocked = detailHtml({ ...local("blocked"), result: undefined }, "hist", pg);
     expect(blocked).toContain(">Not run</span>");
     expect(blocked).toContain("Execution was blocked.");
-    // In the trail the same words may be a recorded error: they stay a failure.
-    const auditUndelivered = detailHtml(
-      { ...item, status: "failed", note: "result not delivered", result: undefined },
-      "audit",
-      pg,
-    );
-    expect(auditUndelivered).toContain(">Failed</span>");
+    // The same words as an execution error, local or in the trail, stay a failure with them.
+    for (const note of ["blocked", "lease lost", "result not delivered"]) {
+      for (const source of ["hist", "audit"] as const) {
+        const raw = detailHtml({ ...item, status: "failed", note, result: undefined }, source, pg);
+        expect(raw).toContain(">Failed</span>");
+        expect(raw).toContain(`<span class="q">Message</span>${note}</div>`);
+      }
+    }
   });
 
   it("copies the SQL with its invisible characters spelled out", () => {

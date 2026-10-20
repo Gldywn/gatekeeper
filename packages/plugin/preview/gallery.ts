@@ -11,7 +11,6 @@ import { recentRowHtml } from "../src/render/inbox";
 import { AUTO_EVALUATING, cardHtml } from "../src/render/queue";
 import { capResult, type HistResult } from "../src/result";
 import { AUTO_POLICY, AUTO_THRESHOLDS } from "../src/sql/auto";
-import { classifyQuery } from "../src/sql/classify";
 import type { RiskMode } from "../src/sql/mode";
 import type { SchemaContext } from "../src/sql/schema";
 import type { Card, HistItem } from "../src/types";
@@ -289,6 +288,7 @@ const DONE: DoneState[] = [
     {
       status: "failed",
       note: "result not delivered",
+      outcome: "result not delivered",
       intent: "list invoices that have no payment yet",
     },
     { state: "failed", intent: "list invoices that have no payment yet" },
@@ -508,7 +508,7 @@ const label = (text: string) => `<div class="g-label">${escapeHtml(text)}</div>`
 function rowsSection(): string {
   const lines = DONE.map(
     (s, i) => `<div class="g-row">${label(s.label)}
-      <section class="pane pane-list g-pane"><div class="pane-body">${recentRowHtml(s.hist, i === 0, classifyQuery(s.hist.sql, DIALECT).class)}</div></section>
+      <section class="pane pane-list g-pane"><div class="pane-body">${recentRowHtml(s.hist, i === 0, DIALECT)}</div></section>
       <section class="pane pane-list g-pane"><div class="pane-body">${activityEntryHtml(s.entry, i === 0, DIALECT)}</div></section>
     </div>`,
   ).join("");
