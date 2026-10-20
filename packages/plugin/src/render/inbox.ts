@@ -40,11 +40,13 @@ export function queueRowHtml(
   now = Date.now(),
 ): string {
   const evaluating = card.state === "ready" && card.autoStatus === AUTO_EVALUATING;
+  // While Auto mode evaluates, the held dot turns cyan and pulses; the sentence says it to a
+  // screen reader, and to anyone the colour alone does not reach once the detail opens.
   const mark =
     card.state !== "ready"
       ? '<span class="spin" aria-hidden="true"></span>'
       : evaluating
-        ? `<span class="ix-bolt" aria-hidden="true">${autoIcon}</span>`
+        ? '<span class="ix-dot eval" aria-hidden="true"></span><span class="sr-only">Auto mode is evaluating this read with Jev.</span>'
         : '<span class="ix-dot" aria-hidden="true"></span>';
   const risk = RISK_WORD[cls]
     ? `<span aria-hidden="true">&middot;</span><span class="ix-risk ${cls}">${RISK_WORD[cls]}</span>`

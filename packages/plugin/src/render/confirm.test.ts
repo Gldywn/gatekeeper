@@ -31,8 +31,10 @@ describe("render/confirm", () => {
     );
     // Same marks as the card, so a sensitive value cannot look ordinary here.
     expect(html).toContain('<span class="kw">DELETE</span>');
-    expect(html).toContain('<span class="pii-col">email</span>');
-    expect(html).toContain("<span class=\"st sensitive-val\">'jane@acme.io'</span>");
+    expect(html).toContain('<span class="pii-col" title="Possible PII">email</span>');
+    expect(html).toContain(
+      '<span class="st sensitive-val" title="Sensitive value">\'jane@acme.io\'</span>',
+    );
     // The tone reaches the card, which is what turns the frame red on a destructive.
     expect(html).toContain('<div class="detail-card confirm-card destructive">');
   });

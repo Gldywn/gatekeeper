@@ -100,10 +100,13 @@ describe("queueRowHtml", () => {
     );
   });
 
-  it("marks a held proposal with the dot, and with the bolt while Jev evaluates it", () => {
+  it("marks a held proposal with the dot, cyan and spoken while Jev evaluates it", () => {
     expect(queueRowHtml(card({}), "read", false, T)).toContain('class="ix-dot"');
-    expect(queueRowHtml(card({ autoStatus: AUTO_EVALUATING }), "read", false, T)).toContain(
-      'class="ix-bolt"',
+    const evaluating = queueRowHtml(card({ autoStatus: AUTO_EVALUATING }), "read", false, T);
+    expect(evaluating).toContain('<span class="ix-dot eval" aria-hidden="true"></span>');
+    // The decorative dot is hidden; the sentence is not.
+    expect(evaluating).toContain(
+      '<span class="sr-only">Auto mode is evaluating this read with Jev.</span>',
     );
   });
 

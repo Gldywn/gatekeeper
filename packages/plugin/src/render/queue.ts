@@ -1,13 +1,12 @@
 import { capitalize, clock, escapeHtml, relAge } from "../html";
 import {
   buildingIcon,
+  checkIcon,
   clockIcon,
   copyIcon,
   dbReadsIcon,
   messageIcon,
-  pencilIcon,
   sendIcon,
-  trashIcon,
   warnIcon,
   xCircleIcon,
 } from "../icons";
@@ -97,14 +96,13 @@ const EVAL_NOTE = "Auto mode is evaluating this read with Jev.";
 
 // One line that names Auto mode first, says where the read stands, and only then carries
 // the reason. Whether the query ever left the machine is the part a human must not guess.
-function autoNote(card: Card): string {
+export function autoNote(card: Card): string {
   if (!card.autoStatus) {
     return "";
   }
+  // An evaluation in flight speaks from the decision bar, where it blocks Approve.
   if (card.autoStatus === AUTO_EVALUATING) {
-    // A human can approve mid-evaluation; once the card left ready, nothing is evaluating it.
-    if (card.state !== "ready") return "";
-    return `<div class="cs-unparsed auto evaluating" role="status"><span class="auto-bolt">${autoIcon}</span><span><b>Auto mode:</b> <i>${AUTO_EVALUATING}&hellip;</i></span></div>`;
+    return "";
   }
   if (card.autoStatus === AUTO_APPROVED) {
     return `<div class="cs-unparsed auto" role="status">${autoIcon}<span><b>Auto mode:</b> ${AUTO_LEADS.automatic}.</span></div>`;
@@ -116,22 +114,38 @@ function autoNote(card: Card): string {
   return `<div class="cs-unparsed auto" role="status">${autoIcon}<span><b>Auto mode:</b> ${reasonHtml(text, tail)}</span></div>`;
 }
 
-// A name the card already marks (PII or client) or values it already shows need no repeat.
+// A name needs no repeat only when the SQL shows it marked, as the highlighter marks it. A column
+// a SELECT * expands to, or one only a comment or a string mentions, stays named.
 function reasonContext(card: Card): ReasonContext {
-  const names = [...(card.schema?.pii ?? []), ...(card.schema?.client ?? [])].map((n) =>
-    n.toLowerCase(),
-  );
+  const html = highlight(card.sql, card.schema?.pii, card.schema?.client);
+  const marked = new Set([...html.matchAll(MARKED)].map(([, n]) => n.toLowerCase()));
   return {
-    shown: (name) => names.includes(name.toLowerCase()),
+    shown: (name) => marked.has(escapeHtml(name).toLowerCase()),
     valuesShown: Boolean(card.schema?.literals.length),
   };
 }
+
+const MARKED = /<span class="(?:pii|client)-col"[^>]*>([^<]*)<\/span>/g;
 
 // Why the last human approval did not run, in its own words: never an Auto mode fact.
 function executionNote(card: Card): string {
   if (!card.executionNotice) return "";
   const text = holdSentence(card.executionNotice) || escapeHtml(card.executionNotice);
   return `<div class="cs-unparsed" role="status">${warnIcon}<span>${text}</span></div>`;
+}
+
+// An evaluation in flight blocks Approve like a gate, its sentence above the actions, while
+// Reject stays open. Shared with the app, so an action row rebuilt in place matches the card.
+export function cardGateFor(
+  card: Card,
+  dialect: string,
+  mode: RiskMode,
+  connReadOnly: boolean,
+): CardGate {
+  const gate = cardGate(card.sql, dialect, mode, connReadOnly);
+  return card.state === "ready" && card.autoStatus === AUTO_EVALUATING
+    ? { ...gate, approveEnabled: false, note: EVAL_NOTE }
+    : gate;
 }
 
 export function cardHtml(
@@ -142,38 +156,32 @@ export function cardHtml(
   connReadOnly = false,
 ): string {
   const evaluating = card.state === "ready" && card.autoStatus === AUTO_EVALUATING;
-  // An evaluation in flight borrows the blocked-Approve chrome: the reason rides in the
-  // same popover, and Reject stays open for a human who has already made up their mind.
-  const gate = evaluating
-    ? { ...cardGate(card.sql, dialect, mode, connReadOnly), approveEnabled: false, note: EVAL_NOTE }
-    : cardGate(card.sql, dialect, mode, connReadOnly);
-  const remaining = card.expiresAt - Date.now();
+  const gate = cardGateFor(card, dialect, mode, connReadOnly);
   const run = card.state === "executing" ? card.run : undefined;
-  let actions: string;
+  let bar: string;
   if (run) {
-    actions = runningActions(card.id, run);
+    bar = runningActions(card.id, run);
   } else if (card.state !== "ready") {
-    actions = `<div class="actions"><span class="busy"><span class="spin"></span>${busyLabel(card.state)}&hellip;</span></div>`;
+    bar = `<div class="actions"><span class="busy"><span class="spin"></span>${busyLabel(card.state)}&hellip;</span></div>`;
   } else {
-    actions = readyActions(card.id, gate, denyDrafts);
-  }
-  const badge = riskBadge(gate.cls);
-  const riskAnno = riskAnnotation(card.sql, dialect, gate.cls);
-  // The expiry clock only means something while the proposal waits for a decision.
-  const lease =
-    card.state === "ready"
-      ? `<span class="${remaining <= 45_000 ? "lease low" : "lease"}">${clock(remaining)}</span>`
+    const blocker = gate.note
+      ? `<div class="nb-msg${evaluating ? " auto" : ""}" id="gate-${card.id}"${evaluating ? ' role="status"' : ""}>${evaluating ? autoIcon : ALERT_ICON}<span>${escapeHtml(gate.note)}</span></div>`
       : "";
+    bar = blocker + readyActions(card.id, gate, denyDrafts, card.expiresAt);
+  }
+  const sql = `<pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(visibleControls(card.sql))}" aria-label="Copy SQL">${copyIcon}</button><code class="sql-body" id="sqlbody-${card.id}">${highlight(formatSql(card.sql), card.schema?.pii, card.schema?.client, card.schema?.literals)}</code></pre>`;
+  // While Auto mode evaluates, the ring the card frame used to carry runs round the SQL.
+  const sqlBlock = evaluating ? `<div class="sql-ring">${sql}</div>` : sql;
   return `
-      <div class="card ${cardClassFor(gate)}${evaluating ? " auto-eval" : ""}${run ? runClass(run) : ""}" data-card="${card.id}">
+      <div class="card ${cardClassFor(gate)}${run ? runClass(run) : ""}" data-card="${card.id}">
         <div class="top">
-          ${badge}${evaluating ? `<span class="auto-mark" title="${EVAL_NOTE}" aria-label="${EVAL_NOTE}">${autoIcon}</span>` : ""}${card.intent ? `<span class="intent">${escapeHtml(capitalize(card.intent))}</span>` : `<span class="intent">${escapeHtml(card.id)}</span>`}
-          ${lease}
+          ${riskBadge(gate.cls)}<span class="intent">${escapeHtml(card.intent ? capitalize(card.intent) : card.id)}</span>
         </div>
-        <div class="meta">${escapeHtml(card.id)} &middot; ${relAge(card.createdAt)}</div>
-        <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(visibleControls(card.sql))}" aria-label="Copy SQL">${copyIcon}</button><code class="sql-body" id="sqlbody-${card.id}">${highlight(formatSql(card.sql), card.schema?.pii, card.schema?.client, card.schema?.literals)}</code></pre>
-        ${unparsedNote(gate)}${riskAnno}<div class="card-schema" id="cs-${card.id}">${schemaInner(card.schema, gate.cls !== "read")}</div>
-        ${autoNote(card)}${executionNote(card)}${actions}
+        <div class="meta">${escapeHtml(card.id)} &middot; Requested ${relAge(card.createdAt)}</div>
+        <div class="cs-matrix" id="cm-${card.id}">${accessMatrix(card.sql, dialect, gate.cls, card.schema)}</div>
+        ${unparsedNote(gate)}<div class="cs-legend" id="cs-${card.id}">${sensitiveLegend(card.schema, card.id)}</div>
+        ${sqlBlock}
+        <div class="cs-auto" id="ca-${card.id}">${autoNote(card)}</div>${executionNote(card)}<div class="dbar">${bar}</div>
       </div>`;
 }
 
@@ -197,51 +205,110 @@ function riskBadge(cls: RiskClass): string {
   return "";
 }
 
-// The tables a statement touches, by role in one word: Delete for what removes data (DELETE,
-// DROP, TRUNCATE), Write for every other change, Read for what a mixed statement reads.
-function riskAnnotation(sql: string, dialect: string, cls: RiskClass): string {
-  if (cls === "read") {
-    return "";
-  }
+// Which tables the statement reads, writes or deletes from, one row per table: a table both
+// read and written keeps both marks. Delete only for what removes data (DELETE, DROP, TRUNCATE);
+// a read's tables come from the column analysis once it lands, from the SQL text until then.
+export function accessMatrix(
+  sql: string,
+  dialect: string,
+  cls: RiskClass,
+  schema?: SchemaContext | null,
+): string {
   const ops = analyzeTableOps(sql, dialect);
-  if (!ops) {
+  const roles = new Map<string, Set<Role>>();
+  const add = (table: string, role: Role) =>
+    roles.set(table, (roles.get(table) ?? new Set()).add(role));
+  if (cls !== "read") {
+    const removes = ["delete", "drop", "truncate"].includes(ops?.writeOp ?? "");
+    for (const t of ops?.writes ?? []) add(t, removes ? "Delete" : "Write");
+    for (const t of ops?.reads ?? []) add(t, "Read");
+  } else {
+    for (const t of schema?.tables ?? ops?.reads ?? []) add(t, "Read");
+  }
+  if (!roles.size) {
     return "";
   }
-  const removes = ["delete", "drop", "truncate"].includes(ops.writeOp ?? "");
-  const label = removes ? "Delete" : "Write";
-  const icon = removes ? trashIcon : pencilIcon;
-  const tone = cls === "destructive" ? "destructive" : "write";
-  const writesLine = ops.writes.length
-    ? `<div class="cs-writes ${tone}"><span class="cs-writes-k">${icon}${label}</span>${tblChips(ops.writes)}</div>`
-    : "";
-  const readsLine = ops.reads.length
-    ? `<div class="cs-reads"><span class="cs-reads-k">${dbReadsIcon}Read</span>${tblChips(ops.reads)}</div>`
-    : "";
-  if (!writesLine && !readsLine) {
+  const cell = (on: boolean, role: Role) =>
+    on
+      ? `<td class="mk on ${role.toLowerCase()}">${checkIcon}<span class="sr-only">Yes</span></td>`
+      : '<td class="mk"><span class="sr-only">No</span></td>';
+  const rows = [...roles]
+    .map(
+      ([t, set]) =>
+        `<tr><th scope="row" class="nm">${escapeHtml(t)}</th>${ROLES.map((r) => cell(set.has(r), r)).join("")}</tr>`,
+    )
+    .join("");
+  return `<table class="mx"><thead><tr><th scope="col">Table</th>${ROLES.map((r) => `<th scope="col">${r}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+type Role = "Read" | "Write" | "Delete";
+const ROLES: Role[] = ["Read", "Write", "Delete"];
+
+// What the SQL marks, explained once just above it: each category written as it is marked in
+// the query, with how many. Nothing when the analysis found nothing to mark.
+export function sensitiveLegend(schema: SchemaContext | null | undefined, id: string): string {
+  if (!schema) {
     return "";
   }
-  return `<div class="card-risk">${writesLine}${readsLine}</div>`;
+  const values = schema.literals.map((v) => `'${v}'`);
+  const groups: [string, string, string[]][] = [
+    ["pii", "Possible PII", schema.pii],
+    ["client", "Client data", schema.client],
+    ["val", values.length > 1 ? "Sensitive values" : "Sensitive value", values],
+  ];
+  // Each entry names its objects on hover and keyboard focus, so a reader who cannot tell the
+  // colours apart, or a SELECT * whose columns the SQL never spells out, still gets the names.
+  return groups
+    .filter(([, , items]) => items.length > 0)
+    .map(
+      ([k, label, items]) =>
+        `<span class="lg-slot"><button class="lg ${k}" type="button" aria-describedby="lg-${k}-${id}"><span class="sw">${label}</span><span class="ct">${items.length}</span></button><span class="lg-pop" id="lg-${k}-${id}" role="tooltip">${items.map(escapeHtml).join(", ")}</span></span>`,
+    )
+    .join("");
 }
 
-function tblChips(tables: string[]): string {
-  return tables.map((t) => `<span class="tbl-chip">${escapeHtml(t)}</span>`).join("");
+// The legend is rebuilt when an analysis lands; a reader on one of its entries stays on the
+// same category, or on the first one left.
+export function paintLegend(
+  host: HTMLElement,
+  schema: SchemaContext | null | undefined,
+  id: string,
+): void {
+  const active = host.ownerDocument?.activeElement;
+  const was = active && host.contains(active) ? active.getAttribute("aria-describedby") : null;
+  host.innerHTML = sensitiveLegend(schema, id);
+  if (was) {
+    (
+      host.querySelector<HTMLElement>(`[aria-describedby="${CSS.escape(was)}"]`) ??
+      host.querySelector<HTMLElement>(".lg")
+    )?.focus();
+  }
 }
 
-export function readyActions(id: string, gate: CardGate, denyDrafts: Map<string, string>): string {
+export function readyActions(
+  id: string,
+  gate: CardGate,
+  denyDrafts: Map<string, string>,
+  expiresAt?: number,
+  now = Date.now(),
+): string {
   const revise = denyDrafts.has(id)
     ? denyField(id, denyDrafts.get(id) ?? "")
     : `<button class="deny-open" type="button" data-deny-open="${id}" title="Reject and ask the agent to change something">${messageIcon}Request changes</button>`;
   const tone = gate.cls === "destructive" ? " destructive" : gate.cls === "write" ? " write" : "";
-  const approveBtn = `<button class="btn approve${tone}" type="button" data-approve="${id}" ${gate.approveEnabled ? "" : "disabled"}>${gate.approveLabel}</button>`;
-  // When blocked, the reason rides in a hover popover above the disabled Approve,
-  // not as a loose line in the card body.
-  const approve = gate.note
-    ? `<span class="approve-slot">${approveBtn}<span class="approve-pop" role="tooltip">${ALERT_ICON}${escapeHtml(gate.note)}</span></span>`
-    : approveBtn;
+  // A blocked Approve points at the reason written just above the actions.
+  const described = gate.note ? ` aria-describedby="gate-${id}"` : "";
+  const approve = `<button class="btn approve${tone}" type="button" data-approve="${id}"${described} ${gate.approveEnabled ? "" : "disabled"}>${gate.approveLabel}</button>`;
+  // The expiry clock only means something while the proposal waits for a decision.
+  const left = (expiresAt ?? now) - now;
+  const due =
+    expiresAt === undefined
+      ? ""
+      : `<span class="nb-due">Expires in <span class="${left <= 45_000 ? "lease low" : "lease"}">${clock(left)}</span></span>`;
   return `<div class="actions">
              ${approve}
              <button class="btn reject" type="button" data-reject="${id}">Reject</button>
-             ${revise}
+             ${revise}${due}
            </div>`;
 }
 
@@ -305,7 +372,7 @@ export function runningActions(id: string, run: RunState, now = Date.now()): str
       ? `<span class="autostop" title="Auto-stop is set to ${run.limitMs / 60_000} min on this connection">${clockIcon}Auto-stop in<span class="clock autostop-clock">${clock(run.limitMs - elapsed)}</span></span>`
       : "";
   const error = stop?.error
-    ? `<div class="cs-unparsed stop-error" role="status">${xCircleIcon}<span class="stop-msg"><span>An error occurred while stopping the query.</span><span class="stop-raw">${escapeHtml(stop.error)}</span></span></div>`
+    ? `<div class="cs-unparsed stop-error" role="status">${xCircleIcon}<span class="stop-msg"><span>${stop.by === "limit" ? "Auto-stop could not be confirmed." : "Stop could not be confirmed."}</span><span class="stop-raw">${escapeHtml(stop.error)}</span></span></div>`
     : "";
   return `<div class="actions">${control}<span class="run"><span class="spin"></span>Running<span class="clock run-clock">${clock(elapsed)}</span></span>${limit}</div>${error}`;
 }

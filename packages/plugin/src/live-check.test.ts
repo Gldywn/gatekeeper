@@ -385,15 +385,32 @@ describe("status popovers", () => {
     expect(app.dismissAgentPop()).toBe(false);
   });
 
+  it("hides an open legend entry's names once, then lets Escape go on", () => {
+    const app = harness();
+    const attrs = new Set<string>();
+    const slot = { toggleAttribute: (name: string) => attrs.add(name) && true };
+    let selector = "";
+    app.root = {
+      querySelector: (s: string) => {
+        selector = s;
+        return attrs.size ? null : slot;
+      },
+    };
+    expect(app.dismissLegendPop()).toBe(true);
+    expect(attrs.has("data-dismissed")).toBe(true);
+    expect(selector).toBe(".lg-slot:is(:hover, :focus-within):not([data-dismissed])");
+    expect(app.dismissLegendPop()).toBe(false);
+  });
+
   it("rearms the hidden server popover only when its glyph is entered from outside", () => {
     const app = harness();
     app.root = { querySelector: () => null };
     const link = { removeAttribute: vi.fn() };
     const inner = { closest: () => glyph };
     const glyph = { contains: (node: unknown) => node === inner, closest: () => link };
-    app.enterAgentGlyph({ target: inner, relatedTarget: inner });
+    app.enterPopGlyph({ target: inner, relatedTarget: inner });
     expect(link.removeAttribute).not.toHaveBeenCalled();
-    app.enterAgentGlyph({ target: inner, relatedTarget: null });
+    app.enterPopGlyph({ target: inner, relatedTarget: null });
     expect(link.removeAttribute).toHaveBeenCalledWith("data-dismissed");
   });
 

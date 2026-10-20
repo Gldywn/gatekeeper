@@ -1496,18 +1496,6 @@ label.qs-row {
   background: color-mix(in oklch, var(--danger) 15%, transparent);
   border-color: color-mix(in oklch, var(--danger) 44%, transparent);
 }
-/* The written-tables annotation ("Writes"/"Deletes"), mirroring .card-schema's stack;
-   the label carries the class tone, the chips reuse the neutral .tbl-chip. */
-.card-risk {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--s2);
-  margin: 0 0 var(--s3);
-}
-.card-risk:empty {
-  display: none;
-}
 /* The parser could not read the statement, so the class below it is a guess. Stated in
    full sentences, unlike the terse annotations: it asks the human to take the call. */
 .cs-unparsed {
@@ -3757,40 +3745,28 @@ p.auto-message[data-tone="busy"] {
     animation: spin 0.7s linear infinite;
   }
 }
-/* A read under evaluation: the card takes a faint Auto tint, the note keeps the card's own
-   note shape, and the only motion is the bolt and one sweep across that note. */
-/* Centred inside one title line, so it holds its place when the title wraps, and pulled
-   close to the title: it reads as part of it, not as a column of its own. */
-.auto-mark {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  height: 1.5em;
-  margin-top: 1px;
-  margin-right: -3px;
-  color: var(--auto);
-}
-.auto-mark svg {
-  width: 15px;
-  height: 15px;
-}
-/* The border fills in the Auto accent, the same ring the landing page draws on a guard,
-   looping here because it marks work in progress. The card keeps its usual edge
-   underneath, so the line reads against it instead of cyan over cyan. */
+/* A read under evaluation: the ring the card frame used to carry runs round the SQL, the
+   request under evaluation. It sits over the SQL's corner brackets at their width, so its fill
+   covers them as it passes; looping, since it marks work in progress. */
 @property --auto-fill {
   syntax: "<number>";
   initial-value: 1;
   inherits: false;
 }
-.card.auto-eval {
+.sql-ring {
   position: relative;
+  margin-bottom: var(--s3);
+  border-radius: 4px;
 }
-.card.auto-eval::before {
+.sql-ring > .sql {
+  margin-bottom: 0;
+}
+.sql-ring::after {
   content: "";
   position: absolute;
-  inset: -1px;
-  border-radius: calc(var(--r) + 1px);
-  padding: 1px;
+  inset: 0;
+  border-radius: 4px;
+  padding: 2px;
   background: conic-gradient(
     from -90deg,
     var(--auto) calc(var(--auto-fill) * 1turn),
@@ -3806,42 +3782,14 @@ p.auto-message[data-tone="busy"] {
   mask-composite: exclude;
   pointer-events: none;
 }
-.cs-unparsed.auto.evaluating {
-  position: relative;
-  overflow: hidden;
-}
-.auto-bolt {
-  display: inline-flex;
-  flex: none;
-  transform-origin: center;
-}
-.cs-unparsed.auto.evaluating::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: linear-gradient(
-    100deg,
-    transparent 20%,
-    color-mix(in oklch, var(--auto) 22%, transparent) 50%,
-    transparent 80%
-  );
-  opacity: 0;
+/* The queue row's held dot, cyan while Auto mode evaluates: it pulses faster than a
+   connecting agent does, and never fades out entirely. */
+.ix-dot.eval {
+  background: var(--auto);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--auto) 22%, transparent);
 }
 @media (prefers-reduced-motion: no-preference) {
-  .cs-unparsed.auto.evaluating::after {
-    opacity: 1;
-    animation: auto-sweep 2.4s var(--ease-in-out) infinite;
-  }
-  @keyframes auto-sweep {
-    from {
-      transform: translateX(-100%);
-    }
-    to {
-      transform: translateX(100%);
-    }
-  }
-  .card.auto-eval::before {
+  .sql-ring::after {
     animation: auto-fill 2.8s linear infinite;
   }
   @keyframes auto-fill {
@@ -3852,18 +3800,12 @@ p.auto-message[data-tone="busy"] {
       --auto-fill: 1;
     }
   }
-  .auto-bolt {
-    animation: auto-bolt 1.4s var(--ease-in-out) infinite;
+  .ix-dot.eval {
+    animation: eval-pulse 0.9s var(--ease-in-out) infinite;
   }
-  @keyframes auto-bolt {
-    0%,
-    100% {
-      transform: scale(1);
-      opacity: 0.85;
-    }
+  @keyframes eval-pulse {
     50% {
-      transform: scale(1.18);
-      opacity: 1;
+      opacity: 0.45;
     }
   }
 }
@@ -4406,8 +4348,10 @@ p.auto-message[data-tone="busy"] {
 .pane-list .pane-body {
   padding-bottom: var(--s2);
 }
+/* The scrollbar's gutter is reserved on both sides, so a full-width line or bar stays symmetric. */
 .pane-detail .pane-body {
   padding: var(--s3);
+  scrollbar-gutter: stable both-edges;
 }
 
 /* List rows: the state mark centred on the title's line, the title over who and what came
@@ -4480,14 +4424,6 @@ p.auto-message[data-tone="busy"] {
   border-radius: 50%;
   background: var(--amber);
   box-shadow: 0 0 0 3px color-mix(in oklch, var(--amber) 20%, transparent);
-}
-.ix-bolt {
-  display: inline-flex;
-  color: var(--auto);
-}
-.ix-bolt svg {
-  width: 14px;
-  height: 14px;
 }
 .ix-mark .spin {
   width: 10px;
@@ -4658,6 +4594,245 @@ p.auto-message[data-tone="busy"] {
   top: calc(-1 * var(--s3));
   z-index: 2;
   background: var(--surface);
+}
+
+/* The open proposal reads top to bottom with no frame of its own: who asked, the request, the
+   tables it touches, what the SQL marks, the SQL, then the decision. The risk classes stay on
+   the wrapper so the SQL keeps its state colours. */
+#queue > .card,
+#queue > .card:hover {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+#queue .pd-who {
+  margin: 0 0 8px;
+}
+#queue .pd-who .harness-badge {
+  width: 15px;
+  height: 15px;
+}
+#queue .pd-name {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+#queue .intent {
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+}
+#queue .meta {
+  margin: 4px 0 0;
+}
+#queue .cs-matrix:not(:empty),
+#queue .cs-legend:not(:empty),
+#queue .card > .sql,
+#queue .sql-ring,
+#queue .card > .cs-unparsed,
+#queue .cs-auto:not(:empty) {
+  margin-top: 14px;
+  margin-bottom: 0;
+}
+#queue .cs-auto > .cs-unparsed {
+  margin: 0;
+}
+/* The legend explains the SQL right under it. */
+#queue .cs-legend:not(:empty) + .sql,
+#queue .cs-legend:not(:empty) + .sql-ring {
+  margin-top: 6px;
+}
+/* Tables by role: quiet rules, a check where the statement reads, writes or deletes. */
+.mx {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.mx th {
+  padding: 0 10px 6px 0;
+  text-align: left;
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--faint);
+  border-bottom: 1px solid var(--edge);
+}
+.mx tbody th,
+.mx td {
+  padding: 7px 10px 7px 0;
+  border-bottom: 1px solid var(--hi);
+  vertical-align: baseline;
+}
+.mx tbody th {
+  font-family: var(--font-mono);
+  font-weight: 400;
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.mx thead th:not(:first-child),
+.mx td.mk {
+  width: 64px;
+  text-align: center;
+  padding-right: 0;
+}
+.mx td.mk svg {
+  width: 14px;
+  height: 14px;
+  vertical-align: -2px;
+}
+.mx td.mk.on.read {
+  color: var(--text);
+}
+.mx td.mk.on.write {
+  color: var(--amber);
+}
+.mx td.mk.on.delete {
+  color: var(--danger);
+}
+/* Each category written as the SQL marks it, with its count; hover or focus names its objects. */
+.cs-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  font-size: 11.5px;
+}
+.lg-slot {
+  position: relative;
+  display: inline-flex;
+}
+.lg {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: default;
+}
+.lg:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+.lg-pop {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 8;
+  max-width: min(320px, 70vw);
+  padding: 6px 10px;
+  border: 1px solid var(--edge);
+  border-radius: 7px;
+  background: var(--surface);
+  box-shadow: var(--elev-2);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(3px);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .lg-pop {
+    transition:
+      opacity var(--dur) var(--ease),
+      transform var(--dur) var(--ease),
+      visibility var(--dur);
+  }
+}
+.lg-slot:hover .lg-pop,
+.lg-slot:focus-within .lg-pop {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+/* Escape hides the names until the entry is entered again from outside. */
+.lg-slot[data-dismissed] .lg-pop {
+  opacity: 0;
+  visibility: hidden;
+  transition: none;
+}
+.lg .sw {
+  font-weight: 700;
+}
+.lg.pii .sw {
+  color: var(--danger);
+}
+.lg.client .sw {
+  color: var(--client);
+}
+.lg.val .sw {
+  padding: 0 3px;
+  border-radius: 3px;
+  font-weight: 600;
+  color: var(--text);
+  background: color-mix(in oklch, var(--danger) 24%, transparent);
+}
+.lg .ct {
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+/* The decision bar stays at the pane's foot while the request scrolls under it. */
+#queue .dbar {
+  position: sticky;
+  bottom: calc(-1 * var(--s3));
+  z-index: 3;
+  margin: 16px calc(-1 * var(--s3)) calc(-1 * var(--s3));
+  padding: 10px var(--s3) 12px;
+  background: color-mix(in oklch, var(--surface) 92%, var(--ground));
+  border-top: 1px solid var(--edge);
+  box-shadow: 0 -10px 24px color-mix(in oklch, var(--ground) 70%, transparent);
+}
+#queue .dbar .actions {
+  flex-wrap: wrap;
+}
+#queue .dbar .stop-error {
+  margin: 10px 0 0;
+}
+/* What blocks Approve, said above it, with no label of its own. */
+.nb-msg {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 12.5px;
+  font-weight: 560;
+  line-height: 1.45;
+  color: color-mix(in oklch, var(--amber) 88%, var(--text));
+}
+.nb-msg svg {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin-top: 1px;
+}
+.nb-msg.auto {
+  color: color-mix(in oklch, var(--auto) 85%, var(--text));
+}
+/* The expiry closes the action row; it turns amber with the clock inside it. */
+.nb-due {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.nb-due .lease {
+  font-size: inherit;
+  color: inherit;
+}
+.nb-due:has(.lease.low) {
+  color: var(--amber);
 }
 .pane-empty-host:empty,
 .queue:empty {

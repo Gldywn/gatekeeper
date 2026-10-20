@@ -65,7 +65,10 @@ describe("Auto mode surfaces", () => {
       "postgresql",
       new Map(),
     );
-    expect(evaluating).toContain("Evaluating with Jev");
+    // The evaluation speaks from the decision bar, as what blocks Approve, and the SQL wears the ring.
+    expect(evaluating).toContain('<div class="nb-msg auto" id="gate-r1" role="status">');
+    expect(evaluating).toContain("Auto mode is evaluating this read with Jev.");
+    expect(evaluating).toContain('<div class="sql-ring">');
     expect(evaluating).toContain('data-approve="r1"');
     expect(evaluating).toContain('data-reject="r1"');
     // The reason is the sentence; a name the card does not already mark is named, escaped.
@@ -82,6 +85,7 @@ describe("Auto mode surfaces", () => {
     const marked = cardHtml(
       {
         ...card,
+        sql: "SELECT email FROM public.users",
         autoStatus: "Needs review: Sensitive source or alias: email",
         schema: { tables: [], pii: ["email"], client: [], literals: [], star: false },
       },
@@ -154,7 +158,7 @@ describe("Auto mode surfaces", () => {
     };
     // The row says who decided; the evaluation's details open with it on the right.
     expect(activityEntryHtml(entry, true, "postgresql")).toContain("Approved automatically");
-    expect(detailHtml(auditItem(entry, null))).toContain("auto-beta-1");
+    expect(detailHtml(auditItem(entry, null), "audit", "postgresql")).toContain("auto-beta-1");
   });
 });
 

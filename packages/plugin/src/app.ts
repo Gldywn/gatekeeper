@@ -60,12 +60,14 @@ import {
   recentRowHtml,
 } from "./render/inbox";
 import {
+  accessMatrix,
+  autoNote,
   type CardGate,
-  cardGate,
+  cardGateFor,
   cardHtml,
   LONG_RUN_MS,
+  paintLegend,
   readyActions,
-  schemaInner,
 } from "./render/queue";
 import { type LayerState, readOnlyView } from "./render/readonly";
 import { presence } from "./render/roster";
@@ -447,6 +449,7 @@ export class Gatekeeper {
           this.closeModeMenus() ||
           this.closeFlyoutMenus() ||
           this.dismissAgentPop() ||
+          this.dismissLegendPop() ||
           this.setAgentsPopOpen(false)
         ) {
           return;
@@ -472,8 +475,8 @@ export class Gatekeeper {
         }
       }
     });
-    document.addEventListener("mouseover", (e) => this.enterAgentGlyph(e));
-    document.addEventListener("focusin", (e) => this.enterAgentGlyph(e));
+    document.addEventListener("mouseover", (e) => this.enterPopGlyph(e));
+    document.addEventListener("focusin", (e) => this.enterPopGlyph(e));
     // The agents list folded behind "+N more" closes on any click outside it.
     document.addEventListener("click", (e) => {
       const target = e.target as Element;
@@ -1857,10 +1860,18 @@ export class Gatekeeper {
     return true;
   }
 
-  // The server popover Escape hid stays hidden until its glyph is entered again from outside,
+  // A legend entry's names hide on Escape with the focus kept on the entry, as the server popover.
+  private dismissLegendPop(): boolean {
+    const slot = this.root.querySelector(
+      ".lg-slot:is(:hover, :focus-within):not([data-dismissed])",
+    );
+    return slot ? slot.toggleAttribute("data-dismissed", true) : false;
+  }
+
+  // A popover Escape hid stays hidden until its glyph is entered again from outside,
   // by the pointer or the focus, whatever else still holds it open.
-  private enterAgentGlyph(e: MouseEvent | FocusEvent): void {
-    const glyph = (e.target as Element | null)?.closest?.(".ag-ico");
+  private enterPopGlyph(e: MouseEvent | FocusEvent): void {
+    const glyph = (e.target as Element | null)?.closest?.(".ag-ico, .lg-slot");
     if (!glyph || glyph.contains(e.relatedTarget as Node | null)) {
       return;
     }
@@ -2803,12 +2814,22 @@ export class Gatekeeper {
   }
 
   private renderCardSchema(card: Card): void {
-    const el = this.root.querySelector<HTMLElement>(`#cs-${CSS.escape(card.id)}`);
-    if (el) {
-      // A write/destructive card lists its tables in the risk annotation, so drop the
-      // duplicate reads line here; the sensitive-column flags still render.
+    // The matrix (a read's tables come from this analysis), the legend and the SQL marks move
+    // together, so none of them describes a different analysis than the others.
+    const id = CSS.escape(card.id);
+    const matrix = this.root.querySelector<HTMLElement>(`#cm-${id}`);
+    if (matrix) {
       const cls = classifyQuery(card.sql, this.dialect).class;
-      el.innerHTML = schemaInner(card.schema, cls !== "read");
+      matrix.innerHTML = accessMatrix(card.sql, this.dialect, cls, card.schema);
+    }
+    const legend = this.root.querySelector<HTMLElement>(`#cs-${id}`);
+    if (legend) {
+      paintLegend(legend, card.schema, card.id);
+    }
+    // Auto mode's note names an object only when the card does not show it, so it follows too.
+    const note = this.root.querySelector<HTMLElement>(`#ca-${id}`);
+    if (note) {
+      note.innerHTML = autoNote(card);
     }
     // Re-highlight the SQL now that the sensitive columns are known, so they light
     // up in the query text too, not only in the flags below.
@@ -3134,7 +3155,7 @@ export class Gatekeeper {
     if (!actions) {
       return;
     }
-    actions.outerHTML = readyActions(id, this.gateFor(card), this.denyDrafts);
+    actions.outerHTML = readyActions(id, this.gateFor(card), this.denyDrafts, card.expiresAt);
     this.root.querySelector<HTMLInputElement>(`[data-card="${id}"] .deny-reason`)?.focus();
   }
 
@@ -3154,13 +3175,13 @@ export class Gatekeeper {
     if (!card || !actions) {
       return;
     }
-    actions.outerHTML = readyActions(id, this.gateFor(card), this.denyDrafts);
+    actions.outerHTML = readyActions(id, this.gateFor(card), this.denyDrafts, card.expiresAt);
     this.root.querySelector<HTMLButtonElement>(`[data-card="${id}"] .deny-open`)?.focus();
   }
 
   // The armed-mode verdict for one card, matching what the queue renders.
   private gateFor(card: Card): CardGate {
-    return cardGate(card.sql, this.dialect, this.mode, this.connectionReadOnly());
+    return cardGateFor(card, this.dialect, this.mode, this.connectionReadOnly());
   }
 
   private modeBlockReason(blocked: boolean, cls: RiskClass): string {
