@@ -2798,6 +2798,24 @@ label.qs-row {
   line-height: 1.5;
   color: var(--muted);
 }
+/* What confirming does to Auto mode: one fact under the explanation, led by Auto mode's bolt,
+   with no frame of its own (framed notes belong to the cards). */
+.confirm-auto {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: calc(-1 * var(--s2)) 0 var(--s4);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.confirm-auto svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  color: var(--auto);
+}
 /* The queue card's SQL block, kept scrollable here so a long statement cannot push the
    actions off screen. Everything else (frame, colours, copy button) comes from .sql. */
 .confirm-sql {
@@ -3300,10 +3318,6 @@ p.auto-message:empty {
 .cs-unparsed.auto {
   border-color: color-mix(in oklch, var(--auto) 32%, transparent);
   background: color-mix(in oklch, var(--auto) 8%, transparent);
-}
-/* In the mode confirm, the note closes the explanation before the actions. */
-.confirm-auto {
-  margin-bottom: var(--s4);
 }
 /* Evaluation facts are data, so they read like the activity note beside them. */
 /* The evaluation trace, in the detail and in the audit trail: the pending card's Auto note,

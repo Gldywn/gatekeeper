@@ -2378,9 +2378,7 @@ export class Gatekeeper {
   private openModeArm(next: RiskMode): void {
     // Auto mode runs in Read-only only, so raising the mode switches it off.
     const autoNotice = (mode: string) =>
-      this.autoEnabled
-        ? `Enabling ${mode} mode turns it off. Every read then waits for your approval.`
-        : undefined;
+      this.autoEnabled ? `Enabling ${mode} mode automatically turns off Auto mode.` : undefined;
     if (next === "write") {
       this.confirmModal.open({
         tone: "write",
