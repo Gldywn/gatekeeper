@@ -4746,6 +4746,181 @@ p.auto-message[data-tone="busy"] {
   font-size: 12px;
   color: var(--faint);
 }
+/* An empty list: the header's honeycomb, the middle cell holding the list's own icon. */
+.em-hive-wrap {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 16px;
+  min-height: 100%;
+  padding: 28px var(--s3);
+  text-align: center;
+}
+#listAudit .act-body:has(> .em-hive-wrap) {
+  display: grid;
+  min-height: 100%;
+}
+.em-hive {
+  position: relative;
+  width: 132px;
+  height: 112px;
+}
+.hx {
+  position: absolute;
+  width: 44px;
+  height: 50px;
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+  background: color-mix(in oklch, var(--amber) 10%, transparent);
+}
+/* The cell's edge is its own fill showing round an inset of the pane's colour. */
+.hx::after {
+  content: "";
+  position: absolute;
+  inset: 1.5px;
+  clip-path: inherit;
+  background: var(--pane-bg);
+}
+.hx.c {
+  left: 44px;
+  top: 31px;
+  display: grid;
+  place-items: center;
+  background: color-mix(in oklch, var(--amber) 55%, transparent);
+  color: var(--amber);
+}
+.hx.c::after {
+  background: color-mix(in oklch, var(--amber) 14%, var(--pane-bg));
+}
+.hx.c svg {
+  position: relative;
+  z-index: 1;
+  width: 18px;
+  height: 18px;
+}
+.hx.a {
+  left: 22px;
+  top: -6px;
+  opacity: 0.8;
+}
+.hx.b {
+  left: 66px;
+  top: -6px;
+  opacity: 0.45;
+}
+.hx.d {
+  left: 0;
+  top: 31px;
+  opacity: 0.55;
+}
+.hx.e {
+  left: 88px;
+  top: 31px;
+  opacity: 0.3;
+}
+.em-center {
+  display: grid;
+  gap: 4px;
+  max-width: 30ch;
+}
+.em-center b {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.em-center > span {
+  font-size: 12px;
+  color: var(--faint);
+}
+/* An empty right pane walks through what comes: a tile per step, then who is there. */
+.em-steps {
+  display: grid;
+  gap: 14px;
+  max-width: 460px;
+  padding: var(--s3);
+}
+.em-steps-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.em-steps ol {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.em-steps li {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  column-gap: 10px;
+  align-items: start;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.em-steps li b {
+  font-weight: 600;
+  color: var(--text);
+}
+.em-tile {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: color-mix(in oklch, var(--text) 6%, transparent);
+  color: var(--amber);
+}
+.em-tile svg {
+  width: 15px;
+  height: 15px;
+}
+.em-waiting {
+  gap: 10px;
+}
+.em-agents {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  color: var(--faint);
+}
+.em-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+.em-agents.on {
+  color: var(--muted);
+}
+.em-agents.on .em-dot {
+  background: var(--ok);
+}
+/* The connection as the header names it. An inline block keeps the sentence's baseline and
+   moves to the next line whole; a name wider than the pane wraps inside it. */
+.em-conn {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0 5px 0 4px;
+  border-radius: 5px;
+  background: color-mix(in oklch, var(--text) 7%, transparent);
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.em-conn svg {
+  width: 11px;
+  height: 11px;
+  margin-right: 4px;
+  vertical-align: -1px;
+  color: var(--muted);
+}
+.em-center .em-conn {
+  font-size: 11.5px;
+}
 .pane-back {
   display: none;
   align-items: center;

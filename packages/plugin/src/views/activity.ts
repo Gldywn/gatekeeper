@@ -16,6 +16,7 @@ import {
   activityTailMore,
   entryFlags,
 } from "../render/activity";
+import { emptyListHtml } from "../render/inbox";
 import { textSchema } from "../sql/schema";
 import type { ActivityEntry } from "../types";
 
@@ -49,6 +50,8 @@ interface ActivityViewDeps {
   dialect: () => string;
   // The entry open in the Inbox's right pane, marked as current in the list.
   selected: () => string | null;
+  // Called once the first page is on screen, so the right pane can follow an empty trail.
+  rendered?: () => void;
 }
 
 // Owns the connection-scoped Audit Trail in the Inbox's left pane (#listAudit): a durable,
@@ -63,6 +66,9 @@ export class ActivityView {
   private readonly scope: () => string | undefined;
   private readonly dialect: () => string;
   private readonly selected: () => string | null;
+  private readonly rendered: () => void;
+  // The first page has been shown since the last open, so an empty feed is known to be empty.
+  private settled = false;
   // Fetched but not shown: the oldest day reached so far, held until a later page (or the
   // end of history) proves it whole, so every day on screen has its full count and export.
   private partial: ActivityEntry[] = [];
@@ -83,6 +89,7 @@ export class ActivityView {
     this.scope = deps.scope;
     this.dialect = deps.dialect;
     this.selected = deps.selected;
+    this.rendered = deps.rendered ?? (() => {});
   }
 
   async open(): Promise<void> {
@@ -94,6 +101,7 @@ export class ActivityView {
     this.activity = [];
     this.partial = [];
     this.more = undefined;
+    this.settled = false;
     panel.innerHTML = activityShell();
     await this.loadOlder();
   }
@@ -109,6 +117,7 @@ export class ActivityView {
 
   // Connection switch: drop the feed, which belonged to the previous connection.
   reset(): void {
+    this.settled = false;
     this.activity = [];
     this.partial = [];
     this.close();
@@ -263,11 +272,18 @@ export class ActivityView {
   }
 
   private renderActivity(): void {
-    if (!this.activity.length) {
-      this.setActivityBody('<p class="act-status">No activity on this connection yet.</p>');
-      return;
-    }
-    this.setActivityBody(activityDaysHtml(this.activity, this.selected(), this.dialect()));
+    this.settled = true;
+    this.setActivityBody(
+      this.activity.length
+        ? activityDaysHtml(this.activity, this.selected(), this.dialect())
+        : emptyListHtml("audit", this.connectionName()),
+    );
+    this.rendered();
+  }
+
+  // Loaded, and nothing recorded on this connection: no entry now, none held, none older.
+  isEmpty(): boolean {
+    return this.settled && !this.activity.length && !this.partial.length && this.more !== true;
   }
 
   // Fold a past month open or closed; its days keep their own state inside.

@@ -19,6 +19,8 @@ export const scenario = {
   page: num("page", 40),
   // How long an approved query runs, to see the running row, Stop and the auto-stop.
   delay: num("delay", 400),
+  // 0 empties the Audit Trail, to see its empty state; history=0 alone keeps the older days.
+  audit: num("audit", 1),
 };
 
 export const NOW = Date.now();
@@ -402,6 +404,7 @@ export function seededHistory(): HistItem[] {
 // write whose returned count was never recorded, one with no count at all, then three weeks of
 // older days, enough for several preview pages.
 export function activity(): ActivityEntry[] {
+  if (!scenario.audit) return [];
   const STATE: Record<HistItem["status"], ActivityEntry["state"]> = {
     approved: "approved",
     rejected: "rejected",

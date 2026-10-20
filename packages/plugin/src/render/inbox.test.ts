@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ActivityEntry, Card, HistItem } from "../types";
-import { auditItem, queueRowHtml, recentRowHtml } from "./inbox";
+import { auditItem, emptyListHtml, paneEmptyHtml, queueRowHtml, recentRowHtml } from "./inbox";
 import { AUTO_EVALUATING } from "./queue";
 
 const T = new Date("2026-01-01T00:00:00Z").getTime();
@@ -205,5 +205,37 @@ describe("recentRowHtml", () => {
       false,
     );
     expect(html).toContain('title="Approved automatically"');
+  });
+});
+
+describe("empty states", () => {
+  const ctx = { agents: 0, auditEmpty: false, connection: "prd<db>" };
+
+  it("puts one composition in an empty list, naming the connection as the header does", () => {
+    const queue = emptyListHtml("queue", "prd<db>");
+    expect(queue).toContain("<b>Queue is empty</b>");
+    expect(queue).not.toContain("ix-group");
+    expect(emptyListHtml("audit", "prd<db>")).toContain('Every decision on <span class="em-conn">');
+    expect(emptyListHtml("audit", "prd<db>")).toContain("prd&lt;db&gt;</span> is kept here.");
+    expect(emptyListHtml("audit", "")).toContain("Every decision on this connection is kept here.");
+  });
+
+  it("walks through a first proposal while no agent is there, then waits with who is", () => {
+    const none = paneEmptyHtml(0, "queue", ctx);
+    expect(none).toContain('<div class="em-steps-title">Nothing to review yet</div>');
+    expect(none).toContain("prd&lt;db&gt;</span> and the result goes back to the agent.");
+    expect(none).toContain("No agent connected</span>");
+    expect(paneEmptyHtml(0, "queue", { ...ctx, agents: 1 })).toContain("1 agent connected");
+    const two = paneEmptyHtml(0, "queue", { ...ctx, agents: 2 });
+    expect(two).toContain("Waiting for a query proposal</span>");
+    expect(two).toContain("2 agents connected");
+    expect(paneEmptyHtml(1, "queue", ctx)).toContain("1 proposal waits for you");
+  });
+
+  it("says what the Audit Trail keeps only while it holds nothing", () => {
+    expect(paneEmptyHtml(0, "audit", { ...ctx, auditEmpty: true })).toContain(
+      "What the Audit Trail keeps for",
+    );
+    expect(paneEmptyHtml(0, "audit", ctx)).toContain("Select an entry");
   });
 });

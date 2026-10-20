@@ -11,10 +11,16 @@ import {
 } from "../html";
 import {
   agentBadge,
+  botIcon,
+  checkIcon,
   clockIcon,
+  dbCylinderIcon,
   harnessIcon,
   helpCircleIcon,
+  historyIcon,
+  messageIcon,
   pencilIcon,
+  terminalIcon,
   trashIcon,
 } from "../icons";
 import { classifyQuery, type RiskClass } from "../sql/classify";
@@ -282,14 +288,94 @@ export function agentsStripHtml(rows: { s: SessionRoster; p: Presence }[], live:
     </span>`;
 }
 
-// What the right pane shows with nothing selected.
-export function paneEmptyHtml(waiting: number, tab: "queue" | "audit"): string {
+// The connection as the header names it: its cylinder and its name, set apart in a sentence.
+function connTag(name: string): string {
+  return name
+    ? `<span class="em-conn">${dbCylinderIcon}${escapeHtml(name)}</span>`
+    : "this connection";
+}
+
+// An empty list is one composition on the header's honeycomb; its group heads arrive with the
+// first row.
+export function emptyListHtml(list: "queue" | "audit", connection: string): string {
+  const [icon, title, sub] =
+    list === "queue"
+      ? [clockIcon, "Queue is empty", "Proposals waiting for your review<br>show up here."]
+      : [
+          historyIcon,
+          "Audit Trail is empty",
+          `Every decision on ${connTag(connection)} is kept here.`,
+        ];
+  return `<div class="em-hive-wrap">
+      <div class="em-hive" aria-hidden="true"><span class="hx a"></span><span class="hx b"></span><span class="hx c">${icon}</span><span class="hx d"></span><span class="hx e"></span></div>
+      <div class="em-center"><b>${title}</b><span>${sub}</span></div>
+    </div>`;
+}
+
+function stepsHtml(title: string, steps: [string, string, string][], foot = ""): string {
+  const items = steps
+    .map(
+      ([icon, head, rest]) =>
+        `<li><span class="em-tile">${icon}</span><span><b>${head}</b> ${rest}</span></li>`,
+    )
+    .join("");
+  return `<div class="em-steps"><div class="em-steps-title">${title}</div><ol>${items}</ol>${foot}</div>`;
+}
+
+function agentsLine(agents: number): string {
+  const text = agents
+    ? `${agents} ${agents === 1 ? "agent" : "agents"} connected`
+    : "No agent connected";
+  return `<span class="em-agents${agents ? " on" : ""}"><span class="em-dot"></span>${text}</span>`;
+}
+
+export interface PaneEmptyContext {
+  // Agents the roster shows as there (active or idle).
+  agents: number;
+  // The Audit Trail loaded and holds no decision for this connection.
+  auditEmpty: boolean;
+  connection: string;
+}
+
+// What the right pane shows with nothing selected. With no agent, how a first proposal travels;
+// with no decision yet in the Audit Trail, what it will keep.
+export function paneEmptyHtml(
+  waiting: number,
+  tab: "queue" | "audit",
+  ctx: PaneEmptyContext,
+): string {
+  const conn = connTag(ctx.connection);
   if (tab === "audit") {
-    return `<div class="pane-empty"><span class="pe-title">Select an entry</span><span class="pe-sub">Its query, its outcome and who asked appear here.</span></div>`;
+    return ctx.auditEmpty
+      ? stepsHtml(`What the Audit Trail keeps for ${conn}`, [
+          [messageIcon, "What was asked", "the SQL, the agent's intent and its session."],
+          [checkIcon, "Who decided", "you or Auto mode, and when."],
+          [
+            historyIcon,
+            "How it ended",
+            "completed, declined, failed, cancelled or expired, with the results.",
+          ],
+        ])
+      : `<div class="pane-empty"><span class="pe-title">Select an entry</span><span class="pe-sub">Its query, its outcome and who asked appear here.</span></div>`;
   }
-  if (!waiting) {
-    return `<div class="waiting"><span class="waiting-mark" aria-hidden="true"></span><span>Waiting for a query proposal...</span></div>`;
+  if (waiting) {
+    const what = waiting === 1 ? "1 proposal waits for you" : `${waiting} proposals wait for you`;
+    return `<div class="pane-empty"><span class="pe-title">${what}</span><span class="pe-sub">Select one on the left to review it.</span></div>`;
   }
-  const what = waiting === 1 ? "1 proposal waits for you" : `${waiting} proposals wait for you`;
-  return `<div class="pane-empty"><span class="pe-title">${what}</span><span class="pe-sub">Select one on the left to review it.</span></div>`;
+  if (!ctx.agents) {
+    return stepsHtml(
+      "Nothing to review yet",
+      [
+        [
+          botIcon,
+          "An agent proposes SQL",
+          "through the Gatekeeper MCP server it is configured with.",
+        ],
+        [checkIcon, "You review it here", "then approve it, ask for changes, or decline it."],
+        [terminalIcon, "Beekeeper runs it", `on ${conn} and the result goes back to the agent.`],
+      ],
+      agentsLine(0),
+    );
+  }
+  return `<div class="waiting em-waiting"><span class="waiting-mark" aria-hidden="true"></span><span>Waiting for a query proposal</span>${agentsLine(ctx.agents)}</div>`;
 }

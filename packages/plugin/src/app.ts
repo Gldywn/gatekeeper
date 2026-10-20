@@ -55,6 +55,7 @@ import { CANCELLED_NOTE, NOT_DELIVERED_NOTE } from "./render/detail";
 import {
   agentsStripHtml,
   auditItem,
+  emptyListHtml,
   groupHeadHtml,
   paneEmptyHtml,
   queueRowHtml,
@@ -317,6 +318,8 @@ export class Gatekeeper {
   private prevCardIds = new Set<string>();
   private stripObserver?: ResizeObserver;
   private overlayScrolls: (() => void)[] = [];
+  // Agents the roster shows as there, for the empty right pane.
+  private liveAgents = 0;
   // The Inbox: which list the left pane shows, and what each list has open on the right. Each
   // list keeps its own selection, so coming back to a tab finds what was open there. Nothing
   // is ever selected for the human: a new or next proposal never lands under the pointer.
@@ -394,6 +397,10 @@ export class Gatekeeper {
       scope: () => this.connScopeKey(),
       dialect: () => this.dialect,
       selected: () => this.selection.audit?.id ?? null,
+      // An empty trail changes what the right pane explains.
+      rendered: () => {
+        if (this.tab === "audit" && !this.selection.audit) this.renderSelection();
+      },
     });
     this.settingsView = new SettingsView({
       root,
@@ -1734,7 +1741,11 @@ export class Gatekeeper {
     this.breatheLoop?.stop();
     this.breatheLoop = undefined;
     const waiting = this.cards.filter((c) => c.state === "ready").length;
-    empty.innerHTML = paneEmptyHtml(waiting, this.tab);
+    empty.innerHTML = paneEmptyHtml(waiting, this.tab, {
+      agents: this.liveAgents,
+      auditEmpty: this.activityView.isEmpty(),
+      connection: this.connectionName,
+    });
     const mark = empty.querySelector(".waiting-mark");
     if (mark) this.breatheLoop = pulse(mark);
   }
@@ -2602,6 +2613,11 @@ export class Gatekeeper {
     }
     this.rosterSig = sig;
     const live = rows.filter((r) => r.p !== "gone").length;
+    // The empty right pane says whether an agent is there, so it follows the roster.
+    if (live !== this.liveAgents) {
+      this.liveAgents = live;
+      if (!this.selection[this.tab]) this.renderSelection();
+    }
     const open = this.root.querySelector<HTMLElement>("#agentsPop")?.hidden === false;
     const focused = el.contains(document.activeElement);
     el.innerHTML = agentsStripHtml(rows, live);
@@ -2801,13 +2817,17 @@ export class Gatekeeper {
     const focused = list.contains(document.activeElement)
       ? (document.activeElement as HTMLElement).dataset.row
       : undefined;
-    list.innerHTML = `${groupHeadHtml("Pending approval", ready, ready > 0)}${pending}${
-      recent.length
-        ? `${groupHeadHtml("Recently resolved", 0)}${recent
-            .map((h) => recentRowHtml(h, h.id === selected, this.dialect))
-            .join("")}`
-        : ""
-    }`;
+    // Nothing pending and nothing decided: one composition, the heads come with the first row.
+    list.innerHTML =
+      !this.cards.length && !recent.length
+        ? emptyListHtml("queue", this.connectionName)
+        : `${groupHeadHtml("Pending approval", ready, ready > 0)}${pending}${
+            recent.length
+              ? `${groupHeadHtml("Recently resolved", 0)}${recent
+                  .map((h) => recentRowHtml(h, h.id === selected, this.dialect))
+                  .join("")}`
+              : ""
+          }`;
     for (const row of list.querySelectorAll<HTMLElement>('[data-select="card"]')) {
       if (row.dataset.row && !this.prevCardIds.has(row.dataset.row)) enter(row);
     }
