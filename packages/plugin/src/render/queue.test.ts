@@ -395,7 +395,7 @@ describe("the pending card's order", () => {
       new Map(),
     );
     const sql = held.indexOf('<pre class="sql">');
-    const note = held.indexOf("The evaluation timed out.");
+    const note = held.indexOf("Held on this machine before evaluation.");
     expect(sql).toBeLessThan(note);
     expect(note).toBeLessThan(held.indexOf('<div class="dbar">'));
   });
@@ -414,49 +414,24 @@ describe("the pending card's order", () => {
 });
 
 describe("sensitive names the SQL does not spell out", () => {
-  const held = (schema: Card["schema"], sql = "SELECT * FROM public.users") => ({
-    id: "q_s",
-    sql,
-    createdAt: T - 1000,
-    expiresAt: T + 90_000,
-    leaseId: "l",
-    leaseExpiresAt: T + 90_000,
-    sessionId: "s1",
-    session,
-    state: "ready" as const,
-    autoStatus: "Needs review: Sensitive source or alias: email",
-    schema,
-  });
-  const users = { tables: ["public.users"], client: [], literals: [], star: true };
-
-  it("names a column a SELECT * expands to, and lists it under its category", () => {
-    const html = cardHtml(held({ ...users, pii: ["email"] }), "postgresql", new Map());
-    expect(html).toContain(
-      'A local check flagged <code class="name">email</code> before evaluation.',
+  it("lists a column a SELECT * expands to under its category in the legend", () => {
+    const html = cardHtml(
+      {
+        id: "q_s",
+        sql: "SELECT * FROM public.users",
+        createdAt: T - 1000,
+        expiresAt: T + 90_000,
+        leaseId: "l",
+        leaseExpiresAt: T + 90_000,
+        sessionId: "s1",
+        session,
+        state: "ready",
+        schema: { tables: ["public.users"], pii: ["email"], client: [], literals: [], star: true },
+      },
+      "postgresql",
+      new Map(),
     );
     expect(html).toContain('<span class="lg-pop" id="lg-pii-q_s" role="tooltip">email</span>');
-  });
-
-  it("drops the name once the SQL shows it marked, and restores it when the mark goes", () => {
-    const sql = "SELECT email FROM public.users";
-    const marked = cardHtml(held({ ...users, pii: ["email"] }, sql), "postgresql", new Map());
-    expect(marked).toContain("A local check flagged this read before evaluation.");
-    // PII flagging turned off: no mark, so the note names the column again.
-    const unmarked = cardHtml(held({ ...users, pii: [] }, sql), "postgresql", new Map());
-    expect(unmarked).toContain(
-      'A local check flagged <code class="name">email</code> before evaluation.',
-    );
-  });
-
-  it("keeps the name when only a comment or a string mentions it", () => {
-    for (const sql of [
-      "SELECT * FROM public.users /* email */",
-      "SELECT 'email', u.* FROM public.users u",
-    ]) {
-      expect(cardHtml(held({ ...users, pii: ["email"] }, sql), "postgresql", new Map())).toContain(
-        'A local check flagged <code class="name">email</code> before evaluation.',
-      );
-    }
   });
 });
 

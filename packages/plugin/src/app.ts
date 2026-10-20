@@ -45,8 +45,8 @@ import { connectionScopeKey } from "./net/scope";
 import { SingleInstance, type SingleInstanceWire } from "./net/singleinstance";
 import { overlayScroll } from "./overlay-scroll";
 import { agentLinkAge, agentLinkLabel, agentLinkStatusHtml } from "./render/agentlink";
-import { AUTO_APPROVED, autoIcon, autoPopHtml, SAVED_KEY_MASK } from "./render/auto";
-import { refusalReason } from "./render/autoreasons";
+import { AUTO_APPROVED, autoIcon, autoPopHtml, refusalReason, SAVED_KEY_MASK } from "./render/auto";
+
 import { ConfirmModal } from "./render/confirm";
 import { connChipInner } from "./render/connchip";
 import { modeDropdown, switchInput } from "./render/controls";
@@ -62,7 +62,6 @@ import {
 } from "./render/inbox";
 import {
   accessMatrix,
-  autoNote,
   type CardGate,
   cardGateFor,
   cardHtml,
@@ -2846,11 +2845,6 @@ export class Gatekeeper {
     const legend = this.root.querySelector<HTMLElement>(`#cs-${id}`);
     if (legend) {
       paintLegend(legend, card.schema, card.id);
-    }
-    // Auto mode's note names an object only when the card does not show it, so it follows too.
-    const note = this.root.querySelector<HTMLElement>(`#ca-${id}`);
-    if (note) {
-      note.innerHTML = autoNote(card);
     }
     // Re-highlight the SQL now that the sensitive columns are known, so they light
     // up in the query text too, not only in the flags below.

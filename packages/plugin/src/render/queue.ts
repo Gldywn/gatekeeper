@@ -15,8 +15,7 @@ import { modeRank, type RiskMode } from "../sql/mode";
 import { visibleControls } from "../sql/sanitize";
 import { analyzeTableOps, type SchemaContext } from "../sql/schema";
 import type { Card, CardState, RunState } from "../types";
-import { AUTO_APPROVED, AUTO_LEADS, autoIcon, NOTHING_SENT } from "./auto";
-import { holdSentence, type ReasonContext, reasonHtml, reviewText } from "./autoreasons";
+import { AUTO_APPROVED, AUTO_LEADS, autoIcon, holdText } from "./auto";
 
 const WRITE_MODE_NOTE = "Write mode is required to approve this query.";
 const DESTRUCTIVE_MODE_NOTE = "Destructive mode is required to approve this query.";
@@ -92,9 +91,9 @@ function unparsedNote(gate: CardGate): string {
 export const AUTO_EVALUATING = "Evaluating with Jev";
 const EVAL_NOTE = "Auto mode is evaluating this read with Jev.";
 
-// One line that names Auto mode first, says where the read stands, and only then carries
-// the reason. Whether the query ever left the machine is the part a human must not guess.
-export function autoNote(card: Card): string {
+// One line that names Auto mode first and says where the read was held. Whether the query
+// ever left the machine is the part a human must not guess.
+function autoNote(card: Card): string {
   if (!card.autoStatus) {
     return "";
   }
@@ -105,30 +104,21 @@ export function autoNote(card: Card): string {
   if (card.autoStatus === AUTO_APPROVED) {
     return `<div class="cs-unparsed auto" role="status">${autoIcon}<span><b>Auto mode:</b> ${AUTO_LEADS.automatic}.</span></div>`;
   }
-  // The reason is the sentence: what held the read, then who decides, then whether anything left.
-  const sent = Boolean(card.autoSent);
-  const text = reviewText(card.autoStatus, card.evaluation, reasonContext(card));
-  const tail = ` Waiting for your review.${sent ? "" : ` ${NOTHING_SENT}`}`;
-  return `<div class="cs-unparsed auto" role="status">${autoIcon}<span><b>Auto mode:</b> ${reasonHtml(text, tail)}</span></div>`;
+  return `<div class="cs-unparsed auto" role="status">${autoIcon}<span><b>Auto mode:</b> ${holdText(Boolean(card.autoSent), " Waiting for your review.")}</span></div>`;
 }
-
-// A name needs no repeat only when the SQL shows it marked, as the highlighter marks it. A column
-// a SELECT * expands to, or one only a comment or a string mentions, stays named.
-function reasonContext(card: Card): ReasonContext {
-  const html = highlight(card.sql, card.schema?.pii, card.schema?.client);
-  const marked = new Set([...html.matchAll(MARKED)].map(([, n]) => n.toLowerCase()));
-  return {
-    shown: (name) => marked.has(escapeHtml(name).toLowerCase()),
-    valuesShown: Boolean(card.schema?.literals.length),
-  };
-}
-
-const MARKED = /<span class="(?:pii|client)-col"[^>]*>([^<]*)<\/span>/g;
 
 // Why the last human approval did not run, in its own words: never an Auto mode fact.
+const EXECUTION_NOTICES: Record<string, string> = {
+  "Connection or approval authority changed":
+    "The connection check failed or approval authority changed before execution.",
+  "Execution stopped before SQL ran. Approval authority changed":
+    "Execution was stopped before the SQL ran because the connection, approval authority or approval requirements could not be confirmed.",
+};
 function executionNote(card: Card): string {
   if (!card.executionNotice) return "";
-  const text = holdSentence(card.executionNotice) || escapeHtml(card.executionNotice);
+  const text = Object.hasOwn(EXECUTION_NOTICES, card.executionNotice)
+    ? EXECUTION_NOTICES[card.executionNotice]
+    : escapeHtml(card.executionNotice);
   return `<div class="cs-unparsed" role="status">${warnIcon}<span>${text}</span></div>`;
 }
 
@@ -179,7 +169,7 @@ export function cardHtml(
         <div class="cs-matrix" id="cm-${card.id}">${accessMatrix(card.sql, dialect, gate.cls, card.schema)}</div>
         ${unparsedNote(gate)}<div class="cs-legend" id="cs-${card.id}">${sensitiveLegend(card.schema, card.id)}</div>
         ${sqlBlock}
-        <div class="cs-auto" id="ca-${card.id}">${autoNote(card)}</div>${executionNote(card)}<div class="dbar">${bar}</div>
+        <div class="cs-auto">${autoNote(card)}</div>${executionNote(card)}<div class="dbar">${bar}</div>
       </div>`;
 }
 

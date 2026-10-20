@@ -2,7 +2,6 @@ import type { ApprovalAttribution, AutoEvaluation } from "@gatekeeper/shared";
 import { escapeHtml } from "../html";
 import { AUTO_POLICY, AUTO_THRESHOLDS } from "../sql/auto";
 import type { AutoHold } from "../types";
-import { evaluationText, reasonHtml, reviewText } from "./autoreasons";
 
 export const autoIcon =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m13 3-9 11h7l-1 7 10-12h-7z"/></svg>';
@@ -13,13 +12,21 @@ export const autoDisclosure =
 // to the page. Bullets fall outside the key alphabet, so the mask can never pass as a key.
 export const SAVED_KEY_MASK = "\u2022".repeat(24);
 
-// The same sentences on the pending card and on the kept record.
+// The same sentences on the pending card and on the kept record: a hold says only where it
+// happened, on this machine before anything left, or at Jev, the model that evaluates reads.
 export const AUTO_LEADS = {
-  refused: "The evaluation did not clear this read",
+  held: "Held on this machine before evaluation",
+  refused: "Jev did not clear this read",
   cleared: "The evaluation cleared this read",
   automatic: "This read was approved automatically",
 } as const;
 export const NOTHING_SENT = '<b class="auto-strong">Nothing was sent to TypeSafe.</b>';
+
+// A hold says where it happened, and a local one that nothing left the machine.
+export function holdText(sent: boolean, tail = ""): string {
+  return `${sent ? AUTO_LEADS.refused : AUTO_LEADS.held}.${tail}${sent ? "" : ` ${NOTHING_SENT}`}`;
+}
+
 // Card status once Jev cleared a read and Gatekeeper took it to execution; it replaces
 // "Evaluating with Jev", which would otherwise stay up for the whole run.
 export const AUTO_APPROVED = "Approved automatically";
@@ -72,23 +79,19 @@ export function approvalHtml(
   hold?: AutoHold,
 ): string {
   const e = approval?.evaluation ?? evaluation;
-  // A hold is its own fact, decided or not: its reason is the sentence, and it stands beside a
-  // completed evaluation rather than in place of it.
-  const holdLine = hold
-    ? `<div class="auto-trace-line">${autoIcon}<span><b>Auto mode:</b> ${reasonHtml(reviewText(hold.reason, e), hold.sent ? "" : ` ${NOTHING_SENT}`)}</span></div>`
-    : "";
+  // With an evaluation its verdict is the sentence, so a read Jev cleared and a later check
+  // held never reads as both cleared and not.
   if (!e) {
-    return hold ? `<div class="auto-trace">${holdLine}</div>` : "";
+    return hold
+      ? `<div class="auto-trace"><div class="auto-trace-line">${autoIcon}<span><b>Auto mode:</b> ${holdText(hold.sent)}</span></div></div>`
+      : "";
   }
-  // A refusal says what the evaluator flagged, in its own fixed labels, rather than a chip each.
   const lead =
     approval?.source === "automatic"
       ? `${AUTO_LEADS.automatic}.`
       : e.eligible && !e.reasons.length
         ? `${AUTO_LEADS.cleared}.`
-        : e.reasons.length
-          ? reasonHtml(evaluationText(e.reasons))
-          : `${AUTO_LEADS.refused}.`;
+        : `${AUTO_LEADS.refused}.`;
   // Cutoffs only mean something for the policy they were written for; an older
   // evaluation keeps its numbers without a verdict painted on them.
   const graded = e.policy === AUTO_POLICY;
@@ -103,6 +106,10 @@ export function approvalHtml(
       <div class="auto-trace-line">${autoIcon}<span><b>Auto mode:</b> ${lead}</span></div>
       <div class="auto-reasons">${axes}</div>
       <div class="auto-trace-meta">${escapeHtml(e.provider)} &middot; ${escapeHtml(e.model)} &middot; policy ${escapeHtml(e.policy)} &middot; ${escapeHtml(new Date(e.evaluatedAt).toISOString())} &middot; ${escapeHtml(e.sqlDigest)}</div>
-      ${holdLine}
     </div>`;
+}
+
+/** The reason the app records when an evaluation refuses a read (app.ts evaluateNext). */
+export function refusalReason(evaluation: AutoEvaluation): string {
+  return evaluation.reasons?.join(". ") || "Evaluator uncertainty or stale policy/model";
 }

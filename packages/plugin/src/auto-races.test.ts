@@ -1316,19 +1316,17 @@ describe("holds that are not Auto mode's", () => {
 });
 
 describe("schema repaint", () => {
-  it("repaints the Auto note with the matrix, the legend and the SQL", () => {
+  it("repaints the matrix, the legend and the SQL marks from one analysis", () => {
     const { app, card } = harness();
     vi.stubGlobal("CSS", { escape: (s: string) => s });
     const el = () => ({ innerHTML: "" });
     const nodes: Record<string, { innerHTML: string }> = {
       "#cm-req": el(),
       "#cs-req": el(),
-      "#ca-req": el(),
       "#sqlbody-req": el(),
     };
     app.root = { querySelector: (sel: string) => nodes[sel] ?? null };
     card.sql = "SELECT email FROM public.users";
-    card.autoStatus = "Needs review: Sensitive source or alias: email";
     card.schema = {
       tables: ["public.users"],
       pii: ["email"],
@@ -1337,13 +1335,12 @@ describe("schema repaint", () => {
       star: false,
     };
     app.renderCardSchema(card);
-    expect(nodes["#ca-req"].innerHTML).toContain(
-      "A local check flagged this read before evaluation.",
-    );
-    // The PII display toggle turned off: no mark, so the note names the column again.
+    expect(nodes["#cs-req"].innerHTML).toContain('class="lg pii"');
+    expect(nodes["#sqlbody-req"].innerHTML).toContain('class="pii-col"');
+    // The PII display toggle turned off: neither the legend nor the SQL marks the column.
     card.schema = { ...card.schema, pii: [] };
     app.renderCardSchema(card);
-    expect(nodes["#ca-req"].innerHTML).toContain('<code class="name">email</code>');
     expect(nodes["#cs-req"].innerHTML).toBe("");
+    expect(nodes["#sqlbody-req"].innerHTML).not.toContain("pii-col");
   });
 });
