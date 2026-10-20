@@ -653,7 +653,7 @@ export class Gatekeeper {
         <div class="standby-card">
           <span class="standby-ico">${copyIcon}</span>
           <h1>Open in another tab</h1>
-          <p>Gatekeeper runs in a single tab so two tabs never race an approval. This tab is inactive.</p>
+          <p>Only one tab can approve at a time, so two tabs never race an approval. This tab is inactive.</p>
           <button class="btn approve" id="takeover" type="button">Use Gatekeeper here</button>
         </div>
       </div>`;
@@ -685,7 +685,7 @@ export class Gatekeeper {
         <div class="standby-card">
           <span class="standby-ico">${terminalIcon}</span>
           <h1>Start your agent once</h1>
-          <p>Gatekeeper needs its MCP server running before this tab can pair with it.
+          <p>A running Gatekeeper MCP server is required to pair this tab.
             Start the agent you configured it in (Claude Code, Codex, ...) and this screen moves on by itself.</p>
           <button class="btn approve" id="recheck" type="button">Check again</button>
         </div>
@@ -755,10 +755,10 @@ export class Gatekeeper {
     const name = escapeHtml(dbDisplayName(type));
     return `<div class="detail-card db-notice">
         <h2 class="dbn-title"><span class="dbn-ico">${alertTriangleIcon}</span>Not officially tested with ${name} yet</h2>
-        <p class="dbn-body">Gatekeeper runs entirely through Beekeeper Studio's own database APIs, so it's built to work with every database Beekeeper supports. So far we've officially tested it on PostgreSQL and MySQL. ${name} should work the same way, we just haven't verified it end to end, so keep an eye out for anything that looks off.</p>
+        <p class="dbn-body">SQL execution uses Beekeeper Studio's database APIs. PostgreSQL and MySQL are officially tested so far. Support for ${name} has not been verified end to end.</p>
         <div class="dbn-enc">
           <div class="dbn-h">Help make ${name} official</div>
-          <p class="dbn-p">Gatekeeper is open source and still young. If you run it on ${name} and can help put it through its paces, even a short set of test notes or a small fix is enough for us to move it onto the officially supported list, for you and everyone who comes after. Contributions are genuinely welcome.</p>
+          <p class="dbn-p">This project is open source. If you run it on ${name} and can help put it through its paces, even a short set of test notes or a small fix is enough for us to move it onto the officially supported list, for you and everyone who comes after. Contributions are genuinely welcome.</p>
           <div class="dbn-foot">
             <button class="dbn-gh" type="button" data-notice-contribute>${githubMark}Contribute on GitHub</button>
           </div>
@@ -2881,7 +2881,7 @@ export class Gatekeeper {
         tone: destructive ? "destructive" : "write",
         heading: destructive ? "Run this destructive statement?" : "Run this write?",
         body: destructive
-          ? "This deletes or drops data on the live database the moment you confirm, and Gatekeeper cannot undo it."
+          ? "This statement runs on the live database the moment you confirm. There is no undo action in this plugin."
           : "This changes data on the live database the moment you confirm.",
         sql: card.sql,
         schema: card.schema ?? undefined,

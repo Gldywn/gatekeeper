@@ -111,7 +111,7 @@ export class SettingsView {
           <div class="set-row">
             <div class="set-text">
               <span class="set-name">Execution mode</span>
-              <span class="set-desc">Which statements Gatekeeper will run once you approve.</span>
+              <span class="set-desc">Which statements can run once you approve.</span>
               <span class="set-note">Resets to read-only on load or a connection switch.</span>
             </div>
             <span class="set-control" id="modeCtlSettings">${modeDropdown(this.mode(), false, this.auto())}</span>
