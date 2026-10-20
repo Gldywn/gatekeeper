@@ -14,7 +14,9 @@ const num = (key: string, fallback: number) => {
 export const scenario = {
   agents: num("agents", 2),
   queue: num("queue", 3),
-  history: num("history", 8),
+  history: num("history", 10),
+  // Activity entries per page; a large one shows past months without scrolling to load them.
+  page: num("page", 40),
   // How long an approved query runs, to see the running row, Stop and the auto-stop.
   delay: num("delay", 400),
 };
@@ -277,6 +279,28 @@ export function seededHistory(): HistItem[] {
       session: session(0),
       intent: "find duplicate invoice numbers this month",
       result: capResult(dup, fieldsOf(dup)),
+      sensitivity: { pii: true, value: false, client: false },
+    },
+    {
+      ...base,
+      id: "req_b84f21c07d55",
+      status: "approved",
+      note: "2 rows changed",
+      sql: SQL.voidDup,
+      resolvedAt: NOW - 3 * MIN,
+      session: session(0),
+      intent: "mark the two duplicate invoices as void",
+      result: { fields: [], rows: [], rowCount: 0, affectedRows: 2, truncated: false },
+    },
+    {
+      ...base,
+      id: "req_6f3d0a9c2e71",
+      status: "failed",
+      note: "result not delivered",
+      sql: SQL.status,
+      resolvedAt: NOW - 4 * MIN,
+      session: session(1),
+      intent: "list the invoice statuses in use",
     },
     {
       ...base,

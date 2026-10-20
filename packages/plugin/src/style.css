@@ -2491,12 +2491,13 @@ label.qs-row {
   z-index: 1;
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 12px;
   width: 100%;
-  padding: 10px var(--s3) 8px;
+  padding: 8px var(--s3);
   background: var(--pane-bg);
   border: none;
   font: inherit;
+  color: inherit;
   text-align: left;
   cursor: pointer;
 }
@@ -2520,30 +2521,103 @@ label.qs-row {
 .act-day.collapsed .act-day-chev {
   transform: rotate(-90deg);
 }
-.act-day-label {
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+/* The day as a calendar tile, amber only while that day is open. */
+.act-day-tile {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--text) 6%, transparent);
+  font-size: 15px;
   font-weight: 650;
-  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.act-day:not(.collapsed) .act-day-tile {
+  background: color-mix(in oklch, var(--amber) 14%, transparent);
+  color: var(--amber);
+}
+.act-day-text {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.act-day-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+.act-day-sub {
+  margin-left: 6px;
+  font-weight: 400;
+  color: var(--faint);
 }
 .act-day-count {
   font-size: 11px;
   color: var(--faint);
   font-variant-numeric: tabular-nums;
 }
+.act-day-head .act-day-chev {
+  margin-left: auto;
+}
 .act-day.collapsed .act-day-body {
   display: none;
 }
+/* A past month folds its days under one head; the current month's days stand alone. */
+.act-month {
+  border-top: 1px solid var(--hi);
+}
+.act-month:first-child {
+  border-top: none;
+}
+.act-month-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 11px var(--s3) 9px;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.act-month-head:hover {
+  background: color-mix(in oklch, var(--text) 4%, transparent);
+}
+.act-month-head:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: -2px;
+}
+.act-month-head .act-day-chev {
+  margin-left: auto;
+}
+.act-month.collapsed .act-month-head .act-day-chev {
+  transform: rotate(-90deg);
+}
+.act-month-body {
+  padding-left: 10px;
+}
+.act-month.collapsed .act-month-body {
+  display: none;
+}
+.act-month-body .act-day:first-child {
+  border-top: 1px solid var(--hi);
+}
 
-/* The list tail (older page loading, or failed): rows in the day-head grammar, same slot,
+/* The list tail (older page loading, or failed): rows in the day-head grammar, same tile slot,
    gap, padding and separator, so the list never ends on a widget. */
 .act-tail-row {
   display: flex;
   align-items: center;
-  gap: 9px;
-  min-height: 36px;
-  padding: var(--s2) var(--s3);
+  gap: 12px;
+  min-height: 50px;
+  padding: 8px var(--s3);
   border-top: 1px solid var(--hi);
 }
 /* Nothing listed yet (first load, or it failed): the tail sits right under the head. */
@@ -2553,14 +2627,14 @@ label.qs-row {
 .act-tail-slot {
   display: inline-grid;
   place-items: center;
-  width: 13px;
-  height: 13px;
+  width: 34px;
+  height: 34px;
   flex: none;
   color: var(--muted);
 }
 .act-tail-slot svg {
-  width: 13px;
-  height: 13px;
+  width: 15px;
+  height: 15px;
 }
 .act-skel-dot,
 .act-skel-bar {
@@ -2568,9 +2642,9 @@ label.qs-row {
   background: color-mix(in oklch, var(--text) 9%, transparent);
 }
 .act-skel-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 2px;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
 }
 .act-skel-bar {
   height: 8px;
@@ -2631,12 +2705,18 @@ label.qs-row {
   border-radius: 3px;
 }
 
-/* Session group: a one-line head (agent, session task, count, export) over its rows. */
+/* Session group: a one-line head (agent, session task) over its rows, as a full-width band one
+   tone darker than the list, so it never reads as hover or selection (both lighten). */
 .act-group-head {
   display: flex;
   align-items: center;
   gap: var(--s2);
-  padding: 8px var(--s3) 4px;
+  padding: 7px var(--s3);
+  background: var(--ground);
+  border-block: 1px solid var(--hi);
+}
+.act-group + .act-group {
+  margin-top: 6px;
 }
 .act-sess-name {
   flex: none;
@@ -4441,11 +4521,6 @@ p.auto-message[data-tone="busy"] {
 .ix-who {
   flex: none;
 }
-.ix-note {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 .ix-risk.write {
   color: var(--amber);
 }
@@ -4476,9 +4551,61 @@ p.auto-message[data-tone="busy"] {
   font-family: var(--font-ui);
   font-size: 11px;
 }
-.ix-side .act-flags {
+/* A decided row reads two by two: title, then flags and time; who asked, then one fact,
+   right-aligned under the time. Under a session head the fact takes the who slot. */
+.ix-row.done {
+  grid-template-areas:
+    "mark title top"
+    ". meta fact";
+  align-items: center;
+  row-gap: 2px;
+}
+.ix-row.done.grouped {
+  grid-template-areas:
+    "mark title top"
+    ". fact .";
+}
+.ix-row.done .ix-mark {
+  grid-area: mark;
+}
+.ix-row.done .ix-title {
+  grid-area: title;
+  min-width: 0;
+}
+.ix-row.done .ix-meta {
+  grid-area: meta;
+}
+.ix-top {
+  grid-area: top;
+  justify-self: end;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 18px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--faint);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.ix-top .act-flags {
   display: inline-flex;
   gap: 3px;
+}
+/* The chip's own padding on the line's 18px would make a flagged row taller than the rest. */
+.ix-top .act-flag {
+  line-height: 14px;
+}
+.ix-fact {
+  grid-area: fact;
+  justify-self: end;
+  font-size: 11px;
+  color: var(--faint);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.ix-row.done.grouped .ix-fact {
+  justify-self: start;
 }
 
 /* The open item: who asked over the full card, or the decided request's detail. */

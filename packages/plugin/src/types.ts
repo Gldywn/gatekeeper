@@ -35,6 +35,12 @@ export interface Card extends Proposal {
   // Raw flags from that analysis, posted with the decision for the audit trail: presence
   // only, so no table or column name ever reaches the broker.
   sensitivity?: import("@gatekeeper/shared").SensitivityRecord;
+  // The flags the broker holds for this request, so the local row never shows a flag the trail
+  // lacks. `standing` false after a withdrawal: the broker keeps them, the next post replaces them.
+  decisionSensitivity?: {
+    value: import("@gatekeeper/shared").SensitivityRecord | undefined;
+    standing: boolean;
+  };
   run?: RunState;
 }
 
@@ -79,4 +85,6 @@ export interface HistItem {
   approval?: import("@gatekeeper/shared").ApprovalAttribution;
   evaluation?: import("@gatekeeper/shared").AutoEvaluation;
   autoHold?: AutoHold;
+  // The flags recorded with the decision, so the local row shows the same chips as the trail.
+  sensitivity?: import("@gatekeeper/shared").SensitivityRecord;
 }

@@ -4,13 +4,16 @@ import type { BrokerClient } from "../net/broker";
 import {
   activityCsv,
   activityDayBodyHtml,
+  activityDayChunks,
   activityDaysHtml,
   activityFlagLabels,
   activityJson,
   activityMarkdown,
+  activityMonthHtml,
   activityShell,
   activityTailError,
   activityTailLoading,
+  activityTailMore,
   entryFlags,
 } from "../render/activity";
 import { textSchema } from "../sql/schema";
@@ -182,16 +185,27 @@ export class ActivityView {
       this.activity = entries;
       this.renderActivity();
     } else {
-      // Older whole days only ever go below: what the human has open above stays as is.
+      // Older whole days only ever go below: what the human has open above stays as is. A
+      // page that continues a month already shown lands inside that month, not under a twin.
       this.activity.push(...entries);
-      this.root
-        .querySelector<HTMLElement>("#listAudit .act-body")
-        ?.insertAdjacentHTML(
-          "beforeend",
-          activityDaysHtml(entries, this.selected(), this.dialect(), false),
-        );
+      const body = this.root.querySelector<HTMLElement>("#listAudit .act-body");
+      for (const chunk of activityDayChunks(entries, this.selected(), this.dialect(), false)) {
+        const month =
+          chunk.month &&
+          body?.querySelector<HTMLElement>(
+            `.act-month[data-month-key="${chunk.month}"] .act-month-body`,
+          );
+        if (month) {
+          month.insertAdjacentHTML("beforeend", chunk.html);
+        } else {
+          body?.insertAdjacentHTML(
+            "beforeend",
+            chunk.month ? activityMonthHtml(chunk) : chunk.html,
+          );
+        }
+      }
     }
-    this.setTail("");
+    this.setTail(this.more === true ? activityTailMore() : "");
     if (this.more === true) {
       this.watchTail();
     } else {
@@ -254,6 +268,14 @@ export class ActivityView {
       return;
     }
     this.setActivityBody(activityDaysHtml(this.activity, this.selected(), this.dialect()));
+  }
+
+  // Fold a past month open or closed; its days keep their own state inside.
+  toggleMonth(head: HTMLElement): void {
+    const month = head.closest<HTMLElement>(".act-month");
+    if (month) {
+      head.setAttribute("aria-expanded", String(!month.classList.toggle("collapsed")));
+    }
   }
 
   // Fold a day open or closed in place. A day that arrived folded has no rows yet: build

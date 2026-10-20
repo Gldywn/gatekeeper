@@ -28,6 +28,10 @@ import { statusIcon } from "./status";
 
 // An agent cancellation is stored as an expiry; this note is what tells the two apart.
 export const CANCELLED_NOTE = "cancelled by the agent";
+// The rows ran but the broker never took the result; and the error the server's sweep records
+// when an execution lease lapses with no outcome. Both leave the outcome unconfirmed.
+export const NOT_DELIVERED_NOTE = "result not delivered";
+export const EXECUTION_UNKNOWN = "execution_unknown";
 
 export function detailHtml(item: HistItem): string {
   const harness = item.session?.harness?.trim() || null;

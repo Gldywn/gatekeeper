@@ -49,7 +49,7 @@ import { ConfirmModal } from "./render/confirm";
 import { connChipInner } from "./render/connchip";
 import { modeDropdown, switchInput } from "./render/controls";
 import { type DbCheck, dbLink, dbLinkLabel, dbStatusHtml, nextCheckText } from "./render/dblink";
-import { CANCELLED_NOTE } from "./render/detail";
+import { CANCELLED_NOTE, NOT_DELIVERED_NOTE } from "./render/detail";
 import {
   agentsStripHtml,
   auditItem,
@@ -1550,7 +1550,12 @@ export class Gatekeeper {
       this.activityView.toggleDay(dayHead);
       return;
     }
-    if (target.closest("[data-act-retry]")) {
+    const monthHead = target.closest<HTMLElement>("[data-month]");
+    if (monthHead) {
+      this.activityView.toggleMonth(monthHead);
+      return;
+    }
+    if (target.closest("[data-act-retry], [data-act-older]")) {
       void this.activityView.loadOlder();
       return;
     }
@@ -2916,6 +2921,9 @@ export class Gatekeeper {
       } catch {
         card.authorityLost = true;
       }
+      // Withdrawn, the request is leased again: the broker keeps these flags until the next
+      // decision posts its own, and an expiry or cancellation before then keeps them for good.
+      if (card.decisionSensitivity) card.decisionSensitivity.standing = false;
       this.reviewCard(card, "Execution stopped before SQL ran. Approval authority changed");
       return;
     }
@@ -2950,7 +2958,7 @@ export class Gatekeeper {
       // The rows already ran on the live database; if the outcome never reached the
       // broker the agent cannot see them, so record a failure rather than a false approve.
       if (!posted) {
-        this.finish(id, "failed", "result not delivered");
+        this.finish(id, "failed", NOT_DELIVERED_NOTE);
         return;
       }
       // A write reports what it changed, a read what it returned, and a write that also
@@ -3161,20 +3169,22 @@ export class Gatekeeper {
   // Frozen as the decision is recorded, never awaited: the card's schema analysis if it has
   // finished, else what the SQL text alone shows (none when it will not parse).
   private sensitivity(card: Card): SensitivityRecord | undefined {
-    if (card.sensitivity) {
-      return card.sensitivity;
-    }
+    return card.sensitivity ?? this.textSensitivity(card);
+  }
+
+  private textSensitivity(card: Card): SensitivityRecord | undefined {
     const text = textSchema(card.sql, this.dialect);
     return text ? sensitivityOf(text) : undefined;
   }
 
   private async postExecuting(card: Card): Promise<boolean> {
     try {
+      card.decisionSensitivity = { value: this.sensitivity(card), standing: true };
       return await this.broker.executing(
         card.id,
         card.leaseId,
         card.approval,
-        this.sensitivity(card),
+        card.decisionSensitivity.value,
       );
     } catch (err) {
       log.error(err instanceof Error ? err : String(err));
@@ -3196,10 +3206,14 @@ export class Gatekeeper {
 
   private async postResult(card: Card, body: Record<string, unknown>): Promise<boolean> {
     try {
+      // While an /executing snapshot stands the broker keeps it; otherwise this one applies.
+      if (!card.decisionSensitivity?.standing) {
+        card.decisionSensitivity = { value: this.sensitivity(card), standing: true };
+      }
       return await this.broker.result(card.id, card.leaseId, {
         ...body,
         autoHold: this.autoHold(card),
-        sensitivity: this.sensitivity(card),
+        sensitivity: card.decisionSensitivity.value,
       });
     } catch (err) {
       log.error(err instanceof Error ? err : String(err));
@@ -3247,6 +3261,11 @@ export class Gatekeeper {
         approval: card.approval,
         evaluation: card.evaluation,
         autoHold: this.autoHold(card),
+        // The broker's snapshot for this decision; with none posted (an expiry), what the trail
+        // falls back to: the SQL text alone.
+        sensitivity: card.decisionSensitivity
+          ? card.decisionSensitivity.value
+          : this.textSensitivity(card),
       };
       // An open card stays open as its outcome: same request, now decided. The selection holds
       // the item itself, so it outlives the Recently resolved cap while another tab shows.

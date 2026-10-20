@@ -2,7 +2,7 @@
 // are byte-stable on any machine (dev or CI).
 process.env.TZ = "UTC";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { textSchema } from "../sql/schema";
 import type { ActivityEntry } from "../types";
 import {
@@ -51,25 +51,28 @@ const rejected: ActivityEntry = {
 };
 
 describe("render/activity", () => {
-  it("renders an approved entry as a selectable row: who, what came of it, flags and time", () => {
+  it("renders an approved entry as a selectable row: what came of it, flags and time", () => {
     const html = activityEntryHtml(approved, true, "postgresql");
     expect(html).toContain('data-row="q_ab12" data-select="audit" aria-current="true"');
     expect(html).toContain('<span class="hstate approved" title="Approved"');
     expect(html).toContain('<span class="ix-title">List account contacts</span>');
-    expect(html).toContain('<span class="ix-who">gatekeeper</span>');
-    expect(html).toContain('<span class="ix-note" title="3 rows returned">3 rows returned</span>');
+    expect(html).toContain('<span class="ix-fact">3 rows</span>');
     expect(html).toContain('<span class="act-flag pii">PII</span>');
     expect(html).toContain('<span class="act-time">09:30 AM</span>');
+    // Under its session head the row drops who asked: the head names them once.
+    expect(html).toContain('class="ix-row done grouped"');
+    expect(html).not.toContain("ix-who");
     // The SQL opens on the right now, never inline under the row.
     expect(html).not.toContain("act-detail");
   });
 
-  it("renders a declined entry with its reason and its risk", () => {
+  it("renders a declined entry as Declined, its reason and risk left for the detail", () => {
     const html = activityEntryHtml(rejected, false, "postgresql");
     expect(html).toContain('aria-current="false"');
     expect(html).toContain('<span class="hstate rejected" title="Declined"');
-    expect(html).toContain('<span class="ix-risk destructive">destructive</span>');
-    expect(html).toContain('<span class="ix-note" title="read-only only">read-only only</span>');
+    expect(html).toContain('<span class="ix-fact">Declined</span>');
+    expect(html).not.toContain("ix-risk");
+    expect(html).not.toContain("read-only only");
   });
 
   it("shows no count or export in the session head during the redesign", () => {
@@ -185,7 +188,7 @@ describe("render/activity", () => {
     expect(csv).toContain('"SELECT a, b FROM t WHERE c = \'x""y\'"');
   });
 
-  it("names what an approved write changed, and stays blank when no count is known", () => {
+  it("names what an approved write affected, and says Completed when no count is known", () => {
     const base = {
       id: "q_w1",
       createdAt: Date.UTC(2026, 0, 1, 9, 30),
@@ -201,22 +204,64 @@ describe("render/activity", () => {
       error: null,
       rowCount: 0,
     };
-    // A write reports what it changed; the returned zero must not stand in for it.
-    const changed = activityEntryHtml({ ...base, affectedRows: 3 }, false, "postgresql");
-    expect(changed).toContain('<span class="ix-note" title="3 rows changed">3 rows changed</span>');
-    expect(changed).not.toContain("3 rows returned");
+    // A write reports what it affected; the returned zero must not stand in for it.
+    const affected = activityEntryHtml({ ...base, affectedRows: 3 }, false, "postgresql");
+    expect(affected).toContain('<span class="ix-fact">3 affected</span>');
+    expect(affected).not.toContain("0 rows");
 
-    // No count reported: the row says nothing rather than a zero.
+    // A write with no affected count and an empty result set: a zero would read as an answer.
+    const empty = activityEntryHtml(base, false, "postgresql");
+    expect(empty).toContain('<span class="ix-fact">Completed</span>');
+
+    // No count recorded at all: Completed, never a zero.
     const unknown = activityEntryHtml({ ...base, rowCount: null }, false, "postgresql");
-    expect(unknown).not.toContain('class="ix-note"');
+    expect(unknown).toContain('<span class="ix-fact">Completed</span>');
 
-    // A read keeps its returned count, no longer relabelled as affected.
+    // A read keeps its returned count, zero included.
     const read = activityEntryHtml(
       { ...base, sql: "SELECT id FROM audit.users", rowCount: 5 },
       false,
       "postgresql",
     );
-    expect(read).toContain('<span class="ix-note" title="5 rows returned">5 rows returned</span>');
+    expect(read).toContain('<span class="ix-fact">5 rows</span>');
+    const none = activityEntryHtml(
+      { ...base, sql: "SELECT id FROM audit.users", rowCount: 0 },
+      false,
+      "postgresql",
+    );
+    expect(none).toContain('<span class="ix-fact">0 rows</span>');
+  });
+
+  it("tells an unconfirmed or cancelled outcome from a failure or an expiry", () => {
+    const unknown = activityEntryHtml(
+      { ...approved, state: "failed", error: "execution_unknown", rowCount: null },
+      false,
+      "postgresql",
+    );
+    expect(unknown).toContain('<span class="ix-fact">Unconfirmed</span>');
+    expect(unknown).toContain('title="Unconfirmed"');
+    const failed = activityEntryHtml(
+      { ...approved, state: "failed", error: "relation does not exist", rowCount: null },
+      false,
+      "postgresql",
+    );
+    expect(failed).toContain('<span class="ix-fact">Failed</span>');
+    // In the trail these words can be an error the server recorded: only the reserved
+    // execution_unknown leaves the outcome unconfirmed there.
+    const undelivered = activityEntryHtml(
+      { ...approved, state: "failed", error: "result not delivered", rowCount: null },
+      false,
+      "postgresql",
+    );
+    expect(undelivered).toContain('<span class="ix-fact">Failed</span>');
+    const cancelled = activityEntryHtml(
+      { ...approved, state: "cancelled", rowCount: null },
+      false,
+      "postgresql",
+    );
+    expect(cancelled).toContain('<span class="ix-fact">Cancelled</span>');
+    expect(cancelled).toContain('title="Cancelled"');
+    expect(cancelled).not.toContain("Expired");
   });
 
   it("marks every row Auto mode touched, and colours the chip when it decided", () => {
@@ -310,6 +355,21 @@ describe("audit flags without the database", () => {
       expect(entryFlags(entry, textSchema(entry.sql, "postgresql"))).toMatchObject({ pii: true });
     },
   );
+
+  it("heads each day with its date tile, Today by name and its totals", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(T);
+    try {
+      const html = activityDaysHtml([approved, rejected], null, "postgresql");
+      expect(html).toContain('<span class="act-day-tile">1</span>');
+      expect(html).toContain('Today<span class="act-day-sub">Thu, Jan</span>');
+      expect(html).toContain('<span class="act-day-count">2 queries, 1 session</span>');
+      // Today is in the current month: no month head above it.
+      expect(html).not.toContain("act-month");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it("ships folded days without their rows", () => {
     const older = { ...rejected, id: "q_old", decidedAt: T - 3 * 86_400_000 };

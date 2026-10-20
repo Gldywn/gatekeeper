@@ -1233,3 +1233,58 @@ describe("generation changes during an approved run", () => {
     expect(app.broker.result).not.toHaveBeenCalled();
   });
 });
+
+describe("decision-time flags", () => {
+  it("keeps the /executing snapshot when the column analysis lands after the approval", async () => {
+    const { app, card } = harness();
+    card.sql = "SELECT * FROM public.users";
+    await app.postExecuting(card);
+    const posted = app.broker.executing.mock.calls[0][3];
+    // The analysis finishes mid-run and finds PII the SQL text alone could not show.
+    card.sensitivity = { pii: true, value: false, client: false };
+    await app.postResult(card, { status: "approved" });
+    expect(app.broker.result.mock.calls[0][2].sensitivity).toEqual(posted);
+    // The local row shows what the trail recorded, not the later analysis.
+    Object.assign(app, {
+      finish: Gatekeeper.prototype["finish" as keyof Gatekeeper],
+      history: [],
+      selection: {},
+      drop: vi.fn(),
+      renderHistory: vi.fn(),
+      settingsStore: { get: () => ({ recentlyResolved: 20, resultCacheMb: 4 }) },
+    });
+    app.finish(card.id, "approved", "");
+    expect(app.history[0].sensitivity).toEqual(posted);
+    expect(app.history[0].sensitivity?.pii).not.toBe(true);
+  });
+
+  it("posts fresh flags with the next decision once an execution is withdrawn", async () => {
+    const { app, card } = harness();
+    await app.postExecuting(card);
+    card.decisionSensitivity!.standing = false;
+    card.sensitivity = { pii: true, value: false, client: false };
+    await app.postResult(card, { status: "rejected" });
+    expect(app.broker.result.mock.calls[0][2].sensitivity).toEqual({
+      pii: true,
+      value: false,
+      client: false,
+    });
+  });
+
+  it("keeps the broker's flags when a withdrawn request expires with no new decision", () => {
+    const { app, card } = harness();
+    const recorded = { pii: true, value: false, client: false };
+    card.decisionSensitivity = { value: recorded, standing: false };
+    card.sql = "SELECT * FROM public.users";
+    Object.assign(app, {
+      finish: Gatekeeper.prototype["finish" as keyof Gatekeeper],
+      history: [],
+      selection: {},
+      drop: vi.fn(),
+      renderHistory: vi.fn(),
+      settingsStore: { get: () => ({ recentlyResolved: 20, resultCacheMb: 4 }) },
+    });
+    app.finish(card.id, "expired", "expired");
+    expect(app.history[0].sensitivity).toEqual(recorded);
+  });
+});

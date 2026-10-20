@@ -1,17 +1,19 @@
+import type { SensitivityRecord } from "@gatekeeper/shared";
 import {
   capitalize,
   clock,
   escapeHtml,
+  formatCount,
   previewSql,
   relAge,
   rowsLabel,
   sessionDisplayName,
 } from "../html";
-import { agentBadge, harnessIcon } from "../icons";
+import { agentBadge, clockIcon, harnessIcon, helpCircleIcon } from "../icons";
 import type { RiskClass } from "../sql/classify";
 import type { ActivityEntry, Card, HistItem, Presence, SessionRoster } from "../types";
 import { autoIcon } from "./auto";
-import { CANCELLED_NOTE } from "./detail";
+import { CANCELLED_NOTE, EXECUTION_UNKNOWN, NOT_DELIVERED_NOTE } from "./detail";
 import { AUTO_EVALUATING, busyLabel } from "./queue";
 import { rosterRow } from "./roster";
 import { statusIcon } from "./status";
@@ -64,27 +66,92 @@ export function queueRowHtml(
     </button>`;
 }
 
-// A decided request, local (Recently resolved) or from the Audit Trail: the outcome glyph, the
-// intent, who asked and what came of it, and when.
+// Neither a success nor a failure: the query may have run, but its outcome was never confirmed.
+// Locally the plugin's own note says so; in the trail only the server's reserved error does,
+// since there the same words could be an execution error the server recorded.
+function unconfirmed(item: HistItem, source: "hist" | "audit"): boolean {
+  if (item.status !== "failed") return false;
+  return item.note === EXECUTION_UNKNOWN || (source === "hist" && item.note === NOT_DELIVERED_NOTE);
+}
+
+// The one fact a decided row states, from a closed vocabulary: the outcome before any count,
+// the affected count before the returned one. The note stays whole for the detail.
+export function rowFact(item: HistItem, cls: RiskClass, source: "hist" | "audit"): string {
+  if (item.status === "rejected") return "Declined";
+  if (item.status === "failed") return unconfirmed(item, source) ? "Unconfirmed" : "Failed";
+  if (item.status === "expired") return item.note === CANCELLED_NOTE ? "Cancelled" : "Expired";
+  const r = item.result;
+  if (r?.affectedRows != null) return `${formatCount(r.affectedRows)} affected`;
+  // A write's empty result set says nothing about what it did.
+  if (r?.rowCount != null && (cls === "read" || r.rowCount > 0)) {
+    return `${formatCount(r.rowCount)} ${r.rowCount === 1 ? "row" : "rows"}`;
+  }
+  return "Completed";
+}
+
+function rowGlyph(item: HistItem, source: "hist" | "audit"): string {
+  const glyph = (cls: string, icon: string, label: string) =>
+    `<span class="hstate ${cls}" title="${label}" aria-label="${label}">${icon}</span>`;
+  if (item.status === "approved" && item.approval?.source === "automatic") {
+    return glyph("auto", autoIcon, "Approved automatically");
+  }
+  if (unconfirmed(item, source)) return glyph("expired", helpCircleIcon, "Unconfirmed");
+  if (item.status === "expired" && item.note === CANCELLED_NOTE) {
+    return glyph("expired", clockIcon, "Cancelled");
+  }
+  return statusIcon(item.status);
+}
+
+// Auto mode evaluated or held this read but a human decided: a quiet bolt says it was involved.
+// When Auto mode approved it, the row's own glyph is already the bolt.
+function autoFlag(item: Pick<HistItem, "approval" | "evaluation" | "autoHold">): string {
+  const evaluation = item.approval?.evaluation ?? item.evaluation;
+  if (item.approval?.source === "automatic" || (!evaluation && !item.autoHold)) {
+    return "";
+  }
+  const label = evaluation
+    ? "Evaluated by Auto mode, decided by you"
+    : "Auto mode stopped this read before evaluation";
+  return `<span class="act-flag auto" title="${label}" aria-label="${label}">${autoIcon}</span>`;
+}
+
+// The condensed sensitivity flags on a row: presence only, never which columns.
+export function activityFlagsHtml(flags: SensitivityRecord): string {
+  let html = "";
+  if (flags.pii) {
+    html += '<span class="act-flag pii">PII</span>';
+  }
+  if (flags.value) {
+    html += '<span class="act-flag val">Value</span>';
+  }
+  if (flags.client) {
+    html += '<span class="act-flag client">Client</span>';
+  }
+  return html;
+}
+
+// A decided request, local (Recently resolved) or from the Audit Trail, two by two: title, then
+// flags and time; who asked, then one fact. Under a session head (`grouped`) the head already
+// names who asked, so the fact takes that slot.
 export function doneRowHtml(
   item: HistItem,
   selected: boolean,
   select: "hist" | "audit",
-  side: string,
+  time: string,
   cls: RiskClass = "read",
+  flags: SensitivityRecord | null = null,
+  grouped = false,
 ): string {
-  const risk = RISK_WORD[cls]
-    ? `<span aria-hidden="true">&middot;</span><span class="ix-risk ${cls}">${RISK_WORD[cls]}</span>`
-    : "";
-  const glyph =
-    item.status === "approved" && item.approval?.source === "automatic"
-      ? `<span class="hstate auto" title="Approved automatically" aria-label="Approved automatically">${autoIcon}</span>`
-      : statusIcon(item.status);
   const title = item.intent ? capitalize(item.intent) : previewSql(item.sql);
-  return `<button class="ix-row done" type="button" data-row="${escapeHtml(item.id)}" data-select="${select}" aria-current="${selected}">
-      <span class="ix-mark">${glyph}</span>
-      <span class="ix-main"><span class="ix-title">${escapeHtml(title)}</span><span class="ix-meta">${agentBadge(item.session?.harness?.trim() || null)}<span class="ix-who">${who(item.session, item.id)}</span>${risk}${item.note ? `<span aria-hidden="true">&middot;</span><span class="ix-note" title="${escapeHtml(item.note)}">${escapeHtml(item.note)}</span>` : ""}</span></span>
-      ${side}
+  const flagsHtml = flags ? `<span class="act-flags">${activityFlagsHtml(flags)}</span>` : "";
+  const meta = grouped
+    ? ""
+    : `<span class="ix-meta">${agentBadge(item.session?.harness?.trim() || null)}<span class="ix-who">${who(item.session, item.id)}</span></span>`;
+  return `<button class="ix-row done${grouped ? " grouped" : ""}" type="button" data-row="${escapeHtml(item.id)}" data-select="${select}" aria-current="${selected}">
+      <span class="ix-mark">${rowGlyph(item, select)}</span>
+      <span class="ix-title">${escapeHtml(title)}</span>
+      <span class="ix-top">${autoFlag(item)}${flagsHtml}${time}</span>
+      ${meta}<span class="ix-fact">${escapeHtml(rowFact(item, cls, select))}</span>
     </button>`;
 }
 
@@ -93,8 +160,9 @@ export function recentRowHtml(item: HistItem, selected: boolean, cls: RiskClass 
     item,
     selected,
     "hist",
-    `<span class="ix-side"><span class="hage" data-age="${item.resolvedAt}">${relAge(item.resolvedAt)}</span></span>`,
+    `<span class="hage" data-age="${item.resolvedAt}">${relAge(item.resolvedAt)}</span>`,
     cls,
+    item.sensitivity ?? null,
   );
 }
 

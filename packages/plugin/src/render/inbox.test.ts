@@ -147,6 +147,31 @@ describe("recentRowHtml", () => {
     expect(html).not.toContain("ix-note");
   });
 
+  it("reads two by two: who asked and one fact, with the flags kept from the decision", () => {
+    const html = recentRowHtml(
+      {
+        ...item,
+        status: "approved",
+        session: { sessionId: "s1", harness: "codex", harnessVersion: null, project: "billing" },
+        result: { fields: [], rows: [], rowCount: 0, affectedRows: 2, truncated: false },
+        sensitivity: { pii: true, value: false, client: true },
+      },
+      false,
+      "destructive",
+    );
+    expect(html).toContain('<span class="ix-who">billing</span>');
+    expect(html).toContain('<span class="ix-fact">2 affected</span>');
+    expect(html).toContain('<span class="act-flag pii">PII</span>');
+    expect(html).toContain('<span class="act-flag client">Client</span>');
+    expect(html).not.toContain("ix-risk");
+    expect(
+      recentRowHtml({ ...item, note: "result not delivered", status: "failed" }, false),
+    ).toContain('<span class="ix-fact">Unconfirmed</span>');
+    expect(
+      recentRowHtml({ ...item, note: "cancelled by the agent", status: "expired" }, false),
+    ).toContain('<span class="ix-fact">Cancelled</span>');
+  });
+
   it("marks an automatic approval with the Auto glyph instead of the check", () => {
     const html = recentRowHtml(
       { ...item, status: "approved", approval: { source: "automatic" } },

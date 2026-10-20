@@ -1,5 +1,5 @@
 import type { ActivityEntry, Proposal } from "@gatekeeper/shared";
-import { activity, proposals, roster } from "./fixtures";
+import { activity, proposals, roster, scenario } from "./fixtures";
 
 // The broker the plugin polls, answered in memory. Installed before the app boots; a request to
 // any other origin, or to a route this table does not know, fails loudly and never reaches the
@@ -9,8 +9,8 @@ const BROKER = "http://localhost:9999";
 const IDENTITY = encodeURIComponent(
   JSON.stringify({ version: "0.3.1", dev: { branch: "preview" } }),
 );
-// Smaller than the server's 200, so a few weeks of fixtures exercise paging and its tail.
-const PAGE = 40;
+// Smaller than the server's 200 by default, so a few weeks of fixtures exercise paging and its tail.
+const PAGE = scenario.page;
 
 const offered = proposals();
 const feed: ActivityEntry[] = activity();
