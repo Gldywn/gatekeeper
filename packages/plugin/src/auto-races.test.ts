@@ -676,7 +676,12 @@ describe("shared manual/automatic execution authority", () => {
     const generation = app.autoGeneration;
     app.requestMode(next);
     expect(app.confirmModal.isOpen).toBe(true);
-    expect(panel.innerHTML).toContain("Confirming turns off Auto mode");
+    // What confirming does to Auto mode stands in its own note, naming the mode it enables.
+    const mode = next === "write" ? "Write" : "Destructive";
+    expect(panel.innerHTML).toContain(
+      `<b>Auto mode:</b> Enabling ${mode} mode turns it off. Every read then waits for your approval.`,
+    );
+    expect(panel.innerHTML).toContain('class="cs-unparsed auto confirm-auto"');
     if (next === "destructive") expect(panel.innerHTML).toContain("data-confirm-go disabled");
     expect(app.confirmModal.cancel()).toBe(true);
     expect(app.autoEnabled).toBe(true);

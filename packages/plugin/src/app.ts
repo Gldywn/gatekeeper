@@ -2374,12 +2374,17 @@ export class Gatekeeper {
   }
 
   private openModeArm(next: RiskMode): void {
-    const autoNotice = this.autoEnabled ? " Confirming turns off Auto mode." : "";
+    // Auto mode runs in Read-only only, so raising the mode switches it off.
+    const autoNotice = (mode: string) =>
+      this.autoEnabled
+        ? `Enabling ${mode} mode turns it off. Every read then waits for your approval.`
+        : undefined;
     if (next === "write") {
       this.confirmModal.open({
         tone: "write",
         heading: "Enable Write Mode",
-        body: `Write mode lets you approve INSERT and UPDATE statements. Each still runs only on your one-click approval, one at a time.${autoNotice}`,
+        body: "Write mode lets you approve INSERT and UPDATE statements. Each still runs only on your one-click approval, one at a time.",
+        autoNotice: autoNotice("Write"),
         confirmLabel: "Enable Write Mode",
         onConfirm: () => this.applyMode("write"),
       });
@@ -2390,7 +2395,8 @@ export class Gatekeeper {
     this.confirmModal.open({
       tone: "destructive",
       heading: "Enable Destructive Mode",
-      body: `Destructive mode lets you approve DELETE, DROP, TRUNCATE and other data-changing statements. Type the database name to confirm.${autoNotice}`,
+      body: "Destructive mode lets you approve DELETE, DROP, TRUNCATE and other data-changing statements. Type the database name to confirm.",
+      autoNotice: autoNotice("Destructive"),
       confirmLabel: "Enable Destructive Mode",
       challenge: {
         label: "Type the database name to confirm",

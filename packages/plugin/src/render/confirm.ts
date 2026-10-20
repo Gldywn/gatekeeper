@@ -4,6 +4,7 @@ import { formatSql } from "../sql/format";
 import { highlight } from "../sql/highlight";
 import { visibleControls } from "../sql/sanitize";
 import type { SchemaContext } from "../sql/schema";
+import { autoIcon } from "./auto";
 
 // The tone tints only the heading and the confirm button; the modal border stays
 // neutral (no coloured top accent), so blue/amber/red reads as intent, not chrome.
@@ -29,6 +30,8 @@ export interface ConfirmSpec {
   // same formatting, same keyword colours, same PII, client and literal marks.
   schema?: SchemaContext;
   challenge?: ConfirmChallenge;
+  // What confirming does to Auto mode, set apart in its own note rather than in the body.
+  autoNotice?: string;
   onConfirm: () => void;
   // Called on cancel, backdrop, or Escape, so a caller can revert an optimistic
   // toggle (e.g. a checkbox the user flipped before confirming).
@@ -59,6 +62,7 @@ export function confirmHtml(spec: ConfirmSpec): string {
       <div class="detail-card confirm-card ${spec.tone}">
         <h2 class="confirm-title ${spec.tone}">${escapeHtml(spec.heading)}</h2>
         <p class="confirm-text">${withSqlKeywords(spec.body)}</p>
+        ${spec.autoNotice ? `<div class="cs-unparsed auto confirm-auto">${autoIcon}<span><b>Auto mode:</b> ${escapeHtml(spec.autoNotice)}</span></div>` : ""}
         ${sql}
         ${challenge}
         <div class="confirm-actions">

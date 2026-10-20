@@ -3301,6 +3301,10 @@ p.auto-message:empty {
   border-color: color-mix(in oklch, var(--auto) 32%, transparent);
   background: color-mix(in oklch, var(--auto) 8%, transparent);
 }
+/* In the mode confirm, the note closes the explanation before the actions. */
+.confirm-auto {
+  margin-bottom: var(--s4);
+}
 /* Evaluation facts are data, so they read like the activity note beside them. */
 /* The evaluation trace, in the detail and in the audit trail: the pending card's Auto note,
    opened out over several lines because it carries the numbers a human may want to read. */
