@@ -123,6 +123,11 @@ export class ActivityView {
     this.close();
   }
 
+  // The newest decision fetched, for the trail's first view.
+  newest(): ActivityEntry | undefined {
+    return this.activity[0];
+  }
+
   // An entry already on screen, for the right pane.
   entry(id: string): ActivityEntry | undefined {
     return this.activity.find((e) => e.id === id);

@@ -186,3 +186,53 @@ describe("closing the open item", () => {
     expect(app.inInbox(from(false, false))).toBe(false);
   });
 });
+
+describe("the Audit Trail's first view", () => {
+  const entry = {
+    id: "e1",
+    createdAt: 1,
+    decidedAt: 2,
+    sessionId: "s1",
+    harness: null,
+    project: null,
+    sessionLabel: null,
+    sql: "SELECT 1",
+    intent: null,
+    state: "approved",
+    reason: null,
+    error: null,
+    rowCount: 1,
+    affectedRows: null,
+  };
+
+  it("opens on the first decision it lists, and keeps one already open", () => {
+    const app = harness();
+    const row = { dataset: { row: "e1" }, setAttribute: vi.fn() };
+    app.tab = "audit";
+    app.root = { querySelector: () => row };
+    app.activityView = {
+      entry: (id: string) => (id === "e1" ? entry : undefined),
+      newest: () => entry,
+    };
+    app.openNewestAudit();
+    expect(app.selection.audit).toMatchObject({ kind: "audit", id: "e1" });
+    expect(row.setAttribute).toHaveBeenCalledWith("aria-current", "true");
+    expect(app.renderSelection).toHaveBeenCalledWith(true);
+    app.selection.audit = { kind: "audit", id: "older" };
+    app.openNewestAudit();
+    expect(app.selection.audit.id).toBe("older");
+  });
+
+  it("shows its empty state when it holds nothing, and has no close of its own", () => {
+    const app = harness();
+    app.tab = "audit";
+    app.root = { querySelector: () => null };
+    app.activityView = { entry: () => undefined, newest: () => undefined };
+    app.openNewestAudit();
+    expect(app.selection.audit).toBeNull();
+    expect(app.renderSelection).toHaveBeenCalledWith(true);
+    app.selection.audit = { kind: "audit", id: "e1" };
+    app.closeSelection();
+    expect(app.selection.audit).toEqual({ kind: "audit", id: "e1" });
+  });
+});

@@ -1906,13 +1906,13 @@ label.qs-row {
   outline-offset: 1px;
 }
 /* The right pane's own close: pinned top-right while the item scrolls, its slot taken from the
-   first line (the agent line, or the outcome) so nothing runs under it. Wide only. */
+   first line so nothing runs under it, clear of the scroll thumb on the right. Wide only. */
 .pane-close {
   position: sticky;
   top: -5px;
   z-index: 5;
   float: right;
-  margin: -5px -4px 0 var(--s2);
+  margin: -5px 0 0 var(--s2);
   background: var(--pane-bg);
 }
 .pane-close[hidden] {

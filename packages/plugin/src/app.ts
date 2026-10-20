@@ -398,9 +398,9 @@ export class Gatekeeper {
       scope: () => this.connScopeKey(),
       dialect: () => this.dialect,
       selected: () => this.selection.audit?.id ?? null,
-      // An empty trail changes what the right pane explains.
+      // The trail opens on its newest decision, or on what it keeps when it holds none.
       rendered: () => {
-        if (this.tab === "audit" && !this.selection.audit) this.renderSelection();
+        this.openNewestAudit();
       },
     });
     this.settingsView = new SettingsView({
@@ -1664,6 +1664,23 @@ export class Gatekeeper {
     if (actions) actions.hidden = this.tab !== "audit";
   }
 
+  // The Audit Trail opens on the first decision it lists, with no selection of its own yet. It
+  // takes neither the focus nor, in a narrow tab, the place of the list.
+  private openNewestAudit(): void {
+    if (this.tab !== "audit" || this.selection.audit) return;
+    const row = this.root.querySelector<HTMLElement>('#listAudit [data-select="audit"]');
+    const entry = this.activityView.entry(row?.dataset.row ?? "") ?? this.activityView.newest();
+    if (entry) {
+      this.selection.audit = {
+        kind: "audit",
+        id: entry.id,
+        item: auditItem(entry, this.connectionName || null),
+      };
+      row?.setAttribute("aria-current", "true");
+    }
+    this.renderSelection(true);
+  }
+
   private select(next: Selection): void {
     if (next.kind === "audit") {
       const entry = this.activityView.entry(next.id);
@@ -1703,11 +1720,11 @@ export class Gatekeeper {
     );
   }
 
-  // Back to nothing open in this tab. Only the view changes: the request stays queued, running
+  // Back to nothing open in the Queue. Only the view changes: the request stays queued, running
   // or decided, the other tab keeps its own selection, and the focus returns to the row.
   private closeSelection(): void {
     const id = this.selection[this.tab]?.id;
-    if (!id) return;
+    if (!id || this.tab !== "queue") return;
     this.selection[this.tab] = null;
     // A later narrow layout must open on the list, not on a pane with nothing in it.
     this.root.querySelector("#inbox")?.setAttribute("data-show", "list");
@@ -1738,9 +1755,10 @@ export class Gatekeeper {
   // the selection changed (`force`), never on a poll, so its grid keeps its sort and page.
   private renderSelection(force = false): void {
     const sel = this.selection[this.tab];
-    // The close control shows only while something is open in this tab.
+    // The close control shows only while something is open in the Queue; the Audit Trail always
+    // has its newest decision open, or its empty state.
     const close = this.root.querySelector<HTMLElement>("[data-close-detail]");
-    if (close) close.hidden = !sel;
+    if (close) close.hidden = !sel || this.tab !== "queue";
     const queue = this.root.querySelector<HTMLElement>("#queue");
     const empty = this.root.querySelector<HTMLElement>("#paneEmpty");
     if (!queue || !empty) {
