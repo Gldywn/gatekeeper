@@ -5,9 +5,10 @@ import { dayKey, sessionDisplayName } from "../html";
 import { checkIcon, copyIcon } from "../icons";
 import { detailHtml } from "../render/detail";
 import { mountResultGrid } from "../render/grid";
-import { schemaInner } from "../render/queue";
+import { accessMatrix, paintLegend } from "../render/queue";
 import { resultCsv, resultJson, resultMarkdown } from "../render/resultexport";
 import { filterSchema, type Settings } from "../settings";
+import { classifyQuery } from "../sql/classify";
 import { formatSql } from "../sql/format";
 import { highlight } from "../sql/highlight";
 import { textSchema } from "../sql/schema";
@@ -56,7 +57,7 @@ export class DetailView {
       return;
     }
     this.detailItem = item;
-    panel.innerHTML = detailHtml(item);
+    panel.innerHTML = detailHtml(item, annotate === "text" ? "audit" : "hist", this.dialect());
     panel.hidden = false;
     this.mountGrid(panel, item);
     void this.annotateDetail(item, annotate);
@@ -66,10 +67,15 @@ export class DetailView {
   private mountGrid(panel: HTMLElement, item: HistItem): void {
     this.destroyGrid();
     const host = panel.querySelector<HTMLElement>(".gk-grid");
-    if (host && item.result && item.result.rows.length > 0) {
+    const pager = panel.querySelector<HTMLElement>("[data-grid-pager]");
+    const count = panel.querySelector<HTMLElement>("[data-grid-count]");
+    if (host && pager && count && item.result && item.result.rows.length > 0) {
       const pane = host.closest<HTMLElement>(".pane-body");
       const room = (pane?.clientHeight ?? window.innerHeight) - GRID_CHROME_PX;
-      this.grid = mountResultGrid(host, item.result, Math.max(GRID_MIN_PX, room));
+      this.grid = mountResultGrid(host, item.result, Math.max(GRID_MIN_PX, room), {
+        pager,
+        count,
+      });
     }
   }
 
@@ -92,9 +98,21 @@ export class DetailView {
       return;
     }
     const schema = filterSchema(raw ?? null, settings);
+    // The matrix (a read's tables come from this analysis), the legend and the SQL marks move
+    // together, as on the pending card.
+    const cm = this.root.querySelector<HTMLElement>("#detail-cm");
+    if (cm) {
+      const dialect = this.dialect();
+      cm.innerHTML = accessMatrix(
+        item.sql,
+        dialect,
+        classifyQuery(item.sql, dialect).class,
+        schema,
+      );
+    }
     const cs = this.root.querySelector<HTMLElement>("#detail-cs");
     if (cs) {
-      cs.innerHTML = schemaInner(schema);
+      paintLegend(cs, schema, "detail");
     }
     const body = this.root.querySelector<HTMLElement>("#detail-sqlbody");
     if (body) {

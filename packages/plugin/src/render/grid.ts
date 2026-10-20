@@ -1,4 +1,5 @@
 import { type CellComponent, type ColumnDefinition, TabulatorFull } from "tabulator-tables";
+import { formatCount } from "../html";
 import { type HistResult, resultColumns } from "../result";
 import { classifyColumn } from "../sql/schema";
 
@@ -7,6 +8,7 @@ import { classifyColumn } from "../sql/schema";
 const NUMERIC_SAMPLE = 40;
 // Only clipped-enough strings earn a hover tooltip, so short cells stay quiet.
 const TOOLTIP_MIN_CHARS = 40;
+const PAGE_SIZES = [10, 25, 50, 100];
 
 // Display only: sorting, resize and reorder are read-only affordances. The caller sizes it to
 // the pane that scrolls it, so the column headers stay in view once the pane reaches the grid.
@@ -14,9 +16,11 @@ export function mountResultGrid(
   host: HTMLElement,
   result: HistResult,
   maxHeight: number,
+  // The result bar: Tabulator's pager mounts in `pager`, the position is written to `count`.
+  bar?: { pager: HTMLElement; count: HTMLElement },
 ): TabulatorFull {
   const names = resultColumns(result);
-  return new TabulatorFull(host, {
+  const table = new TabulatorFull(host, {
     data: result.rows,
     columns: names.map((name) => columnDef(name, result.rows)),
     // fitColumns fills the overlay width so there's no dead gutter; many columns keep
@@ -29,8 +33,21 @@ export function mountResultGrid(
     // Client-side paging with the sizes the reviewer had before virtualization replaced it.
     pagination: true,
     paginationSize: 50,
-    paginationSizeSelector: [10, 25, 50, 100],
-    paginationCounter: "rows",
+    paginationSizeSelector: PAGE_SIZES,
+    // In the bar, Tabulator drops its own counter (Page.js mounts it only without
+    // paginationElement), so the position is written below from the page it loaded.
+    ...(bar
+      ? {
+          paginationElement: bar.pager,
+          paginationButtonCount: 3,
+          // Arrows keep the bar on one line; the buttons keep their full titles for readers.
+          langs: {
+            default: {
+              pagination: { first: "«", prev: "‹", next: "›", last: "»", page_size: "Rows" },
+            },
+          },
+        }
+      : { paginationCounter: "rows" }),
     columnDefaults: {
       formatter: (cell) => renderValue(cell.getValue()),
       tooltip: cellTooltip,
@@ -38,6 +55,21 @@ export function mountResultGrid(
       minWidth: 80,
     },
   });
+  if (bar) {
+    const total = result.rows.length;
+    const position = () => {
+      const size = Number(table.getPageSize()) || total;
+      const page = Number(table.getPage()) || 1;
+      const from = total ? (page - 1) * size + 1 : 0;
+      bar.count.textContent = `${formatCount(from)}–${formatCount(Math.min(page * size, total))} of ${formatCount(total)}`;
+      // One page needs no page buttons; the size choice stays while a smaller size would page.
+      bar.pager.toggleAttribute("data-single", total <= size);
+      bar.pager.hidden = total <= PAGE_SIZES[0];
+    };
+    table.on("tableBuilt", position);
+    table.on("pageLoaded", position);
+  }
+  return table;
 }
 
 function columnDef(name: string, rows: Record<string, unknown>[]): ColumnDefinition {

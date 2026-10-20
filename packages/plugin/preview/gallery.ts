@@ -528,7 +528,7 @@ function cardsSection(): string {
 function detailsSection(): string {
   return `<h2 id="decided">Decided detail</h2>${DETAILS.map(
     (s, i) => `<div class="g-detail">${label(s.label)}
-      <section class="pane pane-detail g-pane-detail"><div class="pane-body"><div class="detail-host" data-i="${i}">${detailHtml(s.item)}</div></div></section>
+      <section class="pane pane-detail g-pane-detail"><div class="pane-body"><div class="detail-host" data-i="${i}">${detailHtml(s.item, "hist", "postgresql")}</div></div></section>
     </div>`,
   ).join("")}`;
 }
@@ -556,10 +556,14 @@ const root = document.querySelector<HTMLDivElement>("#gallery");
 if (root) {
   root.innerHTML = `<nav class="g-nav"><a href="#rows">Rows</a><a href="#pending">Pending approval detail</a><a href="#decided">Decided detail</a></nav>
     ${rowsSection()}${cardsSection()}${detailsSection()}`;
-  // The detail's grid mounts once its markup is laid out, as the app does.
+  // The detail's grid mounts once its markup is laid out, as the app does, pager in its bar.
   for (const host of root.querySelectorAll<HTMLElement>(".detail-host[data-i]")) {
     const item = DETAILS[Number(host.dataset.i)]?.item;
     const grid = host.querySelector<HTMLElement>(".gk-grid");
-    if (grid && item?.result?.rows.length) mountResultGrid(grid, item.result, 320);
+    const pager = host.querySelector<HTMLElement>("[data-grid-pager]");
+    const count = host.querySelector<HTMLElement>("[data-grid-count]");
+    if (grid && pager && count && item?.result?.rows.length) {
+      mountResultGrid(grid, item.result, 320, { pager, count });
+    }
   }
 }

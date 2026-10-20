@@ -1323,147 +1323,6 @@ label.qs-row {
   border-color: var(--danger);
 }
 
-/* Under-SQL schema annotation: the tables read, plus a possible-PII flag so the
-   human eyeballs the sensitive columns before approving. Host-side only. */
-.card-schema {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--s2);
-  margin: 0 0 var(--s3);
-}
-.card-schema:empty {
-  display: none;
-}
-.cs-line {
-  display: flex;
-  align-items: baseline;
-  gap: var(--s2);
-  min-width: 0;
-  font-size: 11px;
-}
-.cs-list {
-  min-width: 0;
-  font-family: var(--font-mono);
-  color: var(--muted);
-  overflow-wrap: anywhere;
-}
-/* The PII flag is a heads-up, not a block: a quiet danger-tinted chip, not loose
-   red text. It hugs its content (max-width: 100%) and wraps if the list is long. */
-.cs-pii {
-  max-width: 100%;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 10px;
-  border-radius: 6px;
-  background: color-mix(in oklch, var(--danger) 11%, transparent);
-}
-.cs-pii .cs-warn {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--danger);
-  font-weight: 620;
-  font-size: 9.5px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-.cs-pii .cs-warn svg {
-  width: 12px;
-  height: 12px;
-}
-.cs-pii .cs-list {
-  color: color-mix(in oklch, var(--danger) 78%, var(--text));
-}
-/* Client-confidentiality flag: same quiet-chip treatment as PII, its own line and
-   violet tint so the two axes never blur together. */
-.cs-client {
-  max-width: 100%;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 10px;
-  border-radius: 6px;
-  background: color-mix(in oklch, var(--client) 12%, transparent);
-}
-.cs-client .cs-warn {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--client);
-  font-weight: 620;
-  font-size: 9.5px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-.cs-client .cs-warn svg {
-  width: 12px;
-  height: 12px;
-}
-.cs-client .cs-list {
-  color: color-mix(in oklch, var(--client) 78%, var(--text));
-}
-/* A value embedded in the query is more serious than a flagged column, so it reuses
-   the danger tint (like PII) on its own line. */
-.cs-literal {
-  max-width: 100%;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 10px;
-  border-radius: 6px;
-  background: color-mix(in oklch, var(--danger) 11%, transparent);
-}
-.cs-literal .cs-warn {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--danger);
-  font-weight: 620;
-  font-size: 9.5px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-.cs-literal .cs-warn svg {
-  width: 12px;
-  height: 12px;
-}
-.cs-literal .cs-list {
-  color: color-mix(in oklch, var(--danger) 78%, var(--text));
-}
-/* The "reads" line as labeled chips: a cylinder-led label then one bordered mono
-   chip per table, shared by the pending card and the resolved detail. */
-.cs-reads {
-  display: flex;
-  align-items: center;
-  gap: var(--s2);
-  flex-wrap: wrap;
-  min-width: 0;
-}
-.cs-reads-k {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  color: var(--muted);
-}
-.cs-reads-k svg {
-  width: 14px;
-  height: 14px;
-  color: var(--faint);
-}
-.tbl-chip {
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--text);
-  background: color-mix(in oklch, var(--text) 6%, transparent);
-  border: 1px solid var(--edge);
-  border-radius: 5px;
-  padding: 3px 9px;
-}
-
 /* ---- Risk classes: write (amber) and destructive (red) card treatments ---- */
 /* A faint red wash so a destructive card reads as dangerous at a glance. */
 .card.destructive {
@@ -1869,13 +1728,6 @@ label.qs-row {
   color: var(--amber);
   flex: none;
 }
-/* Detail head only. Several brand marks are wide and short (Claude Code inks 5..20 of a
-   24 grid, 62% of its height), so the shared 15px box left them near 9px tall beside a
-   15px name. The dense rows (roster, queue group, history) keep the 15px box. */
-.detail-head > .harness-badge {
-  width: 19px;
-  height: 19px;
-}
 .harness-badge svg {
   width: 100%;
   height: 100%;
@@ -2012,9 +1864,6 @@ label.qs-row {
 .panel-head > .conn-chip {
   transform: translateY(1.9px);
 }
-.detail-head > .detail-scope {
-  transform: translateY(1.75px);
-}
 .panel-head-ico {
   display: inline-flex;
   flex: none;
@@ -2033,40 +1882,6 @@ label.qs-row {
      within 0.2px of it, where matching the icon's 16px box drifts to 0.7px. */
   line-height: 1;
 }
-/* The detail head is the same seated title bar as settings and activity, only its
-   background is the outcome tint (below) instead of the neutral seated fill. */
-/* Everything centres on one axis, like the settings and audit heads. Baseline
-   alignment tied the row to the text, so any taller item (the close button) slid the
-   icons against it; centring holds whatever gets added to the line later. */
-.detail-head {
-  display: flex;
-  align-items: center;
-  gap: var(--s2);
-  margin: calc(-1 * var(--s3)) calc(-1 * var(--s3)) var(--s3);
-  padding: var(--s3);
-  border-bottom: 1px solid var(--edge);
-  border-radius: var(--r) var(--r) 0 0;
-}
-/* The title bar stays neutral; the outcome colour lives on the rail below, with the
-   status glyph as the only tint up here. */
-/* The session task rides the head line next to the status; long ones ellipsise
-   with the full text on hover. */
-.detail-scope {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
-  color: var(--text);
-}
-.detail-intent {
-  font-weight: 640;
-  font-size: 14px;
-  color: var(--text);
-  margin: 0 0 var(--s3);
-  overflow-wrap: anywhere;
-}
 /* SQL and result grid share the card's full width so they line up. The query text is
    capped and scrolls on its own so a very long statement can't push the popup past the
    viewport (the grid below sizes to whatever height is left). */
@@ -2074,126 +1889,6 @@ label.qs-row {
   width: 100%;
   max-height: 40vh;
   overflow: auto;
-}
-/* The accent rail: the outcome breaks out to the card's bottom edges with a status-
-   coloured left rail and a faint status wash, flat on the surface (no inset). All the
-   outcome colour lives here, so the neutral title bar has one job less. */
-.detail-rail {
-  margin: var(--s3) calc(-1 * var(--s3)) calc(-1 * var(--s3));
-  padding: var(--s3) var(--s3) var(--s3) calc(var(--s3) + 3px);
-  border-left: 3px solid var(--edge);
-  border-radius: 0 0 var(--r) var(--r);
-}
-.detail-rail.approved {
-  border-left-color: var(--ok);
-}
-.detail-rail.rejected {
-  border-left-color: var(--amber);
-}
-.detail-rail.failed {
-  border-left-color: var(--danger);
-}
-.detail-rail.expired {
-  border-left-color: var(--faint);
-}
-/* Outcome header: a status-tinted band that bleeds to the rail edges and runs down to
-   the table top; the tint lives here (plus the left rail), not across the whole tray. */
-.detail-oc {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  margin: calc(-1 * var(--s3)) calc(-1 * var(--s3)) 0 calc(-1 * var(--s3) - 3px);
-  padding: 5px var(--s3) 5px calc(var(--s3) + 3px);
-}
-.detail-rail.approved .detail-oc {
-  background: color-mix(in oklch, var(--ok) 11%, transparent);
-}
-.detail-rail.rejected .detail-oc {
-  background: color-mix(in oklch, var(--amber) 12%, transparent);
-}
-.detail-rail.failed .detail-oc {
-  background: color-mix(in oklch, var(--danger) 12%, transparent);
-}
-.detail-rail.expired .detail-oc {
-  background: color-mix(in oklch, var(--faint) 12%, transparent);
-}
-.detail-oc svg {
-  width: 15px;
-  height: 15px;
-  flex: none;
-}
-.detail-oc-title {
-  font-size: 13.5px;
-  font-weight: 620;
-}
-.detail-oc-meta {
-  margin-left: auto;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--faint);
-  font-variant-numeric: tabular-nums;
-}
-.detail-rail.approved .detail-oc-title,
-.detail-rail.approved .detail-oc svg {
-  color: var(--ok);
-}
-.detail-rail.rejected .detail-oc-title,
-.detail-rail.rejected .detail-oc svg {
-  color: var(--amber);
-}
-.detail-rail.failed .detail-oc-title,
-.detail-rail.failed .detail-oc svg {
-  color: var(--danger);
-}
-.detail-rail.expired .detail-oc-title,
-.detail-rail.expired .detail-oc svg {
-  color: var(--muted);
-}
-.detail-oc-body {
-  margin-top: var(--s2);
-}
-.detail-oc-msg {
-  font-size: 12.5px;
-  color: var(--muted);
-}
-/* A decline states its outcome in the outcome colour; a typed reason follows, boxed. */
-.detail-rail.rejected .detail-oc-msg {
-  color: color-mix(in oklch, var(--amber) 82%, var(--text));
-}
-/* Failed error / rejected note: a wrapped mono block, tinted toward the outcome. */
-.detail-oc-note {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  color: var(--text);
-  background: color-mix(in oklch, var(--text) 4%, transparent);
-  border: 1px solid var(--edge);
-  border-radius: 6px;
-  padding: 10px 12px;
-}
-.detail-rail.failed .detail-oc-note {
-  color: color-mix(in oklch, var(--danger) 78%, var(--text));
-}
-.detail-rail.rejected .detail-oc-note {
-  color: color-mix(in oklch, var(--amber) 82%, var(--text));
-}
-/* The detail's project/who reads as the window title, harmonized with the seated
-   bars (.panel-title); the rest of the detail head is unchanged. */
-.detail-who {
-  font-size: 15px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
-  color: var(--text);
-}
-.detail-meta {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--muted);
-  margin: 0 0 var(--s3);
-  max-width: 80ch;
-  overflow-wrap: anywhere;
 }
 /* A ~24px rounded hover target with a ~15px glyph, harmonized across all three
    overlay heads (settings, activity, detail). */
@@ -2232,34 +1927,6 @@ label.qs-row {
    is bundled first (main.ts); everything below re-skins it to our tokens. Scoped
    under .gk-grid so nothing here leaks past the grid, and so these two-class
    selectors outrank Tabulator's single-class defaults whatever the bundle order. */
-
-/* The footer states the true total and the held cap, both independent of the
-   virtual slice Tabulator has painted (in memory, never a re-query). */
-.grid-foot {
-  display: flex;
-  align-items: center;
-  gap: var(--s3);
-  flex-wrap: wrap;
-  padding: 9px 2px 0;
-  font-size: 11.5px;
-  color: var(--muted);
-}
-.grid-foot .rc b {
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-.grid-foot-actions {
-  margin-left: auto;
-  display: flex;
-  gap: var(--s2);
-}
-.cap-tag {
-  font-size: 10px;
-  color: var(--amber);
-  border: 1px solid color-mix(in oklch, var(--amber) 30%, transparent);
-  border-radius: 4px;
-  padding: 1px 6px;
-}
 
 .gk-grid.tabulator {
   background: var(--sunken);
@@ -4588,12 +4255,217 @@ p.auto-message[data-tone="busy"] {
 .detail-host .detail-card {
   max-width: none;
 }
-/* The detail's title bar stays in view while its result scrolls. */
-.detail-host .detail-head {
-  position: sticky;
-  top: calc(-1 * var(--s3));
-  z-index: 2;
-  background: var(--surface);
+
+/* The decided request, result first: the status and who decided, the receipt and its rows, a
+   REQUEST line, then the request as the pending card showed it. */
+.dt-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+.dt-st {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 650;
+}
+.dt-st svg {
+  width: 15px;
+  height: 15px;
+}
+.dt-status.ok .dt-st {
+  color: var(--ok);
+}
+.dt-status.no .dt-st {
+  color: color-mix(in oklch, var(--amber) 90%, var(--text));
+}
+.dt-status.fail .dt-st {
+  color: var(--danger);
+}
+.dt-status.mut .dt-st {
+  color: var(--muted);
+}
+.dt-sub {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.dt-sub + .dt-sub {
+  margin-top: 1px;
+}
+/* The one explanation box, a reason or an error, under one header whatever it holds. */
+.dt-msg {
+  margin-top: 8px;
+  padding: 9px 12px;
+  border-radius: 7px;
+  background: color-mix(in oklch, var(--text) 5%, transparent);
+  font-size: 12.5px;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.dt-msg.err {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: color-mix(in oklch, var(--danger) 9%, transparent);
+}
+.dt-msg .q {
+  display: block;
+  margin-bottom: 2px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--faint);
+}
+.dt-result {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  margin-top: 14px;
+}
+.dt-fact {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.dt-fact b {
+  font-weight: 700;
+}
+.dt-quiet {
+  font-size: 12px;
+  color: var(--muted);
+}
+/* The rows' own bar: Copy and Export left, where the rows start and end and the pages right. */
+.res-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--edge);
+  border-bottom: 0;
+  border-radius: var(--r) var(--r) 0 0;
+  background: color-mix(in oklch, var(--sunken) 70%, var(--surface));
+  font-size: 12px;
+}
+.res-tools {
+  display: flex;
+  gap: var(--s2);
+}
+.res-pg {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px 12px;
+  margin-left: auto;
+  min-width: 0;
+}
+.res-count {
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.res-pager {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+/* Its display would otherwise outrank the hidden attribute; one page keeps only the size choice. */
+.res-pager[hidden],
+.res-pager[data-single] > :is(.tabulator-page, .tabulator-pages) {
+  display: none;
+}
+.res-pager .tabulator-pages {
+  display: inline-flex;
+  gap: 2px;
+}
+.res-bar .res-pager .tabulator-page,
+.res-bar .res-pager .tabulator-page-size {
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  font: inherit;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.res-bar .res-pager .tabulator-page:not(:disabled):hover {
+  background: color-mix(in oklch, var(--text) 7%, transparent);
+  color: var(--text);
+}
+.res-bar .res-pager .tabulator-page.active {
+  background: color-mix(in oklch, var(--text) 10%, transparent);
+  color: var(--text);
+  font-weight: 650;
+}
+.res-bar .res-pager .tabulator-page:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.res-bar .res-pager .tabulator-page:focus-visible,
+.res-bar .res-pager .tabulator-page-size:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 1px;
+}
+.res-pager label {
+  margin-right: 4px;
+}
+.res .gk-grid {
+  border-radius: 0 0 var(--r) var(--r);
+}
+/* The line between what happened and what was asked, named for what follows it. */
+.sep-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 22px;
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.sep-label::after {
+  content: "";
+  flex: 1;
+  border-top: 1px solid var(--edge);
+}
+#detail .pd-who {
+  margin: 12px 0 8px;
+}
+#detail .pd-who .harness-badge {
+  width: 15px;
+  height: 15px;
+}
+#detail .pd-name {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+#detail .intent {
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+#detail .meta {
+  margin: 4px 0 0;
+}
+#detail .cs-matrix:not(:empty),
+#detail .cs-legend:not(:empty),
+#detail .detail-flat > .sql,
+#detail .auto-trace {
+  margin-top: 14px;
+}
+#detail .cs-legend:not(:empty) + .sql {
+  margin-top: 6px;
 }
 
 /* The open proposal reads top to bottom with no frame of its own: who asked, the request, the

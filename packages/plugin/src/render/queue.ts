@@ -1,10 +1,8 @@
 import { capitalize, clock, escapeHtml, relAge } from "../html";
 import {
-  buildingIcon,
   checkIcon,
   clockIcon,
   copyIcon,
-  dbReadsIcon,
   messageIcon,
   sendIcon,
   warnIcon,
@@ -195,7 +193,7 @@ function cardClassFor(gate: CardGate): string {
 
 // The class chip in .top: none for a read, "Write" (amber) or "Destructive" (red),
 // matching the mode names.
-function riskBadge(cls: RiskClass): string {
+export function riskBadge(cls: RiskClass): string {
   if (cls === "write") {
     return `<span class="risk-badge write">Write</span>`;
   }
@@ -319,28 +317,6 @@ export function denyField(id: string, value = ""): string {
              <input class="deny-reason" type="text" maxlength="140" data-deny-input="${id}" aria-label="What should the agent change?" placeholder="What should the agent change?" autocomplete="off" spellcheck="false" value="${escapeHtml(value)}" />
              <button class="deny-send" type="button" data-deny="${id}" aria-label="Send to the agent">${sendIcon}</button>
            </div>`;
-}
-
-// hideReads drops the "Reads" line on a write/destructive card, whose tables the risk
-// annotation already lists; the sensitive-column flags still stand on their own.
-export function schemaInner(schema: SchemaContext | null | undefined, hideReads = false): string {
-  if (!schema) {
-    return "";
-  }
-  const tables =
-    !hideReads && schema.tables.length
-      ? `<div class="cs-reads"><span class="cs-reads-k">${dbReadsIcon}Read</span>${schema.tables.map((t) => `<span class="tbl-chip">${escapeHtml(t)}</span>`).join("")}</div>`
-      : "";
-  const pii = schema.pii.length
-    ? `<div class="cs-line cs-pii"><span class="cs-warn">${warnIcon}possible PII</span><span class="cs-list">${schema.pii.map(escapeHtml).join(" &middot; ")}</span></div>`
-    : "";
-  const client = schema.client.length
-    ? `<div class="cs-line cs-client"><span class="cs-warn">${buildingIcon}client data</span><span class="cs-list">${schema.client.map(escapeHtml).join(" &middot; ")}</span></div>`
-    : "";
-  const literal = schema.literals.length
-    ? `<div class="cs-line cs-literal"><span class="cs-warn">${warnIcon}sensitive value</span><span class="cs-list">${schema.literals.map((v) => escapeHtml(`'${v}'`)).join(" &middot; ")}</span></div>`
-    : "";
-  return tables + pii + client + literal;
 }
 
 export function busyLabel(state: CardState): string {

@@ -14,7 +14,7 @@ const num = (key: string, fallback: number) => {
 export const scenario = {
   agents: num("agents", 2),
   queue: num("queue", 3),
-  history: num("history", 10),
+  history: num("history", 11),
   // Activity entries per page; a large one shows past months without scrolling to load them.
   page: num("page", 40),
   // How long an approved query runs, to see the running row, Stop and the auto-stop.
@@ -293,6 +293,22 @@ export function seededHistory(): HistItem[] {
       result: { fields: [], rows: [], rowCount: 0, affectedRows: 2, truncated: false },
     },
     {
+      // More rows than one page holds, and more than the agent was sent.
+      ...base,
+      id: "req_2c8a6e1f9b04",
+      status: "approved",
+      note: "12,400 rows returned (agent received 10000)",
+      sql: SQL.cohort,
+      resolvedAt: NOW - 3.5 * MIN,
+      session: session(1),
+      intent: "events since October 1",
+      result: {
+        ...capResult(eventRows(), [{ name: "id" }, { name: "kind" }, { name: "created_at" }]),
+        rowCount: 12_400,
+      },
+      approval: { source: "human" },
+    },
+    {
       ...base,
       id: "req_6f3d0a9c2e71",
       status: "failed",
@@ -468,4 +484,13 @@ export function activity(): ActivityEntry[] {
     }
   }
   return out;
+}
+
+// A result past one page of the grid, so its pager and position show in the result bar.
+export function eventRows(): Record<string, unknown>[] {
+  return Array.from({ length: 2000 }, (_, i) => ({
+    id: 9_000_000 + i,
+    kind: ["view", "click", "signup"][i % 3],
+    created_at: new Date(Date.UTC(2026, 9, 1 + (i % 19), 10 + (i % 9))).toISOString().slice(0, 19),
+  }));
 }

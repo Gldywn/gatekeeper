@@ -1,11 +1,4 @@
-import {
-  capitalize,
-  countsLabel,
-  escapeHtml,
-  formatCount,
-  relAge,
-  sessionDisplayName,
-} from "../html";
+import { capitalize, escapeHtml, formatCount, previewSql, sessionDisplayName } from "../html";
 import {
   agentBadge,
   checkIcon,
@@ -17,14 +10,16 @@ import {
   tableIcon,
   xCircleIcon,
 } from "../icons";
-import type { HistResult } from "../result";
+import { classifyQuery, type RiskClass } from "../sql/classify";
 import { formatSql } from "../sql/format";
 import { highlight } from "../sql/highlight";
 import { visibleControls } from "../sql/sanitize";
+import { countsRows, statementReceipt } from "../sql/schema";
+import { parseStopNote } from "../sql/stop";
 import type { HistItem } from "../types";
 import { approvalHtml } from "./auto";
 import { flyoutMenu } from "./controls";
-import { statusIcon } from "./status";
+import { accessMatrix, riskBadge } from "./queue";
 
 // An agent cancellation is stored as an expiry; this note is what tells the two apart.
 export const CANCELLED_NOTE = "cancelled by the agent";
@@ -33,131 +28,190 @@ export const CANCELLED_NOTE = "cancelled by the agent";
 export const NOT_DELIVERED_NOTE = "result not delivered";
 export const EXECUTION_UNKNOWN = "execution_unknown";
 
-export function detailHtml(item: HistItem): string {
-  const harness = item.session?.harness?.trim() || null;
-  const who = sessionDisplayName(item.session, item.id);
-  const audit = [
-    item.connection ? `on ${escapeHtml(item.connection)}` : "",
-    harness ? escapeHtml(harness) : "",
-    item.session?.sessionId ? escapeHtml(item.session.sessionId) : "",
-    escapeHtml(item.id),
-    escapeHtml(new Date(item.resolvedAt).toLocaleString()),
-  ].filter(Boolean);
+// Where a decided request comes from: the local history (Recently resolved) knows its own notes
+// and who declined; an Audit Trail entry knows only what the server recorded.
+export type DetailSource = "hist" | "audit";
+
+// The decided request, result first: what happened and who decided, what the query did (and
+// its rows, if held), then what was asked under the REQUEST line, as the pending card showed it.
+export function detailHtml(item: HistItem, source: DetailSource, dialect: string): string {
+  const cls = classifyQuery(item.sql, dialect).class;
   return `
-      <div class="detail-card">
-        <div class="detail-head ${item.status}">
-          ${agentBadge(harness)}
-          <span class="detail-who">${escapeHtml(who)}</span>
-          ${item.session?.sessionLabel ? `<span class="detail-scope" title="${escapeHtml(capitalize(item.session.sessionLabel))}">${escapeHtml(capitalize(item.session.sessionLabel))}</span>` : ""}
-          ${statusIcon(item.status)}
-        </div>
-        <div class="detail-meta">${audit.join(" &middot; ")}</div>
-        ${item.intent ? `<p class="detail-intent">${escapeHtml(capitalize(item.intent))}</p>` : ""}
-        <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(visibleControls(item.sql))}" aria-label="Copy SQL">${copyIcon}</button><code class="sql-body" id="detail-sqlbody">${highlight(formatSql(item.sql))}</code></pre>
-        <div class="card-schema" id="detail-cs"></div>
-        ${approvalHtml(item.approval, item.evaluation, item.autoHold)}${outcomeHtml(item)}
+      <div class="detail-flat ${cls === "read" ? "" : cls}">
+        ${statusHtml(item, source)}${resultHtml(item, dialect, cls)}
+        <div class="sep-label"><span>Request</span></div>
+        ${requestHtml(item, dialect, cls)}
       </div>`;
 }
 
-// The outcome carries the status colour on a left rail (the title bar stays neutral),
-// keyed off item.status so each terminal state reads at a glance.
-function outcomeHtml(item: HistItem): string {
-  return `<div class="detail-rail ${item.status}">${outcomeInner(item)}</div>`;
+interface Outcome {
+  cls: "ok" | "no" | "fail" | "mut";
+  icon: string;
+  label: string;
+  // Who decided: only what the record establishes.
+  attr: string;
+  // A fact between the status and the message (a stop request).
+  line?: string;
+  // The one explanation box; `err` for an execution error's raw text.
+  message?: { text: string; err: boolean };
 }
 
-function outcomeInner(item: HistItem): string {
+function outcome(item: HistItem, source: DetailSource): Outcome {
+  const approver =
+    item.approval?.source === "automatic"
+      ? "Approved automatically"
+      : item.approval?.source === "human"
+        ? "Approved by you"
+        : "Approver not recorded";
   if (item.status === "approved") {
-    return approvedOutcome(item);
-  }
-  if (item.status === "failed") {
-    return (
-      ocHead(xCircleIcon, "Failed", "at execution") +
-      ocNote(item.note?.trim() || "The query failed at execution.")
-    );
+    return { cls: "ok", icon: checkIcon, label: "Completed", attr: approver };
   }
   if (item.status === "rejected") {
     // "declined" is the label a decline without a typed reason carries; only a real reason shows.
     const reason = item.note?.trim();
-    return (
-      ocHead(xCircleIcon, "Declined", relAge(item.resolvedAt)) +
-      ocMsg("You declined this proposal. Nothing ran against the database.") +
-      (reason && reason !== "declined" ? ocNote(reason) : "")
-    );
+    return {
+      cls: "no",
+      icon: xCircleIcon,
+      label: "Declined",
+      // Only a local decline names its author: an Audit Trail rejection may be the gate's own.
+      attr: source === "hist" ? "Declined by you" : "",
+      ...(reason && reason !== "declined" ? { message: { text: reason, err: false } } : {}),
+    };
   }
-  if (item.note === CANCELLED_NOTE) {
-    return (
-      ocHead(clockIcon, "Cancelled", relAge(item.resolvedAt)) +
-      ocMsg(
-        "The agent cancelled this proposal before a decision. Nothing ran against the database.",
-      )
-    );
+  if (item.status === "failed") {
+    const note = item.note?.trim() || "The query failed at execution.";
+    if (item.note === EXECUTION_UNKNOWN) {
+      return failed("Execution outcome unknown", approver, {
+        text: "The execution lease expired before the outcome was recorded. The query may have changed data.",
+        err: false,
+      });
+    }
+    if (source === "hist" && item.note === NOT_DELIVERED_NOTE) {
+      return failed("Result delivery unconfirmed", approver, {
+        text: "The database returned successfully. Delivery to the server could not be confirmed.",
+        err: false,
+      });
+    }
+    if (source === "hist" && (item.note === "blocked" || item.note === "lease lost")) {
+      return {
+        cls: "mut",
+        icon: xCircleIcon,
+        label: "Not run",
+        attr: approver,
+        message: {
+          text:
+            item.note === "blocked"
+              ? "Execution was blocked."
+              : "Execution could not be authorized.",
+          err: false,
+        },
+      };
+    }
+    // A stop request is one more fact, never the claimed cause of the error after it.
+    const stop = parseStopNote(note);
+    return {
+      ...failed("Failed", approver, { text: stop ? stop.message : note, err: true }),
+      ...(stop ? { line: stop.stop } : {}),
+    };
   }
-  return (
-    ocHead(clockIcon, "Expired", relAge(item.resolvedAt)) +
-    ocMsg("The proposal timed out before a decision. Nothing ran against the database.")
+  return item.note === CANCELLED_NOTE
+    ? {
+        cls: "mut",
+        icon: clockIcon,
+        label: "Cancelled",
+        attr: "",
+        message: { text: "The agent withdrew the proposal before execution.", err: false },
+      }
+    : {
+        cls: "mut",
+        icon: clockIcon,
+        label: "Expired",
+        attr: "",
+        message: { text: "The proposal expired before execution.", err: false },
+      };
+}
+
+function failed(label: string, attr: string, message: Outcome["message"]): Outcome {
+  return { cls: "fail", icon: xCircleIcon, label, attr, message };
+}
+
+function statusHtml(item: HistItem, source: DetailSource): string {
+  const o = outcome(item, source);
+  const when = `${source === "audit" ? "Recorded" : "Resolved"} ${escapeHtml(
+    new Date(item.resolvedAt).toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+  )}`;
+  const sub = [o.attr, when].filter(Boolean).join(" &middot; ");
+  const message = o.message
+    ? `<div class="dt-msg${o.message.err ? " err" : ""}"><span class="q">Message</span>${escapeHtml(o.message.text)}</div>`
+    : "";
+  return `<div class="dt-status ${o.cls}"><span class="dt-st">${o.icon}${o.label}</span></div><div class="dt-sub">${sub}</div>${o.line ? `<div class="dt-sub">${escapeHtml(o.line)}</div>` : ""}${message}`;
+}
+
+const rowsHtml = (n: number) => `<b>${formatCount(n)}</b> ${n === 1 ? "row" : "rows"}`;
+
+// One receipt for reads and writes alike. DDL reports a conventional zero that measures
+// nothing, and a write's empty result set says nothing either: neither is counted.
+function resultHtml(item: HistItem, dialect: string, cls: RiskClass): string {
+  if (item.status !== "approved") {
+    return "";
+  }
+  const receipt = statementReceipt(item.sql, dialect);
+  const head = receipt
+    ? `<code class="kw">${receipt.op}</code> on ${receipt.tables.map((t) => `<code class="name">${escapeHtml(t)}</code>`).join(", ")} completed`
+    : "Query completed";
+  const r = item.result;
+  const parts: string[] = [];
+  if (r?.affectedRows != null && countsRows(item.sql, dialect)) {
+    parts.push(`<b>affecting</b> ${rowsHtml(r.affectedRows)}`);
+  }
+  if (r?.rowCount != null && !(cls !== "read" && r.rowCount === 0)) {
+    parts.push(`<b>returning</b> ${rowsHtml(r.rowCount)}`);
+  }
+  const line = `<p class="dt-fact">${head}${parts.length ? `, ${parts.join(" and ")}` : ""}.</p>`;
+  const grid = r?.rows.length ? resultGrid() : "";
+  // The local note records how many rows the agent was sent when its cap cut them.
+  const sent = /\(agent received (\d+)\)$/.exec(item.note ?? "");
+  const cap = sent
+    ? `<p class="dt-fact dt-quiet">Only the first ${formatCount(Number(sent[1]))} rows were sent to the agent to avoid context pollution.</p>`
+    : "";
+  return `<div class="dt-result">${line}${grid}${cap}</div>`;
+}
+
+// The held rows: Copy and Export left, Tabulator's pager mounted right (views/detail.ts), the
+// position written beside it; no footer under the grid.
+function resultGrid(): string {
+  const copy = flyoutMenu(
+    "copy",
+    "result",
+    `<span class="flyout-ico" data-flyout-ico>${copyIcon}</span>`,
+    "Copy",
+    [{ fmt: "md", icon: markdownIcon, name: "Markdown" }],
   );
+  const exportMenu = flyoutMenu("export", "result", downloadIcon, "Export", [
+    { fmt: "csv", icon: tableIcon, name: "CSV" },
+    { fmt: "json", icon: jsonIcon, name: "JSON" },
+  ]);
+  return `<div class="res" id="detail-grid"><div class="res-bar"><span class="res-tools">${copy}${exportMenu}</span><span class="res-pg"><span class="res-count" data-grid-count></span><span class="res-pager" data-grid-pager></span></span></div><div class="gk-grid" data-result-grid></div></div>`;
 }
 
-function approvedOutcome(item: HistItem): string {
-  const result = item.result;
-  if (!result) {
-    return ocHead(checkIcon, "Approved", "") + ocMsg("The query ran. No count was recorded.");
-  }
-  // The meta carries the facts: what a write changed, what the query returned, or both.
-  const head = ocHead(checkIcon, "Approved", countsLabel(result));
-  if (result.rowCount === 0) {
-    return head + ocMsg("The query returned no rows.");
-  }
-  // Rows returned but no longer here (retention or the byte budget): keep the scalar
-  // count honest without claiming the data is still around. With no returned count known
-  // (a write's Audit Trail entry), the counts in the head say all there is.
-  if (result.rows.length === 0) {
-    return result.rowCount === null
-      ? head
-      : head + ocMsg("The rows this query returned are no longer held in memory.");
-  }
-  return `${head}<div class="detail-oc-body" id="detail-grid">${resultGrid(result)}</div>`;
-}
-
-function ocHead(icon: string, title: string, meta: string): string {
-  return `<div class="detail-oc">${icon}<span class="detail-oc-title">${title}</span><span class="detail-oc-meta">${escapeHtml(meta)}</span></div>`;
-}
-
-function ocMsg(text: string): string {
-  return `<div class="detail-oc-body"><div class="detail-oc-msg">${escapeHtml(text)}</div></div>`;
-}
-
-function ocNote(text: string): string {
-  return `<div class="detail-oc-body"><div class="detail-oc-note">${escapeHtml(text)}</div></div>`;
-}
-
-// The held rows are already capped (capResult, at decision time). Tabulator mounts on the
-// .gk-grid host once this markup is in the DOM (views/detail.ts) and paginates over them;
-// the footer states the true total and the held cap, independent of the paged slice.
-function resultGrid(result: HistResult): string {
-  return `<div class="gk-grid" data-result-grid></div>${gridFoot(result)}`;
-}
-
-export function gridFoot(result: HistResult): string {
-  const total = result.rowCount ?? result.rows.length;
-  const noun = total === 1 ? "row" : "rows";
-  const capTag = result.truncated
-    ? ` <span class="cap-tag">first ${formatCount(result.rows.length)} held</span>`
-    : "";
-  // The copy/export controls act on the rows on screen, so they show only when rows are
-  // held; the copy icon is wrapped so a copy can flash a check on it without disturbing
-  // the label. When truncated, both operate on the held slice, not the full result.
-  const actions = result.rows.length
-    ? `<span class="grid-foot-actions">${flyoutMenu(
-        "copy",
-        "result",
-        `<span class="flyout-ico" data-flyout-ico>${copyIcon}</span>`,
-        "Copy",
-        [{ fmt: "md", icon: markdownIcon, name: "Markdown" }],
-      )}${flyoutMenu("export", "result", downloadIcon, "Export", [
-        { fmt: "csv", icon: tableIcon, name: "CSV" },
-        { fmt: "json", icon: jsonIcon, name: "JSON" },
-      ])}</span>`
-    : "";
-  return `<div class="grid-foot"><span class="rc"><b>${formatCount(total)}</b> ${noun}${capTag}</span>${actions}</div>`;
+function requestHtml(item: HistItem, dialect: string, cls: RiskClass): string {
+  const harness = item.session?.harness?.trim() || null;
+  const task = item.session?.sessionLabel?.trim();
+  const meta = [
+    escapeHtml(item.id),
+    item.session?.sessionId ? escapeHtml(item.session.sessionId) : "",
+    item.connection ? `on ${escapeHtml(item.connection)}` : "",
+  ].filter(Boolean);
+  return `<div class="pd-who">${agentBadge(harness)}<span class="pd-name">${escapeHtml(sessionDisplayName(item.session, item.id))}</span>${task ? `<span class="pd-task" title="${escapeHtml(capitalize(task))}">${escapeHtml(capitalize(task))}</span>` : ""}</div>
+        <div class="top">${riskBadge(cls)}<span class="intent">${escapeHtml(item.intent ? capitalize(item.intent) : previewSql(item.sql))}</span></div>
+        <div class="meta">${meta.join(" &middot; ")}</div>
+        <div class="cs-matrix" id="detail-cm">${accessMatrix(item.sql, dialect, cls)}</div>
+        <div class="cs-legend" id="detail-cs"></div>
+        <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(visibleControls(item.sql))}" aria-label="Copy SQL">${copyIcon}</button><code class="sql-body" id="detail-sqlbody">${highlight(formatSql(item.sql))}</code></pre>
+        ${approvalHtml(item.approval, item.evaluation, item.autoHold)}`;
 }

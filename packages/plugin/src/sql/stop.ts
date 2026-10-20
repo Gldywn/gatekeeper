@@ -121,6 +121,21 @@ export function stopNote(run: RunState | undefined, error: string): string {
   return `Stop requested by ${who}. The query then ended with: ${error}`;
 }
 
+// The note stopNote() wrote, split back into the stop line a human reads and the message the
+// query ended with. It proves a stop was requested, not that it took effect.
+export function parseStopNote(note: string): { stop: string; message: string } | null {
+  const m = /^Stop requested by (.+?)\. The query then ended with: ([\s\S]*)$/.exec(note);
+  if (!m) return null;
+  const operator = /^the operator after (.+)$/.exec(m[1]);
+  const limit = /^auto-stop (.+)$/.exec(m[1]);
+  const stop = operator
+    ? `Stop requested by you after ${operator[1]}.`
+    : limit
+      ? `Auto-stop requested ${limit[1]}.`
+      : `Stop requested by ${m[1]}.`;
+  return { stop, message: m[2] };
+}
+
 function duration(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
