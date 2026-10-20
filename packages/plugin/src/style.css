@@ -4114,6 +4114,21 @@ p.auto-message[data-tone="busy"] {
 .ix-who {
   flex: none;
 }
+/* A pending row's end: the class icon, then the clock that ticks on its own. */
+.ix-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 18px;
+}
+.ix-risk {
+  display: inline-flex;
+  align-items: center;
+}
+.ix-risk svg {
+  width: 13px;
+  height: 13px;
+}
 .ix-risk.write {
   color: var(--amber);
 }

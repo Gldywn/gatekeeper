@@ -66,12 +66,12 @@ describe("render/activity", () => {
     expect(html).not.toContain("act-detail");
   });
 
-  it("renders a declined entry as Declined, its reason and risk left for the detail", () => {
+  it("renders a declined entry as Declined, its reason left for the detail", () => {
     const html = activityEntryHtml(rejected, false, "postgresql");
     expect(html).toContain('aria-current="false"');
     expect(html).toContain('<span class="hstate rejected" title="Declined"');
     expect(html).toContain('<span class="ix-fact">Declined</span>');
-    expect(html).not.toContain("ix-risk");
+    expect(html).toContain('<span class="ix-risk destructive" title="Destructive">');
     expect(html).not.toContain("read-only only");
   });
 

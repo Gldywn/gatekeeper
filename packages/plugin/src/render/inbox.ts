@@ -9,7 +9,14 @@ import {
   rowsLabel,
   sessionDisplayName,
 } from "../html";
-import { agentBadge, clockIcon, harnessIcon, helpCircleIcon } from "../icons";
+import {
+  agentBadge,
+  clockIcon,
+  harnessIcon,
+  helpCircleIcon,
+  pencilIcon,
+  trashIcon,
+} from "../icons";
 import { classifyQuery, type RiskClass } from "../sql/classify";
 import { countsRows } from "../sql/schema";
 import type { ActivityEntry, Card, HistItem, Presence, SessionRoster } from "../types";
@@ -24,9 +31,17 @@ import { statusIcon } from "./status";
 // own renderers so every gate and annotation stays in one place.
 
 const RISK_WORD: Partial<Record<RiskClass, string>> = {
-  write: "write",
-  destructive: "destructive",
+  write: "Write",
+  destructive: "Destructive",
 };
+
+// A write or a destructive statement says so by an icon before the time; a read carries none.
+function riskIcon(cls: RiskClass): string {
+  const word = RISK_WORD[cls];
+  if (!word) return "";
+  const icon = cls === "destructive" ? trashIcon : pencilIcon;
+  return `<span class="ix-risk ${cls}" title="${word}">${icon}<span class="sr-only">${word}</span></span>`;
+}
 
 function who(session: Card["session"], fallback: string): string {
   return escapeHtml(sessionDisplayName(session, fallback));
@@ -49,9 +64,6 @@ export function queueRowHtml(
       : evaluating
         ? '<span class="ix-dot eval" aria-hidden="true"></span><span class="sr-only">Auto mode is evaluating this read with Jev.</span>'
         : '<span class="ix-dot" aria-hidden="true"></span>';
-  const risk = RISK_WORD[cls]
-    ? `<span aria-hidden="true">&middot;</span><span class="ix-risk ${cls}">${RISK_WORD[cls]}</span>`
-    : "";
   let side: string;
   if (card.state === "executing" && card.run) {
     side = `<span class="ix-side run" data-run="${escapeHtml(card.id)}">${clock(now - card.run.startedAt)}</span>`;
@@ -64,8 +76,8 @@ export function queueRowHtml(
   const title = card.intent ? capitalize(card.intent) : card.id;
   return `<button class="ix-row pend" type="button" data-row="${escapeHtml(card.id)}" data-select="card" aria-current="${selected}">
       <span class="ix-mark">${mark}</span>
-      <span class="ix-main"><span class="ix-title">${escapeHtml(title)}</span><span class="ix-meta">${agentBadge(card.session?.harness?.trim() || null)}<span class="ix-who">${who(card.session, card.sessionId)}</span>${risk}</span></span>
-      ${side}
+      <span class="ix-main"><span class="ix-title">${escapeHtml(title)}</span><span class="ix-meta">${agentBadge(card.session?.harness?.trim() || null)}<span class="ix-who">${who(card.session, card.sessionId)}</span></span></span>
+      <span class="ix-end">${riskIcon(cls)}${side}</span>
     </button>`;
 }
 
@@ -157,6 +169,7 @@ export function doneRowHtml(
   grouped = false,
 ): string {
   const title = item.intent ? capitalize(item.intent) : previewSql(item.sql);
+  const cls = classifyQuery(item.sql, dialect).class;
   const flagsHtml = flags ? `<span class="act-flags">${activityFlagsHtml(flags)}</span>` : "";
   const meta = grouped
     ? ""
@@ -164,7 +177,7 @@ export function doneRowHtml(
   return `<button class="ix-row done${grouped ? " grouped" : ""}" type="button" data-row="${escapeHtml(item.id)}" data-select="${select}" aria-current="${selected}">
       <span class="ix-mark">${rowGlyph(item)}</span>
       <span class="ix-title">${escapeHtml(title)}</span>
-      <span class="ix-top">${autoFlag(item)}${flagsHtml}${time}</span>
+      <span class="ix-top">${riskIcon(cls)}${autoFlag(item)}${flagsHtml}${time}</span>
       ${meta}<span class="ix-fact">${escapeHtml(rowFact(item, dialect))}</span>
     </button>`;
 }

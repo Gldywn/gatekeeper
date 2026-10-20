@@ -127,7 +127,11 @@ describe("queueRowHtml", () => {
 
   it("names a write and falls back to the id without an intent", () => {
     const html = queueRowHtml(card({ intent: undefined }), "write", false, T);
-    expect(html).toContain('<span class="ix-risk write">write</span>');
+    expect(html).toContain('<span class="ix-risk write" title="Write">');
+    expect(html).toContain(
+      '<span class="sr-only">Write</span></span><span class="ix-side" data-lease>',
+    );
+    expect(html).not.toContain("&middot;");
     expect(html).toContain('<span class="ix-title">q_cd34</span>');
   });
 });
@@ -166,7 +170,8 @@ describe("recentRowHtml", () => {
     expect(html).toContain('<span class="ix-fact">2 affected</span>');
     expect(html).toContain('<span class="act-flag pii">PII</span>');
     expect(html).toContain('<span class="act-flag client">Client</span>');
-    expect(html).not.toContain("ix-risk");
+    expect(html).toContain('<span class="ix-risk destructive" title="Destructive">');
+    expect(recentRowHtml({ ...item, sql: "SELECT id FROM users" }, false)).not.toContain("ix-risk");
     expect(
       recentRowHtml(
         {
