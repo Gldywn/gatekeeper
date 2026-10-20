@@ -43,6 +43,7 @@ import {
 import { BrokerClient } from "./net/broker";
 import { connectionScopeKey } from "./net/scope";
 import { SingleInstance, type SingleInstanceWire } from "./net/singleinstance";
+import { overlayScroll } from "./overlay-scroll";
 import { agentLinkAge, agentLinkLabel, agentLinkStatusHtml } from "./render/agentlink";
 import { AUTO_APPROVED, autoIcon, autoPopHtml, SAVED_KEY_MASK } from "./render/auto";
 import { refusalReason } from "./render/autoreasons";
@@ -316,6 +317,7 @@ export class Gatekeeper {
   private breatheLoop?: Loop;
   private prevCardIds = new Set<string>();
   private stripObserver?: ResizeObserver;
+  private overlayScrolls: (() => void)[] = [];
   // The Inbox: which list the left pane shows, and what each list has open on the right. Each
   // list keeps its own selection, so coming back to a tab finds what was open there. Nothing
   // is ever selected for the human: a new or next proposal never lands under the pointer.
@@ -652,6 +654,7 @@ export class Gatekeeper {
   }
 
   private renderStandby(): void {
+    this.releaseOverlayScrolls();
     this.root.innerHTML = `
       <div class="standby">
         <div class="standby-card">
@@ -683,6 +686,7 @@ export class Gatekeeper {
   }
 
   private renderNoBroker(): void {
+    this.releaseOverlayScrolls();
     this.stopProbe();
     this.root.innerHTML = `
       <div class="standby">
@@ -1176,6 +1180,7 @@ export class Gatekeeper {
   }
 
   private renderPairing(errorMessage = ""): void {
+    this.releaseOverlayScrolls();
     this.stopProbe();
     this.resetInbox();
     this.root.innerHTML = `
@@ -1308,11 +1313,18 @@ export class Gatekeeper {
   </header>`;
   }
 
+  // The thumbs observe the Inbox's panes; every render that replaces the root lets them go.
+  private releaseOverlayScrolls(): void {
+    for (const dispose of this.overlayScrolls) dispose();
+    this.overlayScrolls = [];
+  }
+
   private renderShell(): void {
     // The fresh markup opens on the Queue with nothing selected, whatever the last shell showed.
     this.tab = "queue";
     this.resetInbox();
     this.stripObserver?.disconnect();
+    this.releaseOverlayScrolls();
     this.root.innerHTML = `
       <div class="gk">
         <div class="app-top">
@@ -1329,11 +1341,11 @@ export class Gatekeeper {
               </div>
               <span class="pane-actions" id="auditActions" hidden></span>
             </div>
-            <div class="pane-body" id="listQueue" role="tabpanel" aria-labelledby="tabQueue"></div>
-            <div class="pane-body" id="listAudit" role="tabpanel" aria-labelledby="tabAudit" hidden></div>
+            <div class="ov-rail" aria-hidden="true"></div><div class="pane-body" id="listQueue" role="tabpanel" aria-labelledby="tabQueue"></div>
+            <div class="ov-rail" aria-hidden="true"></div><div class="pane-body" id="listAudit" role="tabpanel" aria-labelledby="tabAudit" hidden></div>
           </section>
           <section class="pane pane-detail" aria-label="Selected">
-            <div class="pane-body" id="detailBody">
+            <div class="ov-rail" aria-hidden="true"></div><div class="pane-body" id="detailBody">
               <button class="pane-back" type="button" data-back>${chevronLeft}Back to the list</button>
               <div class="pane-empty-host" id="paneEmpty"></div>
               <div class="queue" id="queue"></div>
@@ -1365,6 +1377,9 @@ export class Gatekeeper {
     // Remeasured on width changes, so the chips that fit follow the tab's size.
     this.stripObserver = new ResizeObserver(() => this.layoutStrip());
     this.stripObserver.observe(strip);
+    this.overlayScrolls = [...this.root.querySelectorAll<HTMLElement>(".ov-rail")].map((rail) =>
+      overlayScroll(rail.nextElementSibling as HTMLElement, rail),
+    );
     const inbox = this.root.querySelector<HTMLElement>("#inbox")!;
     inbox.addEventListener("click", (e) => this.onInboxClick(e));
     inbox.addEventListener("keydown", (e) => this.onInboxKey(e));

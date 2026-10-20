@@ -122,3 +122,19 @@ describe("Inbox selection", () => {
     expect(app.renderSelection).not.toHaveBeenCalled();
   });
 });
+
+describe("overlay thumbs", () => {
+  it("lets them go when the Inbox leaves for standby or the no-server screen", () => {
+    vi.stubGlobal("window", { matchMedia: () => ({ matches: true }), setTimeout: vi.fn() });
+    for (const leave of ["renderStandby", "renderNoBroker"] as const) {
+      const app = harness();
+      const dispose = [vi.fn(), vi.fn()];
+      app.overlayScrolls = [...dispose];
+      app.stopProbe = vi.fn();
+      app.root = { innerHTML: "", querySelector: () => null };
+      app[leave]();
+      for (const d of dispose) expect(d).toHaveBeenCalledOnce();
+      expect(app.overlayScrolls).toEqual([]);
+    }
+  });
+});

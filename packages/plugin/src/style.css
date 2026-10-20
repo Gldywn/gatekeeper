@@ -3980,20 +3980,48 @@ p.auto-message[data-tone="busy"] {
   align-items: center;
   gap: var(--s2);
 }
+/* The native bar is hidden so bands and open rows reach the pane's edge; overlay-scroll.ts
+   draws the thumb that floats over them. */
 .pane-body {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in oklch, var(--text) 16%, transparent) transparent;
+  scrollbar-width: none;
+}
+.pane-body::-webkit-scrollbar {
+  display: none;
+}
+.ov-rail {
+  position: relative;
+  flex: none;
+  height: 0;
+  z-index: 4;
+}
+.ov-thumb {
+  position: absolute;
+  top: 0;
+  right: 2px;
+  width: 4px;
+  border-radius: 4px;
+  background: color-mix(in oklch, var(--text) 26%, transparent);
+  opacity: 0.7;
+  touch-action: none;
+}
+.pane:hover .ov-thumb,
+.ov-rail.dragging .ov-thumb {
+  width: 7px;
+  opacity: 1;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ov-thumb {
+    transition: opacity var(--dur) var(--ease);
+  }
 }
 .pane-list .pane-body {
   padding-bottom: var(--s2);
 }
-/* The scrollbar's gutter is reserved on both sides, so a full-width line or bar stays symmetric. */
 .pane-detail .pane-body {
   padding: var(--s3);
-  scrollbar-gutter: stable both-edges;
 }
 
 /* List rows: the state mark centred on the title's line, the title over who and what came
