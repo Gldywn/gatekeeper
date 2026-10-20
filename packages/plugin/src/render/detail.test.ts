@@ -129,27 +129,62 @@ describe("render/detail", () => {
     expect(stopped).toContain(">Failed</span>");
   });
 
-  it("names a local decline's author and its reason; an Audit Trail decline names neither author", () => {
+  it("gives every decline a Message, and only a local one reads as your own words", () => {
     const local = detailHtml(
-      { ...item, status: "rejected", note: "use a bind param", result: undefined },
+      {
+        ...item,
+        status: "rejected",
+        note: "use a bind param",
+        reason: "use a bind param",
+        result: undefined,
+      },
       "hist",
       pg,
     );
     expect(local).toContain(">Declined</span>");
     expect(local).toContain('<div class="dt-sub">Declined by you &middot; Resolved');
-    expect(local).toContain('<span class="q">Message</span>use a bind param</div>');
+    expect(local).toContain(
+      '<div class="dt-msg reason"><span class="q">Message</span>use a bind param</div>',
+    );
     const plain = detailHtml(
       { ...item, status: "rejected", note: "declined", result: undefined },
       "hist",
       pg,
     );
-    expect(plain).not.toContain("dt-msg");
+    expect(plain).toContain(
+      '<div class="dt-msg"><span class="q">Message</span>You declined this proposal without giving a reason.</div>',
+    );
+    // The gate's own block is recorded as a decline with its sentence: no author, no tint.
     const audit = detailHtml(
-      { ...item, status: "rejected", note: "use a bind param", result: undefined },
+      {
+        ...item,
+        status: "rejected",
+        note: "use a bind param",
+        reason: "use a bind param",
+        result: undefined,
+      },
       "audit",
       pg,
     );
     expect(audit).toContain('<div class="dt-sub">Recorded Jan 1, 09:30 AM</div>');
+    expect(audit).toContain(
+      '<div class="dt-msg"><span class="q">Message</span>use a bind param</div>',
+    );
+    const auditPlain = detailHtml(
+      { ...item, status: "rejected", note: "declined", result: undefined },
+      "audit",
+      pg,
+    );
+    expect(auditPlain).toContain("The proposal was declined.");
+    // A typed "declined" is still a typed reason, told apart from a decline with none.
+    const literal = detailHtml(
+      { ...item, status: "rejected", note: "declined", reason: "declined", result: undefined },
+      "hist",
+      pg,
+    );
+    expect(literal).toContain(
+      '<div class="dt-msg reason"><span class="q">Message</span>declined</div>',
+    );
   });
 
   it("tells an agent cancellation apart from an expiry, and both ran nothing", () => {
@@ -159,15 +194,31 @@ describe("render/detail", () => {
       pg,
     );
     expect(cancelled).toContain(">Cancelled</span>");
+    expect(cancelled).toContain('<div class="dt-sub">Withdrawn by the agent &middot; Resolved');
     expect(cancelled).toContain("The agent withdrew the proposal before execution.");
     const expired = detailHtml(
-      { ...item, status: "expired", note: "expired", result: undefined },
+      { ...item, status: "expired", note: "expired", approval: undefined, result: undefined },
       "hist",
       pg,
     );
     expect(expired).toContain(">Expired</span>");
+    expect(expired).toContain('<div class="dt-sub">Not decided in time &middot; Resolved');
     expect(expired).toContain("The proposal expired before execution.");
     expect(expired).not.toContain("dt-fact");
+    // Approved, then withdrawn before it ran, then expired: it says who approved, not that no one did.
+    const withdrawn = detailHtml(
+      { ...item, status: "expired", note: "expired", result: undefined },
+      "hist",
+      pg,
+    );
+    expect(withdrawn).toContain('<div class="dt-sub">Approved by you &middot; Resolved');
+    expect(
+      detailHtml(
+        { ...item, status: "expired", note: "expired", approval: undefined, result: undefined },
+        "hist",
+        pg,
+      ),
+    ).toContain("Not decided in time");
   });
 
   it("tells unconfirmed and not-run outcomes apart from a failure", () => {

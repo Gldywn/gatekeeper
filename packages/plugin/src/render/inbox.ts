@@ -243,6 +243,7 @@ export function auditItem(e: ActivityEntry, connection: string | null): HistItem
           truncated: false,
         }
       : undefined,
+    ...(e.state === "rejected" && e.reason?.trim() ? { reason: e.reason.trim() } : {}),
     approval: e.approval,
     evaluation: e.evaluation,
     autoHold: e.autoHold,

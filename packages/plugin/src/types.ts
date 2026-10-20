@@ -80,6 +80,8 @@ export interface HistItem {
   note: string;
   // How the plugin itself ended it ("blocked", "lease lost"...), never the raw error the note may be.
   outcome?: string;
+  // The words a person typed when declining, kept apart so a typed "declined" is still theirs.
+  reason?: string;
   sql: string;
   resolvedAt: number;
   connection: string | null;

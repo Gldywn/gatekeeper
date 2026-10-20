@@ -3304,6 +3304,7 @@ export class Gatekeeper {
         status,
         note: displayNote,
         outcome: note,
+        ...(status === "rejected" && reason?.trim() ? { reason: reason.trim() } : {}),
         sql: card.sql,
         resolvedAt: Date.now(),
         connection: this.connectionName || null,

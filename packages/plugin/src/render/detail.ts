@@ -52,8 +52,8 @@ interface Outcome {
   attr: string;
   // A fact between the status and the message (a stop request).
   line?: string;
-  // The one explanation box; `err` for an execution error's raw text.
-  message?: { text: string; err: boolean };
+  // The one explanation box: `err` for an execution error's raw text, `reason` for your words.
+  message?: { text: string; tone?: "err" | "reason" };
 }
 
 function outcome(item: HistItem, source: DetailSource): Outcome {
@@ -67,15 +67,22 @@ function outcome(item: HistItem, source: DetailSource): Outcome {
     return { cls: "ok", icon: checkIcon, label: "Completed", attr: approver };
   }
   if (item.status === "rejected") {
-    // "declined" is the label a decline without a typed reason carries; only a real reason shows.
-    const reason = item.note?.trim();
+    const typed = item.reason ?? "";
+    const hist = source === "hist";
     return {
       cls: "no",
       icon: xCircleIcon,
       label: "Declined",
-      // Only a local decline names its author: an Audit Trail rejection may be the gate's own.
-      attr: source === "hist" ? "Declined by you" : "",
-      ...(reason && reason !== "declined" ? { message: { text: reason, err: false } } : {}),
+      // Only a local decline names its author: an Audit Trail rejection may be the gate's own,
+      // with the gate's own sentence as its reason, so only a local one reads as your words.
+      attr: hist ? "Declined by you" : "",
+      message: typed
+        ? { text: typed, tone: hist ? "reason" : undefined }
+        : {
+            text: hist
+              ? "You declined this proposal without giving a reason."
+              : "The proposal was declined.",
+          },
     };
   }
   if (item.status === "failed") {
@@ -83,13 +90,11 @@ function outcome(item: HistItem, source: DetailSource): Outcome {
     if (item.note === EXECUTION_UNKNOWN) {
       return failed("Execution outcome unknown", approver, {
         text: "The execution lease expired before the outcome was recorded. The query may have changed data.",
-        err: false,
       });
     }
     if (item.outcome === NOT_DELIVERED_NOTE) {
       return failed("Result delivery unconfirmed", approver, {
         text: "The database returned successfully. Delivery to the server could not be confirmed.",
-        err: false,
       });
     }
     if (item.outcome === "blocked" || item.outcome === "lease lost") {
@@ -103,14 +108,13 @@ function outcome(item: HistItem, source: DetailSource): Outcome {
             item.outcome === "blocked"
               ? "Execution was blocked."
               : "Execution could not be authorized.",
-          err: false,
         },
       };
     }
     // A stop request is one more fact, never the claimed cause of the error after it.
     const stop = parseStopNote(note);
     return {
-      ...failed("Failed", approver, { text: stop ? stop.message : note, err: true }),
+      ...failed("Failed", approver, { text: stop ? stop.message : note, tone: "err" }),
       ...(stop ? { line: stop.stop } : {}),
     };
   }
@@ -119,15 +123,16 @@ function outcome(item: HistItem, source: DetailSource): Outcome {
         cls: "mut",
         icon: clockIcon,
         label: "Cancelled",
-        attr: "",
-        message: { text: "The agent withdrew the proposal before execution.", err: false },
+        attr: "Withdrawn by the agent",
+        message: { text: "The agent withdrew the proposal before execution." },
       }
     : {
         cls: "mut",
         icon: clockIcon,
         label: "Expired",
-        attr: "",
-        message: { text: "The proposal expired before execution.", err: false },
+        // An approval whose execution was withdrawn can still expire: then it says who approved.
+        attr: item.approval ? approver : "Not decided in time",
+        message: { text: "The proposal expired before execution." },
       };
 }
 
@@ -147,7 +152,7 @@ function statusHtml(item: HistItem, source: DetailSource): string {
   )}`;
   const sub = [o.attr, when].filter(Boolean).join(" &middot; ");
   const message = o.message
-    ? `<div class="dt-msg${o.message.err ? " err" : ""}"><span class="q">Message</span>${escapeHtml(o.message.text)}</div>`
+    ? `<div class="dt-msg${o.message.tone ? ` ${o.message.tone}` : ""}"><span class="q">Message</span>${escapeHtml(o.message.text)}</div>`
     : "";
   return `<div class="dt-status ${o.cls}"><span class="dt-st">${o.icon}${o.label}</span></div><div class="dt-sub">${sub}</div>${o.line ? `<div class="dt-sub">${escapeHtml(o.line)}</div>` : ""}${message}`;
 }

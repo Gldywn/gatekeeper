@@ -4325,6 +4325,10 @@ p.auto-message[data-tone="busy"] {
   font-size: 12px;
   background: color-mix(in oklch, var(--danger) 9%, transparent);
 }
+/* Words the reviewer typed, set apart from the sentences the plugin writes itself. */
+.dt-msg.reason {
+  background: color-mix(in oklch, var(--amber) 11%, transparent);
+}
 .dt-msg .q {
   display: block;
   margin-bottom: 2px;

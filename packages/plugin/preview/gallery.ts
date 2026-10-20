@@ -230,6 +230,7 @@ const DONE: DoneState[] = [
     {
       status: "rejected",
       note: "Only void the newer copy of each pair",
+      reason: "Only void the newer copy of each pair",
       intent: "void the duplicate invoices",
     },
     {
@@ -244,6 +245,8 @@ const DONE: DoneState[] = [
     {
       status: "rejected",
       note: "Not on production during the billing run. Ask again after 18:00 and scope it to sessions of deleted accounts only.",
+      reason:
+        "Not on production during the billing run. Ask again after 18:00 and scope it to sessions of deleted accounts only.",
       intent: "purge sessions idle for 90 days",
     },
     {
