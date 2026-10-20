@@ -318,8 +318,9 @@ export class Gatekeeper {
   private prevCardIds = new Set<string>();
   private stripObserver?: ResizeObserver;
   private overlayScrolls: (() => void)[] = [];
-  // Agents the roster shows as there, for the empty right pane.
+  // Agents the roster shows as there, and whether one is active, for the empty right pane.
   private liveAgents = 0;
+  private agentsActive = false;
   // The Inbox: which list the left pane shows, and what each list has open on the right. Each
   // list keeps its own selection, so coming back to a tab finds what was open there. Nothing
   // is ever selected for the human: a new or next proposal never lands under the pointer.
@@ -1741,6 +1742,7 @@ export class Gatekeeper {
     const waiting = this.cards.filter((c) => c.state === "ready").length;
     empty.innerHTML = paneEmptyHtml(waiting, this.tab, {
       agents: this.liveAgents,
+      active: this.agentsActive,
       auditEmpty: this.activityView.isEmpty(),
       connection: this.connectionName,
     });
@@ -2618,8 +2620,10 @@ export class Gatekeeper {
     this.rosterSig = sig;
     const live = rows.filter((r) => r.p !== "gone").length;
     // The empty right pane says whether an agent is there, so it follows the roster.
-    if (live !== this.liveAgents) {
+    const active = rows.some((r) => r.p === "active");
+    if (live !== this.liveAgents || active !== this.agentsActive) {
       this.liveAgents = live;
+      this.agentsActive = active;
       if (!this.selection[this.tab]) this.renderSelection();
     }
     const open = this.root.querySelector<HTMLElement>("#agentsPop")?.hidden === false;

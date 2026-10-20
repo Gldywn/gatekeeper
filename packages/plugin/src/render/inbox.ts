@@ -305,11 +305,7 @@ export function emptyListHtml(list: "queue" | "pending" | "audit", connection: s
           "Audit Trail is empty",
           `Every decision on ${connTag(connection)} is kept here.`,
         ]
-      : [
-          clockIcon,
-          list === "queue" ? "Queue is empty" : "Nothing waiting",
-          "Proposals waiting for your review<br>show up here.",
-        ];
+      : [clockIcon, "Queue is empty", "Proposals waiting for your review<br>show up here."];
   return `<div class="em-hive-wrap${list === "pending" ? " compact" : ""}">
       <div class="em-hive" aria-hidden="true"><span class="hx a"></span><span class="hx b"></span><span class="hx c">${icon}</span><span class="hx d"></span><span class="hx e"></span></div>
       <div class="em-center"><b>${title}</b><span>${sub}</span></div>
@@ -326,16 +322,17 @@ function stepsHtml(title: string, steps: [string, string, string][], foot = ""):
   return `<div class="em-steps"><div class="em-steps-title">${title}</div><ol>${items}</ol>${foot}</div>`;
 }
 
-function agentsLine(agents: number): string {
+function agentsLine(agents: number, active: boolean): string {
   const text = agents
     ? `${agents} ${agents === 1 ? "agent" : "agents"} connected`
     : "No agent connected";
-  return `<span class="em-agents${agents ? " on" : ""}"><span class="em-dot"></span>${text}</span>`;
+  return `<span class="em-agents${agents ? " on" : ""}${active ? " active" : ""}"><span class="em-dot"></span>${text}</span>`;
 }
 
 export interface PaneEmptyContext {
-  // Agents the roster shows as there (active or idle).
+  // Agents the roster shows as there (active or idle), and whether one of them is active.
   agents: number;
+  active: boolean;
   // The Audit Trail loaded and holds no decision for this connection.
   auditEmpty: boolean;
   connection: string;
@@ -378,8 +375,8 @@ export function paneEmptyHtml(
         [checkIcon, "You review it here", "then approve it, ask for changes, or decline it."],
         [terminalIcon, "Beekeeper runs it", `on ${conn} and the result goes back to the agent.`],
       ],
-      agentsLine(0),
+      agentsLine(0, false),
     );
   }
-  return `<div class="waiting em-waiting"><span class="waiting-mark" aria-hidden="true"></span><span>Waiting for a query proposal</span>${agentsLine(ctx.agents)}</div>`;
+  return `<div class="waiting em-waiting"><span class="waiting-mark" aria-hidden="true"></span><span>Waiting for a query proposal</span>${agentsLine(ctx.agents, ctx.active)}</div>`;
 }

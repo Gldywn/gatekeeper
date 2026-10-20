@@ -4847,7 +4847,8 @@ p.auto-message[data-tone="busy"] {
   font-size: 12px;
   color: var(--faint);
 }
-/* An empty right pane walks through what comes: a tile per step, then who is there. */
+/* An empty right pane walks through what comes: a tile per step, then who is there, its dot
+   coloured as the agents strip colours the most active of them. */
 .em-steps {
   display: grid;
   gap: 14px;
@@ -4911,8 +4912,9 @@ p.auto-message[data-tone="busy"] {
 .em-agents.on {
   color: var(--muted);
 }
-.em-agents.on .em-dot {
+.em-agents.active .em-dot {
   background: var(--ok);
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--ok) 20%, transparent);
 }
 /* The connection as the header names it. An inline block keeps the sentence's baseline and
    moves to the next line whole; a name wider than the pane wraps inside it. */

@@ -209,7 +209,7 @@ describe("recentRowHtml", () => {
 });
 
 describe("empty states", () => {
-  const ctx = { agents: 0, auditEmpty: false, connection: "prd<db>" };
+  const ctx = { agents: 0, active: false, auditEmpty: false, connection: "prd<db>" };
 
   it("puts one composition in an empty list, naming the connection as the header does", () => {
     const queue = emptyListHtml("queue", "prd<db>");
@@ -217,7 +217,7 @@ describe("empty states", () => {
     expect(queue).not.toContain("ix-group");
     // Over Recently resolved, Pending approval keeps its head over the smaller composition.
     expect(emptyListHtml("pending", "")).toContain('<div class="em-hive-wrap compact">');
-    expect(emptyListHtml("pending", "")).toContain("<b>Nothing waiting</b>");
+    expect(emptyListHtml("pending", "")).toContain("<b>Queue is empty</b>");
     expect(emptyListHtml("audit", "prd<db>")).toContain('Every decision on <span class="em-conn">');
     expect(emptyListHtml("audit", "prd<db>")).toContain("prd&lt;db&gt;</span> is kept here.");
     expect(emptyListHtml("audit", "")).toContain("Every decision on this connection is kept here.");
@@ -232,6 +232,11 @@ describe("empty states", () => {
     const two = paneEmptyHtml(0, "queue", { ...ctx, agents: 2 });
     expect(two).toContain("Waiting for a query proposal</span>");
     expect(two).toContain("2 agents connected");
+    // The dot is green only while one of them is active, as on the agents strip.
+    expect(two).toContain('<span class="em-agents on"><span class="em-dot"></span>');
+    expect(paneEmptyHtml(0, "queue", { ...ctx, agents: 2, active: true })).toContain(
+      'class="em-agents on active"',
+    );
     expect(paneEmptyHtml(1, "queue", ctx)).toContain("1 proposal waits for you");
   });
 
