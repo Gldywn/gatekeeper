@@ -138,3 +138,51 @@ describe("overlay thumbs", () => {
     }
   });
 });
+
+describe("closing the open item", () => {
+  it("clears this tab's selection only, and gives the focus back to its row or the tab", () => {
+    vi.stubGlobal("CSS", { escape: (s: string) => s });
+    const app = harness();
+    const row = { offsetParent: {} as unknown, focus: vi.fn(), setAttribute: vi.fn() };
+    const tab = { focus: vi.fn() };
+    let held: typeof row | null = row;
+    const inbox = { setAttribute: vi.fn() };
+    app.root = {
+      querySelector: (s: string) =>
+        s === "#inbox"
+          ? inbox
+          : s === '#listQueue [data-row="a"]'
+            ? held
+            : s === '[data-tab][aria-selected="true"]'
+              ? tab
+              : null,
+      querySelectorAll: () => (held ? [held] : []),
+    };
+    app.selection = { queue: { kind: "card", id: "a" }, audit: { kind: "audit", id: "x" } };
+    app.closeSelection();
+    expect(app.selection).toEqual({ queue: null, audit: { kind: "audit", id: "x" } });
+    expect(row.setAttribute).toHaveBeenCalledWith("aria-current", "false");
+    expect(app.renderSelection).toHaveBeenCalledWith(true);
+    // A later narrow layout opens on the list.
+    expect(inbox.setAttribute).toHaveBeenCalledWith("data-show", "list");
+    expect(row.focus).toHaveBeenCalledOnce();
+    // Its row gone from the list: the open tab takes the focus.
+    held = null;
+    app.selection.queue = { kind: "hist", id: "a" };
+    app.closeSelection();
+    expect(tab.focus).toHaveBeenCalledOnce();
+    vi.unstubAllGlobals();
+  });
+
+  it("takes an Escape from the Inbox, never one from a field inside it", () => {
+    const app = harness();
+    const from = (inside: boolean, field: boolean) => ({
+      target: {
+        closest: (s: string) => (s === "#inbox" ? inside : field ? {} : null),
+      },
+    });
+    expect(app.inInbox(from(true, false))).toBe(true);
+    expect(app.inInbox(from(true, true))).toBe(false);
+    expect(app.inInbox(from(false, false))).toBe(false);
+  });
+});

@@ -481,6 +481,9 @@ export class Gatekeeper {
         const list = this.root.querySelector<HTMLElement>(".pane-list");
         if (this.root.querySelector('#inbox[data-show="detail"]') && list?.offsetParent === null) {
           this.showList();
+        } else if (list?.offsetParent && !e.defaultPrevented && !e.isComposing && this.inInbox(e)) {
+          // Wide: the last Escape closes the open item, once nothing above it took the key.
+          this.closeSelection();
         }
       }
     });
@@ -1351,6 +1354,7 @@ export class Gatekeeper {
           </section>
           <section class="pane pane-detail" aria-label="Selected">
             <div class="ov-rail" aria-hidden="true"></div><div class="pane-body" id="detailBody">
+              <button class="detail-close pane-close" type="button" data-close-detail aria-label="Close details" title="Close details" hidden>${xIcon}</button>
               <button class="pane-back" type="button" data-back>${chevronLeft}Back to the list</button>
               <div class="pane-empty-host" id="paneEmpty"></div>
               <div class="queue" id="queue"></div>
@@ -1565,6 +1569,10 @@ export class Gatekeeper {
       this.select({ kind: row.dataset.select as Selection["kind"], id: row.dataset.row! });
       return;
     }
+    if (target.closest("[data-close-detail]")) {
+      this.closeSelection();
+      return;
+    }
     if (target.closest("[data-back]")) {
       this.showList();
       return;
@@ -1686,6 +1694,33 @@ export class Gatekeeper {
       : item;
   }
 
+  // An Escape meant for the Inbox: from inside it, never from a field that keeps its own.
+  private inInbox(e: KeyboardEvent): boolean {
+    const target = e.target as HTMLElement | null;
+    return (
+      Boolean(target?.closest?.("#inbox")) &&
+      !target?.closest("input, textarea, select, [contenteditable]")
+    );
+  }
+
+  // Back to nothing open in this tab. Only the view changes: the request stays queued, running
+  // or decided, the other tab keeps its own selection, and the focus returns to the row.
+  private closeSelection(): void {
+    const id = this.selection[this.tab]?.id;
+    if (!id) return;
+    this.selection[this.tab] = null;
+    // A later narrow layout must open on the list, not on a pane with nothing in it.
+    this.root.querySelector("#inbox")?.setAttribute("data-show", "list");
+    const list = this.tab === "queue" ? "#listQueue" : "#listAudit";
+    for (const row of this.root.querySelectorAll<HTMLElement>(`${list} [data-row]`)) {
+      row.setAttribute("aria-current", "false");
+    }
+    this.renderSelection(true);
+    const row = this.root.querySelector<HTMLElement>(`${list} [data-row="${CSS.escape(id)}"]`);
+    if (row?.offsetParent) row.focus({ preventScroll: true });
+    else this.focusOpenTab();
+  }
+
   // Narrow tab: the list and the selection take turns; Back returns to the row it left, or to
   // the open tab when that row is gone or folded away.
   private showList(): void {
@@ -1703,6 +1738,9 @@ export class Gatekeeper {
   // the selection changed (`force`), never on a poll, so its grid keeps its sort and page.
   private renderSelection(force = false): void {
     const sel = this.selection[this.tab];
+    // The close control shows only while something is open in this tab.
+    const close = this.root.querySelector<HTMLElement>("[data-close-detail]");
+    if (close) close.hidden = !sel;
     const queue = this.root.querySelector<HTMLElement>("#queue");
     const empty = this.root.querySelector<HTMLElement>("#paneEmpty");
     if (!queue || !empty) {

@@ -1905,6 +1905,19 @@ label.qs-row {
   outline: 2px solid var(--amber);
   outline-offset: 1px;
 }
+/* The right pane's own close: pinned top-right while the item scrolls, its slot taken from the
+   first line (the agent line, or the outcome) so nothing runs under it. Wide only. */
+.pane-close {
+  position: sticky;
+  top: -5px;
+  z-index: 5;
+  float: right;
+  margin: -5px -4px 0 var(--s2);
+  background: var(--pane-bg);
+}
+.pane-close[hidden] {
+  display: none;
+}
 /* ==== Result grid (Tabulator) ==============================================
    Tabulator renders the approved result set (render/grid.ts): row virtualization,
    click-to-sort, column resize + reorder, and type-aware cells. Its base stylesheet
@@ -4997,6 +5010,9 @@ p.auto-message[data-tone="busy"] {
   }
   .inbox[data-show="list"] .pane-detail,
   .inbox[data-show="detail"] .pane-list {
+    display: none;
+  }
+  .pane-close {
     display: none;
   }
   .pane-back {
