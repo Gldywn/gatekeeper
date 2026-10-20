@@ -120,7 +120,7 @@ import {
 } from "./version";
 import { ActivityView } from "./views/activity";
 import { DetailView } from "./views/detail";
-import { SettingsView } from "./views/settings";
+import { DETECTION_TOGGLES, exampleChip, SettingsView } from "./views/settings";
 
 const BROKER_URL = "http://localhost:9999";
 const POLL_MS = 1000;
@@ -208,8 +208,8 @@ async function runApprovedQuery(
 }
 
 // A quick-menu switch row: the setting name and its live, persisted toggle.
-function quickSwitch(setting: string, label: string, checked: boolean): string {
-  return `<label class="qs-row switch-row"><span class="qs-name">${label}</span>${switchInput(setting, label, checked)}</label>`;
+function quickSwitch(setting: string, label: string, checked: boolean, example = ""): string {
+  return `<label class="qs-row switch-row"><span class="qs-name">${label}${example}</span>${switchInput(setting, label, checked)}</label>`;
 }
 
 function newInstanceId(): string {
@@ -1306,9 +1306,7 @@ export class Gatekeeper {
           </div>
           <div class="pop-group">
             <div class="pop-eyebrow">Detection</div>
-            ${quickSwitch("piiFlagging", "PII flagging", s.piiFlagging)}
-            ${quickSwitch("clientFlagging", "Client-data flagging", s.clientFlagging)}
-            ${quickSwitch("sensitiveValues", "Sensitive-value detection", s.sensitiveValues)}
+            ${DETECTION_TOGGLES.map((t) => quickSwitch(t.key, t.name, Boolean(s[t.key]), exampleChip(t))).join("")}
           </div>
           <div class="pop-foot">
             <button class="pop-full" id="settingsAll" type="button">Open all settings ${externalLinkIcon}</button>

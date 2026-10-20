@@ -941,8 +941,17 @@ label.qs-row {
   cursor: pointer;
 }
 .qs-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
   font-size: 12px;
   color: var(--text);
+}
+/* The detection's sample, as on the settings page, a size down to fit the menu's line. */
+.qs-name .set-ex {
+  font-size: 10px;
+  padding: 0 5px;
 }
 /* The quick menu mirrors the settings page taxonomy: eyebrow groups (Access, then
    Detection) reusing the page's eyebrow so the two surfaces read as one system. */

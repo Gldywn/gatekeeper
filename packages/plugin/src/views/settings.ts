@@ -19,7 +19,7 @@ interface SettingsViewDeps {
   version?: () => string;
 }
 
-interface ToggleSpec {
+export interface ToggleSpec {
   key: keyof Settings;
   name: string;
   desc: string;
@@ -30,7 +30,7 @@ interface ToggleSpec {
 
 // The tables and columns a query reads are always resolved and shown (2026-09-21
 // decision); only what is highlighted on top of them stays a preference.
-const DETECTION_TOGGLES: ToggleSpec[] = [
+export const DETECTION_TOGGLES: ToggleSpec[] = [
   {
     key: "piiFlagging",
     name: "PII flagging",
@@ -183,10 +183,15 @@ function groupHead(name: string): string {
   return `<div class="set-group-head"><span class="set-group-name">${name}</span></div>`;
 }
 
-function toggleRow(t: ToggleSpec, s: Settings): string {
-  const example = t.example
+// The detection's sample in its own on-card style, beside its name here and in the quick menu.
+export function exampleChip(t: Pick<ToggleSpec, "example">): string {
+  return t.example
     ? `<span class="set-ex ${t.example.cls}">${escapeHtml(t.example.text)}</span>`
     : "";
+}
+
+function toggleRow(t: ToggleSpec, s: Settings): string {
+  const example = exampleChip(t);
   return `
           <div class="set-row">
             <div class="set-text">
