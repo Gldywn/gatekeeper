@@ -1569,6 +1569,10 @@ export class Gatekeeper {
       this.select({ kind: row.dataset.select as Selection["kind"], id: row.dataset.row! });
       return;
     }
+    if (target.closest("[data-request-toggle]")) {
+      this.detailView.toggleRequest();
+      return;
+    }
     if (target.closest("[data-close-detail]")) {
       this.closeSelection();
       return;

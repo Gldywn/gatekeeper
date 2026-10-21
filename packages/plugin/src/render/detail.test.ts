@@ -60,8 +60,16 @@ describe("render/detail", () => {
       'data-flyout-action="copy" data-flyout-key="result" data-flyout-fmt="md"',
     );
     expect(html).not.toContain("grid-foot");
-    // Then what was asked, under its line, as the pending card showed it.
-    expect(html.indexOf('class="sep-label"')).toBeGreaterThan(html.indexOf("detail-grid"));
+    // Then what was asked, folded under one line that names it, as the pending card showed it.
+    expect(html.indexOf("data-request-toggle")).toBeGreaterThan(html.indexOf("detail-grid"));
+    expect(html).toContain('aria-expanded="false" aria-controls="detail-rq"');
+    expect(html).toContain(
+      '<span class="rq-label">Show request</span><span class="rq-intent">List account contacts</span>',
+    );
+    expect(html).toContain('<div class="rq-body" id="detail-rq" hidden>');
+    expect(detailHtml(item, "hist", pg, true)).toContain(
+      '<span class="rq-label">Hide request</span>',
+    );
     expect(html).toContain(
       '<span class="pd-name">gatekeeper</span><span class="pd-task" title="Audit review">Audit review</span>',
     );

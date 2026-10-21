@@ -4469,22 +4469,66 @@ p.auto-message[data-tone="busy"] {
 .res .gk-grid {
   border-radius: 0 0 var(--r) var(--r);
 }
-/* The line between what happened and what was asked, named for what follows it. */
-.sep-label {
+/* What was asked, folded under one line that names it: the label, then the intent cut to the
+   line. The whole line opens it. */
+.rq-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-top: 22px;
-  font-size: 10.5px;
-  font-weight: 650;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  gap: 8px;
+  width: 100%;
+  margin-top: 16px;
+  padding: 12px 0 0;
+  border: 0;
+  border-top: 1px solid var(--hi);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.rq-chev {
+  display: inline-flex;
+  flex: none;
+  color: var(--faint);
+  transform: rotate(-90deg);
+}
+.rq-chev svg {
+  width: 13px;
+  height: 13px;
+}
+.rq-row[aria-expanded="true"] .rq-chev {
+  transform: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .rq-chev {
+    transition: transform var(--dur) var(--ease);
+  }
+}
+.rq-label {
+  flex: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.rq-intent {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
   color: var(--faint);
 }
-.sep-label::after {
-  content: "";
-  flex: 1;
-  border-top: 1px solid var(--edge);
+.rq-row:hover .rq-label,
+.rq-row:hover .rq-chev {
+  color: var(--text);
+}
+.rq-row:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+#detail .rq-body > .pd-who {
+  margin-top: 14px;
 }
 #detail .pd-who {
   margin: 12px 0 8px;
@@ -4511,7 +4555,7 @@ p.auto-message[data-tone="busy"] {
 }
 #detail .cs-matrix:not(:empty),
 #detail .cs-legend:not(:empty),
-#detail .detail-flat > .sql,
+#detail .rq-body > .sql,
 #detail .auto-trace {
   margin-top: 14px;
 }

@@ -2,6 +2,7 @@ import { capitalize, escapeHtml, formatCount, previewSql, sessionDisplayName } f
 import {
   agentBadge,
   checkIcon,
+  chevronDown,
   clockIcon,
   copyIcon,
   downloadIcon,
@@ -33,15 +34,27 @@ export const EXECUTION_UNKNOWN = "execution_unknown";
 export type DetailSource = "hist" | "audit";
 
 // The decided request, result first: what happened and who decided, what the query did (and
-// its rows, if held), then what was asked under the REQUEST line, as the pending card showed it.
-export function detailHtml(item: HistItem, source: DetailSource, dialect: string): string {
+// its rows, if held), then what was asked, folded, as the pending card showed it.
+export function detailHtml(
+  item: HistItem,
+  source: DetailSource,
+  dialect: string,
+  requestOpen = false,
+): string {
   const cls = classifyQuery(item.sql, dialect).class;
   return `
       <div class="detail-flat ${cls === "read" ? "" : cls}">
         ${statusHtml(item, source)}${resultHtml(item, dialect, cls)}
-        <div class="sep-label"><span>Request</span></div>
-        ${requestHtml(item, dialect, cls)}
+        ${requestFoldHtml(item, requestOpen)}
+        <div class="rq-body" id="detail-rq"${requestOpen ? "" : " hidden"}>${requestHtml(item, dialect, cls)}</div>
       </div>`;
+}
+
+// Once decided, what was asked folds under one line that names it by its intent; the whole line
+// opens it. It starts closed on each item and keeps its state while that item re-renders.
+function requestFoldHtml(item: HistItem, open: boolean): string {
+  const what = escapeHtml(item.intent ? capitalize(item.intent) : previewSql(item.sql));
+  return `<button class="rq-row" type="button" data-request-toggle aria-expanded="${open}" aria-controls="detail-rq"><span class="rq-chev">${chevronDown}</span><span class="rq-label">${open ? "Hide" : "Show"} request</span><span class="rq-intent">${what}</span></button>`;
 }
 
 interface Outcome {

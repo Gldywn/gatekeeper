@@ -47,6 +47,9 @@ export class DetailView {
     this.dialect = deps.dialect;
   }
 
+  // The item whose request is open: closed again whenever another item opens.
+  private requestOpen: string | null = null;
+
   showing(): string | null {
     return this.detailItem?.id ?? null;
   }
@@ -57,10 +60,30 @@ export class DetailView {
       return;
     }
     this.detailItem = item;
-    panel.innerHTML = detailHtml(item, annotate === "text" ? "audit" : "hist", this.dialect());
+    if (this.requestOpen !== item.id) this.requestOpen = null;
+    panel.innerHTML = detailHtml(
+      item,
+      annotate === "text" ? "audit" : "hist",
+      this.dialect(),
+      this.requestOpen === item.id,
+    );
     panel.hidden = false;
     this.mountGrid(panel, item);
     void this.annotateDetail(item, annotate);
+  }
+
+  // Opens or folds the request in place: the grid above keeps its page and sort, the line its focus.
+  toggleRequest(): void {
+    const item = this.detailItem;
+    const toggle = this.root.querySelector<HTMLElement>("#detail [data-request-toggle]");
+    const body = this.root.querySelector<HTMLElement>("#detail-rq");
+    if (!item || !toggle || !body) return;
+    const open = this.requestOpen !== item.id;
+    this.requestOpen = open ? item.id : null;
+    toggle.setAttribute("aria-expanded", String(open));
+    const label = toggle.querySelector(".rq-label");
+    if (label) label.textContent = `${open ? "Hide" : "Show"} request`;
+    body.hidden = !open;
   }
 
   // Mounted once the markup is laid out: the virtual renderer sizes its viewport from it.
@@ -168,6 +191,7 @@ export class DetailView {
 
   close(): void {
     this.detailItem = null;
+    this.requestOpen = null;
     this.destroyGrid();
     const panel = this.root.querySelector<HTMLDivElement>("#detail");
     if (panel) {
