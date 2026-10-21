@@ -61,7 +61,10 @@ export function mountResultGrid(
       const size = Number(table.getPageSize()) || total;
       const page = Number(table.getPage()) || 1;
       const from = total ? (page - 1) * size + 1 : 0;
-      bar.count.textContent = `${formatCount(from)}–${formatCount(Math.min(page * size, total))} of ${formatCount(total)}`;
+      const to = Math.min(page * size, total);
+      // A last page of one row reads "11 of 11", not "11–11 of 11".
+      const span = from === to ? formatCount(to) : `${formatCount(from)}–${formatCount(to)}`;
+      bar.count.textContent = `${span} of ${formatCount(total)}`;
       // One page needs no page buttons; the size choice stays while a smaller size would page.
       bar.pager.toggleAttribute("data-single", total <= size);
       bar.pager.hidden = total <= PAGE_SIZES[0];
