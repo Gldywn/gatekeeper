@@ -97,6 +97,7 @@ function harness() {
     },
     root: { querySelector: () => null },
     settingsStore: { get: () => ({ confirmWrites: true, resultCacheMb: 4 }) },
+    confirmModal: { dismissFor: vi.fn() },
     renderQueue: vi.fn(),
     renderAuto: vi.fn(),
     renderModeSurfaces: vi.fn(),

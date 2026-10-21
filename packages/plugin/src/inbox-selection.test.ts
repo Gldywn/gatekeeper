@@ -43,6 +43,7 @@ function harness() {
     selection: { queue: null, audit: null },
     root: { querySelector: () => null },
     settingsStore: { get: () => ({ recentlyResolved: 20, resultCacheMb: 4 }) },
+    confirmModal: { dismissFor: vi.fn() },
     renderQueueList: vi.fn(),
     renderSelection: vi.fn(),
     updateTabTitle: vi.fn(),

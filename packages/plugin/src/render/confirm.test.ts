@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { type ConfirmSpec, confirmHtml, runSentence } from "./confirm";
+import { describe, expect, it, vi } from "vitest";
+import { ConfirmModal, type ConfirmSpec, confirmHtml, runSentence } from "./confirm";
 import { cardHtml } from "./queue";
 
 const schema = {
@@ -142,5 +142,30 @@ describe("runSentence", () => {
     expect(html.indexOf('class="confirm-mx"')).toBeLessThan(
       html.indexOf('class="sql confirm-sql"'),
     );
+  });
+});
+
+describe("ConfirmModal", () => {
+  it("closes a run confirm once its request stops waiting, and only for that request", () => {
+    const panel = { innerHTML: "", hidden: true, querySelector: () => ({ focus: vi.fn() }) };
+    const modal = new ConfirmModal({
+      addEventListener: vi.fn(),
+      querySelector: () => panel,
+    } as unknown as HTMLElement);
+    const onConfirm = vi.fn();
+    modal.open({
+      tone: "write",
+      heading: "Run?",
+      body: "",
+      confirmLabel: "Run",
+      requestId: "a",
+      onConfirm,
+    });
+    modal.dismissFor("b");
+    expect(modal.isOpen).toBe(true);
+    modal.dismissFor("a");
+    expect(modal.isOpen).toBe(false);
+    expect(panel.hidden).toBe(true);
+    expect(onConfirm).not.toHaveBeenCalled();
   });
 });

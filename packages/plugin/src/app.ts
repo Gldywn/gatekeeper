@@ -3051,6 +3051,7 @@ export class Gatekeeper {
         sql: card.sql,
         schema: card.schema ?? undefined,
         confirmLabel: op ? `Run ${op}` : destructive ? "Run destructive" : "Run write",
+        requestId: id,
         onConfirm: () => void this.approve(id, true),
       });
       return;
@@ -3389,6 +3390,7 @@ export class Gatekeeper {
   }
 
   private drop(id: string): void {
+    this.confirmModal.dismissFor(id);
     this.denyDrafts.delete(id);
     const index = this.cards.findIndex((c) => c.id === id);
     if (index !== -1) {
@@ -3408,6 +3410,8 @@ export class Gatekeeper {
     if (!card) {
       return;
     }
+    // At once, not after the row's exit: the confirm must not outlive what it asks about.
+    this.confirmModal.dismissFor(id);
     const el = this.root.querySelector<HTMLElement>(`[data-row="${id}"]`);
     // A custom reason replaces the terse default label; the row and the detail both read
     // HistItem.note, so nothing here is hardcoded.

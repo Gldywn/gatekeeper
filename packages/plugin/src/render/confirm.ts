@@ -30,6 +30,8 @@ export interface ConfirmSpec {
   // same formatting, same keyword colours, same PII, client and literal marks.
   schema?: SchemaContext;
   challenge?: ConfirmChallenge;
+  // The request a run confirm asks about: it closes once that request stops waiting.
+  requestId?: string;
   // What the statement does, on which table and database (trusted HTML), and the tables it
   // reads and writes: shown instead of the body, before the SQL.
   facts?: { sentence: string; matrix: string };
@@ -148,6 +150,11 @@ export class ConfirmModal {
     this.teardown();
     spec.onCancel?.();
     return true;
+  }
+
+  // Expired, withdrawn or taken back by the broker underneath: nothing is left to confirm.
+  dismissFor(requestId: string): void {
+    if (this.spec?.requestId === requestId) this.cancel();
   }
 
   private confirm(): void {
