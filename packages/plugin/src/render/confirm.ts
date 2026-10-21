@@ -1,6 +1,6 @@
 import { escapeHtml, withSqlKeywords } from "../html";
 import { copyIcon } from "../icons";
-import { formatSql } from "../sql/format";
+import { formatSql, tokenize } from "../sql/format";
 import { highlight } from "../sql/highlight";
 import { visibleControls } from "../sql/sanitize";
 import type { SchemaContext } from "../sql/schema";
@@ -30,6 +30,9 @@ export interface ConfirmSpec {
   // same formatting, same keyword colours, same PII, client and literal marks.
   schema?: SchemaContext;
   challenge?: ConfirmChallenge;
+  // What the statement does, on which table and database (trusted HTML), and the tables it
+  // reads and writes: shown instead of the body, before the SQL.
+  facts?: { sentence: string; matrix: string };
   // What confirming does to Auto mode, one fact on its own line under the body.
   autoNotice?: string;
   onConfirm: () => void;
@@ -59,9 +62,10 @@ export function confirmHtml(spec: ConfirmSpec): string {
     ? `<pre class="sql confirm-sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(visibleControls(spec.sql))}" aria-label="Copy SQL">${copyIcon}</button><code class="sql-body">${highlight(formatSql(spec.sql), spec.schema?.pii, spec.schema?.client, spec.schema?.literals)}</code></pre>`
     : "";
   return `
-      <div class="detail-card confirm-card ${spec.tone}">
+      <div class="detail-card confirm-card ${spec.tone}${spec.sql ? " with-sql" : ""}">
         <h2 class="confirm-title ${spec.tone}">${escapeHtml(spec.heading)}</h2>
-        <p class="confirm-text">${withSqlKeywords(spec.body)}</p>
+        <p class="confirm-text">${spec.facts ? spec.facts.sentence : withSqlKeywords(spec.body)}</p>
+        ${spec.facts?.matrix ? `<div class="confirm-mx">${spec.facts.matrix}</div>` : ""}
         ${spec.autoNotice ? `<p class="confirm-auto">${autoIcon}<span>${escapeHtml(spec.autoNotice)}</span></p>` : ""}
         ${sql}
         ${challenge}
@@ -173,4 +177,39 @@ export class ConfirmModal {
   private panel(): HTMLElement | null {
     return this.root.querySelector<HTMLElement>("#confirm");
   }
+}
+
+const RUN_VERBS: Record<string, string> = {
+  INSERT: "adds rows to",
+  UPSERT: "adds or changes rows of",
+  UPDATE: "changes rows of",
+  DELETE: "removes rows from",
+  DROP: "drops",
+  TRUNCATE: "empties",
+};
+
+// An upsert's INSERT may change an existing row instead of adding one. Read on its words only:
+// a comment between the keywords cannot hide it, nor a string fake it.
+const UPSERT = /\bon conflict\b.*\bdo update\b|\bon duplicate key update\b/i;
+const words = (sql: string) =>
+  tokenize(sql)
+    .filter((t) => t.t === "word")
+    .map((t) => t.v)
+    .join(" ");
+
+// What the statement does, to which table, on which database, before its SQL. With no single
+// operation the parse can vouch for, it names the database only.
+export function runSentence(
+  sql: string,
+  op: string | undefined,
+  tables: string[],
+  database: string,
+  destructive: boolean,
+): string {
+  const key = op === "INSERT" && UPSERT.test(words(sql)) ? "UPSERT" : op;
+  const verb = key && tables.length ? RUN_VERBS[key] : undefined;
+  const names = tables.map((t) => `<code class="name">${escapeHtml(t)}</code>`).join(", ");
+  return verb
+    ? `It ${verb} ${names} on ${database}, once, when you confirm.`
+    : `It ${destructive ? "runs" : "changes data"} on ${database}, once, when you confirm.`;
 }

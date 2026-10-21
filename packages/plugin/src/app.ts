@@ -47,7 +47,7 @@ import { overlayScroll } from "./overlay-scroll";
 import { agentLinkAge, agentLinkLabel, agentLinkStatusHtml } from "./render/agentlink";
 import { AUTO_APPROVED, autoIcon, autoPopHtml, refusalReason, SAVED_KEY_MASK } from "./render/auto";
 
-import { ConfirmModal } from "./render/confirm";
+import { ConfirmModal, runSentence } from "./render/confirm";
 import { connChipInner } from "./render/connchip";
 import { modeDropdown, switchInput } from "./render/controls";
 import { type DbCheck, dbLink, dbLinkLabel, dbStatusHtml, nextCheckText } from "./render/dblink";
@@ -55,6 +55,7 @@ import { CANCELLED_NOTE, NOT_DELIVERED_NOTE } from "./render/detail";
 import {
   agentsStripHtml,
   auditItem,
+  connTag,
   emptyListHtml,
   groupHeadHtml,
   paneEmptyHtml,
@@ -89,7 +90,7 @@ import { highlight } from "./sql/highlight";
 import { modeRank, type RiskMode } from "./sql/mode";
 import { mapDialect } from "./sql/readonly";
 import { type EndpointReadOnly, hasProbe, probeReadOnly, runErrorText } from "./sql/readonly-probe";
-import { sensitivityOf, textSchema } from "./sql/schema";
+import { sensitivityOf, statementReceipt, textSchema } from "./sql/schema";
 import {
   newStopToken,
   readStop,
@@ -3006,15 +3007,31 @@ export class Gatekeeper {
     if (!confirmed && verdict.class !== "read" && this.settingsStore.get().confirmWrites) {
       this.setCardState(id, "ready");
       const destructive = verdict.class === "destructive";
+      // The operation names the title and the button; the sentence says what it does to which
+      // table on which database, before the tables it touches and its SQL.
+      const receipt = statementReceipt(card.sql, this.dialect);
+      const op = receipt?.op;
       this.confirmModal.open({
         tone: destructive ? "destructive" : "write",
-        heading: destructive ? "Run this destructive statement?" : "Run this write?",
-        body: destructive
-          ? "This statement runs on the live database the moment you confirm. There is no undo action in this plugin."
-          : "This changes data on the live database the moment you confirm.",
+        heading: op
+          ? `Run this ${op}?`
+          : destructive
+            ? "Run this destructive statement?"
+            : "Run this write?",
+        body: "",
+        facts: {
+          sentence: runSentence(
+            card.sql,
+            op,
+            receipt?.tables ?? [],
+            connTag(this.connectionName),
+            destructive,
+          ),
+          matrix: accessMatrix(card.sql, this.dialect, verdict.class, card.schema),
+        },
         sql: card.sql,
         schema: card.schema ?? undefined,
-        confirmLabel: destructive ? "Run destructive" : "Run write",
+        confirmLabel: op ? `Run ${op}` : destructive ? "Run destructive" : "Run write",
         onConfirm: () => void this.approve(id, true),
       });
       return;

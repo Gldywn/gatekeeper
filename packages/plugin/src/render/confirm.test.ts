@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type ConfirmSpec, confirmHtml } from "./confirm";
+import { type ConfirmSpec, confirmHtml, runSentence } from "./confirm";
 import { cardHtml } from "./queue";
 
 const schema = {
@@ -36,7 +36,7 @@ describe("render/confirm", () => {
       '<span class="st sensitive-val" title="Sensitive value">\'jane@acme.io\'</span>',
     );
     // The tone reaches the card, which is what turns the frame red on a destructive.
-    expect(html).toContain('<div class="detail-card confirm-card destructive">');
+    expect(html).toContain('<div class="detail-card confirm-card destructive with-sql">');
   });
 
   it("renders the same body as the card it confirms", () => {
@@ -86,5 +86,61 @@ describe("render/confirm", () => {
     expect(plain).not.toContain("data-copy-sql");
     // Copying is not an action of the dialog: it carries no confirm or cancel hook.
     expect(confirmHtml(spec)).not.toContain('data-copy-sql="" data-confirm');
+  });
+});
+
+describe("runSentence", () => {
+  it("says what the statement does to which table on which database", () => {
+    expect(runSentence("", "UPDATE", ["treasury.debit_orders"], "<db>", false)).toBe(
+      'It changes rows of <code class="name">treasury.debit_orders</code> on <db>, once, when you confirm.',
+    );
+    expect(runSentence("", "DELETE", ["a<b"], "<db>", true)).toBe(
+      'It removes rows from <code class="name">a&lt;b</code> on <db>, once, when you confirm.',
+    );
+    // No single operation the parse vouches for: the database only.
+    expect(runSentence("", undefined, [], "<db>", false)).toBe(
+      "It changes data on <db>, once, when you confirm.",
+    );
+    expect(runSentence("", undefined, [], "<db>", true)).toBe(
+      "It runs on <db>, once, when you confirm.",
+    );
+  });
+
+  it("does not claim an upsert only adds rows", () => {
+    const say = (sql: string) => runSentence(sql, "INSERT", ["firms"], "<db>", false);
+    expect(say("INSERT INTO firms (id) VALUES (1)")).toContain("It adds rows to");
+    expect(
+      say("INSERT INTO firms (id, n) VALUES (1, 'A') ON CONFLICT (id) DO UPDATE SET n = 'B'"),
+    ).toContain("It adds or changes rows of");
+    expect(say("INSERT INTO firms (id) VALUES (1) ON DUPLICATE KEY UPDATE id = 2")).toContain(
+      "It adds or changes rows of",
+    );
+    expect(say("INSERT INTO firms (id) VALUES (1) ON CONFLICT DO NOTHING")).toContain(
+      "It adds rows to",
+    );
+    expect(
+      say(
+        "INSERT INTO firms (id) VALUES (1) ON /* policy */ CONFLICT (id) DO -- x\n UPDATE SET id = 2",
+      ),
+    ).toContain("It adds or changes rows of");
+    expect(say("INSERT INTO firms (n) VALUES ('on conflict do update')")).toContain(
+      "It adds rows to",
+    );
+  });
+
+  it("puts the sentence and the tables in place of the body, before the SQL", () => {
+    const html = confirmHtml({
+      tone: "write",
+      heading: "Run this UPDATE?",
+      body: "",
+      facts: { sentence: "It changes rows.", matrix: '<table class="mx"></table>' },
+      sql: "UPDATE t SET a = 1",
+      confirmLabel: "Run UPDATE",
+      onConfirm: () => {},
+    });
+    expect(html).toContain('<p class="confirm-text">It changes rows.</p>');
+    expect(html.indexOf('class="confirm-mx"')).toBeLessThan(
+      html.indexOf('class="sql confirm-sql"'),
+    );
   });
 });

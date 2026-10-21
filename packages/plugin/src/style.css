@@ -2789,6 +2789,19 @@ label.qs-row {
   max-width: min(94vw, 440px);
   margin-top: 12vh;
 }
+/* A run confirm carries the SQL: wider, so its lines break where the formatter breaks them. */
+.confirm-card.with-sql {
+  max-width: min(94vw, 600px);
+}
+.confirm-card.with-sql .confirm-text {
+  margin-bottom: var(--s3);
+}
+.confirm-mx {
+  margin-bottom: var(--s3);
+}
+.confirm-text .em-conn {
+  font-size: 12px;
+}
 .confirm-title {
   margin: 0 0 var(--s2);
   font-size: 16px;

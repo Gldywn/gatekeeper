@@ -293,7 +293,7 @@ export function agentsStripHtml(rows: { s: SessionRoster; p: Presence }[], live:
 }
 
 // The connection as the header names it: its cylinder and its name, set apart in a sentence.
-function connTag(name: string): string {
+export function connTag(name: string): string {
   return name
     ? `<span class="em-conn">${dbCylinderIcon}${escapeHtml(name)}</span>`
     : "this connection";
