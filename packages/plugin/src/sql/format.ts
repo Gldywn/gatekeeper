@@ -162,9 +162,18 @@ function clauseEnd(toks: Tok[], i: number): number {
   }
   if ((w === "inner" || w === "cross") && w2 === "join") return j;
   if (
-    ["from", "where", "having", "limit", "offset", "join", "union", "except", "intersect"].includes(
-      w,
-    )
+    [
+      "from",
+      "where",
+      "having",
+      "limit",
+      "offset",
+      "join",
+      "union",
+      "except",
+      "intersect",
+      "returning",
+    ].includes(w)
   ) {
     return i;
   }
@@ -202,6 +211,12 @@ function reflow(sql: string): string {
     prevType = tk.t;
   };
 
+  // A WHERE, HAVING or join condition puts each top-level AND / OR on its own line, except the
+  // AND of a BETWEEN and any inside a CASE, which belong to one expression.
+  let conditions = false;
+  let between = false;
+  let caseDepth = 0;
+
   let i = 0;
   while (i < toks.length) {
     const tk = toks[i];
@@ -216,7 +231,32 @@ function reflow(sql: string): string {
         newLine("");
         for (let k = i; k <= end; k++) if (toks[k].t !== "ws") append(toks[k]);
         selectList = false;
+        conditions = ["where", "having", "join"].includes(toks[end].v.toLowerCase());
+        between = false;
         i = end + 1;
+        continue;
+      }
+      if (lw === "case") caseDepth++;
+      if (lw === "end" && caseDepth) caseDepth--;
+      if (lw === "between" && !caseDepth) between = true;
+      if ((lw === "and" || lw === "or") && conditions && !caseDepth) {
+        if (lw === "and" && between) {
+          between = false;
+        } else {
+          newLine("  ");
+          append(tk);
+          i++;
+          continue;
+        }
+      }
+      // SET lists its assignments one per line, as SELECT lists its columns.
+      if (lw === "set") {
+        newLine("");
+        append(tk);
+        selectList = true;
+        conditions = false;
+        newLine("  ");
+        i++;
         continue;
       }
       if (lw === "select") {
