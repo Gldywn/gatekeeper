@@ -1866,6 +1866,33 @@ label.qs-row {
      within 0.2px of it, where matching the icon's 16px box drifts to 0.7px. */
   line-height: 1;
 }
+/* An overlay window (Settings, the confirm and notice dialogs) reads as one solid piece over the
+   Inbox: a dark outer line, a light inner one above the head's fill, a shadow beneath. */
+.detail {
+  --frame-dark: oklch(9% 0.005 250);
+}
+.detail > .detail-card {
+  position: relative;
+  border-color: var(--frame-dark);
+  border-radius: 8px;
+  box-shadow: 0 14px 36px oklch(0% 0 0 / 0.45);
+}
+.detail > .detail-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 7px;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, var(--text) 11%, transparent),
+    inset 0 2px 0 -1px color-mix(in oklch, var(--text) 9%, transparent);
+  pointer-events: none;
+}
+.detail > .detail-card > .panel-head {
+  border-radius: 7px 7px 0 0;
+  background: color-mix(in oklch, var(--sunken) 70%, transparent);
+  border-bottom-color: var(--frame-dark);
+  box-shadow: 0 1px 0 var(--hi);
+}
 /* SQL and result grid share the card's full width so they line up. The query text is
    capped and scrolls on its own so a very long statement can't push the popup past the
    viewport (the grid below sizes to whatever height is left). */

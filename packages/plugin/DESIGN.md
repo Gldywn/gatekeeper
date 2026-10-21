@@ -96,6 +96,9 @@ Headings are always roman (no italic display).
    connection.
 3. **Tonal edges**: containers get a self-colored 1px edge at low opacity plus a
    faint top highlight (`inset 0 1px 0`), never a hard contrasting hairline.
+   Overlay windows (Settings, the confirm and notice dialogs) are the one exception:
+   a dark outer line, a light inner one and a shadow (`.detail > .detail-card`), so
+   they read as one solid piece over the Inbox instead of blending into its veil.
 
 ## Connection identity
 
