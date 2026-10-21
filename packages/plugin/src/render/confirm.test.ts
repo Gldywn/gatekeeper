@@ -171,6 +171,30 @@ describe("ConfirmModal", () => {
     expect(panel.hidden).toBe(true);
     expect(onConfirm).not.toHaveBeenCalled();
   });
+
+  it("opens a run confirm on Cancel, and any other on its action", () => {
+    const focused: string[] = [];
+    const panel = {
+      innerHTML: "",
+      hidden: true,
+      querySelector: (s: string) => ({ focus: () => focused.push(s) }),
+    };
+    const modal = new ConfirmModal({
+      addEventListener: vi.fn(),
+      querySelector: () => panel,
+    } as unknown as HTMLElement);
+    const base = {
+      tone: "write",
+      heading: "h",
+      body: "",
+      confirmLabel: "Go",
+      onConfirm: vi.fn(),
+    } as const;
+    modal.open({ ...base, requestId: "a", sql: "UPDATE t SET a = 1" });
+    modal.cancel();
+    modal.open(base);
+    expect(focused).toEqual(["[data-confirm-cancel]", "[data-confirm-go]"]);
+  });
 });
 
 describe("takeOver", () => {

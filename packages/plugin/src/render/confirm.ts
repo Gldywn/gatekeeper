@@ -137,9 +137,12 @@ export class ConfirmModal {
     this.release ??= takeOver(panel);
     panel.innerHTML = confirmHtml(spec);
     panel.hidden = false;
+    // A run confirm opens on Cancel: Enter pressed twice from Approve must not run the write.
     const focusTarget = spec.challenge
       ? panel.querySelector<HTMLElement>("[data-confirm-input]")
-      : panel.querySelector<HTMLElement>("[data-confirm-go]");
+      : panel.querySelector<HTMLElement>(
+          spec.requestId ? "[data-confirm-cancel]" : "[data-confirm-go]",
+        );
     focusTarget?.focus();
   }
 
