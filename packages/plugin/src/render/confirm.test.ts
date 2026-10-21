@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { takeOver } from "../modal";
 import { ConfirmModal, type ConfirmSpec, confirmHtml, runSentence } from "./confirm";
 import { cardHtml } from "./queue";
 
@@ -36,7 +37,9 @@ describe("render/confirm", () => {
       '<span class="st sensitive-val" title="Sensitive value">\'jane@acme.io\'</span>',
     );
     // The tone reaches the card, which is what turns the frame red on a destructive.
-    expect(html).toContain('<div class="detail-card confirm-card destructive with-sql">');
+    expect(html).toContain(
+      '<div class="detail-card confirm-card destructive with-sql" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">',
+    );
   });
 
   it("renders the same body as the card it confirms", () => {
@@ -167,5 +170,39 @@ describe("ConfirmModal", () => {
     expect(modal.isOpen).toBe(false);
     expect(panel.hidden).toBe(true);
     expect(onConfirm).not.toHaveBeenCalled();
+  });
+});
+
+describe("takeOver", () => {
+  it("makes the rest inert, spares an overlay already inert, and returns the focus", () => {
+    const opener = { isConnected: true, getClientRects: () => [{}], focus: vi.fn() } as {
+      isConnected: boolean;
+      getClientRects: () => object[];
+      focus: ReturnType<typeof vi.fn>;
+      ownerDocument?: unknown;
+    };
+    const doc = { activeElement: opener, body: {} };
+    opener.ownerDocument = doc;
+    const inbox = { inert: false };
+    const settings = { inert: true };
+    const confirm = { inert: false, hidden: true };
+    const overlay = { ownerDocument: doc, parentElement: { children: [] as object[] } };
+    overlay.parentElement.children.push(inbox, overlay, settings, confirm);
+    const gear = { focus: vi.fn() };
+    const release = takeOver(
+      overlay as unknown as HTMLElement,
+      () => gear as unknown as HTMLElement,
+    );
+    expect(inbox.inert).toBe(true);
+    // A closed overlay stays live, so a confirm can still open over this one.
+    expect(confirm.inert).toBe(false);
+    release();
+    expect(inbox.inert).toBe(false);
+    expect(settings.inert).toBe(true);
+    expect(opener.focus).toHaveBeenCalledOnce();
+    // The opener gone by then (the gear menu's own button): the fallback takes the focus.
+    opener.isConnected = false;
+    takeOver(overlay as unknown as HTMLElement, () => gear as unknown as HTMLElement)();
+    expect(gear.focus).toHaveBeenCalledOnce();
   });
 });

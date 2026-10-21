@@ -2019,6 +2019,8 @@ export class Gatekeeper {
     gear.classList.toggle("open", open);
     if (!open) {
       this.closeModeMenus();
+      // Closed from inside (an Escape, a confirmed arm): the focus must not go with it.
+      if (pop.contains(document.activeElement)) gear.focus({ preventScroll: true });
     }
   }
 
@@ -2505,6 +2507,10 @@ export class Gatekeeper {
   // Re-render both mode dropdowns (header popover, settings overlay when open) and the
   // armed banner in place, without a full shell rebuild.
   private renderModeSurfaces(): void {
+    // A confirmed arm hands the focus back to the dropdown it came from, rebuilt here.
+    const focused = (document.activeElement as HTMLElement | null)?.closest?.(
+      "#modeCtlHeader, #modeCtlSettings",
+    )?.id;
     const header = this.root.querySelector<HTMLElement>("#modeCtlHeader");
     if (header) {
       header.innerHTML = modeDropdown(this.mode, true, this.autoEnabled);
@@ -2512,6 +2518,11 @@ export class Gatekeeper {
     const overlay = this.root.querySelector<HTMLElement>("#modeCtlSettings");
     if (overlay) {
       overlay.innerHTML = modeDropdown(this.mode, false, this.autoEnabled);
+    }
+    if (focused) {
+      this.root
+        .querySelector<HTMLElement>(`#${focused} [data-mode-trigger]`)
+        ?.focus({ preventScroll: true });
     }
     // Double-confirmation only matters once a write/destructive mode is armed, so the quick
     // menu surfaces it only then; the full settings screen always shows it to preconfigure.

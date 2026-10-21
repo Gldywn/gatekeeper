@@ -1,5 +1,6 @@
 import { escapeHtml, withSqlKeywords } from "../html";
 import { copyIcon } from "../icons";
+import { takeOver } from "../modal";
 import { formatSql, tokenize } from "../sql/format";
 import { highlight } from "../sql/highlight";
 import { visibleControls } from "../sql/sanitize";
@@ -64,8 +65,8 @@ export function confirmHtml(spec: ConfirmSpec): string {
     ? `<pre class="sql confirm-sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(visibleControls(spec.sql))}" aria-label="Copy SQL">${copyIcon}</button><code class="sql-body">${highlight(formatSql(spec.sql), spec.schema?.pii, spec.schema?.client, spec.schema?.literals)}</code></pre>`
     : "";
   return `
-      <div class="detail-card confirm-card ${spec.tone}${spec.sql ? " with-sql" : ""}">
-        <h2 class="confirm-title ${spec.tone}">${escapeHtml(spec.heading)}</h2>
+      <div class="detail-card confirm-card ${spec.tone}${spec.sql ? " with-sql" : ""}" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+        <h2 class="confirm-title ${spec.tone}" id="confirmTitle">${escapeHtml(spec.heading)}</h2>
         <p class="confirm-text">${spec.facts ? spec.facts.sentence : withSqlKeywords(spec.body)}</p>
         ${spec.facts?.matrix ? `<div class="confirm-mx">${spec.facts.matrix}</div>` : ""}
         ${spec.autoNotice ? `<p class="confirm-auto">${autoIcon}<span>${escapeHtml(spec.autoNotice)}</span></p>` : ""}
@@ -83,6 +84,7 @@ export function confirmHtml(spec: ConfirmSpec): string {
 export class ConfirmModal {
   private readonly root: HTMLElement;
   private spec: ConfirmSpec | null = null;
+  private release: (() => void) | undefined;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -132,6 +134,7 @@ export class ConfirmModal {
       return;
     }
     this.spec = spec;
+    this.release ??= takeOver(panel);
     panel.innerHTML = confirmHtml(spec);
     panel.hidden = false;
     const focusTarget = spec.challenge
@@ -179,6 +182,8 @@ export class ConfirmModal {
       panel.hidden = true;
       panel.innerHTML = "";
     }
+    this.release?.();
+    this.release = undefined;
   }
 
   private panel(): HTMLElement | null {

@@ -1,5 +1,6 @@
 import { escapeHtml, withSqlKeywords } from "../html";
 import { gearIcon, schemaIcon, xIcon } from "../icons";
+import { takeOver } from "../modal";
 import { autoSettingsHtml } from "../render/auto";
 import { modeDropdown, switchInput } from "../render/controls";
 import {
@@ -61,6 +62,7 @@ export class SettingsView {
   private readonly auto: () => boolean;
   private readonly keySaved: () => boolean;
   private readonly version: () => string;
+  private release: (() => void) | undefined;
 
   constructor(deps: SettingsViewDeps) {
     this.root = deps.root;
@@ -71,13 +73,22 @@ export class SettingsView {
     this.version = deps.version ?? (() => "");
   }
 
+  // Callers that open on one section focus it after this; the rest start on the close control.
+  // Reopened in place (a reset), it keeps a focus that was inside on that same control.
   open(): void {
     const panel = this.root.querySelector<HTMLDivElement>("#settings");
     if (!panel) {
       return;
     }
+    const inside = panel.contains(panel.ownerDocument?.activeElement ?? null);
+    if (panel.hidden) {
+      // Opened from the gear's menu, whose button hides at once: the gear takes the focus back.
+      this.release = takeOver(panel, () => this.root.querySelector<HTMLElement>("#settingsGear"));
+    }
+    const fresh = panel.hidden || inside;
     panel.innerHTML = this.html();
     panel.hidden = false;
+    if (fresh) panel.querySelector<HTMLElement>("[data-close]")?.focus({ preventScroll: true });
   }
 
   close(): void {
@@ -85,16 +96,18 @@ export class SettingsView {
     if (panel && !panel.hidden) {
       panel.hidden = true;
       panel.innerHTML = "";
+      this.release?.();
+      this.release = undefined;
     }
   }
 
   private html(): string {
     const s = this.settings();
     return `
-      <div class="detail-card settings-card">
+      <div class="detail-card settings-card" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
         <div class="panel-head">
           <span class="panel-head-ico">${gearIcon}</span>
-          <span class="panel-title">Settings</span>
+          <span class="panel-title" id="settingsTitle">Settings</span>
           <button class="detail-close" type="button" data-close aria-label="Close settings">${xIcon}</button>
         </div>
         <div class="starbar">
