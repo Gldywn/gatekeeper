@@ -4030,7 +4030,10 @@ p.auto-message[data-tone="busy"] {
 }
 /* The native bar is hidden so bands and open rows reach the pane's edge; overlay-scroll.ts
    draws the thumb that floats over them. */
+/* Positioned so its absolute descendants (every .sr-only word) scroll and clip with it: with
+   their containing block outside, they stretched the page below the Inbox. */
 .pane-body {
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
