@@ -133,9 +133,14 @@ describe("overlay thumbs", () => {
       app.overlayScrolls = [...dispose];
       app.stopProbe = vi.fn();
       app.root = { innerHTML: "", querySelector: () => null };
+      // An open confirm or Settings must not keep its hold on the shell being replaced.
+      app.confirmModal = { cancel: vi.fn() };
+      app.settingsView = { close: vi.fn() };
       app[leave]();
       for (const d of dispose) expect(d).toHaveBeenCalledOnce();
       expect(app.overlayScrolls).toEqual([]);
+      expect(app.confirmModal.cancel).toHaveBeenCalledOnce();
+      expect(app.settingsView.close).toHaveBeenCalledOnce();
     }
   });
 });

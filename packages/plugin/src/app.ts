@@ -664,7 +664,7 @@ export class Gatekeeper {
   }
 
   private renderStandby(): void {
-    this.releaseOverlayScrolls();
+    this.releaseShell();
     this.root.innerHTML = `
       <div class="standby">
         <div class="standby-card">
@@ -696,7 +696,7 @@ export class Gatekeeper {
   }
 
   private renderNoBroker(): void {
-    this.releaseOverlayScrolls();
+    this.releaseShell();
     this.stopProbe();
     this.root.innerHTML = `
       <div class="standby">
@@ -1190,7 +1190,7 @@ export class Gatekeeper {
   }
 
   private renderPairing(errorMessage = ""): void {
-    this.releaseOverlayScrolls();
+    this.releaseShell();
     this.stopProbe();
     this.resetInbox();
     this.root.innerHTML = `
@@ -1321,10 +1321,13 @@ export class Gatekeeper {
   </header>`;
   }
 
-  // The thumbs observe the Inbox's panes; every render that replaces the root lets them go.
-  private releaseOverlayScrolls(): void {
+  // Every render that replaces the root lets go of what the old shell held: the thumbs observing
+  // its panes, and an open confirm or Settings, whose hold on the page would outlive its nodes.
+  private releaseShell(): void {
     for (const dispose of this.overlayScrolls) dispose();
     this.overlayScrolls = [];
+    this.confirmModal.cancel();
+    this.settingsView.close();
   }
 
   private renderShell(): void {
@@ -1332,7 +1335,7 @@ export class Gatekeeper {
     this.tab = "queue";
     this.resetInbox();
     this.stripObserver?.disconnect();
-    this.releaseOverlayScrolls();
+    this.releaseShell();
     this.root.innerHTML = `
       <div class="gk">
         <div class="app-top">
