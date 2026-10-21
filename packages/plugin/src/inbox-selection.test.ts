@@ -184,6 +184,38 @@ describe("closing the open item", () => {
     expect(app.inInbox(from(true, false))).toBe(true);
     expect(app.inInbox(from(true, true))).toBe(false);
     expect(app.inInbox(from(false, false))).toBe(false);
+    // The focus on the body: the clicked control is gone, the Escape is still the Inbox's.
+    const body = { closest: () => null } as { closest: () => null; ownerDocument?: unknown };
+    body.ownerDocument = { body };
+    expect(app.inInbox({ target: body })).toBe(true);
+  });
+
+  it("hands the focus to the open row when a rebuild took the focused control", () => {
+    const app = harness();
+    delete app.renderSelection;
+    const button = {};
+    const doc = { activeElement: button as unknown };
+    vi.stubGlobal("document", doc);
+    app.root = {
+      querySelector: (s: string) =>
+        s === "#detailBody" ? { contains: (el: unknown) => el === button } : null,
+    };
+    app.focusSelectedRow = vi.fn();
+    app.paintSelection = vi.fn(() => {
+      doc.activeElement = {};
+    });
+    app.renderSelection(true);
+    expect(app.paintSelection).toHaveBeenCalledWith(true);
+    expect(app.focusSelectedRow).toHaveBeenCalledOnce();
+    // A rebuild that keeps the focus in the pane (an open reason field) leaves it there.
+    doc.activeElement = button;
+    app.paintSelection = vi.fn();
+    app.renderSelection();
+    // Nor does one while the focus is elsewhere.
+    doc.activeElement = {};
+    app.renderSelection();
+    expect(app.focusSelectedRow).toHaveBeenCalledOnce();
+    vi.unstubAllGlobals();
   });
 });
 

@@ -1716,11 +1716,12 @@ export class Gatekeeper {
       : item;
   }
 
-  // An Escape meant for the Inbox: from inside it, never from a field that keeps its own.
+  // An Escape meant for the Inbox: from inside it, or from nowhere (a clicked control that went
+  // away leaves the focus on the body), never from a field that keeps its own.
   private inInbox(e: KeyboardEvent): boolean {
     const target = e.target as HTMLElement | null;
     return (
-      Boolean(target?.closest?.("#inbox")) &&
+      (target === target?.ownerDocument?.body || Boolean(target?.closest?.("#inbox"))) &&
       !target?.closest("input, textarea, select, [contenteditable]")
     );
   }
@@ -1747,6 +1748,16 @@ export class Gatekeeper {
   // the open tab when that row is gone or folded away.
   private showList(): void {
     this.root.querySelector("#inbox")?.setAttribute("data-show", "list");
+    this.focusSelectedRow();
+  }
+
+  // The open item's row, or the open tab when that row is gone or folded away; Back while the
+  // list sits hidden behind the item in a narrow tab.
+  private focusSelectedRow(): void {
+    if (this.root.querySelector<HTMLElement>(".pane-list")?.offsetParent === null) {
+      this.root.querySelector<HTMLElement>("[data-back]")?.focus({ preventScroll: true });
+      return;
+    }
     const id = this.selection[this.tab]?.id;
     const list = this.tab === "queue" ? "#listQueue" : "#listAudit";
     const row = id
@@ -1756,9 +1767,18 @@ export class Gatekeeper {
     else this.focusOpenTab();
   }
 
+  // A rebuild that took the focused control with it (Approve, Stop, a sent reason) hands the
+  // focus to the open row, so the keyboard keeps its place and Escape still reaches the Inbox.
+  private renderSelection(force = false): void {
+    const pane = this.root.querySelector<HTMLElement>("#detailBody");
+    const focused = Boolean(pane?.contains(document.activeElement));
+    this.paintSelection(force);
+    if (focused && !pane?.contains(document.activeElement)) this.focusSelectedRow();
+  }
+
   // The right pane shows exactly the current selection. A decided request reopens only when
   // the selection changed (`force`), never on a poll, so its grid keeps its sort and page.
-  private renderSelection(force = false): void {
+  private paintSelection(force = false): void {
     const sel = this.selection[this.tab];
     // The close control shows only while something is open in the Queue; the Audit Trail always
     // has its newest decision open, or its empty state.
@@ -1773,7 +1793,7 @@ export class Gatekeeper {
       const card = this.cards.find((c) => c.id === sel.id);
       if (!card) {
         this.selection[this.tab] = null;
-        this.renderSelection(true);
+        this.paintSelection(true);
         return;
       }
       this.detailView.close();
@@ -3421,13 +3441,13 @@ export class Gatekeeper {
       // the item itself, so it outlives the Recently resolved cap while another tab shows.
       const open = this.selection.queue?.kind === "card" && this.selection.queue.id === id;
       if (open) this.selection.queue = { kind: "hist", id, item };
-      this.drop(id);
       this.history.unshift(item);
       if (this.history.length > this.settingsStore.get().recentlyResolved) {
         this.history.pop();
       }
       this.enforceHistoryBudget();
-      this.renderHistory();
+      // Dropped once its outcome row exists, so the rebuild hands a focused row to that row.
+      this.drop(id);
       // The Audit Trail's open entry, if that tab shows, keeps its grid's sort and page.
       if (open && this.tab === "queue") this.renderSelection(true);
     };
