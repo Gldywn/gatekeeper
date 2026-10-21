@@ -67,18 +67,18 @@ describe("formatSql", () => {
 
   it("lists SET assignments and WHERE conditions one per line, RETURNING on its own", () => {
     const out = formatSql(
-      "UPDATE treasury.debit_orders AS d SET status = 'FAILED', failed_at = now() WHERE d.id = 'x' AND d.amount = 1980 OR d.currency = 'EUR' RETURNING d.id, d.status",
+      "UPDATE invoices AS i SET status = 'void', voided_at = now() WHERE i.id = 'x' AND i.amount_eur = 120 OR i.copies > 1 RETURNING i.id, i.status",
     );
     expect(out).toBe(
       [
-        "UPDATE treasury.debit_orders AS d",
+        "UPDATE invoices AS i",
         "SET",
-        "  status = 'FAILED',",
-        "  failed_at = now()",
-        "WHERE d.id = 'x'",
-        "  AND d.amount = 1980",
-        "  OR d.currency = 'EUR'",
-        "RETURNING d.id, d.status",
+        "  status = 'void',",
+        "  voided_at = now()",
+        "WHERE i.id = 'x'",
+        "  AND i.amount_eur = 120",
+        "  OR i.copies > 1",
+        "RETURNING i.id, i.status",
       ].join("\n"),
     );
   });

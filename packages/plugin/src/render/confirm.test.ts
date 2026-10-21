@@ -94,8 +94,8 @@ describe("render/confirm", () => {
 
 describe("runSentence", () => {
   it("says what the statement does to which table on which database", () => {
-    expect(runSentence("", "UPDATE", ["treasury.debit_orders"], "<db>", false)).toBe(
-      'It changes rows of <code class="name">treasury.debit_orders</code> on <db>, once, when you confirm.',
+    expect(runSentence("", "UPDATE", ["billing.invoices"], "<db>", false)).toBe(
+      'It changes rows of <code class="name">billing.invoices</code> on <db>, once, when you confirm.',
     );
     expect(runSentence("", "DELETE", ["a<b"], "<db>", true)).toBe(
       'It removes rows from <code class="name">a&lt;b</code> on <db>, once, when you confirm.',

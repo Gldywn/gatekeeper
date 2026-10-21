@@ -46,8 +46,7 @@ of the machine-wide state below. It listens on port 5199 and refuses a taken por
 worktree adds `--port 5200` (any free port) and uses that port in its URLs.
 
 1. `pnpm --filter @gatekeeper/plugin preview:fixtures`, then open
-   `http://127.0.0.1:5199/preview/index.html` in a browser you can capture (in Orca, the
-   embedded browser and `orca-screenshot`).
+   `http://127.0.0.1:5199/preview/index.html` in a browser you can capture.
 2. Render before calling it done. Capture the change wide and in
    `preview/frame.html?w=440&h=760`, with the scenario that exercises it (`agents=20`,
    `queue=0`, `history=0`...). Capture once the rows are in and the reveal animation is over;
@@ -57,7 +56,7 @@ worktree adds `--port 5200` (any free port) and uses that port in its URLs.
    elements next to it: a count on its label's baseline, an icon centred in its button, row
    edges on one line. Magnifying shows alignment; it does not test browser zoom or reflow.
 4. Drive interactions in the page (clicks, a narrow frame) and read the DOM state back.
-   Check keyboard paths with real key presses (`orca keypress`) and `document.activeElement`:
+   Check keyboard paths with real key presses and `document.activeElement`:
    a scripted click or Escape proves nothing about the keyboard.
 5. For a substantive UI change, compare the behaviour with `origin/main` so nothing is lost
    (features, keyboard paths, live updates), and have an agent of another model family

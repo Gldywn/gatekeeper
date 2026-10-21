@@ -209,24 +209,26 @@ describe("recentRowHtml", () => {
 });
 
 describe("empty states", () => {
-  const ctx = { agents: 0, active: false, auditEmpty: false, connection: "prd<db>" };
+  const ctx = { agents: 0, active: false, auditEmpty: false, connection: "shop<db>" };
 
   it("puts one composition in an empty list, naming the connection as the header does", () => {
-    const queue = emptyListHtml("queue", "prd<db>");
+    const queue = emptyListHtml("queue", "shop<db>");
     expect(queue).toContain("<b>Queue is empty</b>");
     expect(queue).not.toContain("ix-group");
     // Over Recently resolved, Pending approval keeps its head over the smaller composition.
     expect(emptyListHtml("pending", "")).toContain('<div class="em-hive-wrap compact">');
     expect(emptyListHtml("pending", "")).toContain("<b>Queue is empty</b>");
-    expect(emptyListHtml("audit", "prd<db>")).toContain('Every decision on <span class="em-conn">');
-    expect(emptyListHtml("audit", "prd<db>")).toContain("prd&lt;db&gt;</span> is kept here.");
+    expect(emptyListHtml("audit", "shop<db>")).toContain(
+      'Every decision on <span class="em-conn">',
+    );
+    expect(emptyListHtml("audit", "shop<db>")).toContain("shop&lt;db&gt;</span> is kept here.");
     expect(emptyListHtml("audit", "")).toContain("Every decision on this connection is kept here.");
   });
 
   it("walks through a first proposal while no agent is there, then waits with who is", () => {
     const none = paneEmptyHtml(0, "queue", ctx);
     expect(none).toContain('<div class="em-steps-title">Nothing to review yet</div>');
-    expect(none).toContain("prd&lt;db&gt;</span> and the result goes back to the agent.");
+    expect(none).toContain("shop&lt;db&gt;</span> and the result goes back to the agent.");
     expect(none).toContain("No agent connected</span>");
     expect(paneEmptyHtml(0, "queue", { ...ctx, agents: 1 })).toContain("1 agent connected");
     const two = paneEmptyHtml(0, "queue", { ...ctx, agents: 2 });
