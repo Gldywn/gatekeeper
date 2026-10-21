@@ -389,7 +389,6 @@ export class Gatekeeper {
     this.detailView = new DetailView({
       root,
       annotator: this.annotator,
-      settings: () => this.settingsStore.get(),
       dialect: () => this.dialect,
     });
     this.activityView = new ActivityView({

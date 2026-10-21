@@ -7,7 +7,6 @@ import { detailHtml } from "../render/detail";
 import { mountResultGrid } from "../render/grid";
 import { accessMatrix, paintLegend } from "../render/queue";
 import { resultCsv, resultJson, resultMarkdown } from "../render/resultexport";
-import { filterSchema, type Settings } from "../settings";
 import { classifyQuery } from "../sql/classify";
 import { formatSql } from "../sql/format";
 import { highlight } from "../sql/highlight";
@@ -22,7 +21,6 @@ const GRID_MIN_PX = 240;
 interface DetailViewDeps {
   root: HTMLElement;
   annotator: SchemaAnnotator;
-  settings: () => Settings;
   dialect: () => string;
 }
 
@@ -37,13 +35,11 @@ export class DetailView {
   private grid: TabulatorFull | null = null;
   private readonly root: HTMLElement;
   private readonly annotator: SchemaAnnotator;
-  private readonly settings: () => Settings;
   private readonly dialect: () => string;
 
   constructor(deps: DetailViewDeps) {
     this.root = deps.root;
     this.annotator = deps.annotator;
-    this.settings = deps.settings;
     this.dialect = deps.dialect;
   }
 
@@ -112,7 +108,6 @@ export class DetailView {
   // `live` reads the connection's columns as the pending card did; `text` reads the SQL alone,
   // as the Audit Trail always has, so history never queries the connected database.
   private async annotateDetail(item: HistItem, source: "live" | "text"): Promise<void> {
-    const settings = this.settings();
     const raw =
       source === "live"
         ? await this.annotator.schemaFor(item.sql)
@@ -120,7 +115,9 @@ export class DetailView {
     if (this.detailItem?.id !== item.id) {
       return;
     }
-    const schema = filterSchema(raw ?? null, settings);
+    // Every detection, whatever the display toggles say now: they shape the requests still to
+    // decide, and a decided one keeps what its row records.
+    const schema = raw ?? null;
     // The matrix (a read's tables come from this analysis), the legend and the SQL marks move
     // together, as on the pending card.
     const cm = this.root.querySelector<HTMLElement>("#detail-cm");
