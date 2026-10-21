@@ -71,7 +71,8 @@ describe("render/activity", () => {
     expect(html).toContain('aria-current="false"');
     expect(html).toContain('<span class="hstate rejected" title="Declined"');
     expect(html).toContain('<span class="ix-fact">Declined</span>');
-    expect(html).toContain('<span class="ix-risk destructive" title="Destructive">');
+    // It never ran, so no class mark: the detail says what it would have touched.
+    expect(html).not.toContain("ix-risk");
     expect(html).not.toContain("read-only only");
   });
 

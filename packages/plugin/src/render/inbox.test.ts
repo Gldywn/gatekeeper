@@ -247,3 +247,33 @@ describe("empty states", () => {
     expect(paneEmptyHtml(0, "audit", ctx)).toContain("Select an entry");
   });
 });
+
+describe("row marks", () => {
+  const base: HistItem = {
+    id: "q_m",
+    status: "approved",
+    note: "",
+    sql: "DELETE FROM users WHERE id = 1",
+    resolvedAt: 1,
+    connection: "app_db",
+    sensitivity: { pii: true, value: false, client: false },
+  };
+
+  it("marks the class and the sensitive data only where the query ran", () => {
+    const ran = recentRowHtml(base, false);
+    expect(ran).toContain('class="ix-risk destructive"');
+    expect(ran).toContain('<span class="act-flag pii">PII</span>');
+    for (const status of ["rejected", "expired", "failed"] as const) {
+      const row = recentRowHtml({ ...base, status }, false);
+      expect(row).not.toContain("ix-risk");
+      expect(row).not.toContain("act-flag pii");
+    }
+    // Unconfirmed may have run: it keeps them.
+    const unsure = recentRowHtml(
+      { ...base, status: "failed", note: "result not delivered", outcome: "result not delivered" },
+      false,
+    );
+    expect(unsure).toContain('class="ix-risk destructive"');
+    expect(unsure).toContain('<span class="act-flag pii">PII</span>');
+  });
+});

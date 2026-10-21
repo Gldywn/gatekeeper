@@ -176,14 +176,18 @@ export function doneRowHtml(
 ): string {
   const title = item.intent ? capitalize(item.intent) : previewSql(item.sql);
   const cls = classifyQuery(item.sql, dialect).class;
-  const flagsHtml = flags ? `<span class="act-flags">${activityFlagsHtml(flags)}</span>` : "";
+  // The class and the sensitivity marks only where the query ran (or may have): a declined,
+  // expired, cancelled, blocked or failed one touched nothing worth marking. The detail keeps all.
+  const ran = item.status === "approved" || unconfirmed(item);
+  const flagsHtml =
+    flags && ran ? `<span class="act-flags">${activityFlagsHtml(flags)}</span>` : "";
   const meta = grouped
     ? ""
     : `<span class="ix-meta">${agentBadge(item.session?.harness?.trim() || null)}<span class="ix-who">${who(item.session, item.id)}</span></span>`;
   return `<button class="ix-row done${grouped ? " grouped" : ""}" type="button" data-row="${escapeHtml(item.id)}" data-select="${select}" aria-current="${selected}">
       <span class="ix-mark">${rowGlyph(item)}</span>
       <span class="ix-title">${escapeHtml(title)}</span>
-      <span class="ix-top">${riskIcon(cls)}${autoFlag(item)}${flagsHtml}${time}</span>
+      <span class="ix-top">${ran ? riskIcon(cls) : ""}${autoFlag(item)}${flagsHtml}${time}</span>
       ${meta}<span class="ix-fact">${escapeHtml(rowFact(item, dialect))}</span>
     </button>`;
 }
