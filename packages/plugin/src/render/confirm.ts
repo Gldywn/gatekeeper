@@ -1,9 +1,11 @@
-import { escapeHtml } from "../html";
+import { escapeHtml, withSqlKeywords } from "../html";
 import { copyIcon } from "../icons";
-import { formatSql } from "../sql/format";
+import { takeOver } from "../modal";
+import { formatSql, tokenize } from "../sql/format";
 import { highlight } from "../sql/highlight";
 import { visibleControls } from "../sql/sanitize";
 import type { SchemaContext } from "../sql/schema";
+import { autoIcon } from "./auto";
 
 // The tone tints only the heading and the confirm button; the modal border stays
 // neutral (no coloured top accent), so blue/amber/red reads as intent, not chrome.
@@ -29,6 +31,13 @@ export interface ConfirmSpec {
   // same formatting, same keyword colours, same PII, client and literal marks.
   schema?: SchemaContext;
   challenge?: ConfirmChallenge;
+  // The request a run confirm asks about: it closes once that request stops waiting.
+  requestId?: string;
+  // What the statement does, on which table and database (trusted HTML), and the tables it
+  // reads and writes: shown instead of the body, before the SQL.
+  facts?: { sentence: string; matrix: string };
+  // What confirming does to Auto mode, one fact on its own line under the body.
+  autoNotice?: string;
   onConfirm: () => void;
   // Called on cancel, backdrop, or Escape, so a caller can revert an optimistic
   // toggle (e.g. a checkbox the user flipped before confirming).
@@ -56,9 +65,11 @@ export function confirmHtml(spec: ConfirmSpec): string {
     ? `<pre class="sql confirm-sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(visibleControls(spec.sql))}" aria-label="Copy SQL">${copyIcon}</button><code class="sql-body">${highlight(formatSql(spec.sql), spec.schema?.pii, spec.schema?.client, spec.schema?.literals)}</code></pre>`
     : "";
   return `
-      <div class="detail-card confirm-card ${spec.tone}">
-        <h2 class="confirm-title ${spec.tone}">${escapeHtml(spec.heading)}</h2>
-        <p class="confirm-text">${escapeHtml(spec.body)}</p>
+      <div class="detail-card confirm-card ${spec.tone}${spec.sql ? " with-sql" : ""}" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+        <h2 class="confirm-title ${spec.tone}" id="confirmTitle">${escapeHtml(spec.heading)}</h2>
+        <p class="confirm-text">${spec.facts ? spec.facts.sentence : withSqlKeywords(spec.body)}</p>
+        ${spec.facts?.matrix ? `<div class="confirm-mx">${spec.facts.matrix}</div>` : ""}
+        ${spec.autoNotice ? `<p class="confirm-auto">${autoIcon}<span>${escapeHtml(spec.autoNotice)}</span></p>` : ""}
         ${sql}
         ${challenge}
         <div class="confirm-actions">
@@ -73,6 +84,7 @@ export function confirmHtml(spec: ConfirmSpec): string {
 export class ConfirmModal {
   private readonly root: HTMLElement;
   private spec: ConfirmSpec | null = null;
+  private release: (() => void) | undefined;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -122,11 +134,15 @@ export class ConfirmModal {
       return;
     }
     this.spec = spec;
+    this.release ??= takeOver(panel);
     panel.innerHTML = confirmHtml(spec);
     panel.hidden = false;
+    // A run confirm opens on Cancel: Enter pressed twice from Approve must not run the write.
     const focusTarget = spec.challenge
       ? panel.querySelector<HTMLElement>("[data-confirm-input]")
-      : panel.querySelector<HTMLElement>("[data-confirm-go]");
+      : panel.querySelector<HTMLElement>(
+          spec.requestId ? "[data-confirm-cancel]" : "[data-confirm-go]",
+        );
     focusTarget?.focus();
   }
 
@@ -140,6 +156,11 @@ export class ConfirmModal {
     this.teardown();
     spec.onCancel?.();
     return true;
+  }
+
+  // Expired, withdrawn or taken back by the broker underneath: nothing is left to confirm.
+  dismissFor(requestId: string): void {
+    if (this.spec?.requestId === requestId) this.cancel();
   }
 
   private confirm(): void {
@@ -164,9 +185,46 @@ export class ConfirmModal {
       panel.hidden = true;
       panel.innerHTML = "";
     }
+    this.release?.();
+    this.release = undefined;
   }
 
   private panel(): HTMLElement | null {
     return this.root.querySelector<HTMLElement>("#confirm");
   }
+}
+
+const RUN_VERBS: Record<string, string> = {
+  INSERT: "adds rows to",
+  UPSERT: "adds or changes rows of",
+  UPDATE: "changes rows of",
+  DELETE: "removes rows from",
+  DROP: "drops",
+  TRUNCATE: "empties",
+};
+
+// An upsert's INSERT may change an existing row instead of adding one. Read on its words only:
+// a comment between the keywords cannot hide it, nor a string fake it.
+const UPSERT = /\bon conflict\b.*\bdo update\b|\bon duplicate key update\b/i;
+const words = (sql: string) =>
+  tokenize(sql)
+    .filter((t) => t.t === "word")
+    .map((t) => t.v)
+    .join(" ");
+
+// What the statement does, to which table, on which database, before its SQL. With no single
+// operation the parse can vouch for, it names the database only.
+export function runSentence(
+  sql: string,
+  op: string | undefined,
+  tables: string[],
+  database: string,
+  destructive: boolean,
+): string {
+  const key = op === "INSERT" && UPSERT.test(words(sql)) ? "UPSERT" : op;
+  const verb = key && tables.length ? RUN_VERBS[key] : undefined;
+  const names = tables.map((t) => `<code class="name">${escapeHtml(t)}</code>`).join(", ");
+  return verb
+    ? `It ${verb} ${names} on ${database}, once, when you confirm.`
+    : `It ${destructive ? "runs" : "changes data"} on ${database}, once, when you confirm.`;
 }

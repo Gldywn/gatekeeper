@@ -4,10 +4,12 @@ import {
   analyzeTableOps,
   classifyColumn,
   clientColumns,
+  countsRows,
   looksLikeClientData,
   looksLikePii,
   piiColumns,
   sensitiveLiterals,
+  statementReceipt,
 } from "./schema";
 
 describe("analyzeTableOps", () => {
@@ -942,5 +944,52 @@ describe("sensitiveLiterals", () => {
         "postgresql",
       ),
     ).toEqual([]);
+  });
+});
+
+describe("statementReceipt", () => {
+  it.each([
+    [
+      "SELECT id FROM invoices i JOIN customers c ON c.id = i.customer_id",
+      "SELECT",
+      ["invoices", "customers"],
+    ],
+    ["UPDATE invoices SET status = 'void' WHERE id = 1", "UPDATE", ["invoices"]],
+    ["INSERT INTO contact_archive (id) SELECT id FROM customers", "INSERT", ["contact_archive"]],
+    ["DELETE FROM sessions WHERE last_seen < now()", "DELETE", ["sessions"]],
+    ["DROP TABLE tmp_imports", "DROP", ["tmp_imports"]],
+    ["TRUNCATE sessions", "TRUNCATE", ["sessions"]],
+  ])("names %s as one operation on its tables", (sql, op, tables) => {
+    expect(statementReceipt(sql, "postgresql")).toEqual({ op, tables });
+  });
+
+  it.each([
+    "WITH recent AS (SELECT id FROM invoices) UPDATE invoices SET status = 'x' WHERE id IN (SELECT id FROM recent)",
+    "SELECT * INTO staging_copy FROM crm.people",
+    "SELECT 1; SELECT 2",
+    "SELECT 1",
+    "not sql at all",
+  ])("stays generic for %s", (sql) => {
+    expect(statementReceipt(sql, "postgresql")).toBeNull();
+  });
+});
+
+describe("countsRows", () => {
+  it.each([
+    ["UPDATE invoices SET status = 'void' WHERE id = 1", true],
+    ["DELETE FROM sessions WHERE last_seen < now()", true],
+    ["INSERT INTO contact_archive (id) SELECT id FROM customers", true],
+    [
+      "WITH r AS (SELECT id FROM invoices) UPDATE invoices SET x = 1 WHERE id IN (SELECT id FROM r)",
+      true,
+    ],
+    ["/* weekly */ MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN DELETE", true],
+    ["CREATE TABLE example (id int)", false],
+    ["ALTER TABLE invoices ADD COLUMN note text", false],
+    ["DROP TABLE tmp_imports", false],
+    ["TRUNCATE sessions", false],
+    ["SELECT 1", false],
+  ])("%s -> %s", (sql, counted) => {
+    expect(countsRows(sql, "postgresql")).toBe(counted);
   });
 });

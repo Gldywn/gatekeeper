@@ -51,11 +51,17 @@ declare module "tabulator-tables" {
     paginationSize?: number;
     paginationSizeSelector?: number[] | boolean;
     paginationCounter?: string;
+    paginationElement?: HTMLElement;
+    paginationButtonCount?: number;
+    langs?: Record<string, { pagination?: Record<string, string> }>;
   }
 
   export class Tabulator {
     constructor(selector: string | HTMLElement, options?: Options);
     destroy(): void;
+    getPage(): number | false;
+    getPageSize(): number | boolean;
+    on(event: "tableBuilt" | "pageLoaded", callback: () => void): void;
   }
 
   export class TabulatorFull extends Tabulator {}

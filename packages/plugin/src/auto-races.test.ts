@@ -97,6 +97,7 @@ function harness() {
     },
     root: { querySelector: () => null },
     settingsStore: { get: () => ({ confirmWrites: true, resultCacheMb: 4 }) },
+    confirmModal: { dismissFor: vi.fn() },
     renderQueue: vi.fn(),
     renderAuto: vi.fn(),
     renderModeSurfaces: vi.fn(),
@@ -676,7 +677,10 @@ describe("shared manual/automatic execution authority", () => {
     const generation = app.autoGeneration;
     app.requestMode(next);
     expect(app.confirmModal.isOpen).toBe(true);
-    expect(panel.innerHTML).toContain("Confirming turns off Auto mode");
+    // What confirming does to Auto mode is one line of its own, naming the mode it enables.
+    const mode = next === "write" ? "Write" : "Destructive";
+    expect(panel.innerHTML).toContain(`Enabling ${mode} mode automatically turns off Auto mode.`);
+    expect(panel.innerHTML).toContain('<p class="confirm-auto">');
     if (next === "destructive") expect(panel.innerHTML).toContain("data-confirm-go disabled");
     expect(app.confirmModal.cancel()).toBe(true);
     expect(app.autoEnabled).toBe(true);
@@ -1044,8 +1048,8 @@ describe("stopping a running query", () => {
   });
 
   it.each([
-    ["sqlite", false, "This feature is not available on SQLite."],
-    ["mysql", true, "This feature is not available on read-only MySQL connections."],
+    ["sqlite", false, "PostgreSQL or MySQL is required to stop a query."],
+    ["mysql", true, "A writable connection is required to stop a MySQL query."],
   ])("runs the untouched SQL and offers no stop on %s (read-only %s)", async (type, ro, why) => {
     const { app, card } = harness();
     connection.mockResolvedValue({
@@ -1157,7 +1161,7 @@ describe("stopping a running query", () => {
     query.mockReturnValue(run.promise);
     const pending = app.approve(card.id);
     await vi.waitFor(() => expect(card.state).toBe("executing"));
-    expect(card.run.unavailable).toBe("This feature is not available on this MySQL server.");
+    expect(card.run.unavailable).toBe("MySQL 8.0.19 or later is required to stop a query.");
     expect(query).toHaveBeenCalledWith(card.sql);
     run.resolve(answer({ quantity: 3 }));
     await pending;
@@ -1231,5 +1235,116 @@ describe("generation changes during an approved run", () => {
     run.resolve(rows);
     await pending;
     expect(app.broker.result).not.toHaveBeenCalled();
+  });
+});
+
+describe("decision-time flags", () => {
+  it("keeps the /executing snapshot when the column analysis lands after the approval", async () => {
+    const { app, card } = harness();
+    card.sql = "SELECT * FROM public.users";
+    await app.postExecuting(card);
+    const posted = app.broker.executing.mock.calls[0][3];
+    // The analysis finishes mid-run and finds PII the SQL text alone could not show.
+    card.sensitivity = { pii: true, value: false, client: false };
+    await app.postResult(card, { status: "approved" });
+    expect(app.broker.result.mock.calls[0][2].sensitivity).toEqual(posted);
+    // The local row shows what the trail recorded, not the later analysis.
+    Object.assign(app, {
+      finish: Gatekeeper.prototype["finish" as keyof Gatekeeper],
+      history: [],
+      selection: {},
+      drop: vi.fn(),
+      renderHistory: vi.fn(),
+      settingsStore: { get: () => ({ recentlyResolved: 20, resultCacheMb: 4 }) },
+    });
+    app.finish(card.id, "approved", "");
+    expect(app.history[0].sensitivity).toEqual(posted);
+    expect(app.history[0].sensitivity?.pii).not.toBe(true);
+  });
+
+  it("posts fresh flags with the next decision once an execution is withdrawn", async () => {
+    const { app, card } = harness();
+    await app.postExecuting(card);
+    card.decisionSensitivity!.standing = false;
+    card.sensitivity = { pii: true, value: false, client: false };
+    await app.postResult(card, { status: "rejected" });
+    expect(app.broker.result.mock.calls[0][2].sensitivity).toEqual({
+      pii: true,
+      value: false,
+      client: false,
+    });
+  });
+
+  it("keeps the broker's flags when a withdrawn request expires with no new decision", () => {
+    const { app, card } = harness();
+    const recorded = { pii: true, value: false, client: false };
+    card.decisionSensitivity = { value: recorded, standing: false };
+    card.sql = "SELECT * FROM public.users";
+    Object.assign(app, {
+      finish: Gatekeeper.prototype["finish" as keyof Gatekeeper],
+      history: [],
+      selection: {},
+      drop: vi.fn(),
+      renderHistory: vi.fn(),
+      settingsStore: { get: () => ({ recentlyResolved: 20, resultCacheMb: 4 }) },
+    });
+    app.finish(card.id, "expired", "expired");
+    expect(app.history[0].sensitivity).toEqual(recorded);
+  });
+});
+
+describe("holds that are not Auto mode's", () => {
+  it("keeps a human approval's failed connection check out of Auto mode and the trail", async () => {
+    const { app, card } = harness();
+    app.autoEnabled = false;
+    app.checkConnection = vi.fn(async () => false);
+    await app.approve(card.id);
+    expect(card.state).toBe("ready");
+    expect(card.autoStatus).toBeUndefined();
+    expect(card.executionNotice).toBe("Connection or approval authority changed");
+    expect(app.autoHold(card)).toBeUndefined();
+  });
+
+  it("keeps a later hold beside a favourable evaluation, and none for a refusal", () => {
+    const { app, card } = harness();
+    card.evaluation = evaluation();
+    card.autoSent = true;
+    card.autoStatus = "Needs review: Execution stopped before SQL ran. Approval authority changed";
+    expect(app.autoHold(card)).toEqual({
+      sent: true,
+      reason: "Execution stopped before SQL ran. Approval authority changed",
+    });
+    card.autoStatus = "Needs review: Evaluator uncertainty or stale policy/model";
+    expect(app.autoHold(card)).toBeUndefined();
+  });
+});
+
+describe("schema repaint", () => {
+  it("repaints the matrix, the legend and the SQL marks from one analysis", () => {
+    const { app, card } = harness();
+    vi.stubGlobal("CSS", { escape: (s: string) => s });
+    const el = () => ({ innerHTML: "" });
+    const nodes: Record<string, { innerHTML: string }> = {
+      "#cm-req": el(),
+      "#cs-req": el(),
+      "#sqlbody-req": el(),
+    };
+    app.root = { querySelector: (sel: string) => nodes[sel] ?? null };
+    card.sql = "SELECT email FROM public.users";
+    card.schema = {
+      tables: ["public.users"],
+      pii: ["email"],
+      client: [],
+      literals: [],
+      star: false,
+    };
+    app.renderCardSchema(card);
+    expect(nodes["#cs-req"].innerHTML).toContain('class="lg pii"');
+    expect(nodes["#sqlbody-req"].innerHTML).toContain('class="pii-col"');
+    // The PII display toggle turned off: neither the legend nor the SQL marks the column.
+    card.schema = { ...card.schema, pii: [] };
+    app.renderCardSchema(card);
+    expect(nodes["#cs-req"].innerHTML).toBe("");
+    expect(nodes["#sqlbody-req"].innerHTML).not.toContain("pii-col");
   });
 });

@@ -19,13 +19,14 @@ import type {
 } from "@gatekeeper/shared";
 import { enter, type Loop, pulse, reveal } from "./anim";
 import { SchemaAnnotator } from "./annotate";
-import { clock, countsLabel, escapeHtml, relAge } from "./html";
+import { capitalize, clock, countsLabel, escapeHtml, relAge } from "./html";
 import {
+  agentBadge,
   alertTriangleIcon,
   botIcon,
   botOffIcon,
   checkIcon,
-  chevronDown,
+  chevronLeft,
   copyIcon,
   externalLinkIcon,
   gearIcon,
@@ -42,23 +43,36 @@ import {
 import { BrokerClient } from "./net/broker";
 import { connectionScopeKey } from "./net/scope";
 import { SingleInstance, type SingleInstanceWire } from "./net/singleinstance";
+import { overlayScroll } from "./overlay-scroll";
 import { agentLinkAge, agentLinkLabel, agentLinkStatusHtml } from "./render/agentlink";
-import { AUTO_APPROVED, autoIcon, autoPopHtml, SAVED_KEY_MASK } from "./render/auto";
-import { ConfirmModal } from "./render/confirm";
+import { AUTO_APPROVED, autoIcon, autoPopHtml, refusalReason, SAVED_KEY_MASK } from "./render/auto";
+
+import { ConfirmModal, runSentence } from "./render/confirm";
 import { connChipInner } from "./render/connchip";
 import { modeDropdown, switchInput } from "./render/controls";
 import { type DbCheck, dbLink, dbLinkLabel, dbStatusHtml, nextCheckText } from "./render/dblink";
-import { historyRow } from "./render/history";
+import { CANCELLED_NOTE, NOT_DELIVERED_NOTE } from "./render/detail";
 import {
+  agentsStripHtml,
+  auditItem,
+  connTag,
+  emptyListHtml,
+  groupHeadHtml,
+  paneEmptyHtml,
+  queueRowHtml,
+  recentRowHtml,
+} from "./render/inbox";
+import {
+  accessMatrix,
   type CardGate,
-  cardGate,
+  cardGateFor,
+  cardHtml,
   LONG_RUN_MS,
-  queueHtml,
+  paintLegend,
   readyActions,
-  schemaInner,
 } from "./render/queue";
 import { type LayerState, readOnlyView } from "./render/readonly";
-import { presence, rosterRow } from "./render/roster";
+import { presence } from "./render/roster";
 import {
   UPDATE_SKILL_URL,
   updatePrompt,
@@ -76,7 +90,7 @@ import { highlight } from "./sql/highlight";
 import { modeRank, type RiskMode } from "./sql/mode";
 import { mapDialect } from "./sql/readonly";
 import { type EndpointReadOnly, hasProbe, probeReadOnly, runErrorText } from "./sql/readonly-probe";
-import { sensitivityOf, textSchema } from "./sql/schema";
+import { sensitivityOf, statementReceipt, textSchema } from "./sql/schema";
 import {
   newStopToken,
   readStop,
@@ -107,7 +121,7 @@ import {
 } from "./version";
 import { ActivityView } from "./views/activity";
 import { DetailView } from "./views/detail";
-import { SettingsView } from "./views/settings";
+import { DETECTION_TOGGLES, exampleChip, SettingsView } from "./views/settings";
 
 const BROKER_URL = "http://localhost:9999";
 const POLL_MS = 1000;
@@ -159,6 +173,15 @@ function schemaAccessLabel(on: boolean): string {
 
 const PRESENCE_ORDER: Record<Presence, number> = { active: 0, idle: 1, gone: 2 };
 
+type InboxTab = "queue" | "audit";
+// A card while it waits, a local result once decided (same id), or an Audit Trail entry, kept
+// with the item it showed so the pane survives the feed being fetched again.
+interface Selection {
+  kind: "card" | "hist" | "audit";
+  id: string;
+  item?: HistItem;
+}
+
 // The host sends affectedRows on every result (Beekeeper >= 5.4) but the SDK type does not
 // declare it, so read it defensively: an absent count must stay absent rather than become a
 // fabricated zero the agent would read as "changed nothing".
@@ -186,8 +209,8 @@ async function runApprovedQuery(
 }
 
 // A quick-menu switch row: the setting name and its live, persisted toggle.
-function quickSwitch(setting: string, label: string, checked: boolean): string {
-  return `<label class="qs-row switch-row"><span class="qs-name">${label}</span>${switchInput(setting, label, checked)}</label>`;
+function quickSwitch(setting: string, label: string, checked: boolean, example = ""): string {
+  return `<label class="qs-row switch-row"><span class="qs-name">${label}${example}</span>${switchInput(setting, label, checked)}</label>`;
 }
 
 function newInstanceId(): string {
@@ -291,11 +314,19 @@ export class Gatekeeper {
   private readonly history: HistItem[] = [];
   private roster: SessionRoster[] = [];
   private rosterSig = "";
-  private rosterOpen = true;
-  private rosterLive = -1;
   private rosterLoops: Loop[] = [];
   private breatheLoop?: Loop;
   private prevCardIds = new Set<string>();
+  private stripObserver?: ResizeObserver;
+  private overlayScrolls: (() => void)[] = [];
+  // Agents the roster shows as there, and whether one is active, for the empty right pane.
+  private liveAgents = 0;
+  private agentsActive = false;
+  // The Inbox: which list the left pane shows, and what each list has open on the right. Each
+  // list keeps its own selection, so coming back to a tab finds what was open there. Nothing
+  // is ever selected for the human: a new or next proposal never lands under the pointer.
+  private tab: InboxTab = "queue";
+  private readonly selection: Record<InboxTab, Selection | null> = { queue: null, audit: null };
   private polling = false;
   private lastTitle = "";
   private lastConnCheck = 0;
@@ -358,18 +389,19 @@ export class Gatekeeper {
     this.detailView = new DetailView({
       root,
       annotator: this.annotator,
-      settings: () => this.settingsStore.get(),
+      dialect: () => this.dialect,
     });
     this.activityView = new ActivityView({
       root,
       broker: this.broker,
       connectionName: () => this.connectionName,
       scope: () => this.connScopeKey(),
-      connChip: () => {
-        const data = this.connChipData();
-        return data ? `<span class="conn-chip">${connChipInner(data)}</span>` : "";
-      },
       dialect: () => this.dialect,
+      selected: () => this.selection.audit?.id ?? null,
+      // The trail opens on its newest decision, or on what it keeps when it holds none.
+      rendered: () => {
+        this.openNewestAudit();
+      },
     });
     this.settingsView = new SettingsView({
       root,
@@ -422,17 +454,46 @@ export class Gatekeeper {
         }
         // An open mode or flyout menu swallows the first Escape so it dismisses without
         // also tearing down the overlay or popover it sits inside.
-        if (this.closeModeMenus() || this.closeFlyoutMenus() || this.dismissAgentPop()) {
+        if (
+          this.closeModeMenus() ||
+          this.closeFlyoutMenus() ||
+          this.dismissAgentPop() ||
+          this.dismissLegendPop() ||
+          this.setAgentsPopOpen(false)
+        ) {
           return;
         }
-        this.activityView.close();
-        this.detailView.close();
-        this.settingsView.close();
-        this.setSettingsOpen(false);
+        // Then one layer per press: Settings, the settings popover, and in a narrow tab the
+        // list behind an open item. The database notice stays until its own buttons.
+        const settings = this.root.querySelector<HTMLElement>("#settings");
+        if (settings && !settings.hidden) {
+          this.settingsView.close();
+          return;
+        }
+        const pop = this.root.querySelector<HTMLElement>("#settingsPop");
+        if (pop && !pop.hidden) {
+          this.setSettingsOpen(false);
+          return;
+        }
+        if (!this.root.querySelector<HTMLElement>("#notice")?.hidden) {
+          return;
+        }
+        const list = this.root.querySelector<HTMLElement>(".pane-list");
+        if (this.root.querySelector('#inbox[data-show="detail"]') && list?.offsetParent === null) {
+          this.showList();
+        } else if (list?.offsetParent && !e.defaultPrevented && !e.isComposing && this.inInbox(e)) {
+          // Wide: the last Escape closes the open item, once nothing above it took the key.
+          this.closeSelection();
+        }
       }
     });
-    document.addEventListener("mouseover", (e) => this.enterAgentGlyph(e));
-    document.addEventListener("focusin", (e) => this.enterAgentGlyph(e));
+    document.addEventListener("mouseover", (e) => this.enterPopGlyph(e));
+    document.addEventListener("focusin", (e) => this.enterPopGlyph(e));
+    // The agents list folded behind "+N more" closes on any click outside it.
+    document.addEventListener("click", (e) => {
+      const target = e.target as Element;
+      if (!target.closest("#agentsPop, [data-agents-more]")) this.setAgentsPopOpen(false);
+    });
     // A click anywhere outside the gear or the open popover dismisses it. Bound
     // once (the gear/popover are re-created per render, so this reads them live).
     document.addEventListener("click", (e) => {
@@ -597,18 +658,19 @@ export class Gatekeeper {
     this.breatheLoop?.stop();
     this.breatheLoop = undefined;
     this.rosterSig = "";
-    this.rosterLive = -1;
+    this.resetInbox();
     this.stopProbe();
     this.renderStandby();
   }
 
   private renderStandby(): void {
+    this.releaseShell();
     this.root.innerHTML = `
       <div class="standby">
         <div class="standby-card">
           <span class="standby-ico">${copyIcon}</span>
           <h1>Open in another tab</h1>
-          <p>Gatekeeper runs in a single tab so two tabs never race an approval. This tab is inactive.</p>
+          <p>Only one tab can approve at a time, so two tabs never race an approval. This tab is inactive.</p>
           <button class="btn approve" id="takeover" type="button">Use Gatekeeper here</button>
         </div>
       </div>`;
@@ -634,13 +696,14 @@ export class Gatekeeper {
   }
 
   private renderNoBroker(): void {
+    this.releaseShell();
     this.stopProbe();
     this.root.innerHTML = `
       <div class="standby">
         <div class="standby-card">
           <span class="standby-ico">${terminalIcon}</span>
           <h1>Start your agent once</h1>
-          <p>Gatekeeper needs its MCP server running before this tab can pair with it.
+          <p>A running Gatekeeper MCP server is required to pair this tab.
             Start the agent you configured it in (Claude Code, Codex, ...) and this screen moves on by itself.</p>
           <button class="btn approve" id="recheck" type="button">Check again</button>
         </div>
@@ -710,10 +773,10 @@ export class Gatekeeper {
     const name = escapeHtml(dbDisplayName(type));
     return `<div class="detail-card db-notice">
         <h2 class="dbn-title"><span class="dbn-ico">${alertTriangleIcon}</span>Not officially tested with ${name} yet</h2>
-        <p class="dbn-body">Gatekeeper runs entirely through Beekeeper Studio's own database APIs, so it's built to work with every database Beekeeper supports. So far we've officially tested it on PostgreSQL and MySQL. ${name} should work the same way, we just haven't verified it end to end, so keep an eye out for anything that looks off.</p>
+        <p class="dbn-body">SQL execution uses Beekeeper Studio's database APIs. PostgreSQL and MySQL are officially tested so far. Support for ${name} has not been verified end to end.</p>
         <div class="dbn-enc">
           <div class="dbn-h">Help make ${name} official</div>
-          <p class="dbn-p">Gatekeeper is open source and still young. If you run it on ${name} and can help put it through its paces, even a short set of test notes or a small fix is enough for us to move it onto the officially supported list, for you and everyone who comes after. Contributions are genuinely welcome.</p>
+          <p class="dbn-p">This project is open source. If you run it on ${name} and can help put it through its paces, even a short set of test notes or a small fix is enough for us to move it onto the officially supported list, for you and everyone who comes after. Contributions are genuinely welcome.</p>
           <div class="dbn-foot">
             <button class="dbn-gh" type="button" data-notice-contribute>${githubMark}Contribute on GitHub</button>
           </div>
@@ -844,11 +907,12 @@ export class Gatekeeper {
     // The new database has a different schema; drop cached columns so the next
     // card's annotation cannot describe the old connection.
     this.annotator.clearCache();
-    // History, activity, and roster are connection-scoped; reset so the old one
-    // cannot leak in. The roster re-fetches on its own timer; the activity overlay
-    // is closed because it now shows a different connection's audit trail.
+    // History, activity, roster and what the Inbox shows are connection-scoped; reset so the
+    // old one cannot leak in. The roster re-fetches on its own timer, and an open Audit Trail
+    // reloads for the new connection.
     this.history.length = 0;
-    this.activityView.reset();
+    this.resetInbox();
+    if (this.tab === "audit") void this.activityView.open();
     this.roster = [];
     this.rosterSig = "";
     // The endpoint belongs to the old database; check the new one from scratch.
@@ -921,7 +985,7 @@ export class Gatekeeper {
     const engine = dbDisplayName(this.conn?.databaseType ?? "");
     el.querySelector(".chip-db")?.setAttribute("aria-label", dbLinkLabel(this.dbCheck(), engine));
     const slot = el.querySelector(".db-slot");
-    const status = dbStatusHtml(this.dbCheck(), engine);
+    const status = dbStatusHtml(this.dbCheck());
     if (slot && status !== this.statusHtml) {
       slot.innerHTML = status;
       this.statusHtml = status;
@@ -1126,7 +1190,9 @@ export class Gatekeeper {
   }
 
   private renderPairing(errorMessage = ""): void {
+    this.releaseShell();
     this.stopProbe();
+    this.resetInbox();
     this.root.innerHTML = `
       <div class="standby">
         <div class="standby-card">
@@ -1223,12 +1289,12 @@ export class Gatekeeper {
         <span class="sa-pop">
           <span class="sa-body sa-off">
             <span class="sa-pt">${schemaIcon}Schema access</span>
-            <p>Without this, agents guess your table and column names. Turn it on so they read the real structure through <code>get_schema</code> and write sharper queries. <b>No row data is ever exposed.</b></p>
+            <p>Without this, agents guess your table and column names. Turn it on so they read the real structure through <code class="tool">get_schema</code> and write sharper queries. <b>No row data is ever exposed.</b></p>
             <button class="sa-enable" type="button" data-schema-toggle>Enable Schema access</button>
           </span>
           <span class="sa-body sa-on">
             <span class="sa-pt">${schemaIcon}Schema access</span>
-            <p>Agents now read your tables, columns, types and keys through <code>get_schema</code>, which is what makes their queries sharper. <b>No row data is ever exposed.</b></p>
+            <p>Agents now read your tables, columns, types and keys through <code class="tool">get_schema</code>, which is what makes their queries sharper. <b>No row data is ever exposed.</b></p>
             <button class="sa-enable tonal" type="button" data-schema-toggle>Disable Schema access</button>
           </span>
         </span>
@@ -1244,9 +1310,7 @@ export class Gatekeeper {
           </div>
           <div class="pop-group">
             <div class="pop-eyebrow">Detection</div>
-            ${quickSwitch("piiFlagging", "PII flagging", s.piiFlagging)}
-            ${quickSwitch("clientFlagging", "Client-data flagging", s.clientFlagging)}
-            ${quickSwitch("sensitiveValues", "Sensitive-value detection", s.sensitiveValues)}
+            ${DETECTION_TOGGLES.map((t) => quickSwitch(t.key, t.name, Boolean(s[t.key]), exampleChip(t))).join("")}
           </div>
           <div class="pop-foot">
             <button class="pop-full" id="settingsAll" type="button">Open all settings ${externalLinkIcon}</button>
@@ -1257,149 +1321,80 @@ export class Gatekeeper {
   </header>`;
   }
 
+  // Every render that replaces the root lets go of what the old shell held: the thumbs observing
+  // its panes, and an open confirm or Settings, whose hold on the page would outlive its nodes.
+  private releaseShell(): void {
+    for (const dispose of this.overlayScrolls) dispose();
+    this.overlayScrolls = [];
+    this.confirmModal.cancel();
+    this.settingsView.close();
+  }
+
   private renderShell(): void {
+    // The fresh markup opens on the Queue with nothing selected, whatever the last shell showed.
+    this.tab = "queue";
+    this.resetInbox();
+    this.stripObserver?.disconnect();
+    this.releaseShell();
     this.root.innerHTML = `
       <div class="gk">
-        ${this.headerHtml()}
-        <div class="rail" id="rail">
-          <section class="roster" id="roster"></section>
+        <div class="app-top">
+          ${this.headerHtml()}
+          <section class="agents-strip" id="roster" aria-label="Connected agents"></section>
         </div>
-        <div class="main" id="main">
-          <p class="label">Pending approval <span class="count-badge" id="pendingCount" aria-live="polite"></span></p>
-          <div class="queue" id="queue"></div>
-          <section class="history">
-            <div class="history-head">
-              <button class="disclosure" id="htoggle" aria-expanded="true"><span class="chev">${chevronDown}</span>Recently resolved</button>
-              <button class="activity-link" id="activityBtn" type="button">${historyIcon}Audit Trail</button>
+        <div class="inbox" id="inbox" data-show="list">
+          <div class="inbox-panes">
+          <section class="pane pane-list" aria-label="Queue and Audit Trail">
+            <div class="pane-head">
+              <div class="pane-tabs" role="tablist" aria-label="Lists">
+                <button class="pane-tab" role="tab" type="button" id="tabQueue" data-tab="queue" aria-selected="true" aria-controls="listQueue">Queue<span class="n" id="queueCount"></span></button>
+                <button class="pane-tab" role="tab" type="button" id="tabAudit" data-tab="audit" aria-selected="false" aria-controls="listAudit" tabindex="-1">${historyIcon}Audit Trail</button>
+              </div>
+              <span class="pane-actions" id="auditActions" hidden></span>
             </div>
-            <div class="hist" id="hist"></div>
+            <div class="ov-rail" aria-hidden="true"></div><div class="pane-body" id="listQueue" role="tabpanel" aria-labelledby="tabQueue"></div>
+            <div class="ov-rail" aria-hidden="true"></div><div class="pane-body" id="listAudit" role="tabpanel" aria-labelledby="tabAudit" hidden></div>
           </section>
+          <section class="pane pane-detail" aria-label="Selected">
+            <div class="ov-rail" aria-hidden="true"></div><div class="pane-body" id="detailBody">
+              <button class="detail-close pane-close" type="button" data-close-detail aria-label="Close details" title="Close details" hidden>${xIcon}</button>
+              <button class="pane-back" type="button" data-back>${chevronLeft}Back to the list</button>
+              <div class="pane-empty-host" id="paneEmpty"></div>
+              <div class="queue" id="queue"></div>
+              <div class="detail-host" id="detail" hidden></div>
+            </div>
+          </section>
+          </div>
         </div>
-        <div class="detail" id="detail" hidden></div>
-        <div class="detail activity-overlay" id="activity" hidden></div>
+        <footer class="status-bar">
+          <button class="ver-dock" id="verDock" type="button" hidden></button>
+          <div class="cta-cluster" id="ctaCluster">
+            <button class="cta-fab star${this.starred ? "" : " twinkle"}" type="button" data-gh-star aria-label="Star Gatekeeper on GitHub">${starGlyph}<span class="cta-lbl">Star on GitHub</span></button>
+            <button class="cta-fab fb" type="button" data-gh-feedback aria-label="Request a feature">${feedbackGlyph}<span class="cta-lbl">Request a feature</span></button>
+          </div>
+        </footer>
         <div class="detail settings-overlay" id="settings" hidden></div>
         <div class="detail confirm-overlay" id="confirm" hidden></div>
         <div class="detail db-notice-overlay" id="notice" hidden></div>
-        <button class="ver-dock" id="verDock" type="button" hidden></button>
-        <div class="cta-cluster" id="ctaCluster">
-          <button class="cta-fab star${this.starred ? "" : " twinkle"}" type="button" data-gh-star aria-label="Star Gatekeeper on GitHub">${starGlyph}<span class="cta-lbl">Star on GitHub</span></button>
-          <button class="cta-fab fb" type="button" data-gh-feedback aria-label="Request a feature">${feedbackGlyph}<span class="cta-lbl">Request a feature</span></button>
-        </div>
       </div>`;
     this.renderConnLabel();
     this.renderArmed();
-    const toggle = this.root.querySelector<HTMLButtonElement>("#htoggle")!;
-    const hist = this.root.querySelector<HTMLDivElement>("#hist")!;
-    toggle.addEventListener("click", () => {
-      const open = hist.style.display !== "none";
-      hist.style.display = open ? "none" : "";
-      toggle.setAttribute("aria-expanded", String(!open));
-    });
-    const rosterEl = this.root.querySelector<HTMLElement>("#roster")!;
-    rosterEl.addEventListener("click", (e) => {
-      if (!(e.target as HTMLElement).closest("[data-roster-toggle]")) {
-        return;
-      }
-      this.rosterOpen = !this.rosterOpen;
-      rosterEl
-        .querySelector("[data-roster-toggle]")
-        ?.setAttribute("aria-expanded", String(this.rosterOpen));
-      if (this.rosterOpen) {
-        // Re-arm the cascade: drop .play, force one reflow, re-add so it replays.
-        const rows = [...rosterEl.querySelectorAll<HTMLElement>(".roster-row")];
-        for (const r of rows) {
-          r.classList.remove("play");
-        }
-        void rosterEl.offsetWidth;
-        for (const r of rows) {
-          r.classList.add("play");
-        }
+    const strip = this.root.querySelector<HTMLElement>("#roster")!;
+    strip.addEventListener("click", (e) => {
+      if ((e.target as HTMLElement).closest("[data-agents-more]")) {
+        const pop = strip.querySelector<HTMLElement>("#agentsPop");
+        this.setAgentsPopOpen(Boolean(pop?.hidden));
       }
     });
-    const queue = this.root.querySelector<HTMLDivElement>("#queue")!;
-    queue.addEventListener("click", (e) => {
-      const target = e.target as HTMLElement;
-      const copy = target.closest<HTMLElement>("[data-copy-sql]");
-      const a = target.closest<HTMLElement>("[data-approve]");
-      const r = target.closest<HTMLElement>("[data-reject]");
-      const denyOpen = target.closest<HTMLElement>("[data-deny-open]");
-      const deny = target.closest<HTMLElement>("[data-deny]");
-      const stop = target.closest<HTMLElement>("[data-stop]");
-      if (copy) {
-        this.copySql(copy);
-      } else if (stop) {
-        const card = this.cards.find((c) => c.id === stop.getAttribute("data-stop"));
-        if (card) this.requestStop(card, "operator");
-      } else if (a) {
-        void this.approve(a.getAttribute("data-approve")!);
-      } else if (r) {
-        void this.reject(r.getAttribute("data-reject")!);
-      } else if (denyOpen) {
-        this.openDeny(denyOpen.getAttribute("data-deny-open")!);
-      } else if (deny) {
-        this.confirmDeny(deny.getAttribute("data-deny")!);
-      }
-    });
-    queue.addEventListener("keydown", (e) => {
-      const input = (e.target as HTMLElement).closest<HTMLElement>("[data-deny-input]");
-      if (!input) {
-        return;
-      }
-      const id = input.getAttribute("data-deny-input")!;
-      if (e.key === "Enter") {
-        e.preventDefault();
-        this.confirmDeny(id);
-      } else if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        this.closeDeny(id);
-      }
-    });
-    hist.addEventListener("click", (e) => {
-      const row = (e.target as HTMLElement).closest<HTMLElement>("[data-hist]");
-      if (!row) {
-        return;
-      }
-      const item = this.history.find((h) => h.id === row.getAttribute("data-hist"));
-      if (item) {
-        this.detailView.open(item);
-      }
-    });
-    const detail = this.root.querySelector<HTMLDivElement>("#detail")!;
-    detail.addEventListener("click", (e) => {
-      const target = e.target as HTMLElement;
-      const copy = target.closest<HTMLElement>("[data-copy-sql]");
-      if (copy) {
-        this.copySql(copy);
-        return;
-      }
-      // A result copy/export option: dispatch by action, the view holds the open item.
-      const opt = target.closest<HTMLElement>("[data-flyout-action]");
-      if (opt) {
-        this.closeFlyoutMenus();
-        const fmt = opt.getAttribute("data-flyout-fmt")!;
-        if (opt.getAttribute("data-flyout-action") === "export") {
-          void this.detailView.exportResult(fmt as "csv" | "json");
-        } else {
-          void this.detailView.copyResult(fmt as "md");
-        }
-        return;
-      }
-      const trigger = target.closest<HTMLElement>("[data-flyout-trigger]");
-      if (trigger) {
-        this.toggleFlyoutMenu(trigger);
-        return;
-      }
-      // Any other click dismisses an open format menu.
-      this.closeFlyoutMenus();
-      // Close on the backdrop or the close button, not on the card itself.
-      if (target === detail || target.closest("[data-close]")) {
-        this.detailView.close();
-      }
-    });
-    this.root
-      .querySelector<HTMLButtonElement>("#activityBtn")!
-      .addEventListener("click", () => void this.activityView.open());
+    // Remeasured on width changes, so the chips that fit follow the tab's size.
+    this.stripObserver = new ResizeObserver(() => this.layoutStrip());
+    this.stripObserver.observe(strip);
+    this.overlayScrolls = [...this.root.querySelectorAll<HTMLElement>(".ov-rail")].map((rail) =>
+      overlayScroll(rail.nextElementSibling as HTMLElement, rail),
+    );
+    const inbox = this.root.querySelector<HTMLElement>("#inbox")!;
+    inbox.addEventListener("click", (e) => this.onInboxClick(e));
+    inbox.addEventListener("keydown", (e) => this.onInboxKey(e));
     // The armed banner's X drops straight back to read-only (no confirm on a drop).
     this.root.querySelector<HTMLElement>("#armed")!.addEventListener("click", (e) => {
       if ((e.target as HTMLElement).closest("[data-disarm]")) {
@@ -1519,59 +1514,414 @@ export class Gatekeeper {
         void this.updateSetting(el.dataset.setting!, el.checked);
       }
     });
-    const activity = this.root.querySelector<HTMLDivElement>("#activity")!;
-    activity.addEventListener("click", (e) => {
-      const target = e.target as HTMLElement;
-      const copy = target.closest<HTMLElement>("[data-copy-sql]");
-      if (copy) {
-        this.copySql(copy);
-        return;
-      }
-      const opt = target.closest<HTMLElement>("[data-flyout-action]");
-      if (opt) {
-        this.closeFlyoutMenus();
-        if (opt.getAttribute("data-flyout-action") === "export") {
-          void this.activityView.exportSession(
-            opt.getAttribute("data-flyout-key")!,
-            opt.getAttribute("data-flyout-fmt") as "md" | "csv" | "json",
-          );
-        }
-        return;
-      }
-      const expTrigger = target.closest<HTMLElement>("[data-flyout-trigger]");
-      if (expTrigger) {
-        this.toggleFlyoutMenu(expTrigger);
-        return;
-      }
-      // Any other click in the panel dismisses an open format menu.
-      this.closeFlyoutMenus();
-      const dayHead = target.closest<HTMLElement>("[data-day]");
-      if (dayHead) {
-        this.activityView.toggleDay(dayHead);
-        return;
-      }
-      const sql = target.closest<HTMLElement>("[data-act-sql]");
-      if (sql) {
-        this.activityView.toggle(sql.getAttribute("data-act-sql")!);
-        return;
-      }
-      if (target.closest("[data-act-retry]")) {
-        void this.activityView.loadOlder();
-        return;
-      }
-      if (target === activity || target.closest("[data-close]")) {
-        this.activityView.close();
-      }
-    });
+    this.applyTab();
     this.renderQueue();
-    this.renderHistory();
-    this.renderRoster(); // Rebuilt DOM has a blank glyph; force it back to the initial state (the
-    // guard in setConnectionState would otherwise skip writing the new node).
+    this.renderRoster();
+    this.renderSelection(true);
+    // Rebuilt DOM has a blank glyph; force it back to the initial state (the guard in
+    // setConnectionState would otherwise skip writing the new node).
     this.setConnectionState("connecting", true);
     const gk = this.root.querySelector(".gk");
     if (gk) {
       reveal([...gk.children].filter((c) => !(c as HTMLElement).hidden));
     }
+  }
+
+  // One delegate for both panes: lists, the selected card's actions, the detail's menus, the
+  // Audit Trail's days and exports. Menus and copies come first so a click inside them never
+  // also selects a row.
+  private onInboxClick(e: MouseEvent): void {
+    const target = e.target as HTMLElement;
+    const copy = target.closest<HTMLElement>("[data-copy-sql]");
+    if (copy) {
+      this.copySql(copy);
+      return;
+    }
+    const opt = target.closest<HTMLElement>("[data-flyout-action]");
+    if (opt) {
+      this.closeFlyoutMenus();
+      const fmt = opt.getAttribute("data-flyout-fmt")!;
+      const action = opt.getAttribute("data-flyout-action");
+      if (opt.closest("#listAudit")) {
+        if (action === "export") {
+          void this.activityView.exportSession(
+            opt.getAttribute("data-flyout-key")!,
+            fmt as "md" | "csv" | "json",
+          );
+        }
+      } else if (action === "export") {
+        void this.detailView.exportResult(fmt as "csv" | "json");
+      } else {
+        void this.detailView.copyResult(fmt as "md");
+      }
+      return;
+    }
+    const trigger = target.closest<HTMLElement>("[data-flyout-trigger]");
+    if (trigger) {
+      this.toggleFlyoutMenu(trigger);
+      return;
+    }
+    this.closeFlyoutMenus();
+    const tab = target.closest<HTMLElement>("[data-tab]");
+    if (tab) {
+      this.setTab(tab.dataset.tab as InboxTab);
+      return;
+    }
+    const row = target.closest<HTMLElement>("[data-select]");
+    if (row) {
+      this.select({ kind: row.dataset.select as Selection["kind"], id: row.dataset.row! });
+      return;
+    }
+    if (target.closest("[data-request-toggle]")) {
+      this.detailView.toggleRequest();
+      return;
+    }
+    if (target.closest("[data-close-detail]")) {
+      this.closeSelection();
+      return;
+    }
+    if (target.closest("[data-back]")) {
+      this.showList();
+      return;
+    }
+    const dayHead = target.closest<HTMLElement>("[data-day]");
+    if (dayHead) {
+      this.activityView.toggleDay(dayHead);
+      return;
+    }
+    const monthHead = target.closest<HTMLElement>("[data-month]");
+    if (monthHead) {
+      this.activityView.toggleMonth(monthHead);
+      return;
+    }
+    if (target.closest("[data-act-retry], [data-act-older]")) {
+      void this.activityView.loadOlder();
+      return;
+    }
+    const a = target.closest<HTMLElement>("[data-approve]");
+    const r = target.closest<HTMLElement>("[data-reject]");
+    const denyOpen = target.closest<HTMLElement>("[data-deny-open]");
+    const deny = target.closest<HTMLElement>("[data-deny]");
+    const stop = target.closest<HTMLElement>("[data-stop]");
+    if (stop) {
+      const card = this.cards.find((c) => c.id === stop.getAttribute("data-stop"));
+      if (card) this.requestStop(card, "operator");
+    } else if (a) {
+      void this.approve(a.getAttribute("data-approve")!);
+    } else if (r) {
+      void this.reject(r.getAttribute("data-reject")!);
+    } else if (denyOpen) {
+      this.openDeny(denyOpen.getAttribute("data-deny-open")!);
+    } else if (deny) {
+      this.confirmDeny(deny.getAttribute("data-deny")!);
+    }
+  }
+
+  private onInboxKey(e: KeyboardEvent): void {
+    const target = e.target as HTMLElement;
+    const input = target.closest<HTMLElement>("[data-deny-input]");
+    if (input) {
+      const id = input.getAttribute("data-deny-input")!;
+      if (e.key === "Enter") {
+        e.preventDefault();
+        this.confirmDeny(id);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        this.closeDeny(id);
+      }
+      return;
+    }
+    // The arrow keys move between the tabs; Enter or Space opens one, since opening the Audit
+    // Trail fetches it and passing over it must not.
+    const tab = target.closest<HTMLElement>("[data-tab]");
+    if (tab && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+      e.preventDefault();
+      const other = tab.dataset.tab === "queue" ? "audit" : "queue";
+      this.root.querySelector<HTMLElement>(`[data-tab="${other}"]`)?.focus();
+    }
+  }
+
+  private setTab(tab: InboxTab): void {
+    if (tab === this.tab) {
+      return;
+    }
+    this.tab = tab;
+    this.applyTab();
+    // Fresh on every open, as before: decisions taken since then must show.
+    if (tab === "audit") {
+      void this.activityView.open();
+    } else {
+      this.activityView.close();
+    }
+    this.renderSelection(true);
+  }
+
+  private applyTab(): void {
+    for (const el of this.root.querySelectorAll<HTMLElement>("[data-tab]")) {
+      const on = el.dataset.tab === this.tab;
+      el.setAttribute("aria-selected", String(on));
+      el.tabIndex = on ? 0 : -1;
+    }
+    const queue = this.root.querySelector<HTMLElement>("#listQueue");
+    const audit = this.root.querySelector<HTMLElement>("#listAudit");
+    const actions = this.root.querySelector<HTMLElement>("#auditActions");
+    if (queue) queue.hidden = this.tab !== "queue";
+    if (audit) audit.hidden = this.tab !== "audit";
+    if (actions) actions.hidden = this.tab !== "audit";
+  }
+
+  // The Audit Trail opens on the first decision it lists, with no selection of its own yet. It
+  // takes neither the focus nor, in a narrow tab, the place of the list.
+  private openNewestAudit(): void {
+    if (this.tab !== "audit" || this.selection.audit) return;
+    const row = this.root.querySelector<HTMLElement>('#listAudit [data-select="audit"]');
+    const entry = this.activityView.entry(row?.dataset.row ?? "") ?? this.activityView.newest();
+    if (entry) {
+      this.selection.audit = {
+        kind: "audit",
+        id: entry.id,
+        item: auditItem(entry, this.connectionName || null),
+      };
+      row?.setAttribute("aria-current", "true");
+    }
+    this.renderSelection(true);
+  }
+
+  private select(next: Selection): void {
+    if (next.kind === "audit") {
+      const entry = this.activityView.entry(next.id);
+      if (!entry) return;
+      next.item = auditItem(entry, this.connectionName || null);
+    }
+    this.selection[this.tab] = next;
+    for (const row of this.root.querySelectorAll<HTMLElement>(
+      `#${this.tab === "queue" ? "listQueue" : "listAudit"} [data-row]`,
+    )) {
+      row.setAttribute("aria-current", String(row.dataset.row === next.id));
+    }
+    // Shown before it renders: the grid sizes itself from the visible pane.
+    this.root.querySelector("#inbox")?.setAttribute("data-show", "detail");
+    this.renderSelection(true);
+    // Narrow: the list just hid under the focused row, so Back takes the focus.
+    if (this.root.querySelector<HTMLElement>(".pane-list")?.offsetParent === null) {
+      this.root.querySelector<HTMLElement>("[data-back]")?.focus({ preventScroll: true });
+    }
+  }
+
+  // The server's record stays the fact; rows this tab still holds for the same approved request
+  // are attached when it renders, so rows Result memory has since dropped are not shown here.
+  private withLocalRows(item: HistItem): HistItem {
+    const local = this.history.find((h) => h.id === item.id);
+    return item.status === "approved" && local?.status === "approved" && local.result?.rows.length
+      ? { ...item, result: local.result }
+      : item;
+  }
+
+  // An Escape meant for the Inbox: from inside it, or from nowhere (a clicked control that went
+  // away leaves the focus on the body), never from a field that keeps its own.
+  private inInbox(e: KeyboardEvent): boolean {
+    const target = e.target as HTMLElement | null;
+    return (
+      (target === target?.ownerDocument?.body || Boolean(target?.closest?.("#inbox"))) &&
+      !target?.closest("input, textarea, select, [contenteditable]")
+    );
+  }
+
+  // Back to nothing open in the Queue. Only the view changes: the request stays queued, running
+  // or decided, the other tab keeps its own selection, and the focus returns to the row.
+  private closeSelection(): void {
+    const id = this.selection[this.tab]?.id;
+    if (!id || this.tab !== "queue") return;
+    this.selection[this.tab] = null;
+    // A later narrow layout must open on the list, not on a pane with nothing in it.
+    this.root.querySelector("#inbox")?.setAttribute("data-show", "list");
+    const list = this.tab === "queue" ? "#listQueue" : "#listAudit";
+    for (const row of this.root.querySelectorAll<HTMLElement>(`${list} [data-row]`)) {
+      row.setAttribute("aria-current", "false");
+    }
+    this.renderSelection(true);
+    const row = this.root.querySelector<HTMLElement>(`${list} [data-row="${CSS.escape(id)}"]`);
+    if (row?.offsetParent) row.focus({ preventScroll: true });
+    else this.focusOpenTab();
+  }
+
+  // Narrow tab: the list and the selection take turns; Back returns to the row it left, or to
+  // the open tab when that row is gone or folded away.
+  private showList(): void {
+    this.root.querySelector("#inbox")?.setAttribute("data-show", "list");
+    this.focusSelectedRow();
+  }
+
+  // The open item's row, or the open tab when that row is gone or folded away; Back while the
+  // list sits hidden behind the item in a narrow tab.
+  private focusSelectedRow(): void {
+    if (this.root.querySelector<HTMLElement>(".pane-list")?.offsetParent === null) {
+      this.root.querySelector<HTMLElement>("[data-back]")?.focus({ preventScroll: true });
+      return;
+    }
+    const id = this.selection[this.tab]?.id;
+    const list = this.tab === "queue" ? "#listQueue" : "#listAudit";
+    const row = id
+      ? this.root.querySelector<HTMLElement>(`${list} [data-row="${CSS.escape(id)}"]`)
+      : null;
+    if (row?.offsetParent) row.focus({ preventScroll: true });
+    else this.focusOpenTab();
+  }
+
+  // A rebuild that took the focused control with it (Approve, Stop, a sent reason) hands the
+  // focus to the open row, so the keyboard keeps its place and Escape still reaches the Inbox.
+  private renderSelection(force = false): void {
+    const pane = this.root.querySelector<HTMLElement>("#detailBody");
+    const focused = Boolean(pane?.contains(document.activeElement));
+    this.paintSelection(force);
+    if (focused && !pane?.contains(document.activeElement)) this.focusSelectedRow();
+  }
+
+  // The right pane shows exactly the current selection. A decided request reopens only when
+  // the selection changed (`force`), never on a poll, so its grid keeps its sort and page.
+  private paintSelection(force = false): void {
+    const sel = this.selection[this.tab];
+    // The close control shows only while something is open in the Queue; the Audit Trail always
+    // has its newest decision open, or its empty state.
+    const close = this.root.querySelector<HTMLElement>("[data-close-detail]");
+    if (close) close.hidden = !sel || this.tab !== "queue";
+    const queue = this.root.querySelector<HTMLElement>("#queue");
+    const empty = this.root.querySelector<HTMLElement>("#paneEmpty");
+    if (!queue || !empty) {
+      return;
+    }
+    if (sel?.kind === "card") {
+      const card = this.cards.find((c) => c.id === sel.id);
+      if (!card) {
+        this.selection[this.tab] = null;
+        this.paintSelection(true);
+        return;
+      }
+      this.detailView.close();
+      empty.innerHTML = "";
+      this.renderSelectedCard(card);
+      return;
+    }
+    if (queue.childElementCount) {
+      this.captureDenyDrafts(queue);
+      queue.innerHTML = "";
+    }
+    const item =
+      sel?.kind === "hist"
+        ? (this.history.find((h) => h.id === sel.id) ?? sel.item)
+        : sel?.item && this.withLocalRows(sel.item);
+    if (sel?.kind === "hist" && item) sel.item = item;
+    if (item) {
+      empty.innerHTML = "";
+      if (force || this.detailView.showing() !== item.id) {
+        this.detailView.open(item, sel?.kind === "hist" ? "live" : "text");
+      }
+      return;
+    }
+    this.detailView.close();
+    this.breatheLoop?.stop();
+    this.breatheLoop = undefined;
+    const waiting = this.cards.filter((c) => c.state === "ready").length;
+    empty.innerHTML = paneEmptyHtml(waiting, this.tab, {
+      agents: this.liveAgents,
+      active: this.agentsActive,
+      auditEmpty: this.activityView.isEmpty(),
+      connection: this.connectionName,
+    });
+    const mark = empty.querySelector(".waiting-mark");
+    if (mark) this.breatheLoop = pulse(mark);
+  }
+
+  private renderSelectedCard(card: Card): void {
+    const queue = this.root.querySelector<HTMLElement>("#queue");
+    if (!queue) {
+      return;
+    }
+    // A rebuild must carry an open deny form's typed text and focus across.
+    const focusedDeny = this.captureDenyDrafts(queue);
+    const who = card.session?.project?.trim() || card.session?.harness?.trim() || card.sessionId;
+    const task = card.session?.sessionLabel?.trim();
+    queue.innerHTML = `<div class="pd-who">${agentBadge(card.session?.harness?.trim() || null)}<span class="pd-name">${escapeHtml(who)}</span>${task ? `<span class="pd-task" title="${escapeHtml(capitalize(task))}">${escapeHtml(capitalize(task))}</span>` : ""}</div>${cardHtml(card, this.dialect, this.denyDrafts, this.mode, this.connectionReadOnly())}`;
+    if (focusedDeny) {
+      const input = queue.querySelector<HTMLInputElement>(`[data-deny-input="${focusedDeny}"]`);
+      input?.focus();
+      input?.setSelectionRange(input.value.length, input.value.length);
+    }
+  }
+
+  // Saves every open deny form's text before its markup goes; returns the focused one.
+  private captureDenyDrafts(host: HTMLElement): string | null {
+    let focused: string | null = null;
+    for (const input of host.querySelectorAll<HTMLInputElement>(".deny-reason")) {
+      const id = input.getAttribute("data-deny-input");
+      if (id) {
+        this.denyDrafts.set(id, input.value);
+        if (input === document.activeElement) focused = id;
+      }
+    }
+    return focused;
+  }
+
+  // Connection switch, demotion and re-pair: nothing from before stays open.
+  private resetInbox(): void {
+    this.selection.queue = null;
+    this.selection.audit = null;
+    this.activityView.reset();
+    this.detailView.close();
+    this.root.querySelector("#inbox")?.setAttribute("data-show", "list");
+  }
+
+  private setAgentsPopOpen(open: boolean): boolean {
+    const pop = this.root.querySelector<HTMLElement>("#agentsPop");
+    const more = this.root.querySelector<HTMLElement>("[data-agents-more]");
+    if (!pop || pop.hidden === !open) {
+      return false;
+    }
+    pop.hidden = !open;
+    more?.setAttribute("aria-expanded", String(open));
+    return true;
+  }
+
+  // Hides the chips past the strip's end and counts them on "+N more", which stays visible
+  // itself: its own width is reserved before any chip is measured.
+  private layoutStrip(): void {
+    const box = this.root.querySelector<HTMLElement>("#roster .chips");
+    const more = this.root.querySelector<HTMLElement>("#roster [data-agents-more]");
+    if (!box || !more) {
+      return;
+    }
+    const focused = document.activeElement === more;
+    const chips = [...box.children] as HTMLElement[];
+    for (const c of chips) c.hidden = false;
+    more.hidden = true;
+    if (box.scrollWidth > box.clientWidth) {
+      more.textContent = `+${chips.length} more`;
+      more.hidden = false;
+      const limit = box.getBoundingClientRect().right;
+      let hidden = 0;
+      for (const c of chips) {
+        if (c.getBoundingClientRect().right > limit + 0.5) {
+          c.hidden = true;
+          hidden++;
+        }
+      }
+      more.textContent = `+${hidden} more`;
+    }
+    if (focused && more.hidden) this.refocusStrip();
+  }
+
+  // A keyboard user keeps "+N more" across a rebuild, or lands on the open tab once it goes.
+  private refocusStrip(): void {
+    const more = this.root.querySelector<HTMLElement>("#roster [data-agents-more]");
+    if (more && !more.hidden) more.focus({ preventScroll: true });
+    else this.focusOpenTab();
+  }
+
+  private focusOpenTab(): void {
+    this.root
+      .querySelector<HTMLElement>('[data-tab][aria-selected="true"]')
+      ?.focus({ preventScroll: true });
   }
 
   // Updated in place, never rebuilt, so the live node stays mounted and the glyph keeps the
@@ -1626,10 +1976,18 @@ export class Gatekeeper {
     return true;
   }
 
-  // The server popover Escape hid stays hidden until its glyph is entered again from outside,
+  // A legend entry's names hide on Escape with the focus kept on the entry, as the server popover.
+  private dismissLegendPop(): boolean {
+    const slot = this.root.querySelector(
+      ".lg-slot:is(:hover, :focus-within):not([data-dismissed])",
+    );
+    return slot ? slot.toggleAttribute("data-dismissed", true) : false;
+  }
+
+  // A popover Escape hid stays hidden until its glyph is entered again from outside,
   // by the pointer or the focus, whatever else still holds it open.
-  private enterAgentGlyph(e: MouseEvent | FocusEvent): void {
-    const glyph = (e.target as Element | null)?.closest?.(".ag-ico");
+  private enterPopGlyph(e: MouseEvent | FocusEvent): void {
+    const glyph = (e.target as Element | null)?.closest?.(".ag-ico, .lg-slot");
     if (!glyph || glyph.contains(e.relatedTarget as Node | null)) {
       return;
     }
@@ -1664,6 +2022,8 @@ export class Gatekeeper {
     gear.classList.toggle("open", open);
     if (!open) {
       this.closeModeMenus();
+      // Closed from inside (an Escape, a confirmed arm): the focus must not go with it.
+      if (pop.contains(document.activeElement)) gear.focus({ preventScroll: true });
     }
   }
 
@@ -1967,14 +2327,17 @@ export class Gatekeeper {
     }
   }
 
-  private reviewCard(card: Card, reason: string): void {
+  // `auto` false: a human approval stopped before the SQL ran. That is no Auto mode hold, so it
+  // reads as its own notice and never becomes an Auto status or an Audit Trail hold.
+  private reviewCard(card: Card, reason: string, auto = true): void {
     if (!this.cards.includes(card)) return;
     card.state = "ready";
     if (card.authorityLost) {
       this.drop(card.id);
       return;
     }
-    card.autoStatus = `Needs review: ${reason}`;
+    if (auto) card.autoStatus = `Needs review: ${reason}`;
+    else card.executionNotice = reason;
     this.renderQueue();
   }
 
@@ -2046,10 +2409,7 @@ export class Gatekeeper {
       }
       card.evaluation = evaluation;
       if (!currentEvaluation(evaluation)) {
-        this.reviewCard(
-          card,
-          evaluation.reasons?.join(". ") || "Evaluator uncertainty or stale policy/model",
-        );
+        this.reviewCard(card, refusalReason(evaluation));
         return;
       }
       card.autoStatus = AUTO_APPROVED;
@@ -2101,12 +2461,15 @@ export class Gatekeeper {
   }
 
   private openModeArm(next: RiskMode): void {
-    const autoNotice = this.autoEnabled ? " Confirming turns off Auto mode." : "";
+    // Auto mode runs in Read-only only, so raising the mode switches it off.
+    const autoNotice = (mode: string) =>
+      this.autoEnabled ? `Enabling ${mode} mode automatically turns off Auto mode.` : undefined;
     if (next === "write") {
       this.confirmModal.open({
         tone: "write",
         heading: "Enable Write Mode",
-        body: `Write mode lets you approve INSERT and UPDATE statements. Each still runs only on your one-click approval, one at a time.${autoNotice}`,
+        body: "Write mode lets you approve INSERT and UPDATE statements. Each still runs only on your one-click approval, one at a time.",
+        autoNotice: autoNotice("Write"),
         confirmLabel: "Enable Write Mode",
         onConfirm: () => this.applyMode("write"),
       });
@@ -2117,7 +2480,8 @@ export class Gatekeeper {
     this.confirmModal.open({
       tone: "destructive",
       heading: "Enable Destructive Mode",
-      body: `Destructive mode lets you approve DELETE, DROP, TRUNCATE and other data-changing statements. Type the database name to confirm.${autoNotice}`,
+      body: "Destructive mode lets you approve DELETE, DROP, TRUNCATE and other data-changing statements. Type the database name to confirm.",
+      autoNotice: autoNotice("Destructive"),
       confirmLabel: "Enable Destructive Mode",
       challenge: {
         label: "Type the database name to confirm",
@@ -2146,6 +2510,10 @@ export class Gatekeeper {
   // Re-render both mode dropdowns (header popover, settings overlay when open) and the
   // armed banner in place, without a full shell rebuild.
   private renderModeSurfaces(): void {
+    // A confirmed arm hands the focus back to the dropdown it came from, rebuilt here.
+    const focused = (document.activeElement as HTMLElement | null)?.closest?.(
+      "#modeCtlHeader, #modeCtlSettings",
+    )?.id;
     const header = this.root.querySelector<HTMLElement>("#modeCtlHeader");
     if (header) {
       header.innerHTML = modeDropdown(this.mode, true, this.autoEnabled);
@@ -2153,6 +2521,11 @@ export class Gatekeeper {
     const overlay = this.root.querySelector<HTMLElement>("#modeCtlSettings");
     if (overlay) {
       overlay.innerHTML = modeDropdown(this.mode, false, this.autoEnabled);
+    }
+    if (focused) {
+      this.root
+        .querySelector<HTMLElement>(`#${focused} [data-mode-trigger]`)
+        ?.focus({ preventScroll: true });
     }
     // Double-confirmation only matters once a write/destructive mode is armed, so the quick
     // menu surfaces it only then; the full settings screen always shows it to preconfigure.
@@ -2331,38 +2704,32 @@ export class Gatekeeper {
     // Skip the rebuild (and the pulse restart) when only the relative ages moved;
     // tick() keeps those fresh in place.
     const sig = JSON.stringify(
-      rows.map((r) => [r.s.sessionId, r.p, r.s.pendingCount, r.s.sessionLabel, r.s.lastIntent]),
+      rows.map((r) => [r.s.sessionId, r.p, r.s.sessionLabel, r.s.lastIntent]),
     );
     if (sig === this.rosterSig) {
       return;
     }
     this.rosterSig = sig;
     const live = rows.filter((r) => r.p !== "gone").length;
-    // Cascade only when the roster grew (an agent joined) or first populated, never on a
-    // minor in-place update, so the list does not re-animate on every pending tick.
-    const grew = live > this.rosterLive;
-    this.rosterLive = live;
-    const list =
-      rows.map(({ s, p }) => rosterRow(s, p)).join("") ||
-      '<div class="empty">No agents connected.</div>';
-    el.innerHTML = `<button class="disclosure roster-toggle" type="button" data-roster-toggle aria-expanded="${this.rosterOpen}"><span class="chev">${chevronDown}</span>Connected agents<span class="roster-count count-badge">${live}</span></button><div class="roster-fold"><div class="roster-fold-inner"><div class="roster-list">${list}</div></div></div>`;
-    // Stagger index for the unfold cascade, set here so the row markup (and its test)
-    // stays free of presentation state.
-    const rowEls = [...el.querySelectorAll<HTMLElement>(".roster-row")];
-    rowEls.forEach((r, i) => {
-      r.style.setProperty("--i", String(i));
-    });
-    if (this.rosterOpen && grew) {
-      for (const r of rowEls) {
-        r.classList.add("play");
-      }
+    // The empty right pane says whether an agent is there, so it follows the roster.
+    const active = rows.some((r) => r.p === "active");
+    if (live !== this.liveAgents || active !== this.agentsActive) {
+      this.liveAgents = live;
+      this.agentsActive = active;
+      if (!this.selection[this.tab]) this.renderSelection();
     }
+    const open = this.root.querySelector<HTMLElement>("#agentsPop")?.hidden === false;
+    const focused = el.contains(document.activeElement);
+    el.innerHTML = agentsStripHtml(rows, live);
+    this.layoutStrip();
+    if (open) this.setAgentsPopOpen(true);
+    if (focused) this.refocusStrip();
     for (const loop of this.rosterLoops) {
       loop.stop();
     }
-    this.rosterLoops = [
-      ...el.querySelectorAll('.roster-row[data-presence="active"] .presence-dot'),
-    ].map((dot) => pulse(dot));
+    this.rosterLoops = [...el.querySelectorAll('[data-presence="active"] .presence-dot')].map(
+      (dot) => pulse(dot),
+    );
   }
 
   private claim(proposal: Proposal): void {
@@ -2389,7 +2756,7 @@ export class Gatekeeper {
     }
     const card: Card = { ...proposal, state: "ready" };
     this.cards.push(card);
-    this.renderQueue();
+    this.renderQueue(card.id);
     void this.analyzeSchema(card);
     void this.evaluateNext();
   }
@@ -2455,7 +2822,7 @@ export class Gatekeeper {
     }
     // No word of its own: the row would read as a timeout, so the note carries the truth.
     if (state === "cancelled") {
-      this.finish(card.id, "expired", "cancelled by the agent");
+      this.finish(card.id, "expired", CANCELLED_NOTE);
       return;
     }
     // Back in the pool (or the broker said nothing): the next poll re-offers it.
@@ -2467,21 +2834,30 @@ export class Gatekeeper {
     this.maybeCheckEndpoint();
     this.renderCheckTimes();
     this.renderAgentLinkTimes();
+    const now = Date.now();
     for (const card of [...this.cards]) {
-      if (card.state === "ready" && card.expiresAt - Date.now() <= 0) {
+      if (card.state === "ready" && card.expiresAt - now <= 0) {
         this.finish(card.id, "expired", "expired");
         continue;
       }
+      if (card.state !== "ready") continue;
+      const remaining = card.expiresAt - now;
       const leaseEl = this.root.querySelector<HTMLSpanElement>(`[data-card="${card.id}"] .lease`);
-      if (leaseEl && card.state === "ready") {
-        const remaining = card.expiresAt - Date.now();
+      if (leaseEl) {
         leaseEl.className = remaining <= 45_000 ? "lease low" : "lease";
         leaseEl.textContent = clock(remaining);
       }
+      const rowEl = this.root.querySelector<HTMLSpanElement>(
+        `[data-row="${card.id}"] [data-lease]`,
+      );
+      if (rowEl) {
+        rowEl.classList.toggle("low", remaining <= 45_000);
+        rowEl.textContent = clock(remaining);
+      }
     }
-    this.tickRuns(Date.now());
+    this.tickRuns(now);
     // Keep the resolved-history and roster ages current without re-rendering.
-    this.root.querySelectorAll<HTMLSpanElement>("#hist .hage, #roster .rage").forEach((el) => {
+    this.root.querySelectorAll<HTMLSpanElement>("#listQueue .hage, #roster .rage").forEach((el) => {
       const t = Number(el.dataset.age);
       if (!Number.isNaN(t)) {
         el.textContent = relAge(t);
@@ -2495,57 +2871,74 @@ export class Gatekeeper {
     return (this.conn?.readOnly ?? false) || this.endpointRO?.replica === true;
   }
 
-  private renderQueue(): void {
-    const count = this.root.querySelector<HTMLSpanElement>("#pendingCount");
+  // The queue list and, when a card is open on the right, that card. Counts: the tab says
+  // how many wait for the human (as the Beekeeper tab title does), the group how many it lists.
+  // `changed`: the one card this update is about. The open card is rebuilt only for its own
+  // changes, so a proposal arriving elsewhere never resets a selection, a tooltip or a scroll.
+  private renderQueue(changed?: string): void {
+    const ready = this.cards.filter((c) => c.state === "ready").length;
+    const count = this.root.querySelector<HTMLSpanElement>("#queueCount");
     if (count) {
-      const n = this.cards.length;
-      count.textContent = n > 0 ? String(n) : "";
+      count.textContent = ready > 0 ? String(ready) : "";
     }
-    const queue = this.root.querySelector<HTMLDivElement>("#queue");
-    if (queue) {
-      // A concurrent proposal rebuilds the whole queue; carry any open deny form's
-      // typed text and focus across the rebuild so a half-composed reason survives.
-      let focusedDeny: string | null = null;
-      for (const input of queue.querySelectorAll<HTMLInputElement>(".deny-reason")) {
-        const id = input.getAttribute("data-deny-input");
-        if (id) {
-          this.denyDrafts.set(id, input.value);
-          if (input === document.activeElement) {
-            focusedDeny = id;
-          }
-        }
-      }
-      this.breatheLoop?.stop();
-      this.breatheLoop = undefined;
-      queue.innerHTML = queueHtml(
-        this.cards,
-        this.dialect,
-        this.denyDrafts,
-        this.mode,
-        this.connectionReadOnly(),
-      );
-      if (focusedDeny) {
-        const input = queue.querySelector<HTMLInputElement>(`[data-deny-input="${focusedDeny}"]`);
-        input?.focus();
-        input?.setSelectionRange(input.value.length, input.value.length);
-      }
-      const waitingMark = queue.querySelector(".waiting-mark");
-      if (waitingMark) {
-        this.breatheLoop = pulse(waitingMark);
-      } else {
-        for (const card of queue.querySelectorAll<HTMLElement>(".card")) {
-          if (card.dataset.card && !this.prevCardIds.has(card.dataset.card)) {
-            enter(card);
-          }
-        }
-      }
-      this.prevCardIds = new Set(
-        [...queue.querySelectorAll<HTMLElement>(".card")]
-          .map((c) => c.dataset.card ?? "")
-          .filter(Boolean),
-      );
+    this.renderQueueList();
+    // The empty pane counts what waits, so it follows the queue too.
+    const sel = this.selection[this.tab];
+    if (!sel || (sel.kind === "card" && (changed === undefined || changed === sel.id))) {
+      this.renderSelection();
     }
     this.updateTabTitle();
+  }
+
+  private renderHistory(): void {
+    this.renderQueueList();
+  }
+
+  private renderQueueList(): void {
+    const list = this.root.querySelector<HTMLElement>("#listQueue");
+    if (!list) {
+      return;
+    }
+    const selected = this.selection.queue?.id ?? null;
+    const now = Date.now();
+    // What waits for a decision; running rows say their own state.
+    const ready = this.cards.filter((c) => c.state === "ready").length;
+    const pending = this.cards.length
+      ? this.cards
+          .map((c) =>
+            queueRowHtml(c, classifyQuery(c.sql, this.dialect).class, c.id === selected, now),
+          )
+          .join("")
+      : emptyListHtml("pending", this.connectionName);
+    // Defense in depth: a switch already clears history, but never render a row
+    // stamped under a different connection than the one on screen now.
+    const current = this.connectionName || null;
+    const recent = this.history.filter((h) => h.connection === current);
+    const focused = list.contains(document.activeElement)
+      ? (document.activeElement as HTMLElement).dataset.row
+      : undefined;
+    // Nothing pending and nothing decided: one composition, the heads come with the first row.
+    list.innerHTML =
+      !this.cards.length && !recent.length
+        ? emptyListHtml("queue", this.connectionName)
+        : `${groupHeadHtml("Pending approval", ready, ready > 0)}${pending}${
+            recent.length
+              ? `${groupHeadHtml("Recently resolved", 0)}${recent
+                  .map((h) => recentRowHtml(h, h.id === selected, this.dialect))
+                  .join("")}`
+              : ""
+          }`;
+    for (const row of list.querySelectorAll<HTMLElement>('[data-select="card"]')) {
+      if (row.dataset.row && !this.prevCardIds.has(row.dataset.row)) enter(row);
+    }
+    // A keyboard user keeps the row they were on (a decided card is now its outcome row), or
+    // lands on the open tab once that row is gone.
+    if (focused !== undefined) {
+      const row = list.querySelector<HTMLElement>(`[data-row="${focused}"]`);
+      if (row) row.focus({ preventScroll: true });
+      else this.focusOpenTab();
+    }
+    this.prevCardIds = new Set(this.cards.map((c) => c.id));
   }
 
   // Surface the count of queries awaiting a decision in the Beekeeper tab so it
@@ -2561,12 +2954,17 @@ export class Gatekeeper {
   }
 
   private renderCardSchema(card: Card): void {
-    const el = this.root.querySelector<HTMLElement>(`#cs-${CSS.escape(card.id)}`);
-    if (el) {
-      // A write/destructive card lists its tables in the risk annotation, so drop the
-      // duplicate reads line here; the sensitive-column flags still render.
+    // The matrix (a read's tables come from this analysis), the legend and the SQL marks move
+    // together, so none of them describes a different analysis than the others.
+    const id = CSS.escape(card.id);
+    const matrix = this.root.querySelector<HTMLElement>(`#cm-${id}`);
+    if (matrix) {
       const cls = classifyQuery(card.sql, this.dialect).class;
-      el.innerHTML = schemaInner(card.schema, cls !== "read");
+      matrix.innerHTML = accessMatrix(card.sql, this.dialect, cls, card.schema);
+    }
+    const legend = this.root.querySelector<HTMLElement>(`#cs-${id}`);
+    if (legend) {
+      paintLegend(legend, card.schema, card.id);
     }
     // Re-highlight the SQL now that the sensitive columns are known, so they light
     // up in the query text too, not only in the flags below.
@@ -2585,7 +2983,7 @@ export class Gatekeeper {
     const card = this.cards.find((c) => c.id === id);
     if (card) {
       card.state = state;
-      this.renderQueue();
+      this.renderQueue(id);
     }
   }
 
@@ -2619,9 +3017,10 @@ export class Gatekeeper {
           !autoSignal?.aborted &&
           currentEvaluation(evaluation)));
     // Reserve synchronously, before the host round-trip, for both approval sources.
+    card.executionNotice = undefined;
     this.setCardState(id, "approving");
     if (!(await this.checkConnection()) || !valid()) {
-      this.reviewCard(card, "Connection or approval authority changed");
+      this.reviewCard(card, "Connection or approval authority changed", Boolean(evaluation));
       return;
     }
     // SAFETY-CRITICAL: the real gate. Never run a statement the armed mode cannot
@@ -2641,15 +3040,32 @@ export class Gatekeeper {
     if (!confirmed && verdict.class !== "read" && this.settingsStore.get().confirmWrites) {
       this.setCardState(id, "ready");
       const destructive = verdict.class === "destructive";
+      // The operation names the title and the button; the sentence says what it does to which
+      // table on which database, before the tables it touches and its SQL.
+      const receipt = statementReceipt(card.sql, this.dialect);
+      const op = receipt?.op;
       this.confirmModal.open({
         tone: destructive ? "destructive" : "write",
-        heading: destructive ? "Run this destructive statement?" : "Run this write?",
-        body: destructive
-          ? "This deletes or drops data on the live database the moment you confirm, and Gatekeeper cannot undo it."
-          : "This changes data on the live database the moment you confirm.",
+        heading: op
+          ? `Run this ${op}?`
+          : destructive
+            ? "Run this destructive statement?"
+            : "Run this write?",
+        body: "",
+        facts: {
+          sentence: runSentence(
+            card.sql,
+            op,
+            receipt?.tables ?? [],
+            connTag(this.connectionName),
+            destructive,
+          ),
+          matrix: accessMatrix(card.sql, this.dialect, verdict.class, card.schema),
+        },
         sql: card.sql,
         schema: card.schema ?? undefined,
-        confirmLabel: destructive ? "Run destructive" : "Run write",
+        confirmLabel: op ? `Run ${op}` : destructive ? "Run destructive" : "Run write",
+        requestId: id,
         onConfirm: () => void this.approve(id, true),
       });
       return;
@@ -2680,7 +3096,14 @@ export class Gatekeeper {
       } catch {
         card.authorityLost = true;
       }
-      this.reviewCard(card, "Execution stopped before SQL ran. Approval authority changed");
+      // Withdrawn, the request is leased again: the broker keeps these flags until the next
+      // decision posts its own, and an expiry or cancellation before then keeps them for good.
+      if (card.decisionSensitivity) card.decisionSensitivity.standing = false;
+      this.reviewCard(
+        card,
+        "Execution stopped before SQL ran. Approval authority changed",
+        Boolean(evaluation),
+      );
       return;
     }
     const run = this.startRun(card);
@@ -2714,7 +3137,7 @@ export class Gatekeeper {
       // The rows already ran on the live database; if the outcome never reached the
       // broker the agent cannot see them, so record a failure rather than a false approve.
       if (!posted) {
-        this.finish(id, "failed", "result not delivered");
+        this.finish(id, "failed", NOT_DELIVERED_NOTE);
         return;
       }
       // A write reports what it changed, a read what it returned, and a write that also
@@ -2746,12 +3169,7 @@ export class Gatekeeper {
       limitMs: (this.settingsStore.get().autoStopMinutes ?? 0) * 60_000,
       ended: false,
     };
-    const unavailable = stopUnavailable(
-      type,
-      dbDisplayName(type),
-      this.conn?.readOnly ?? false,
-      this.serverVersion,
-    );
+    const unavailable = stopUnavailable(type, this.conn?.readOnly ?? false, this.serverVersion);
     if (unavailable) {
       run.unavailable = unavailable;
     } else {
@@ -2779,7 +3197,7 @@ export class Gatekeeper {
         attempts: 0,
       };
     }
-    this.renderQueue();
+    this.renderQueue(card.id);
     void this.sendStop(card);
   }
 
@@ -2823,7 +3241,7 @@ export class Gatekeeper {
     } else {
       return;
     }
-    this.renderQueue();
+    this.renderQueue(card.id);
   }
 
   private tickRuns(now: number): void {
@@ -2843,6 +3261,11 @@ export class Gatekeeper {
       if (stop?.state === "sent" && now - (stop.sentAt ?? now) >= STOP_RETRY_MS) {
         stop.state = "idle";
         rerender = true;
+      }
+      const rowClock = this.root.querySelector<HTMLElement>(`[data-run="${card.id}"]`);
+      if (rowClock) {
+        rowClock.textContent = clock(elapsed);
+        rowClock.classList.toggle("long", elapsed >= LONG_RUN_MS);
       }
       const el = this.root.querySelector<HTMLElement>(`[data-card="${card.id}"]`);
       if (!el) continue;
@@ -2884,7 +3307,7 @@ export class Gatekeeper {
     if (!actions) {
       return;
     }
-    actions.outerHTML = readyActions(id, this.gateFor(card), this.denyDrafts);
+    actions.outerHTML = readyActions(id, this.gateFor(card), this.denyDrafts, card.expiresAt);
     this.root.querySelector<HTMLInputElement>(`[data-card="${id}"] .deny-reason`)?.focus();
   }
 
@@ -2904,13 +3327,13 @@ export class Gatekeeper {
     if (!card || !actions) {
       return;
     }
-    actions.outerHTML = readyActions(id, this.gateFor(card), this.denyDrafts);
+    actions.outerHTML = readyActions(id, this.gateFor(card), this.denyDrafts, card.expiresAt);
     this.root.querySelector<HTMLButtonElement>(`[data-card="${id}"] .deny-open`)?.focus();
   }
 
   // The armed-mode verdict for one card, matching what the queue renders.
   private gateFor(card: Card): CardGate {
-    return cardGate(card.sql, this.dialect, this.mode, this.connectionReadOnly());
+    return cardGateFor(card, this.dialect, this.mode, this.connectionReadOnly());
   }
 
   private modeBlockReason(blocked: boolean, cls: RiskClass): string {
@@ -2925,20 +3348,22 @@ export class Gatekeeper {
   // Frozen as the decision is recorded, never awaited: the card's schema analysis if it has
   // finished, else what the SQL text alone shows (none when it will not parse).
   private sensitivity(card: Card): SensitivityRecord | undefined {
-    if (card.sensitivity) {
-      return card.sensitivity;
-    }
+    return card.sensitivity ?? this.textSensitivity(card);
+  }
+
+  private textSensitivity(card: Card): SensitivityRecord | undefined {
     const text = textSchema(card.sql, this.dialect);
     return text ? sensitivityOf(text) : undefined;
   }
 
   private async postExecuting(card: Card): Promise<boolean> {
     try {
+      card.decisionSensitivity = { value: this.sensitivity(card), standing: true };
       return await this.broker.executing(
         card.id,
         card.leaseId,
         card.approval,
-        this.sensitivity(card),
+        card.decisionSensitivity.value,
       );
     } catch (err) {
       log.error(err instanceof Error ? err : String(err));
@@ -2949,21 +3374,28 @@ export class Gatekeeper {
   // What Auto mode did with a read it did not approve itself. It rides every result so the
   // audit trail can still say, later, whether anything ever left this machine.
   private autoHold(card: Card): AutoHold | undefined {
-    if (!card.autoStatus || card.evaluation) {
+    if (!card.autoStatus || card.autoStatus === AUTO_APPROVED) {
       return undefined;
     }
-    return {
-      sent: Boolean(card.autoSent),
-      reason: card.autoStatus.replace(/^Needs review:\s*/, "").slice(0, 200),
-    };
+    const reason = card.autoStatus.replace(/^Needs review:\s*/, "");
+    // A refusal is the evaluation record itself; a later hold, even after a favourable
+    // evaluation, is a fact of its own and rides along with it.
+    if (card.evaluation && reason === refusalReason(card.evaluation)) {
+      return undefined;
+    }
+    return { sent: Boolean(card.autoSent), reason: reason.slice(0, 200) };
   }
 
   private async postResult(card: Card, body: Record<string, unknown>): Promise<boolean> {
     try {
+      // While an /executing snapshot stands the broker keeps it; otherwise this one applies.
+      if (!card.decisionSensitivity?.standing) {
+        card.decisionSensitivity = { value: this.sensitivity(card), standing: true };
+      }
       return await this.broker.result(card.id, card.leaseId, {
         ...body,
         autoHold: this.autoHold(card),
-        sensitivity: this.sensitivity(card),
+        sensitivity: card.decisionSensitivity.value,
       });
     } catch (err) {
       log.error(err instanceof Error ? err : String(err));
@@ -2972,11 +3404,12 @@ export class Gatekeeper {
   }
 
   private drop(id: string): void {
+    this.confirmModal.dismissFor(id);
     this.denyDrafts.delete(id);
     const index = this.cards.findIndex((c) => c.id === id);
     if (index !== -1) {
       this.cards.splice(index, 1);
-      this.renderQueue();
+      this.renderQueue(id);
     }
   }
 
@@ -2991,18 +3424,21 @@ export class Gatekeeper {
     if (!card) {
       return;
     }
-    const el = this.root.querySelector<HTMLElement>(`[data-card="${id}"]`);
-    // A custom reason replaces the terse default label; the row and detail
-    // overlay both read HistItem.note, so nothing here is hardcoded.
+    // At once, not after the row's exit: the confirm must not outlive what it asks about.
+    this.confirmModal.dismissFor(id);
+    const el = this.root.querySelector<HTMLElement>(`[data-row="${id}"]`);
+    // A custom reason replaces the terse default label; the row and the detail both read
+    // HistItem.note, so nothing here is hardcoded.
     const displayNote = reason?.trim() || note;
     const generation = this.connGeneration;
     const commit = () => {
       if (generation !== this.connGeneration || !this.cards.includes(card)) return;
-      this.drop(id);
-      this.history.unshift({
+      const item: HistItem = {
         id,
         status,
         note: displayNote,
+        outcome: note,
+        ...(status === "rejected" && reason?.trim() ? { reason: reason.trim() } : {}),
         sql: card.sql,
         resolvedAt: Date.now(),
         connection: this.connectionName || null,
@@ -3012,12 +3448,25 @@ export class Gatekeeper {
         approval: card.approval,
         evaluation: card.evaluation,
         autoHold: this.autoHold(card),
-      });
+        // The broker's snapshot for this decision; with none posted (an expiry), what the trail
+        // falls back to: the SQL text alone.
+        sensitivity: card.decisionSensitivity
+          ? card.decisionSensitivity.value
+          : this.textSensitivity(card),
+      };
+      // An open card stays open as its outcome: same request, now decided. The selection holds
+      // the item itself, so it outlives the Recently resolved cap while another tab shows.
+      const open = this.selection.queue?.kind === "card" && this.selection.queue.id === id;
+      if (open) this.selection.queue = { kind: "hist", id, item };
+      this.history.unshift(item);
       if (this.history.length > this.settingsStore.get().recentlyResolved) {
         this.history.pop();
       }
       this.enforceHistoryBudget();
-      this.renderHistory();
+      // Dropped once its outcome row exists, so the rebuild hands a focused row to that row.
+      this.drop(id);
+      // The Audit Trail's open entry, if that tab shows, keeps its grid's sort and page.
+      if (open && this.tab === "queue") this.renderSelection(true);
     };
     if (el && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       el.classList.add("leaving");
@@ -3032,6 +3481,7 @@ export class Gatekeeper {
   private enforceHistoryBudget(): void {
     const budget = resultBudgetBytes(this.settingsStore.get());
     let total = 0;
+    let shownShed = false;
     for (const item of this.history) {
       if (!item.result || item.result.rows.length === 0) {
         continue;
@@ -3039,24 +3489,13 @@ export class Gatekeeper {
       const size = item.result.bytes ?? JSON.stringify(item.result.rows).length;
       if (total + size > budget) {
         item.result = { ...item.result, rows: [], truncated: true, bytes: 0 };
+        shownShed ||= item.id === this.detailView.showing();
       } else {
         total += size;
       }
     }
-  }
-
-  private renderHistory(): void {
-    const hist = this.root.querySelector<HTMLDivElement>("#hist");
-    if (!hist) {
-      return;
-    }
-    // Defense in depth: a switch already clears history, but never render a row
-    // stamped under a different connection than the one on screen now.
-    const current = this.connectionName || null;
-    hist.innerHTML = this.history
-      .filter((h) => h.connection === current)
-      .map((h) => historyRow(h))
-      .join("");
+    // The open detail lets go of rows just shed, from either tab, keeping its request and counts.
+    if (shownShed) this.renderSelection(true);
   }
 
   private copySql(el: HTMLElement): void {

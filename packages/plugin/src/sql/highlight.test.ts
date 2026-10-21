@@ -22,13 +22,13 @@ describe("highlight (pinned output for the Phase 2 rewrite)", () => {
 
   it("marks a pii column as pii-col", () => {
     expect(highlight("SELECT email FROM users", ["email"])).toBe(
-      '<span class="kw">SELECT</span> <span class="pii-col">email</span> <span class="kw">FROM</span> users',
+      '<span class="kw">SELECT</span> <span class="pii-col" title="Possible PII">email</span> <span class="kw">FROM</span> users',
     );
   });
 
   it("marks a client column as client-col", () => {
     expect(highlight("SELECT company_name FROM accounts", undefined, ["company_name"])).toBe(
-      '<span class="kw">SELECT</span> <span class="client-col">company_name</span> <span class="kw">FROM</span> accounts',
+      '<span class="kw">SELECT</span> <span class="client-col" title="Client data">company_name</span> <span class="kw">FROM</span> accounts',
     );
   });
 
@@ -36,7 +36,7 @@ describe("highlight (pinned output for the Phase 2 rewrite)", () => {
     expect(
       highlight("SELECT id FROM users WHERE token = 'secret'", undefined, undefined, ["secret"]),
     ).toBe(
-      '<span class="kw">SELECT</span> id <span class="kw">FROM</span> users <span class="kw">WHERE</span> token = <span class="st sensitive-val">\'secret\'</span>',
+      '<span class="kw">SELECT</span> id <span class="kw">FROM</span> users <span class="kw">WHERE</span> token = <span class="st sensitive-val" title="Sensitive value">\'secret\'</span>',
     );
   });
 
@@ -49,7 +49,7 @@ describe("highlight (pinned output for the Phase 2 rewrite)", () => {
         ["ACME"],
       ),
     ).toBe(
-      '<span class="kw">SELECT</span> id <span class="kw">FROM</span> firms <span class="kw">WHERE</span> <span class="client-col">company_name</span> = E<span class="st sensitive-val">\'ACME\'</span>',
+      '<span class="kw">SELECT</span> id <span class="kw">FROM</span> firms <span class="kw">WHERE</span> <span class="client-col" title="Client data">company_name</span> = E<span class="st sensitive-val" title="Sensitive value">\'ACME\'</span>',
     );
   });
 
@@ -62,19 +62,19 @@ describe("highlight (pinned output for the Phase 2 rewrite)", () => {
         ["ACME"],
       ),
     ).toBe(
-      '<span class="kw">SELECT</span> id <span class="kw">FROM</span> firms <span class="kw">WHERE</span> <span class="client-col">company_name</span> = $$ACME$$',
+      '<span class="kw">SELECT</span> id <span class="kw">FROM</span> firms <span class="kw">WHERE</span> <span class="client-col" title="Client data">company_name</span> = $$ACME$$',
     );
   });
 
   it("marks a client column that is table-qualified", () => {
     expect(highlight("SELECT u.company_name FROM users u", undefined, ["company_name"])).toBe(
-      '<span class="kw">SELECT</span> u.<span class="client-col">company_name</span> <span class="kw">FROM</span> users u',
+      '<span class="kw">SELECT</span> u.<span class="client-col" title="Client data">company_name</span> <span class="kw">FROM</span> users u',
     );
   });
 
   it("marks a pii column that is table-qualified", () => {
     expect(highlight("SELECT u.email FROM users u", ["email"])).toBe(
-      '<span class="kw">SELECT</span> u.<span class="pii-col">email</span> <span class="kw">FROM</span> users u',
+      '<span class="kw">SELECT</span> u.<span class="pii-col" title="Possible PII">email</span> <span class="kw">FROM</span> users u',
     );
   });
 
@@ -87,38 +87,38 @@ describe("highlight (pinned output for the Phase 2 rewrite)", () => {
         ["enterprise"],
       ),
     ).toBe(
-      '<span class="kw">SELECT</span> <span class="pii-col">email</span>, <span class="client-col">company_name</span> <span class="kw">FROM</span> users <span class="kw">WHERE</span> plan = <span class="st sensitive-val">\'enterprise\'</span>',
+      '<span class="kw">SELECT</span> <span class="pii-col" title="Possible PII">email</span>, <span class="client-col" title="Client data">company_name</span> <span class="kw">FROM</span> users <span class="kw">WHERE</span> plan = <span class="st sensitive-val" title="Sensitive value">\'enterprise\'</span>',
     );
   });
 
   it("keeps a backtick-quoted pii identifier flagged (MySQL)", () => {
     expect(highlight("SELECT `email` FROM users", ["email"])).toBe(
-      '<span class="kw">SELECT</span> `<span class="pii-col">email</span>` <span class="kw">FROM</span> users',
+      '<span class="kw">SELECT</span> `<span class="pii-col" title="Possible PII">email</span>` <span class="kw">FROM</span> users',
     );
   });
 
   it("keeps a double-quoted client identifier flagged (ANSI/Postgres)", () => {
     expect(highlight('SELECT "company_name" FROM accounts', undefined, ["company_name"])).toBe(
-      '<span class="kw">SELECT</span> &quot;<span class="client-col">company_name</span>&quot; <span class="kw">FROM</span> accounts',
+      '<span class="kw">SELECT</span> &quot;<span class="client-col" title="Client data">company_name</span>&quot; <span class="kw">FROM</span> accounts',
     );
   });
 
   it("marks the key of a JSON accessor as the column it exposes", () => {
     expect(highlight("SELECT profile->>'email' FROM crm.people", ["email"])).toBe(
-      '<span class="kw">SELECT</span> profile-&gt;&gt;\'<span class="pii-col">email</span>\' <span class="kw">FROM</span> crm.people',
+      '<span class="kw">SELECT</span> profile-&gt;&gt;\'<span class="pii-col" title="Possible PII">email</span>\' <span class="kw">FROM</span> crm.people',
     );
   });
 
   it("tints only the flagged segment of a JSON path", () => {
     expect(highlight("SELECT profile ->> '$.contact.email' FROM people", ["email"])).toBe(
-      '<span class="kw">SELECT</span> profile -&gt;&gt; \'$.contact.<span class="pii-col">email</span>\' <span class="kw">FROM</span> people',
+      '<span class="kw">SELECT</span> profile -&gt;&gt; \'$.contact.<span class="pii-col" title="Possible PII">email</span>\' <span class="kw">FROM</span> people',
     );
     expect(
       highlight("SELECT profile#>>'{contact,company_name}' FROM crm.people", undefined, [
         "company_name",
       ]),
     ).toBe(
-      '<span class="kw">SELECT</span> profile#&gt;&gt;\'{contact,<span class="client-col">company_name</span>}\' <span class="kw">FROM</span> crm.people',
+      '<span class="kw">SELECT</span> profile#&gt;&gt;\'{contact,<span class="client-col" title="Client data">company_name</span>}\' <span class="kw">FROM</span> crm.people',
     );
   });
 
@@ -126,7 +126,7 @@ describe("highlight (pinned output for the Phase 2 rewrite)", () => {
     expect(
       highlight("SELECT profile#>>'{company,email}' FROM crm.people", ["email"], ["company"]),
     ).toBe(
-      '<span class="kw">SELECT</span> profile#&gt;&gt;\'{<span class="client-col">company</span>,<span class="pii-col">email</span>}\' <span class="kw">FROM</span> crm.people',
+      '<span class="kw">SELECT</span> profile#&gt;&gt;\'{<span class="client-col" title="Client data">company</span>,<span class="pii-col" title="Possible PII">email</span>}\' <span class="kw">FROM</span> crm.people',
     );
   });
 
@@ -134,10 +134,10 @@ describe("highlight (pinned output for the Phase 2 rewrite)", () => {
     // The body must stay the statement as written. These keys classify only once the
     // heuristics strip their punctuation, and the annotation carries them as parsed.
     expect(highlight("SELECT profile->>'e\"mail\"' FROM t", ['e"mail"'])).toBe(
-      '<span class="kw">SELECT</span> profile-&gt;&gt;\'<span class="pii-col">e&quot;mail&quot;</span>\' <span class="kw">FROM</span> t',
+      '<span class="kw">SELECT</span> profile-&gt;&gt;\'<span class="pii-col" title="Possible PII">e&quot;mail&quot;</span>\' <span class="kw">FROM</span> t',
     );
     expect(highlight("SELECT profile->>'$.em$ail' FROM t", ["em$ail"])).toBe(
-      '<span class="kw">SELECT</span> profile-&gt;&gt;\'$.<span class="pii-col">em$ail</span>\' <span class="kw">FROM</span> t',
+      '<span class="kw">SELECT</span> profile-&gt;&gt;\'$.<span class="pii-col" title="Possible PII">em$ail</span>\' <span class="kw">FROM</span> t',
     );
     // And a name that does not occur in the operand leaves the token alone.
     expect(highlight("SELECT profile->>'e\"mail\"' FROM t", ["email"])).toBe(

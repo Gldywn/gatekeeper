@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Card, RunState, SessionMeta } from "../types";
-import { cardHtml, groupHtml, runningActions } from "./queue";
+import { accessMatrix, cardHtml, paintLegend, runningActions } from "./queue";
 
 // Byte-for-byte lock on the extracted builders: one ready read-only card whose
 // schema annotation and open deny draft exercise every conditional branch.
@@ -47,9 +47,38 @@ afterAll(() => {
 });
 
 describe("render/queue", () => {
-  it("renders a ready card with schema flags and an open deny draft", () => {
-    expect(cardHtml(card, "postgresql", denyDrafts)).toBe(
-      '\n      <div class="card " data-card="q_ab12">\n        <div class="top">\n          <span class="intent">Check a user\'s email</span>\n          <span class="lease">1:30</span>\n        </div>\n        <div class="meta">q_ab12 &middot; 12s ago</div>\n        <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="SELECT email, company_name FROM audit.users WHERE email = \'jane@acme.io\'" aria-label="Copy SQL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg></button><code class="sql-body" id="sqlbody-q_ab12"><span class="kw">SELECT</span>\n  <span class="pii-col">email</span>,\n  <span class="client-col">company_name</span>\n<span class="kw">FROM</span> audit.users\n<span class="kw">WHERE</span> <span class="pii-col">email</span> = <span class="st sensitive-val">\'jane@acme.io\'</span></code></pre>\n        <div class="card-schema" id="cs-q_ab12"><div class="cs-reads"><span class="cs-reads-k"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><ellipse cx="8" cy="4" rx="5" ry="2"/><path d="M3 4v8c0 1.1 2.24 2 5 2s5-.9 5-2V4"/><path d="M3 8c0 1.1 2.24 2 5 2s5-.9 5-2"/></svg>Reads</span><span class="tbl-chip">audit.users</span></div><div class="cs-line cs-pii"><span class="cs-warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>possible PII</span><span class="cs-list">email</span></div><div class="cs-line cs-client"><span class="cs-warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/></svg>client data</span><span class="cs-list">company_name</span></div><div class="cs-line cs-literal"><span class="cs-warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>sensitive value</span><span class="cs-list">\'jane@acme.io\'</span></div></div>\n        <div class="actions">\n             <button class="btn approve" type="button" data-approve="q_ab12" >Approve</button>\n             <button class="btn reject" type="button" data-reject="q_ab12">Reject</button>\n             <div class="deny-field">\n             <input class="deny-reason" type="text" maxlength="140" data-deny-input="q_ab12" aria-label="What should the agent change?" placeholder="What should the agent change?" autocomplete="off" spellcheck="false" value="use a bind param" />\n             <button class="deny-send" type="button" data-deny="q_ab12" aria-label="Send to the agent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg></button>\n           </div>\n           </div>\n      </div>',
+  it("renders a ready card: request, tables, legend, SQL, then the decision with its expiry", () => {
+    const html = cardHtml(card, "postgresql", denyDrafts);
+    expect(html).toContain('<div class="card " data-card="q_ab12">');
+    expect(html).toContain('<span class="intent">Check a user\'s email</span>');
+    expect(html).toContain('<div class="meta">q_ab12 &middot; Requested 12s ago</div>');
+    // Tables by role, before the SQL; the read's table comes from the column analysis.
+    expect(html).toContain('<div class="cs-matrix" id="cm-q_ab12"><table class="mx">');
+    expect(html).toContain('<th scope="row" class="nm">audit.users</th><td class="mk on read">');
+    // The legend names each category the SQL marks, with its count; focus names its objects.
+    expect(html).toContain(
+      '<span class="lg-slot"><button class="lg pii" type="button" aria-describedby="lg-pii-q_ab12"><span class="sw">Possible PII</span><span class="ct">1</span></button><span class="lg-pop" id="lg-pii-q_ab12" role="tooltip">email</span></span>',
+    );
+    expect(html).toContain(
+      '<span class="lg-pop" id="lg-client-q_ab12" role="tooltip">company_name</span>',
+    );
+    expect(html).toContain(
+      '<span class="lg-pop" id="lg-val-q_ab12" role="tooltip">\'jane@acme.io\'</span>',
+    );
+    expect(html.indexOf('id="cs-q_ab12"')).toBeLessThan(html.indexOf('<pre class="sql">'));
+    expect(html).toContain('<span class="pii-col" title="Possible PII">email</span>');
+    expect(html).toContain(
+      "data-copy-sql=\"SELECT email, company_name FROM audit.users WHERE email = 'jane@acme.io'\"",
+    );
+    // The decision closes the card: actions, the open deny draft, then the expiry.
+    expect(html).toContain('<div class="dbar"><div class="actions">');
+    expect(html).toContain('value="use a bind param"');
+    expect(html).toContain(
+      '<span class="nb-due">Expires in <span class="lease">1:30</span></span>',
+    );
+    // The expiry left the title line.
+    expect(html).not.toMatch(
+      /<div class="top">[\s\S]*?class="lease"[\s\S]*?<\/div>\s*<div class="meta">/,
     );
   });
 
@@ -75,7 +104,7 @@ describe("render/queue", () => {
     expect(html).toContain('data-approve="q1" >Approve</button>');
   });
 
-  it("renders a write card in write mode: amber badge, Approve write, Write annotation", () => {
+  it("renders a write card in write mode: amber badge, Approve write, the table under Write", () => {
     const html = cardHtml(
       ready("q2", "INSERT INTO logs (id) VALUES (1)"),
       "postgresql",
@@ -84,12 +113,13 @@ describe("render/queue", () => {
     );
     expect(html).toContain('class="card write"');
     expect(html).toContain('<span class="risk-badge write">Write</span>');
-    expect(html).toContain('class="cs-writes write"');
+    expect(html).toContain('<th scope="row" class="nm">logs</th>');
+    expect(html).toContain('<td class="mk on write">');
     expect(html).toContain('data-approve="q2" >Approve write</button>');
-    expect(html).not.toContain("blocked-note");
+    expect(html).not.toContain("nb-msg");
   });
 
-  it("blocks a write card in read mode with the write-mode note, Approve disabled", () => {
+  it("blocks a write card in read mode, the reason written above a disabled Approve", () => {
     const html = cardHtml(
       ready("q3", "INSERT INTO logs (id) VALUES (1)"),
       "postgresql",
@@ -97,11 +127,15 @@ describe("render/queue", () => {
       "read",
     );
     expect(html).toContain('class="card write blocked"');
-    expect(html).toContain("Write mode required to approve this query.");
-    expect(html).toContain('data-approve="q3" disabled>Approve write</button>');
+    expect(html).toContain('<div class="nb-msg" id="gate-q3">');
+    expect(html).toContain("Write mode is required to approve this query.");
+    expect(html).toContain(
+      'data-approve="q3" aria-describedby="gate-q3" disabled>Approve write</button>',
+    );
+    expect(html.indexOf('id="gate-q3"')).toBeLessThan(html.indexOf('data-approve="q3"'));
   });
 
-  it("renders a destructive card in destructive mode: red badge, red Approve, Delete annotation", () => {
+  it("renders a destructive card in destructive mode: red badge, red Approve, the table under Delete", () => {
     const html = cardHtml(
       ready("q4", "DELETE FROM users WHERE id = 1"),
       "postgresql",
@@ -112,28 +146,45 @@ describe("render/queue", () => {
     expect(html).toContain('<span class="risk-badge destructive">Destructive</span>');
     expect(html).toContain('class="btn approve destructive"');
     expect(html).toContain(">Approve destructive</button>");
-    expect(html).toContain('class="cs-writes destructive"');
-    expect(html).toContain("Delete");
+    expect(html).toContain('<td class="mk on delete">');
   });
 
   it("blocks a destructive card in write mode with the destructive-mode note", () => {
     const html = cardHtml(ready("q5", "DROP TABLE users"), "postgresql", noDrafts, "write");
     expect(html).toContain('class="card destructive blocked"');
-    expect(html).toContain("Destructive mode required to approve this query.");
+    expect(html).toContain("Destructive mode is required to approve this query.");
     expect(html).toContain("disabled>Approve destructive</button>");
   });
 
-  it("shows both Writes and Reads for a mixed INSERT ... SELECT", () => {
+  // A row per table, with the role cells it plays: Read, Write, Delete.
+  const roles = (html: string, table: string) => {
+    const row = html.match(new RegExp(`<tr><th scope="row" class="nm">${table}</th>(.*?)</tr>`));
+    return [...(row?.[1].matchAll(/<td class="mk( on (\w+))?">/g) ?? [])].map((m) => m[2] ?? "-");
+  };
+
+  it("shows both the written and the read table of a mixed INSERT ... SELECT", () => {
     const html = cardHtml(
       ready("q6", "INSERT INTO audit SELECT * FROM users"),
       "postgresql",
       noDrafts,
       "write",
     );
-    expect(html).toContain('class="cs-writes write"');
-    expect(html).toContain('class="cs-reads"');
-    expect(html).toContain('<span class="tbl-chip">audit</span>');
-    expect(html).toContain('<span class="tbl-chip">users</span>');
+    expect(roles(html, "audit")).toEqual(["-", "write", "-"]);
+    expect(roles(html, "users")).toEqual(["read", "-", "-"]);
+  });
+
+  it("labels every removal Delete and every other change Write", () => {
+    for (const sql of ["DROP TABLE users", "DELETE FROM users WHERE id = 1", "TRUNCATE users"]) {
+      const html = cardHtml(ready("q10", sql), "postgresql", noDrafts, "destructive");
+      expect(roles(html, "users"), sql).toEqual(["-", "-", "delete"]);
+    }
+    const update = cardHtml(
+      ready("q11", "UPDATE users SET name = 'x'"),
+      "postgresql",
+      noDrafts,
+      "write",
+    );
+    expect(roles(update, "users")).toEqual(["-", "write", "-"]);
   });
 
   it("names the target of a SELECT ... INTO, not just the table it reads", () => {
@@ -143,10 +194,8 @@ describe("render/queue", () => {
       noDrafts,
       "destructive",
     );
-    expect(html).toContain('class="cs-writes destructive"');
-    expect(html).toContain('Create</span><span class="tbl-chip">staging_copy</span>');
-    expect(html).toContain('class="cs-reads"');
-    expect(html).toContain('<span class="tbl-chip">crm.people</span>');
+    expect(roles(html, "staging_copy")).toEqual(["-", "write", "-"]);
+    expect(roles(html, "crm.people")).toEqual(["read", "-", "-"]);
   });
 
   it("names the file a MySQL INTO OUTFILE exports to", () => {
@@ -156,8 +205,7 @@ describe("render/queue", () => {
       noDrafts,
       "destructive",
     );
-    expect(html).toContain('class="cs-writes destructive"');
-    expect(html).toContain('Export</span><span class="tbl-chip">/tmp/people.csv</span>');
+    expect(roles(html, "/tmp/people.csv")).toEqual(["-", "write", "-"]);
   });
 
   it("keeps a multi-statement query blocked even in destructive mode", () => {
@@ -168,7 +216,7 @@ describe("render/queue", () => {
       "destructive",
     );
     expect(html).toContain("blocked");
-    expect(html).toContain("Only a single statement can be approved.");
+    expect(html).toContain("A single, non-empty SQL statement is required.");
     expect(html).toContain("disabled");
   });
 
@@ -181,13 +229,9 @@ describe("render/queue", () => {
       true,
     );
     expect(html).toContain('class="card write blocked"');
-    expect(html).toContain("Connection is read-only; this write cannot run.");
-    expect(html).toContain('data-approve="q8" disabled>Approve write</button>');
-  });
-
-  it("wraps cards in a session group header", () => {
-    expect(groupHtml(session, [card], "postgresql", denyDrafts)).toBe(
-      '\n      <section class="group">\n        <div class="group-head">\n          <span class="harness-badge"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">\n  <title>Claude Code</title>\n  <path clip-rule="evenodd"\n        d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z"\n        fill="#D97757"\n        fill-rule="evenodd" />\n</svg></span>\n          <span class="group-label">gatekeeper</span>\n          <span class="group-intent" title="Audit review">Audit review</span>\n          <span class="group-count count-badge">1</span>\n        </div>\n        \n      <div class="card " data-card="q_ab12">\n        <div class="top">\n          <span class="intent">Check a user\'s email</span>\n          <span class="lease">1:30</span>\n        </div>\n        <div class="meta">q_ab12 &middot; 12s ago</div>\n        <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="SELECT email, company_name FROM audit.users WHERE email = \'jane@acme.io\'" aria-label="Copy SQL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg></button><code class="sql-body" id="sqlbody-q_ab12"><span class="kw">SELECT</span>\n  <span class="pii-col">email</span>,\n  <span class="client-col">company_name</span>\n<span class="kw">FROM</span> audit.users\n<span class="kw">WHERE</span> <span class="pii-col">email</span> = <span class="st sensitive-val">\'jane@acme.io\'</span></code></pre>\n        <div class="card-schema" id="cs-q_ab12"><div class="cs-reads"><span class="cs-reads-k"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><ellipse cx="8" cy="4" rx="5" ry="2"/><path d="M3 4v8c0 1.1 2.24 2 5 2s5-.9 5-2V4"/><path d="M3 8c0 1.1 2.24 2 5 2s5-.9 5-2"/></svg>Reads</span><span class="tbl-chip">audit.users</span></div><div class="cs-line cs-pii"><span class="cs-warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>possible PII</span><span class="cs-list">email</span></div><div class="cs-line cs-client"><span class="cs-warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/></svg>client data</span><span class="cs-list">company_name</span></div><div class="cs-line cs-literal"><span class="cs-warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>sensitive value</span><span class="cs-list">\'jane@acme.io\'</span></div></div>\n        <div class="actions">\n             <button class="btn approve" type="button" data-approve="q_ab12" >Approve</button>\n             <button class="btn reject" type="button" data-reject="q_ab12">Reject</button>\n             <div class="deny-field">\n             <input class="deny-reason" type="text" maxlength="140" data-deny-input="q_ab12" aria-label="What should the agent change?" placeholder="What should the agent change?" autocomplete="off" spellcheck="false" value="use a bind param" />\n             <button class="deny-send" type="button" data-deny="q_ab12" aria-label="Send to the agent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg></button>\n           </div>\n           </div>\n      </div>\n      </section>',
+    expect(html).toContain("A writable connection is required to run this write.");
+    expect(html).toContain(
+      'data-approve="q8" aria-describedby="gate-q8" disabled>Approve write</button>',
     );
   });
 
@@ -199,9 +243,10 @@ describe("render/queue", () => {
       "postgresql",
       denyDrafts,
     );
-    expect(unparsedRead).toContain("Gatekeeper could not parse this statement.");
-    expect(unparsedRead).toContain("Reading it as a plain read is a guess from its text");
-    expect(unparsedRead).not.toContain("Treating it as destructive");
+    expect(unparsedRead).toContain(
+      "This statement could not be parsed. The read classification is a guess. Waiting for your review.",
+    );
+    expect(unparsedRead).not.toContain("destructive classification");
 
     // A statement the fallback cannot vouch for keeps the strict wording.
     const unparsedDestructive = cardHtml(
@@ -210,10 +255,10 @@ describe("render/queue", () => {
       denyDrafts,
       "destructive",
     );
-    expect(unparsedDestructive).toContain("Treating it as destructive is a guess from its text");
+    expect(unparsedDestructive).toContain("The destructive classification is a guess.");
 
     // A parsed statement says nothing at all.
-    expect(cardHtml(card, "postgresql", denyDrafts)).not.toContain("could not parse");
+    expect(cardHtml(card, "postgresql", denyDrafts)).not.toContain("could not be parsed");
   });
 });
 
@@ -281,12 +326,12 @@ describe("render/queue running row", () => {
     const html = runningActions("q", {
       startedAt: T,
       limitMs: 300_000,
-      unavailable: "This feature is not available on SQLite.",
+      unavailable: "PostgreSQL or MySQL is required to stop a query.",
       ended: false,
     });
     expect(html).toContain('data-stop="q" disabled>');
     expect(html).toContain('<span class="approve-pop warn" role="tooltip">');
-    expect(html).toContain("This feature is not available on SQLite.</span>");
+    expect(html).toContain("PostgreSQL or MySQL is required to stop a query.</span>");
     expect(html).not.toContain("Auto-stop in");
   });
 
@@ -304,13 +349,136 @@ describe("render/queue running row", () => {
     });
     expect(html).toContain('data-stop="q"><span');
     expect(html).toContain('<div class="cs-unparsed stop-error" role="status">');
-    expect(html).toContain("<span>An error occurred while stopping the query.</span>");
+    expect(html).toContain("<span>Stop could not be confirmed.</span>");
     expect(html).toContain('<span class="stop-raw">permission &lt;denied&gt;</span>');
+    const byLimit = runningActions("q", {
+      ...tagged,
+      stop: { by: "limit", atMs: 1, state: "idle", inFlight: false, attempts: 1, error: "x" },
+    });
+    expect(byLimit).toContain("<span>Auto-stop could not be confirmed.</span>");
   });
 
   it("names the other transient states in the UI face", () => {
     const html = cardHtml({ ...base, state: "approving" }, "postgresql", noDrafts);
     expect(html).toContain('<span class="busy"><span class="spin"></span>Approving&hellip;</span>');
     expect(html).not.toContain('class="lease');
+  });
+});
+
+describe("the pending card's order", () => {
+  it("puts the analysis note above the SQL and Auto mode's note between the SQL and the bar", () => {
+    const base = {
+      id: "q_o",
+      createdAt: T - 1000,
+      expiresAt: T + 90_000,
+      leaseId: "l",
+      leaseExpiresAt: T + 90_000,
+      sessionId: "s1",
+      session,
+      state: "ready" as const,
+    };
+    const unparsed = cardHtml(
+      { ...base, sql: "SELECT regexp_replace(code, 'a\\'b', '', 'g') FROM audit.parts" },
+      "postgresql",
+      new Map(),
+    );
+    expect(unparsed.indexOf("could not be parsed")).toBeLessThan(
+      unparsed.indexOf('<pre class="sql">'),
+    );
+    const held = cardHtml(
+      {
+        ...base,
+        sql: "SELECT 1",
+        autoStatus: "Needs review: Evaluation timed out. Approve manually",
+      },
+      "postgresql",
+      new Map(),
+    );
+    const sql = held.indexOf('<pre class="sql">');
+    const note = held.indexOf("Held on this machine before evaluation.");
+    expect(sql).toBeLessThan(note);
+    expect(note).toBeLessThan(held.indexOf('<div class="dbar">'));
+  });
+
+  it("lists a read's tables from the column analysis once it lands", () => {
+    const html = accessMatrix("SELECT * FROM v", "postgresql", "read", {
+      tables: ["public.orders"],
+      pii: [],
+      client: [],
+      literals: [],
+      star: true,
+    });
+    expect(html).toContain('<th scope="row" class="nm">public.orders</th>');
+    expect(accessMatrix("SELECT 1", "postgresql", "read", null)).toBe("");
+  });
+});
+
+describe("sensitive names the SQL does not spell out", () => {
+  it("lists a column a SELECT * expands to under its category in the legend", () => {
+    const html = cardHtml(
+      {
+        id: "q_s",
+        sql: "SELECT * FROM public.users",
+        createdAt: T - 1000,
+        expiresAt: T + 90_000,
+        leaseId: "l",
+        leaseExpiresAt: T + 90_000,
+        sessionId: "s1",
+        session,
+        state: "ready",
+        schema: { tables: ["public.users"], pii: ["email"], client: [], literals: [], star: true },
+      },
+      "postgresql",
+      new Map(),
+    );
+    expect(html).toContain('<span class="lg-pop" id="lg-pii-q_s" role="tooltip">email</span>');
+  });
+});
+
+describe("paintLegend", () => {
+  // A fake host that holds one entry per painted aria-describedby and records what took focus.
+  function fakeHost() {
+    const focused: string[] = [];
+    type Entry = { getAttribute: () => string; focus: () => void };
+    let entries: Entry[] = [];
+    const doc = { activeElement: null as unknown };
+    const el = {
+      ownerDocument: doc,
+      set innerHTML(html: string) {
+        entries = [...html.matchAll(/aria-describedby="([^"]+)"/g)].map(([, id]) => ({
+          getAttribute: () => id,
+          focus: () => focused.push(id),
+        }));
+      },
+      contains: (n: unknown) => entries.includes(n as Entry),
+      querySelector: (s: string) =>
+        s === ".lg"
+          ? (entries[0] ?? null)
+          : (entries.find((e) => s === `[aria-describedby="${e.getAttribute()}"]`) ?? null),
+    };
+    return { el: el as unknown as HTMLElement, doc, focused, entry: (i: number) => entries[i] };
+  }
+  const both = { tables: [], pii: ["email"], client: ["company_name"], literals: [], star: false };
+
+  afterAll(() => vi.unstubAllGlobals());
+
+  it("keeps a focused entry on its category across a repaint, else on the first one left", () => {
+    vi.stubGlobal("CSS", { escape: (s: string) => s });
+    const h = fakeHost();
+    paintLegend(h.el, both, "q1");
+    h.doc.activeElement = h.entry(1);
+    paintLegend(h.el, both, "q1");
+    expect(h.focused).toEqual(["lg-client-q1"]);
+    h.doc.activeElement = h.entry(0);
+    paintLegend(h.el, { ...both, pii: [] }, "q1");
+    expect(h.focused).toEqual(["lg-client-q1", "lg-client-q1"]);
+  });
+
+  it("leaves the focus alone when it is elsewhere", () => {
+    const h = fakeHost();
+    paintLegend(h.el, both, "q1");
+    h.doc.activeElement = {};
+    paintLegend(h.el, both, "q1");
+    expect(h.focused).toEqual([]);
   });
 });

@@ -24,6 +24,8 @@ export interface Card extends Proposal {
   state: CardState;
   autoAttempt?: number;
   autoStatus?: string;
+  // Why the last human approval stopped before the SQL ran: a plain fact, never an Auto mode hold.
+  executionNotice?: string;
   /** Set once the query left for the provider, so the card can say what was shared. */
   autoSent?: boolean;
   evaluation?: import("@gatekeeper/shared").AutoEvaluation;
@@ -35,6 +37,12 @@ export interface Card extends Proposal {
   // Raw flags from that analysis, posted with the decision for the audit trail: presence
   // only, so no table or column name ever reaches the broker.
   sensitivity?: import("@gatekeeper/shared").SensitivityRecord;
+  // The flags the broker holds for this request, so the local row never shows a flag the trail
+  // lacks. `standing` false after a withdrawal: the broker keeps them, the next post replaces them.
+  decisionSensitivity?: {
+    value: import("@gatekeeper/shared").SensitivityRecord | undefined;
+    standing: boolean;
+  };
   run?: RunState;
 }
 
@@ -70,6 +78,10 @@ export interface HistItem {
   id: string;
   status: "approved" | "rejected" | "failed" | "expired";
   note: string;
+  // How the plugin itself ended it ("blocked", "lease lost"...), never the raw error the note may be.
+  outcome?: string;
+  // The words a person typed when declining, kept apart so a typed "declined" is still theirs.
+  reason?: string;
   sql: string;
   resolvedAt: number;
   connection: string | null;
@@ -79,4 +91,6 @@ export interface HistItem {
   approval?: import("@gatekeeper/shared").ApprovalAttribution;
   evaluation?: import("@gatekeeper/shared").AutoEvaluation;
   autoHold?: AutoHold;
+  // The flags recorded with the decision, so the local row shows the same chips as the trail.
+  sensitivity?: import("@gatekeeper/shared").SensitivityRecord;
 }

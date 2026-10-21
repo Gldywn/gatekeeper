@@ -1,14 +1,10 @@
 import { capitalize, clock, escapeHtml, relAge } from "../html";
 import {
-  buildingIcon,
+  checkIcon,
   clockIcon,
   copyIcon,
-  dbReadsIcon,
-  harnessIcon,
   messageIcon,
-  pencilIcon,
   sendIcon,
-  trashIcon,
   warnIcon,
   xCircleIcon,
 } from "../icons";
@@ -18,13 +14,13 @@ import { highlight } from "../sql/highlight";
 import { modeRank, type RiskMode } from "../sql/mode";
 import { visibleControls } from "../sql/sanitize";
 import { analyzeTableOps, type SchemaContext } from "../sql/schema";
-import type { Card, CardState, RunState, SessionMeta } from "../types";
-import { AUTO_APPROVED, AUTO_LEADS, autoIcon, NOTHING_SENT } from "./auto";
+import type { Card, CardState, RunState } from "../types";
+import { AUTO_APPROVED, AUTO_LEADS, autoIcon, holdText } from "./auto";
 
-const WRITE_MODE_NOTE = "Write mode required to approve this query.";
-const DESTRUCTIVE_MODE_NOTE = "Destructive mode required to approve this query.";
-const CONNECTION_NOTE = "Connection is read-only; this write cannot run.";
-const MULTI_STATEMENT_NOTE = "Only a single statement can be approved.";
+const WRITE_MODE_NOTE = "Write mode is required to approve this query.";
+const DESTRUCTIVE_MODE_NOTE = "Destructive mode is required to approve this query.";
+const CONNECTION_NOTE = "A writable connection is required to run this write.";
+const MULTI_STATEMENT_NOTE = "A single, non-empty SQL statement is required.";
 
 const ALERT_ICON =
   '<svg viewBox="0 0 16 16" fill="none"><path d="M8 1.7 1 14h14L8 1.7Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 6.3v3.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.7" r=".8" fill="currentColor"/></svg>';
@@ -83,112 +79,61 @@ export function cardGate(
 // The textual fallback can land on any class, not only destructive: a SELECT the parser
 // chokes on (an ambiguous backslash in a regex, say) still reads as a read. Name the class
 // it guessed rather than claim one.
-const UNPARSED_GUESS: Record<RiskClass, string> = {
-  read: "Reading it as a plain read",
-  write: "Treating it as a write",
-  destructive: "Treating it as destructive",
-};
-
-// Shown standing, not on hover: an unreadable statement is exactly the one the human must
-// read for themselves, so it cannot hide behind the Approve tooltip.
+// Shown standing, not on hover: an unparsed statement's class is a guess, so the note says so
+// where the reader looks, in the same voice as Auto mode's review notes.
 function unparsedNote(gate: CardGate): string {
   if (gate.parseOk) {
     return "";
   }
-  return `<div class="cs-unparsed">${warnIcon}Gatekeeper could not parse this statement. ${UNPARSED_GUESS[gate.cls]} is a guess from its text, so read it yourself before approving.</div>`;
+  return `<div class="cs-unparsed">${warnIcon}This statement could not be parsed. The ${gate.cls} classification is a guess. Waiting for your review.</div>`;
 }
 
-export function queueHtml(
-  cards: Card[],
-  dialect: string,
-  denyDrafts: Map<string, string>,
-  mode: RiskMode = "read",
-  connReadOnly = false,
-): string {
-  if (!cards.length) {
-    return `<div class="waiting"><span class="waiting-mark" aria-hidden="true"></span><span>Waiting for a query proposal...</span></div>`;
-  }
-  // Group by session, keeping the arrival order of both groups and cards.
-  // Always render the session header, even for a single session, so the human
-  // can see which agent is asking.
-  const groups: { session: SessionMeta | null; cards: Card[] }[] = [];
-  for (const card of cards) {
-    let group = groups.find((g) => g.cards[0]?.sessionId === card.sessionId);
-    if (!group) {
-      group = { session: card.session, cards: [] };
-      groups.push(group);
-    }
-    group.cards.push(card);
-  }
-  return groups
-    .map((g) => groupHtml(g.session, g.cards, dialect, denyDrafts, mode, connReadOnly))
-    .join("");
-}
-
-export function groupHtml(
-  session: SessionMeta | null,
-  cards: Card[],
-  dialect: string,
-  denyDrafts: Map<string, string>,
-  mode: RiskMode = "read",
-  connReadOnly = false,
-): string {
-  const project = session?.project?.trim();
-  const harness = session?.harness?.trim() || null;
-  const label = project
-    ? escapeHtml(project)
-    : harness
-      ? escapeHtml(harness)
-      : escapeHtml(cards[0].sessionId ?? "session");
-  const intent = session?.sessionLabel?.trim();
-  return `
-      <section class="group">
-        <div class="group-head">
-          <span class="harness-badge">${harnessIcon(harness)}</span>
-          <span class="group-label">${label}</span>
-          ${intent ? `<span class="group-intent" title="${escapeHtml(capitalize(intent))}">${escapeHtml(capitalize(intent))}</span>` : ""}
-          <span class="group-count count-badge">${cards.length}</span>
-        </div>
-        ${cards.map((c) => cardHtml(c, dialect, denyDrafts, mode, connReadOnly)).join("")}
-      </section>`;
-}
-
-const AUTO_EVALUATING = "Evaluating with Jev";
+export const AUTO_EVALUATING = "Evaluating with Jev";
 const EVAL_NOTE = "Auto mode is evaluating this read with Jev.";
 
-// One line that names Auto mode first, says where the read stands, and only then carries
-// the reason. Whether the query ever left the machine is the part a human must not guess.
+// One line that names Auto mode first and says where the read was held. Whether the query
+// ever left the machine is the part a human must not guess.
 function autoNote(card: Card): string {
   if (!card.autoStatus) {
     return "";
   }
+  // An evaluation in flight speaks from the decision bar, where it blocks Approve.
   if (card.autoStatus === AUTO_EVALUATING) {
-    // A human can approve mid-evaluation; once the card left ready, nothing is evaluating it.
-    if (card.state !== "ready") return "";
-    return `<div class="cs-unparsed auto evaluating" role="status"><span class="auto-bolt">${autoIcon}</span><span><b>Auto mode:</b> <i>${AUTO_EVALUATING}&hellip;</i></span></div>`;
+    return "";
   }
   if (card.autoStatus === AUTO_APPROVED) {
     return `<div class="cs-unparsed auto" role="status">${autoIcon}<span><b>Auto mode:</b> ${AUTO_LEADS.automatic}.</span></div>`;
   }
-  const lead = card.evaluation
-    ? `${AUTO_LEADS.refused}, waiting for your review.`
-    : card.autoSent
-      ? `${AUTO_LEADS.unfinished}, waiting for your review.`
-      : `${AUTO_LEADS.local}, waiting for your review. ${NOTHING_SENT}`;
-  // Each reason reads as its own tag rather than as more sentence: Jev returns them as a
-  // list, and a local refusal carries one.
-  const reasons = card.evaluation?.reasons?.length
-    ? card.evaluation.reasons
-    : card.autoStatus
-        .replace(/^Needs review:\s*/, "")
-        .split(/\.\s+/)
-        .filter(Boolean);
-  const tags = reasons
-    .map(
-      (reason) => `<span class="auto-reason over">${escapeHtml(reason.replace(/\.$/, ""))}</span>`,
-    )
-    .join("");
-  return `<div class="cs-unparsed auto" role="status">${autoIcon}<span><b>Auto mode:</b> ${lead}<span class="auto-reasons">${tags}</span></span></div>`;
+  return `<div class="cs-unparsed auto" role="status">${autoIcon}<span><b>Auto mode:</b> ${holdText(Boolean(card.autoSent), " Waiting for your review.")}</span></div>`;
+}
+
+// Why the last human approval did not run, in its own words: never an Auto mode fact.
+const EXECUTION_NOTICES: Record<string, string> = {
+  "Connection or approval authority changed":
+    "The connection check failed or approval authority changed before execution.",
+  "Execution stopped before SQL ran. Approval authority changed":
+    "Execution was stopped before the SQL ran because the connection, approval authority or approval requirements could not be confirmed.",
+};
+function executionNote(card: Card): string {
+  if (!card.executionNotice) return "";
+  const text = Object.hasOwn(EXECUTION_NOTICES, card.executionNotice)
+    ? EXECUTION_NOTICES[card.executionNotice]
+    : escapeHtml(card.executionNotice);
+  return `<div class="cs-unparsed" role="status">${warnIcon}<span>${text}</span></div>`;
+}
+
+// An evaluation in flight blocks Approve like a gate, its sentence above the actions, while
+// Reject stays open. Shared with the app, so an action row rebuilt in place matches the card.
+export function cardGateFor(
+  card: Card,
+  dialect: string,
+  mode: RiskMode,
+  connReadOnly: boolean,
+): CardGate {
+  const gate = cardGate(card.sql, dialect, mode, connReadOnly);
+  return card.state === "ready" && card.autoStatus === AUTO_EVALUATING
+    ? { ...gate, approveEnabled: false, note: EVAL_NOTE }
+    : gate;
 }
 
 export function cardHtml(
@@ -199,38 +144,32 @@ export function cardHtml(
   connReadOnly = false,
 ): string {
   const evaluating = card.state === "ready" && card.autoStatus === AUTO_EVALUATING;
-  // An evaluation in flight borrows the blocked-Approve chrome: the reason rides in the
-  // same popover, and Reject stays open for a human who has already made up their mind.
-  const gate = evaluating
-    ? { ...cardGate(card.sql, dialect, mode, connReadOnly), approveEnabled: false, note: EVAL_NOTE }
-    : cardGate(card.sql, dialect, mode, connReadOnly);
-  const remaining = card.expiresAt - Date.now();
+  const gate = cardGateFor(card, dialect, mode, connReadOnly);
   const run = card.state === "executing" ? card.run : undefined;
-  let actions: string;
+  let bar: string;
   if (run) {
-    actions = runningActions(card.id, run);
+    bar = runningActions(card.id, run);
   } else if (card.state !== "ready") {
-    actions = `<div class="actions"><span class="busy"><span class="spin"></span>${busyLabel(card.state)}&hellip;</span></div>`;
+    bar = `<div class="actions"><span class="busy"><span class="spin"></span>${busyLabel(card.state)}&hellip;</span></div>`;
   } else {
-    actions = readyActions(card.id, gate, denyDrafts);
-  }
-  const badge = riskBadge(gate.cls);
-  const riskAnno = riskAnnotation(card.sql, dialect, gate.cls);
-  // The expiry clock only means something while the proposal waits for a decision.
-  const lease =
-    card.state === "ready"
-      ? `<span class="${remaining <= 45_000 ? "lease low" : "lease"}">${clock(remaining)}</span>`
+    const blocker = gate.note
+      ? `<div class="nb-msg${evaluating ? " auto" : ""}" id="gate-${card.id}"${evaluating ? ' role="status"' : ""}>${evaluating ? autoIcon : ALERT_ICON}<span>${escapeHtml(gate.note)}</span></div>`
       : "";
+    bar = blocker + readyActions(card.id, gate, denyDrafts, card.expiresAt);
+  }
+  const sql = `<pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(visibleControls(card.sql))}" aria-label="Copy SQL">${copyIcon}</button><code class="sql-body" id="sqlbody-${card.id}">${highlight(formatSql(card.sql), card.schema?.pii, card.schema?.client, card.schema?.literals)}</code></pre>`;
+  // While Auto mode evaluates, the ring the card frame used to carry runs round the SQL.
+  const sqlBlock = evaluating ? `<div class="sql-ring">${sql}</div>` : sql;
   return `
-      <div class="card ${cardClassFor(gate)}${evaluating ? " auto-eval" : ""}${run ? runClass(run) : ""}" data-card="${card.id}">
+      <div class="card ${cardClassFor(gate)}${run ? runClass(run) : ""}" data-card="${card.id}">
         <div class="top">
-          ${badge}${evaluating ? `<span class="auto-mark" title="${EVAL_NOTE}" aria-label="${EVAL_NOTE}">${autoIcon}</span>` : ""}${card.intent ? `<span class="intent">${escapeHtml(capitalize(card.intent))}</span>` : `<span class="intent">${escapeHtml(card.id)}</span>`}
-          ${lease}
+          ${riskBadge(gate.cls)}<span class="intent">${escapeHtml(card.intent ? capitalize(card.intent) : card.id)}</span>
         </div>
-        <div class="meta">${escapeHtml(card.id)} &middot; ${relAge(card.createdAt)}</div>
-        <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(visibleControls(card.sql))}" aria-label="Copy SQL">${copyIcon}</button><code class="sql-body" id="sqlbody-${card.id}">${highlight(formatSql(card.sql), card.schema?.pii, card.schema?.client, card.schema?.literals)}</code></pre>
-        ${unparsedNote(gate)}${riskAnno}<div class="card-schema" id="cs-${card.id}">${schemaInner(card.schema, gate.cls !== "read")}</div>
-        ${autoNote(card)}${actions}
+        <div class="meta">${escapeHtml(card.id)} &middot; Requested ${relAge(card.createdAt)}</div>
+        <div class="cs-matrix" id="cm-${card.id}">${accessMatrix(card.sql, dialect, gate.cls, card.schema)}</div>
+        ${unparsedNote(gate)}<div class="cs-legend" id="cs-${card.id}">${sensitiveLegend(card.schema, card.id)}</div>
+        ${sqlBlock}
+        <div class="cs-auto">${autoNote(card)}</div>${executionNote(card)}<div class="dbar">${bar}</div>
       </div>`;
 }
 
@@ -244,7 +183,7 @@ function cardClassFor(gate: CardGate): string {
 
 // The class chip in .top: none for a read, "Write" (amber) or "Destructive" (red),
 // matching the mode names.
-function riskBadge(cls: RiskClass): string {
+export function riskBadge(cls: RiskClass): string {
   if (cls === "write") {
     return `<span class="risk-badge write">Write</span>`;
   }
@@ -254,76 +193,110 @@ function riskBadge(cls: RiskClass): string {
   return "";
 }
 
-// The specific destructive verb from the parsed operation, so a DROP does not read
-// as "Delete"; falls back to a generic verb the rare time the op is unknown.
-function destructiveVerb(op: string | null): string {
-  switch (op) {
-    case "delete":
-      return "Delete";
-    case "drop":
-      return "Drop";
-    case "truncate":
-      return "Truncate";
-    case "alter":
-      return "Alter";
-    case "create":
-      return "Create";
-    // A MySQL INTO OUTFILE/DUMPFILE writes the rows out to a file, not to a table.
-    case "export":
-      return "Export";
-    case "rename":
-      return "Rename";
-    default:
-      return "Change";
-  }
-}
-
-// The tables written, named by the actual verb (Write / Delete / Drop / …) with a
-// pencil for a write and a trash for a destructive; plus the tables read on a mixed
-// statement (INSERT ... SELECT).
-function riskAnnotation(sql: string, dialect: string, cls: RiskClass): string {
-  if (cls === "read") {
-    return "";
-  }
+// Which tables the statement reads, writes or deletes from, one row per table: a table both
+// read and written keeps both marks. Delete only for what removes data (DELETE, DROP, TRUNCATE);
+// a read's tables come from the column analysis once it lands, from the SQL text until then.
+export function accessMatrix(
+  sql: string,
+  dialect: string,
+  cls: RiskClass,
+  schema?: SchemaContext | null,
+): string {
   const ops = analyzeTableOps(sql, dialect);
-  if (!ops) {
+  const roles = new Map<string, Set<Role>>();
+  const add = (table: string, role: Role) =>
+    roles.set(table, (roles.get(table) ?? new Set()).add(role));
+  if (cls !== "read") {
+    const removes = ["delete", "drop", "truncate"].includes(ops?.writeOp ?? "");
+    for (const t of ops?.writes ?? []) add(t, removes ? "Delete" : "Write");
+    for (const t of ops?.reads ?? []) add(t, "Read");
+  } else {
+    for (const t of schema?.tables ?? ops?.reads ?? []) add(t, "Read");
+  }
+  if (!roles.size) {
     return "";
   }
-  const destructive = cls === "destructive";
-  const label = destructive ? destructiveVerb(ops.writeOp) : "Write";
-  const icon = destructive ? trashIcon : pencilIcon;
-  const tone = destructive ? "destructive" : "write";
-  const writesLine = ops.writes.length
-    ? `<div class="cs-writes ${tone}"><span class="cs-writes-k">${icon}${label}</span>${tblChips(ops.writes)}</div>`
-    : "";
-  const readsLine = ops.reads.length
-    ? `<div class="cs-reads"><span class="cs-reads-k">${dbReadsIcon}Reads</span>${tblChips(ops.reads)}</div>`
-    : "";
-  if (!writesLine && !readsLine) {
+  const cell = (on: boolean, role: Role) =>
+    on
+      ? `<td class="mk on ${role.toLowerCase()}">${checkIcon}<span class="sr-only">Yes</span></td>`
+      : '<td class="mk"><span class="sr-only">No</span></td>';
+  const rows = [...roles]
+    .map(
+      ([t, set]) =>
+        `<tr><th scope="row" class="nm">${escapeHtml(t)}</th>${ROLES.map((r) => cell(set.has(r), r)).join("")}</tr>`,
+    )
+    .join("");
+  return `<table class="mx"><thead><tr><th scope="col">Table</th>${ROLES.map((r) => `<th scope="col">${r}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+type Role = "Read" | "Write" | "Delete";
+const ROLES: Role[] = ["Read", "Write", "Delete"];
+
+// What the SQL marks, explained once just above it: each category written as it is marked in
+// the query, with how many. Nothing when the analysis found nothing to mark.
+export function sensitiveLegend(schema: SchemaContext | null | undefined, id: string): string {
+  if (!schema) {
     return "";
   }
-  return `<div class="card-risk">${writesLine}${readsLine}</div>`;
+  const values = schema.literals.map((v) => `'${v}'`);
+  const groups: [string, string, string[]][] = [
+    ["pii", "Possible PII", schema.pii],
+    ["client", "Client data", schema.client],
+    ["val", values.length > 1 ? "Sensitive values" : "Sensitive value", values],
+  ];
+  // Each entry names its objects on hover and keyboard focus, so a reader who cannot tell the
+  // colours apart, or a SELECT * whose columns the SQL never spells out, still gets the names.
+  return groups
+    .filter(([, , items]) => items.length > 0)
+    .map(
+      ([k, label, items]) =>
+        `<span class="lg-slot"><button class="lg ${k}" type="button" aria-describedby="lg-${k}-${id}"><span class="sw">${label}</span><span class="ct">${items.length}</span></button><span class="lg-pop" id="lg-${k}-${id}" role="tooltip">${items.map(escapeHtml).join(", ")}</span></span>`,
+    )
+    .join("");
 }
 
-function tblChips(tables: string[]): string {
-  return tables.map((t) => `<span class="tbl-chip">${escapeHtml(t)}</span>`).join("");
+// The legend is rebuilt when an analysis lands; a reader on one of its entries stays on the
+// same category, or on the first one left.
+export function paintLegend(
+  host: HTMLElement,
+  schema: SchemaContext | null | undefined,
+  id: string,
+): void {
+  const active = host.ownerDocument?.activeElement;
+  const was = active && host.contains(active) ? active.getAttribute("aria-describedby") : null;
+  host.innerHTML = sensitiveLegend(schema, id);
+  if (was) {
+    (
+      host.querySelector<HTMLElement>(`[aria-describedby="${CSS.escape(was)}"]`) ??
+      host.querySelector<HTMLElement>(".lg")
+    )?.focus();
+  }
 }
 
-export function readyActions(id: string, gate: CardGate, denyDrafts: Map<string, string>): string {
+export function readyActions(
+  id: string,
+  gate: CardGate,
+  denyDrafts: Map<string, string>,
+  expiresAt?: number,
+  now = Date.now(),
+): string {
   const revise = denyDrafts.has(id)
     ? denyField(id, denyDrafts.get(id) ?? "")
     : `<button class="deny-open" type="button" data-deny-open="${id}" title="Reject and ask the agent to change something">${messageIcon}Request changes</button>`;
   const tone = gate.cls === "destructive" ? " destructive" : gate.cls === "write" ? " write" : "";
-  const approveBtn = `<button class="btn approve${tone}" type="button" data-approve="${id}" ${gate.approveEnabled ? "" : "disabled"}>${gate.approveLabel}</button>`;
-  // When blocked, the reason rides in a hover popover above the disabled Approve,
-  // not as a loose line in the card body.
-  const approve = gate.note
-    ? `<span class="approve-slot">${approveBtn}<span class="approve-pop" role="tooltip">${ALERT_ICON}${escapeHtml(gate.note)}</span></span>`
-    : approveBtn;
+  // A blocked Approve points at the reason written just above the actions.
+  const described = gate.note ? ` aria-describedby="gate-${id}"` : "";
+  const approve = `<button class="btn approve${tone}" type="button" data-approve="${id}"${described} ${gate.approveEnabled ? "" : "disabled"}>${gate.approveLabel}</button>`;
+  // The expiry clock only means something while the proposal waits for a decision.
+  const left = (expiresAt ?? now) - now;
+  const due =
+    expiresAt === undefined
+      ? ""
+      : `<span class="nb-due">Expires in <span class="${left <= 45_000 ? "lease low" : "lease"}">${clock(left)}</span></span>`;
   return `<div class="actions">
              ${approve}
              <button class="btn reject" type="button" data-reject="${id}">Reject</button>
-             ${revise}
+             ${revise}${due}
            </div>`;
 }
 
@@ -334,28 +307,6 @@ export function denyField(id: string, value = ""): string {
              <input class="deny-reason" type="text" maxlength="140" data-deny-input="${id}" aria-label="What should the agent change?" placeholder="What should the agent change?" autocomplete="off" spellcheck="false" value="${escapeHtml(value)}" />
              <button class="deny-send" type="button" data-deny="${id}" aria-label="Send to the agent">${sendIcon}</button>
            </div>`;
-}
-
-// hideReads drops the "Reads" line on a write/destructive card, whose tables the risk
-// annotation already lists; the sensitive-column flags still stand on their own.
-export function schemaInner(schema: SchemaContext | null | undefined, hideReads = false): string {
-  if (!schema) {
-    return "";
-  }
-  const tables =
-    !hideReads && schema.tables.length
-      ? `<div class="cs-reads"><span class="cs-reads-k">${dbReadsIcon}Reads</span>${schema.tables.map((t) => `<span class="tbl-chip">${escapeHtml(t)}</span>`).join("")}</div>`
-      : "";
-  const pii = schema.pii.length
-    ? `<div class="cs-line cs-pii"><span class="cs-warn">${warnIcon}possible PII</span><span class="cs-list">${schema.pii.map(escapeHtml).join(" &middot; ")}</span></div>`
-    : "";
-  const client = schema.client.length
-    ? `<div class="cs-line cs-client"><span class="cs-warn">${buildingIcon}client data</span><span class="cs-list">${schema.client.map(escapeHtml).join(" &middot; ")}</span></div>`
-    : "";
-  const literal = schema.literals.length
-    ? `<div class="cs-line cs-literal"><span class="cs-warn">${warnIcon}sensitive value</span><span class="cs-list">${schema.literals.map((v) => escapeHtml(`'${v}'`)).join(" &middot; ")}</span></div>`
-    : "";
-  return tables + pii + client + literal;
 }
 
 export function busyLabel(state: CardState): string {
@@ -387,7 +338,7 @@ export function runningActions(id: string, run: RunState, now = Date.now()): str
       ? `<span class="autostop" title="Auto-stop is set to ${run.limitMs / 60_000} min on this connection">${clockIcon}Auto-stop in<span class="clock autostop-clock">${clock(run.limitMs - elapsed)}</span></span>`
       : "";
   const error = stop?.error
-    ? `<div class="cs-unparsed stop-error" role="status">${xCircleIcon}<span class="stop-msg"><span>An error occurred while stopping the query.</span><span class="stop-raw">${escapeHtml(stop.error)}</span></span></div>`
+    ? `<div class="cs-unparsed stop-error" role="status">${xCircleIcon}<span class="stop-msg"><span>${stop.by === "limit" ? "Auto-stop could not be confirmed." : "Stop could not be confirmed."}</span><span class="stop-raw">${escapeHtml(stop.error)}</span></span></div>`
     : "";
   return `<div class="actions">${control}<span class="run"><span class="spin"></span>Running<span class="clock run-clock">${clock(elapsed)}</span></span>${limit}</div>${error}`;
 }

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Gatekeeper preview frame</title>
+    <style>
+      body { margin: 0; background: #0b0c0e; display: grid; place-items: start center; padding: 16px; }
+      iframe { border: 1px solid #333; background: #000; }
+    </style>
+  </head>
+  <body>
+    <iframe id="f" title="Gatekeeper preview"></iframe>
+    <script type="module">
+      // Fixed-size frame around the preview, to check narrow and short plugin tabs.
+      const p = new URLSearchParams(location.search);
+      const f = document.getElementById("f");
+      f.width = p.get("w") ?? "440";
+      f.height = p.get("h") ?? "800";
+      p.delete("w");
+      p.delete("h");
+      f.src = `/preview/index.html?${p}`;
+    </script>
+  </body>
+</html>

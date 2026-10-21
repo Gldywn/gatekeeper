@@ -5,7 +5,8 @@ export interface Field {
 export interface HistResult {
   fields: Field[];
   rows: Record<string, unknown>[];
-  rowCount: number;
+  /** Rows the query returned. null when only an Audit Trail entry is left and it recorded none. */
+  rowCount: number | null;
   /** Rows a write changed. Absent means the host did not report it, never zero. */
   affectedRows?: number;
   truncated: boolean;

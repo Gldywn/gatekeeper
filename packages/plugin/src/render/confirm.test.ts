@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { type ConfirmSpec, confirmHtml } from "./confirm";
+import { describe, expect, it, vi } from "vitest";
+import { takeOver } from "../modal";
+import { ConfirmModal, type ConfirmSpec, confirmHtml, runSentence } from "./confirm";
 import { cardHtml } from "./queue";
 
 const schema = {
@@ -31,10 +32,14 @@ describe("render/confirm", () => {
     );
     // Same marks as the card, so a sensitive value cannot look ordinary here.
     expect(html).toContain('<span class="kw">DELETE</span>');
-    expect(html).toContain('<span class="pii-col">email</span>');
-    expect(html).toContain("<span class=\"st sensitive-val\">'jane@acme.io'</span>");
+    expect(html).toContain('<span class="pii-col" title="Possible PII">email</span>');
+    expect(html).toContain(
+      '<span class="st sensitive-val" title="Sensitive value">\'jane@acme.io\'</span>',
+    );
     // The tone reaches the card, which is what turns the frame red on a destructive.
-    expect(html).toContain('<div class="detail-card confirm-card destructive">');
+    expect(html).toContain(
+      '<div class="detail-card confirm-card destructive with-sql" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">',
+    );
   });
 
   it("renders the same body as the card it confirms", () => {
@@ -84,5 +89,144 @@ describe("render/confirm", () => {
     expect(plain).not.toContain("data-copy-sql");
     // Copying is not an action of the dialog: it carries no confirm or cancel hook.
     expect(confirmHtml(spec)).not.toContain('data-copy-sql="" data-confirm');
+  });
+});
+
+describe("runSentence", () => {
+  it("says what the statement does to which table on which database", () => {
+    expect(runSentence("", "UPDATE", ["billing.invoices"], "<db>", false)).toBe(
+      'It changes rows of <code class="name">billing.invoices</code> on <db>, once, when you confirm.',
+    );
+    expect(runSentence("", "DELETE", ["a<b"], "<db>", true)).toBe(
+      'It removes rows from <code class="name">a&lt;b</code> on <db>, once, when you confirm.',
+    );
+    // No single operation the parse vouches for: the database only.
+    expect(runSentence("", undefined, [], "<db>", false)).toBe(
+      "It changes data on <db>, once, when you confirm.",
+    );
+    expect(runSentence("", undefined, [], "<db>", true)).toBe(
+      "It runs on <db>, once, when you confirm.",
+    );
+  });
+
+  it("does not claim an upsert only adds rows", () => {
+    const say = (sql: string) => runSentence(sql, "INSERT", ["firms"], "<db>", false);
+    expect(say("INSERT INTO firms (id) VALUES (1)")).toContain("It adds rows to");
+    expect(
+      say("INSERT INTO firms (id, n) VALUES (1, 'A') ON CONFLICT (id) DO UPDATE SET n = 'B'"),
+    ).toContain("It adds or changes rows of");
+    expect(say("INSERT INTO firms (id) VALUES (1) ON DUPLICATE KEY UPDATE id = 2")).toContain(
+      "It adds or changes rows of",
+    );
+    expect(say("INSERT INTO firms (id) VALUES (1) ON CONFLICT DO NOTHING")).toContain(
+      "It adds rows to",
+    );
+    expect(
+      say(
+        "INSERT INTO firms (id) VALUES (1) ON /* policy */ CONFLICT (id) DO -- x\n UPDATE SET id = 2",
+      ),
+    ).toContain("It adds or changes rows of");
+    expect(say("INSERT INTO firms (n) VALUES ('on conflict do update')")).toContain(
+      "It adds rows to",
+    );
+  });
+
+  it("puts the sentence and the tables in place of the body, before the SQL", () => {
+    const html = confirmHtml({
+      tone: "write",
+      heading: "Run this UPDATE?",
+      body: "",
+      facts: { sentence: "It changes rows.", matrix: '<table class="mx"></table>' },
+      sql: "UPDATE t SET a = 1",
+      confirmLabel: "Run UPDATE",
+      onConfirm: () => {},
+    });
+    expect(html).toContain('<p class="confirm-text">It changes rows.</p>');
+    expect(html.indexOf('class="confirm-mx"')).toBeLessThan(
+      html.indexOf('class="sql confirm-sql"'),
+    );
+  });
+});
+
+describe("ConfirmModal", () => {
+  it("closes a run confirm once its request stops waiting, and only for that request", () => {
+    const panel = { innerHTML: "", hidden: true, querySelector: () => ({ focus: vi.fn() }) };
+    const modal = new ConfirmModal({
+      addEventListener: vi.fn(),
+      querySelector: () => panel,
+    } as unknown as HTMLElement);
+    const onConfirm = vi.fn();
+    modal.open({
+      tone: "write",
+      heading: "Run?",
+      body: "",
+      confirmLabel: "Run",
+      requestId: "a",
+      onConfirm,
+    });
+    modal.dismissFor("b");
+    expect(modal.isOpen).toBe(true);
+    modal.dismissFor("a");
+    expect(modal.isOpen).toBe(false);
+    expect(panel.hidden).toBe(true);
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it("opens a run confirm on Cancel, and any other on its action", () => {
+    const focused: string[] = [];
+    const panel = {
+      innerHTML: "",
+      hidden: true,
+      querySelector: (s: string) => ({ focus: () => focused.push(s) }),
+    };
+    const modal = new ConfirmModal({
+      addEventListener: vi.fn(),
+      querySelector: () => panel,
+    } as unknown as HTMLElement);
+    const base = {
+      tone: "write",
+      heading: "h",
+      body: "",
+      confirmLabel: "Go",
+      onConfirm: vi.fn(),
+    } as const;
+    modal.open({ ...base, requestId: "a", sql: "UPDATE t SET a = 1" });
+    modal.cancel();
+    modal.open(base);
+    expect(focused).toEqual(["[data-confirm-cancel]", "[data-confirm-go]"]);
+  });
+});
+
+describe("takeOver", () => {
+  it("makes the rest inert, spares an overlay already inert, and returns the focus", () => {
+    const opener = { isConnected: true, getClientRects: () => [{}], focus: vi.fn() } as {
+      isConnected: boolean;
+      getClientRects: () => object[];
+      focus: ReturnType<typeof vi.fn>;
+      ownerDocument?: unknown;
+    };
+    const doc = { activeElement: opener, body: {} };
+    opener.ownerDocument = doc;
+    const inbox = { inert: false };
+    const settings = { inert: true };
+    const confirm = { inert: false, hidden: true };
+    const overlay = { ownerDocument: doc, parentElement: { children: [] as object[] } };
+    overlay.parentElement.children.push(inbox, overlay, settings, confirm);
+    const gear = { focus: vi.fn() };
+    const release = takeOver(
+      overlay as unknown as HTMLElement,
+      () => gear as unknown as HTMLElement,
+    );
+    expect(inbox.inert).toBe(true);
+    // A closed overlay stays live, so a confirm can still open over this one.
+    expect(confirm.inert).toBe(false);
+    release();
+    expect(inbox.inert).toBe(false);
+    expect(settings.inert).toBe(true);
+    expect(opener.focus).toHaveBeenCalledOnce();
+    // The opener gone by then (the gear menu's own button): the fallback takes the focus.
+    opener.isConnected = false;
+    takeOver(overlay as unknown as HTMLElement, () => gear as unknown as HTMLElement)();
+    expect(gear.focus).toHaveBeenCalledOnce();
   });
 });

@@ -308,8 +308,11 @@ describe("check lifecycle", () => {
       confirmModal: { cancel: vi.fn() },
       annotator: { clearCache: vi.fn() },
       history: [],
-      activityView: { reset: vi.fn() },
+      activityView: { reset: vi.fn(), open: vi.fn() },
+      detailView: { close: vi.fn() },
       settingsView: { close: vi.fn() },
+      tab: "queue",
+      selection: { queue: { kind: "hist", id: "req_old" }, audit: { kind: "audit", id: "req_a" } },
       renderModeSurfaces: vi.fn(),
       renderHistory: vi.fn(),
       renderRoster: vi.fn(),
@@ -319,6 +322,10 @@ describe("check lifecycle", () => {
     });
     query.mockClear();
     app.onConnectionSwitch();
+    // Nothing the old connection had open stays on screen.
+    expect(app.selection).toEqual({ queue: null, audit: null });
+    expect(app.detailView.close).toHaveBeenCalled();
+    expect(app.activityView.reset).toHaveBeenCalled();
     expect(app.mode).toBe("read");
     expect(app.endpointRO).toBeNull();
     expect(app.layerRows()).toMatch(/Gatekeeper<\/span><span class="ro-state ok">/);
@@ -378,15 +385,32 @@ describe("status popovers", () => {
     expect(app.dismissAgentPop()).toBe(false);
   });
 
+  it("hides an open legend entry's names once, then lets Escape go on", () => {
+    const app = harness();
+    const attrs = new Set<string>();
+    const slot = { toggleAttribute: (name: string) => attrs.add(name) && true };
+    let selector = "";
+    app.root = {
+      querySelector: (s: string) => {
+        selector = s;
+        return attrs.size ? null : slot;
+      },
+    };
+    expect(app.dismissLegendPop()).toBe(true);
+    expect(attrs.has("data-dismissed")).toBe(true);
+    expect(selector).toBe(".lg-slot:is(:hover, :focus-within):not([data-dismissed])");
+    expect(app.dismissLegendPop()).toBe(false);
+  });
+
   it("rearms the hidden server popover only when its glyph is entered from outside", () => {
     const app = harness();
     app.root = { querySelector: () => null };
     const link = { removeAttribute: vi.fn() };
     const inner = { closest: () => glyph };
     const glyph = { contains: (node: unknown) => node === inner, closest: () => link };
-    app.enterAgentGlyph({ target: inner, relatedTarget: inner });
+    app.enterPopGlyph({ target: inner, relatedTarget: inner });
     expect(link.removeAttribute).not.toHaveBeenCalled();
-    app.enterAgentGlyph({ target: inner, relatedTarget: null });
+    app.enterPopGlyph({ target: inner, relatedTarget: null });
     expect(link.removeAttribute).toHaveBeenCalledWith("data-dismissed");
   });
 
@@ -579,5 +603,48 @@ describe("server version for Stop", () => {
     pending.resolve(passing("PostgreSQL 16.2 on x86_64"));
     await settle();
     expect(app.serverVersion).toBeNull();
+  });
+});
+
+describe("narrow Back and audit rows", () => {
+  it("returns to the row left when it is on screen, else to the open tab", () => {
+    vi.stubGlobal("CSS", { escape: (s: string) => s });
+    const app = harness();
+    const tab = { focus: vi.fn() };
+    const row = { offsetParent: {} as unknown, focus: vi.fn() };
+    let held: typeof row | null = row;
+    const asked: string[] = [];
+    app.root = {
+      querySelector: (s: string) => {
+        asked.push(s);
+        if (s === "#inbox") return { setAttribute: vi.fn() };
+        if (s === '[data-tab][aria-selected="true"]') return tab;
+        return s === '#listAudit [data-row="q1"]' ? held : null;
+      },
+    };
+    app.tab = "audit";
+    app.selection = { audit: { kind: "audit", id: "q1" } };
+    app.showList();
+    expect(row.focus).toHaveBeenCalledTimes(1);
+    // Folded inside a closed day: in the DOM, with no box.
+    row.offsetParent = null;
+    app.showList();
+    // Gone after a reload, or pruned from Recently resolved.
+    held = null;
+    app.showList();
+    expect(row.focus).toHaveBeenCalledTimes(1);
+    expect(tab.focus).toHaveBeenCalledTimes(2);
+    vi.unstubAllGlobals();
+  });
+
+  it("attaches the rows this tab still holds to an audit record, and drops them once evicted", () => {
+    const app = harness();
+    const record = { id: "q1", status: "approved", note: "", sql: "SELECT 1" };
+    const held = { fields: [{ name: "a" }], rows: [{ a: 1 }], rowCount: 1, truncated: false };
+    const local = { ...record, result: held };
+    app.history = [local];
+    expect(app.withLocalRows(record).result).toBe(held);
+    local.result = { ...held, rows: [] };
+    expect(app.withLocalRows(record)).toBe(record);
   });
 });

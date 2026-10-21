@@ -12,15 +12,21 @@ export const autoDisclosure =
 // to the page. Bullets fall outside the key alphabet, so the mask can never pass as a key.
 export const SAVED_KEY_MASK = "\u2022".repeat(24);
 
-// The same sentences on the pending card and on the kept record.
+// The same sentences on the pending card and on the kept record: a hold says only where it
+// happened, on this machine before anything left, or at Jev, the model that evaluates reads.
 export const AUTO_LEADS = {
-  local: "A local check flagged this read before evaluation",
-  unfinished: "The evaluation did not finish",
-  refused: "The evaluation did not clear this read",
+  held: "Held on this machine before evaluation",
+  refused: "Jev did not clear this read",
   cleared: "The evaluation cleared this read",
   automatic: "This read was approved automatically",
 } as const;
 export const NOTHING_SENT = '<b class="auto-strong">Nothing was sent to TypeSafe.</b>';
+
+// A hold says where it happened, and a local one that nothing left the machine.
+export function holdText(sent: boolean, tail = ""): string {
+  return `${sent ? AUTO_LEADS.refused : AUTO_LEADS.held}.${tail}${sent ? "" : ` ${NOTHING_SENT}`}`;
+}
+
 // Card status once Jev cleared a read and Gatekeeper took it to execution; it replaces
 // "Evaluating with Jev", which would otherwise stay up for the whole run.
 export const AUTO_APPROVED = "Approved automatically";
@@ -32,13 +38,13 @@ export function autoPopHtml(): string {
   return `<span class="sa-pop auto-body">
           <span class="sa-body sa-off">
             ${title}
-            <p>Eligible <code>SELECT</code> reads run automatically and return their results to your agent. Everything else waits for you, and <b>Write and Destructive always need your approval</b>. TypeSafe receives the SQL structure and the schema names it reads, never result rows.</p>
+            <p>Eligible <code class="kw">SELECT</code> reads run automatically and return their results to your agent. Everything else waits for you, and <b>Write and Destructive always need your approval</b>. TypeSafe receives the SQL structure and the schema names it reads, never result rows.</p>
             <button class="sa-enable" type="button" data-auto-toggle>Enable Auto mode</button>
             <p class="auto-message" data-auto-message role="status"></p>
           </span>
           <span class="sa-body sa-on">
             ${title}
-            <p>Eligible <code>SELECT</code> reads now run without your approval. Everything else still waits for you, and <b>confirming Write or Destructive turns off Auto mode</b>.</p>
+            <p>Eligible <code class="kw">SELECT</code> reads now run without your approval. Everything else still waits for you, and <b>confirming Write or Destructive turns off Auto mode</b>.</p>
             <button class="sa-enable tonal" type="button" data-auto-toggle>Disable Auto mode</button>
           </span>
         </span>`;
@@ -73,15 +79,12 @@ export function approvalHtml(
   hold?: AutoHold,
 ): string {
   const e = approval?.evaluation ?? evaluation;
-  // No evaluation: either Auto mode held the read before it ever left, which is worth
-  // recording on its own, or Auto mode never touched it and there is nothing to say.
+  // With an evaluation its verdict is the sentence, so a read Jev cleared and a later check
+  // held never reads as both cleared and not.
   if (!e) {
-    if (!hold) return "";
-    const lead = hold.sent ? `${AUTO_LEADS.unfinished}.` : `${AUTO_LEADS.local}. ${NOTHING_SENT}`;
-    return `<div class="auto-trace">
-      <div class="auto-trace-line">${autoIcon}<span><b>Auto mode:</b> ${lead}</span></div>
-      <div class="auto-reasons"><span class="auto-reason over">${escapeHtml(hold.reason.replace(/\.$/, ""))}</span></div>
-    </div>`;
+    return hold
+      ? `<div class="auto-trace"><div class="auto-trace-line">${autoIcon}<span><b>Auto mode:</b> ${holdText(hold.sent)}</span></div></div>`
+      : "";
   }
   const lead =
     approval?.source === "automatic"
@@ -99,13 +102,14 @@ export function approvalHtml(
       return `<span class="auto-reason metric${over ? " over" : ""}">${escapeHtml(id)} ${escapeHtml(String(value))}</span>`;
     })
     .join("");
-  const reasons = e.reasons
-    .map((reason) => `<span class="auto-reason over">${escapeHtml(reason)}</span>`)
-    .join("");
   return `<div class="auto-trace">
       <div class="auto-trace-line">${autoIcon}<span><b>Auto mode:</b> ${lead}</span></div>
-      ${reasons ? `<div class="auto-reasons">${reasons}</div>` : ""}
       <div class="auto-reasons">${axes}</div>
       <div class="auto-trace-meta">${escapeHtml(e.provider)} &middot; ${escapeHtml(e.model)} &middot; policy ${escapeHtml(e.policy)} &middot; ${escapeHtml(new Date(e.evaluatedAt).toISOString())} &middot; ${escapeHtml(e.sqlDigest)}</div>
     </div>`;
+}
+
+/** The reason the app records when an evaluation refuses a read (app.ts evaluateNext). */
+export function refusalReason(evaluation: AutoEvaluation): string {
+  return evaluation.reasons?.join(". ") || "Evaluator uncertainty or stale policy/model";
 }

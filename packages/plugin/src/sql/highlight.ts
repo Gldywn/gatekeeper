@@ -30,6 +30,17 @@ function lastSegment(word: string): string {
   return dot === -1 ? word : word.slice(dot + 1);
 }
 
+// A marked token names its category on hover, matching the legend above the SQL; a plain
+// string literal ("st") gets no label.
+const MARK_TITLES: Record<string, string> = {
+  "pii-col": "Possible PII",
+  "client-col": "Client data",
+  "st sensitive-val": "Sensitive value",
+};
+function markTitle(cls: string): string {
+  return Object.hasOwn(MARK_TITLES, cls) ? ` title="${MARK_TITLES[cls]}"` : "";
+}
+
 // A key read through a JSON accessor is quoted like a value but names a column, so every
 // flagged segment of the path is tinted like an identifier, in place. A segment the raw
 // operand does not hold verbatim is left alone: the body must stay the query as written.
@@ -47,7 +58,7 @@ function jsonKeySpan(
     if (at === -1) {
       continue;
     }
-    out += `${escapeHtml(inner.slice(cursor, at))}<span class="${cls}">${escapeHtml(seg)}</span>`;
+    out += `${escapeHtml(inner.slice(cursor, at))}<span class="${cls}"${markTitle(cls)}>${escapeHtml(seg)}</span>`;
     cursor = at + seg.length;
   }
   return cursor === 0 ? null : out + escapeHtml(inner.slice(cursor));
@@ -77,7 +88,7 @@ function classifyWord(
     return escapeHtml(word);
   }
   const prefix = word.slice(0, word.length - seg.length);
-  return `${escapeHtml(prefix)}<span class="${cls}">${escapeHtml(seg)}</span>`;
+  return `${escapeHtml(prefix)}<span class="${cls}"${markTitle(cls)}>${escapeHtml(seg)}</span>`;
 }
 
 // Walking the shared tokenizer keeps a match from ever landing inside a string,
@@ -128,7 +139,7 @@ export function highlight(
           continue;
         }
         const cls = sensitive.has(inner) ? "st sensitive-val" : "st";
-        out += `<span class="${cls}">${escapeHtml(tk.v)}</span>`;
+        out += `<span class="${cls}"${markTitle(cls)}>${escapeHtml(tk.v)}</span>`;
         continue;
       }
       // Double-quote (ANSI) and backtick (MySQL) quote an identifier, not a value,
@@ -137,7 +148,7 @@ export function highlight(
       const cls = piiSet.has(key) ? "pii-col" : clientSet.has(key) ? "client-col" : "";
       if (cls) {
         const close = closed ? quote : "";
-        out += `${escapeHtml(quote)}<span class="${cls}">${escapeHtml(inner)}</span>${escapeHtml(close)}`;
+        out += `${escapeHtml(quote)}<span class="${cls}"${markTitle(cls)}>${escapeHtml(inner)}</span>${escapeHtml(close)}`;
         continue;
       }
       out += escapeHtml(tk.v);

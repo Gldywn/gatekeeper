@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 import { activityEntryHtml } from "./activity";
 import { approvalHtml, autoPopHtml, autoSettingsHtml } from "./auto";
 import { modeDropdown } from "./controls";
-import { historyRow } from "./history";
+import { detailHtml } from "./detail";
+import { auditItem, recentRowHtml } from "./inbox";
 import { cardHtml } from "./queue";
 
 describe("Auto mode surfaces", () => {
@@ -37,7 +38,7 @@ describe("Auto mode surfaces", () => {
       expect(html).not.toContain("aria-disabled");
       // The menu keeps its ordinary labels; what a switch costs is explained in the
       // popover and in Settings, not repeated under every option.
-      expect(html).toContain("adds INSERT, UPDATE");
+      expect(html).toContain('adds <code class="kw">INSERT</code>, <code class="kw">UPDATE</code>');
       expect(html).not.toContain("Auto mode");
       expect(html).toContain('data-mode-opt="write"');
       expect(html).toContain('data-mode-opt="destructive"');
@@ -47,7 +48,7 @@ describe("Auto mode surfaces", () => {
       expect(autoPopHtml()).not.toContain("stay unavailable");
     },
   );
-  it("keeps manual actions during evaluation and escapes concrete review reasons", () => {
+  it("keeps manual actions during evaluation and says only where a read was held", () => {
     const card = {
       id: "r1",
       sql: "SELECT quantity FROM public.products",
@@ -64,15 +65,33 @@ describe("Auto mode surfaces", () => {
       "postgresql",
       new Map(),
     );
-    expect(evaluating).toContain("Evaluating with Jev");
+    // The evaluation speaks from the decision bar, as what blocks Approve, and the SQL wears the ring.
+    expect(evaluating).toContain('<div class="nb-msg auto" id="gate-r1" role="status">');
+    expect(evaluating).toContain("Auto mode is evaluating this read with Jev.");
+    expect(evaluating).toContain('<div class="sql-ring">');
     expect(evaluating).toContain('data-approve="r1"');
     expect(evaluating).toContain('data-reject="r1"');
-    const review = cardHtml(
-      { ...card, autoStatus: "Needs review: Sensitive source <email>" },
+    // A hold says only where it happened: never its stored reason, which may name a source.
+    const local = cardHtml(
+      { ...card, autoStatus: "Needs review: Sensitive source or alias: <email>" },
       "postgresql",
       new Map(),
     );
-    expect(review).toContain("Sensitive source &lt;email&gt;");
+    expect(local).toContain(
+      'Held on this machine before evaluation. Waiting for your review. <b class="auto-strong">Nothing was sent to TypeSafe.</b>',
+    );
+    expect(local).not.toContain("email");
+    const sent = cardHtml(
+      {
+        ...card,
+        autoStatus: "Needs review: Evaluation timed out. Approve manually",
+        autoSent: true,
+      },
+      "postgresql",
+      new Map(),
+    );
+    expect(sent).toContain("Jev did not clear this read. Waiting for your review.");
+    expect(sent).not.toContain("Nothing was sent");
   });
   it("distinguishes human and automatic history and includes durable details", () => {
     const approval: ApprovalAttribution = {
@@ -98,34 +117,72 @@ describe("Auto mode surfaces", () => {
       session: null,
       approval,
     };
-    expect(historyRow(item)).toContain("Approved automatically");
-    expect(historyRow({ ...item, approval: { source: "human" } })).not.toContain(
+    expect(recentRowHtml(item, false)).toContain("Approved automatically");
+    expect(recentRowHtml({ ...item, approval: { source: "human" } }, false)).not.toContain(
       "Approved automatically",
     );
     expect(approvalHtml(approval)).toContain("jev-1.13.0");
     expect(approvalHtml(approval)).toContain("auto-beta-1");
     expect(approvalHtml(approval)).toContain("read_only 0.999");
-    const activity = activityEntryHtml(
-      {
-        id: "r1",
-        createdAt: 1,
-        decidedAt: 2,
-        sessionId: "s1",
-        harness: null,
-        project: null,
-        sessionLabel: null,
-        sql: item.sql,
-        intent: null,
-        state: "approved",
-        reason: null,
-        error: null,
-        rowCount: 2,
-        approval,
-      },
-      new Set(["r1"]),
-      "postgresql",
+    const entry = {
+      id: "r1",
+      createdAt: 1,
+      decidedAt: 2,
+      sessionId: "s1",
+      harness: null,
+      project: null,
+      sessionLabel: null,
+      sql: item.sql,
+      intent: null,
+      state: "approved" as const,
+      reason: null,
+      error: null,
+      rowCount: 2,
+      affectedRows: null,
+      approval,
+    };
+    // The row says who decided; the evaluation's details open with it on the right.
+    expect(activityEntryHtml(entry, true, "postgresql")).toContain("Approved automatically");
+    expect(detailHtml(auditItem(entry, null), "audit", "postgresql")).toContain("auto-beta-1");
+  });
+});
+
+describe("the resolved Auto trace", () => {
+  const refusal = (reasons: string[]) => ({
+    provider: "typesafe",
+    model: "jev-1.13.0",
+    policy: "auto-beta-7",
+    evaluatedAt: 1,
+    sqlDigest: "a".repeat(64),
+    eligible: false,
+    reasons,
+    probabilities: { personal_disclosure: 0.9 },
+  });
+
+  it("says Jev did not clear a refused read, without the evaluator's labels", () => {
+    const html = approvalHtml({ source: "human", evaluation: refusal(["A <brand> new label"]) });
+    expect(html).toContain("Jev did not clear this read.");
+    expect(html).not.toContain("brand");
+  });
+
+  it("says where a hold happened, and lets a cleared evaluation speak for itself", () => {
+    expect(
+      approvalHtml(undefined, undefined, { sent: false, reason: "Unsupported projection" }),
+    ).toContain(
+      'Held on this machine before evaluation. <b class="auto-strong">Nothing was sent to TypeSafe.</b>',
     );
-    expect(activity).toContain("Approved automatically");
-    expect(activity).toContain("auto-beta-1");
+    expect(
+      approvalHtml(undefined, undefined, {
+        sent: true,
+        reason: "Evaluation timed out. Approve manually",
+      }),
+    ).toContain("Jev did not clear this read.");
+    const both = approvalHtml(
+      { source: "human", evaluation: { ...refusal([]), eligible: true } },
+      undefined,
+      { sent: true, reason: "Execution stopped before SQL ran. Approval authority changed" },
+    );
+    expect(both).toContain("The evaluation cleared this read.");
+    expect(both).not.toContain("did not clear");
   });
 });
