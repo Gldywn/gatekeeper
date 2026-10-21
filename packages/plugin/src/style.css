@@ -1337,20 +1337,20 @@ label.qs-row {
 .card.destructive {
   background: color-mix(in oklch, var(--danger) 5%, var(--surface));
 }
-/* The class chip in .top: a solid fill with dark ink, centred against the baseline row. */
-/* A quiet tinted tag, top-aligned so it sits with the first line of a wrapping intent
-   instead of floating to the middle. */
+/* A quiet tinted tag, held on the centre of the intent's first line (a wrapping intent keeps it
+   there, not on its middle): each context states that line's height. */
 .risk-badge {
   align-self: flex-start;
-  margin-top: 2px;
+  margin-top: calc((var(--intent-line, 20px) - 20px) / 2);
   flex: none;
   display: inline-flex;
   align-items: center;
+  height: 20px;
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
-  padding: 2px 8px;
+  padding: 0 8px;
   border-radius: 5px;
   border: 1px solid transparent;
 }
@@ -4498,6 +4498,9 @@ p.auto-message[data-tone="busy"] {
   font-weight: 600;
   letter-spacing: 0;
 }
+#detail .top {
+  --intent-line: calc(14px * 1.35);
+}
 #detail .intent {
   font-size: 14px;
   font-weight: 650;
@@ -4538,6 +4541,9 @@ p.auto-message[data-tone="busy"] {
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0;
+}
+#queue .top {
+  --intent-line: calc(16px * 1.35);
 }
 #queue .intent {
   font-size: 16px;
