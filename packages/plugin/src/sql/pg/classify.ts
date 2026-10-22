@@ -1,5 +1,5 @@
 import { type RiskClass, type RiskVerdict, rank } from "../risk";
-import { parsePg } from "./parse";
+import { readPg } from "./parse";
 
 type Node = Record<string, unknown>;
 
@@ -17,12 +17,12 @@ const MODIFY: Record<string, RiskClass> = {
 };
 
 export function classifyPg(sql: string): RiskVerdict | null {
-  const tree = parsePg(sql);
+  const text = readPg(sql);
   // Never the text fallback: its comment stripping can hide the second statement the server
   // would see, as in SELECT 'a\' /*'; DELETE FROM t; -- */.
-  if (tree === "ambiguous") return { class: "destructive", parseOk: false, blocked: true };
-  if (!tree) return null;
-  const stmts = tree.stmts ?? [];
+  if (text === "ambiguous") return { class: "destructive", parseOk: false, blocked: true };
+  if (!text) return null;
+  const stmts = text.tree.stmts ?? [];
   if (stmts.length !== 1) return { class: "destructive", parseOk: true, blocked: true };
   return {
     class: statementClass(stmts[0].stmt as Node | undefined),

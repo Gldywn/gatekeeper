@@ -54,7 +54,7 @@ describe("analyzeTableOps", () => {
     });
   });
 
-  it("names the SELECT ... INTO target when the read comes from a CTE", () => {
+  it("names the SELECT ... INTO target when the read comes from a CTE, which is no table", () => {
     expect(
       analyzeTableOps(
         "WITH recent AS (SELECT * FROM crm.people) SELECT * INTO staging_copy FROM recent",
@@ -62,7 +62,7 @@ describe("analyzeTableOps", () => {
       ),
     ).toEqual({
       writes: ["staging_copy"],
-      reads: ["crm.people", "recent"],
+      reads: ["crm.people"],
       writeOp: "create",
     });
   });
@@ -497,12 +497,10 @@ describe("analyzeSql", () => {
     }
   });
 
-  it("cannot tell a quoted relation alias holding parentheses from a column list", () => {
-    // The parser strips the quotes, so the alias arrives exactly like a column list. Accepted
-    // as an over-report: the annotation errs toward showing a name rather than hiding one.
-    expect(analyzeSql('SELECT * FROM billing.firms AS "f(email)"', "postgresql")?.aliases).toEqual([
-      "email",
-    ]);
+  it("reads a quoted relation alias holding parentheses as a plain alias", () => {
+    expect(analyzeSql('SELECT * FROM billing.firms AS "f(email)"', "postgresql")?.aliases).toEqual(
+      [],
+    );
   });
 
   it("exposes the column list a CTE renames its columns with", () => {
@@ -895,12 +893,10 @@ describe("sensitiveLiterals", () => {
     }
   });
 
-  it("stays silent when the parser re-stringifies an operand it did not model", () => {
-    // IS DISTINCT FROM arrives as raw text quoting a value and a column alike.
-    for (const operand of ["'ACME'", "status"]) {
-      const sql = `SELECT id FROM billing.firms WHERE company_name IS DISTINCT FROM ${operand}`;
-      expect(sensitiveLiterals(sql, "postgresql"), sql).toEqual([]);
-    }
+  it("flags the value of IS DISTINCT FROM, never the column it may compare with", () => {
+    const sql = "SELECT id FROM billing.firms WHERE company_name IS DISTINCT FROM";
+    expect(sensitiveLiterals(`${sql} 'ACME'`, "postgresql")).toEqual(["ACME"]);
+    expect(sensitiveLiterals(`${sql} status`, "postgresql")).toEqual([]);
   });
 
   it("never reports an empty literal, which would tint every '' in the query", () => {
@@ -946,6 +942,57 @@ describe("sensitiveLiterals", () => {
         "postgresql",
       ),
     ).toEqual([]);
+  });
+});
+
+describe("PostgreSQL's own parse tree", () => {
+  const pg = "postgresql";
+
+  it("binds each value of a multiple-column assignment to its own column", () => {
+    expect(
+      sensitiveLiterals("UPDATE billing.firms SET (company_name, status) = ('ACME', 'x')", pg),
+    ).toEqual(["ACME"]);
+  });
+
+  it("reads the path of a SQL/JSON function as keys, and the value compared with it", () => {
+    const sql = "SELECT id FROM crm.people WHERE JSON_VALUE(profile, '$.company_name') = 'ACME'";
+    expect(analyzeSql(sql, pg)?.jsonKeys).toEqual(["company_name"]);
+    expect(sensitiveLiterals(sql, pg)).toEqual(["ACME"]);
+  });
+
+  it("takes the columns a typed table function declares as output names", () => {
+    expect(
+      analyzeSql("SELECT * FROM json_to_record(doc) AS t(company_name text, n int)", pg)?.aliases,
+    ).toEqual(["company_name", "n"]);
+  });
+
+  it("never looks up columns of a CTE or of a relation the statement creates", () => {
+    expect(
+      analyzeSql("WITH x AS (SELECT id FROM crm.people) SELECT id INTO copy FROM x", pg)?.tables,
+    ).toEqual([{ schema: "crm", name: "people" }]);
+  });
+
+  it("names the targets of MERGE, TRUNCATE and DROP, and keeps several targets generic", () => {
+    expect(
+      analyzeTableOps("MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN DELETE", pg),
+    ).toEqual({
+      writes: ["t"],
+      reads: ["s"],
+      writeOp: "merge",
+    });
+    expect(analyzeTableOps("TRUNCATE a.t1, t2", pg)).toEqual({
+      writes: ["a.t1", "t2"],
+      reads: [],
+      writeOp: "truncate",
+    });
+    expect(analyzeTableOps("DROP TABLE a.t1, t2", pg)?.writes).toEqual(["a.t1", "t2"]);
+    expect(statementReceipt("DROP TABLE a.t1, t2", pg)).toBeNull();
+    expect(statementReceipt("TRUNCATE a.t1, t2", pg)).toBeNull();
+  });
+
+  it("reads a statement node-sql-parser could not, without inventing tables for it", () => {
+    expect(analyzeTableOps("VACUUM crm.people", pg)).toBeNull();
+    expect(countsRows("VACUUM crm.people", pg)).toBe(false);
   });
 });
 

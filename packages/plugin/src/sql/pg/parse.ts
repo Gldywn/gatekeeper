@@ -14,18 +14,39 @@ export async function loadPgParser(): Promise<boolean> {
 // libpg_query's scanner token for a string constant: plain, E'', N'' (its quote part) or dollar.
 const SCONST = 261;
 
+export interface PgText {
+  tree: ParseResult;
+  tokens: ScanToken[];
+}
+
 // "ambiguous" when the text may not mean what the parser reads: C stops at a NUL, and with the
 // server's standard_conforming_strings off (the parser assumes on) a backslash-quote moves
 // statement ends. Null when PostgreSQL's grammar rejects the text.
-export function parsePg(sql: string): ParseResult | "ambiguous" | null {
+export function readPg(sql: string): PgText | "ambiguous" | null {
   if (sql.includes("\0")) return "ambiguous";
   try {
-    if (scanSync(sql).tokens.some((t) => ordinaryString(t) && t.text.includes("\\'")))
-      return "ambiguous";
-    return parseSync(sql);
+    const tokens = scanSync(sql).tokens;
+    if (tokens.some((t) => ordinaryString(t) && t.text.includes("\\'"))) return "ambiguous";
+    return { tree: parseSync(sql), tokens };
   } catch {
     return null;
   }
+}
+
+// A string constant as written between its delimiters, escapes kept, so it still matches the
+// query text; null when no string token starts at that byte offset.
+export function writtenString(tokens: ScanToken[], location: number): string | null {
+  const text = tokens.find((t) => t.start === location && t.tokenType === SCONST)?.text;
+  if (text === undefined) return null;
+  const dollar = /^\$[A-Za-z_]*[A-Za-z0-9_]*\$/.exec(text)?.[0];
+  if (dollar) return text.slice(dollar.length, -dollar.length);
+  return text.replace(/^[eE]/, "").slice(1, -1);
+}
+
+// An ordinary string holding a backslash: its value depends on the server's
+// standard_conforming_strings, which the parser does not know.
+export function ordinaryBackslash(tokens: ScanToken[]): boolean {
+  return tokens.some((t) => ordinaryString(t) && t.text.includes("\\"));
 }
 
 function ordinaryString(token: ScanToken): boolean {
