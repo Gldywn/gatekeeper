@@ -1,6 +1,6 @@
 import type { EvaluationInput } from "@gatekeeper/shared";
+import { parser } from "../nsp/parser";
 import { sensitiveReference } from "../schema";
-import { parser } from "../sql-parser";
 import {
   type CallArg,
   type CallResult,

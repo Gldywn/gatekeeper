@@ -21,7 +21,6 @@ vi.mock("./anim", () => ({ enter: vi.fn(), reveal: vi.fn(), pulse: vi.fn() }));
 
 import { Gatekeeper } from "./app";
 import { dbLink } from "./render/dblink";
-import { mapDialect } from "./sql/readonly";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -57,7 +56,7 @@ function harness(databaseType = "postgresql") {
     autoBusy: false,
     cards: [] as Card[],
     mode: "read",
-    dialect: mapDialect(databaseType),
+    databaseType,
     conn: {
       id: 1,
       connectionName: "test",

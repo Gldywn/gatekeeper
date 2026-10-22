@@ -10,8 +10,9 @@ import {
   outcomeMeta,
 } from "../html";
 import { agentBadge, alertTriangleIcon, chevronDown } from "../icons";
+import { textSchema } from "../sql/inspect";
 import { visibleControls } from "../sql/sanitize";
-import { type SchemaContext, sensitivityOf, textSchema } from "../sql/schema";
+import { type SchemaContext, sensitivityOf } from "../sql/schema";
 import type { ActivityEntry } from "../types";
 import { approvalLabel } from "./auto";
 import { auditItem, doneRowHtml } from "./inbox";
@@ -40,7 +41,7 @@ const monthOf = (key: string) => key.slice(0, 7);
 export function activityDayChunks(
   activity: ActivityEntry[],
   selected: string | null,
-  dialect: string,
+  databaseType: string,
   // false for an older page appended below: it arrives all folded.
   openNewest = true,
 ): DayChunk[] {
@@ -63,7 +64,7 @@ export function activityDayChunks(
   const chunks: DayChunk[] = [];
   for (const d of days) {
     const month = monthOf(d.key) === thisMonth ? null : monthOf(d.key);
-    const html = dayHtml(d.key, d.ts, d.entries, d.key === openKey, selected, dialect);
+    const html = dayHtml(d.key, d.ts, d.entries, d.key === openKey, selected, databaseType);
     const open = d.key === openKey;
     const last = chunks.at(-1);
     if (last && last.month === month) {
@@ -95,10 +96,10 @@ export function activityMonthHtml(chunk: DayChunk, open = false): string {
 export function activityDaysHtml(
   activity: ActivityEntry[],
   selected: string | null,
-  dialect: string,
+  databaseType: string,
   openNewest = true,
 ): string {
-  return activityDayChunks(activity, selected, dialect, openNewest)
+  return activityDayChunks(activity, selected, databaseType, openNewest)
     .map((c) => (c.month === null ? c.html : activityMonthHtml(c, c.open)))
     .join("");
 }
@@ -125,12 +126,12 @@ function dayHtml(
   entries: ActivityEntry[],
   open: boolean,
   selected: string | null,
-  dialect: string,
+  databaseType: string,
 ): string {
   const count = dayCount(entries.length, new Set(entries.map((e) => e.sessionId)).size);
   // A folded day ships without its rows: the view builds them on first unfold, so a
   // long prefetched history costs one line per day.
-  const body = open ? activityDayBodyHtml(key, entries, selected, dialect) : "";
+  const body = open ? activityDayBodyHtml(key, entries, selected, databaseType) : "";
   return `
         <section class="act-day${open ? "" : " collapsed"}">
           <button class="act-day-head" type="button" data-day="${escapeHtml(key)}" aria-expanded="${open}">
@@ -147,7 +148,7 @@ export function activityDayBodyHtml(
   day: string,
   entries: ActivityEntry[],
   selected: string | null,
-  dialect: string,
+  databaseType: string,
 ): string {
   const sessions = new Map<string, ActivityEntry[]>();
   for (const e of entries) {
@@ -159,7 +160,7 @@ export function activityDayBodyHtml(
     }
   }
   return [...sessions.entries()]
-    .map(([sid, group]) => activityGroupHtml(day, sid, group, selected, dialect))
+    .map(([sid, group]) => activityGroupHtml(day, sid, group, selected, databaseType))
     .join("");
 }
 
@@ -197,7 +198,7 @@ export function activityGroupHtml(
   sessionId: string,
   entries: ActivityEntry[],
   selected: string | null,
-  dialect: string,
+  databaseType: string,
 ): string {
   const first = entries[0];
   const harness = first.harness?.trim() || null;
@@ -211,21 +212,25 @@ export function activityGroupHtml(
             <span class="act-sess-name">${escapeHtml(name)}</span>
             ${title ? `<span class="act-sess-title" title="${titleText}">${titleText}</span>` : ""}
           </div>
-          <div class="act-entries">${entries.map((e) => activityEntryHtml(e, selected === e.id, dialect)).join("")}</div>
+          <div class="act-entries">${entries.map((e) => activityEntryHtml(e, selected === e.id, databaseType)).join("")}</div>
         </section>`;
 }
 
 // One decision as a selectable row; the right pane shows it in full. The sensitivity flags
 // stay on the row so the eye finds them while scanning.
-export function activityEntryHtml(e: ActivityEntry, selected: boolean, dialect: string): string {
+export function activityEntryHtml(
+  e: ActivityEntry,
+  selected: boolean,
+  databaseType: string,
+): string {
   const ts = e.decidedAt ?? e.createdAt;
   return doneRowHtml(
     auditItem(e, null),
     selected,
     "audit",
     `<span class="act-time">${escapeHtml(clockTime(ts))}</span>`,
-    dialect,
-    entryFlags(e, textSchema(e.sql, dialect)),
+    databaseType,
+    entryFlags(e, textSchema(e.sql, databaseType)),
     true,
   );
 }

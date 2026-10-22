@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parser } from "../sql-parser";
+import { parser } from "../nsp/parser";
 
 // The read walker accepts only node shapes pinned here. A parser upgrade that changes one
 // must fail this file before it can change an analysis.

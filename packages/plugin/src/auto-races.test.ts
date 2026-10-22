@@ -92,7 +92,7 @@ function harness() {
     autoBusy: false,
     autoRuns: 0,
     mode: "read",
-    dialect: "postgresql",
+    databaseType: "postgresql",
     conn: {
       id: 1,
       connectionName: "test",
@@ -129,7 +129,7 @@ function harness() {
   });
   app.serverVersion = "PostgreSQL 16.2 on x86_64-pc-linux-gnu";
   app.annotator = new SchemaAnnotator({
-    dialect: () => app.dialect,
+    databaseType: () => app.databaseType,
     generation: () => app.connGeneration,
     defaultSchema: () => "public",
     getColumns: async () => [],

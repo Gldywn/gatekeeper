@@ -1,4 +1,5 @@
 import type { Column, TableIndex } from "@beekeeperstudio/plugin";
+import { analyzeSql, sensitiveLiterals } from "./sql/inspect";
 import {
   checkLoad,
   type Facts,
@@ -19,23 +20,17 @@ import {
   resolveRead,
   searchPathVerified,
 } from "./sql/read-analysis";
-import {
-  analyzeSql,
-  clientColumns,
-  piiColumns,
-  type SchemaContext,
-  sensitiveLiterals,
-} from "./sql/schema";
+import { clientColumns, piiColumns, type SchemaContext } from "./sql/schema";
 
 // Live views into the owning app's state, read on demand so the annotator never
-// holds a stale dialect, schema, or connection generation across an await.
+// holds a stale engine, schema, or connection generation across an await.
 interface SchemaAnnotatorDeps {
   getColumns: (table: string, schema?: string) => Promise<Column[]>;
-  // Runs one catalog-only query built by the dialect module, never the proposal itself.
+  // Runs one catalog-only query built by the engine's module, never the proposal itself.
   getMetadata?: (sql: string) => Promise<Record<string, unknown>[]>;
   // Beekeeper 5.5 and later; absent or failing means the index list is unknown.
   getIndexes?: (table: string, schema?: string) => Promise<TableIndex[]>;
-  dialect: () => string;
+  databaseType: () => string;
   defaultSchema: () => string | undefined;
   generation: () => number;
 }
@@ -58,7 +53,7 @@ export class SchemaAnnotator {
   // not parse, or undefined when a connection switch invalidated the column fetch
   // mid-flight. Host-side only: no table or column name from here ever reaches the broker.
   async schemaFor(sql: string): Promise<SchemaContext | null | undefined> {
-    const parsed = analyzeSql(sql, this.deps.dialect());
+    const parsed = analyzeSql(sql, this.deps.databaseType());
     if (!parsed) {
       return null;
     }
@@ -85,7 +80,7 @@ export class SchemaAnnotator {
       tables: parsed.tables.map((t) => (t.schema ? `${t.schema}.${t.name}` : t.name)),
       pii: piiColumns(parsed, inspectedColumns),
       client: clientColumns(parsed, inspectedColumns),
-      literals: sensitiveLiterals(sql, this.deps.dialect()),
+      literals: sensitiveLiterals(sql, this.deps.databaseType()),
       star: parsed.star,
       ...(this.deps.getMetadata ? { analysis } : {}),
     };
@@ -100,7 +95,7 @@ export class SchemaAnnotator {
     sql: string,
     authorized: () => boolean = () => true,
   ): Promise<ReadSnapshot | undefined> {
-    const plan = planRead(sql, this.deps.dialect());
+    const plan = planRead(sql, this.deps.databaseType());
     if (typeof plan === "string") return { complete: false, reasons: [plan] };
     const getMetadata = this.deps.getMetadata;
     if (!getMetadata) return { complete: false, reasons: ["Metadata unavailable"] };
@@ -143,15 +138,15 @@ export class SchemaAnnotator {
     sql: string,
     authorized: () => boolean = () => true,
   ): Promise<LoadResult | undefined> {
-    const dialect = this.deps.dialect();
-    const plan = planLoad(sql, dialect);
+    const databaseType = this.deps.databaseType();
+    const plan = planLoad(sql, databaseType);
     if (!plan.relations.length) return checkLoad(plan, new Map());
     if (plan.relations.length > MAX_RELATIONS) return checkLoad(plan, "skipped");
     const generation = this.deps.generation();
     const revision = this.revision;
     const current = () =>
       authorized() && generation === this.deps.generation() && revision === this.revision;
-    const pg = dialect === "postgresql";
+    const pg = databaseType === "postgresql";
     let stats: StatRow[] | null = null;
     if (pg) {
       if (!this.deps.getMetadata) return checkLoad(plan, "unavailable");

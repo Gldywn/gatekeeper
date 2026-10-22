@@ -1,9 +1,10 @@
 import type { EvaluationInput } from "@gatekeeper/shared";
 import { classifyQuery } from "./classify";
+import { analyzeSql, sensitiveLiterals } from "./inspect";
 import { catalogFirst, SEARCH_PATH_SQL } from "./pg/catalog";
 import { type PgReadPlan, pgMetadataSql, planPg, resolvePg } from "./pg/plan";
 import { preparePgSql } from "./pg/syntax";
-import { analyzeSql, sensitiveLiterals, sensitiveReference } from "./schema";
+import { sensitiveReference } from "./schema";
 
 export { sensitiveReference };
 export type ReadPlan = PgReadPlan;

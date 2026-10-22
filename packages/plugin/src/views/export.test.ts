@@ -97,7 +97,7 @@ function harness(activity: (scope?: string, before?: unknown) => Promise<Activit
     broker: { activity: broker },
     scope: () => "scope",
     connectionName: () => "billing-staging",
-    dialect: () => "postgresql",
+    databaseType: () => "postgresql",
   });
   // A click on one control, as the delegated listener sees it.
   const click = (selector: string) => {

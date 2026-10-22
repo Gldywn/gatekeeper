@@ -2,14 +2,16 @@ import { describe, expect, it } from "vitest";
 import {
   analyzeSql,
   analyzeTableOps,
+  countsRows,
+  sensitiveLiterals,
+  statementReceipt,
+} from "./inspect";
+import {
   classifyColumn,
   clientColumns,
-  countsRows,
   looksLikeClientData,
   looksLikePii,
   piiColumns,
-  sensitiveLiterals,
-  statementReceipt,
 } from "./schema";
 
 describe("analyzeTableOps", () => {
@@ -66,12 +68,12 @@ describe("analyzeTableOps", () => {
   });
 
   it("names the target of a SELECT ... INTO in T-SQL, including a temporary table", () => {
-    expect(analyzeTableOps("SELECT * INTO staging_copy FROM crm.people", "transactsql")).toEqual({
+    expect(analyzeTableOps("SELECT * INTO staging_copy FROM crm.people", "sqlserver")).toEqual({
       writes: ["staging_copy"],
       reads: ["crm.people"],
       writeOp: "create",
     });
-    expect(analyzeTableOps("SELECT * INTO #staging_copy FROM crm.people", "transactsql")).toEqual({
+    expect(analyzeTableOps("SELECT * INTO #staging_copy FROM crm.people", "sqlserver")).toEqual({
       writes: ["#staging_copy"],
       reads: ["crm.people"],
       writeOp: "create",
@@ -362,7 +364,7 @@ describe("analyzeSql", () => {
       ["mysql", "SELECT JSON_EXTRACT(profile, '$.email') FROM people", ["email"]],
       ["mariadb", "SELECT JSON_EXTRACT(profile, '$.email') FROM people", ["email"]],
       ["sqlite", "SELECT json_extract(profile, '$.email') FROM people", ["email"]],
-      ["transactsql", "SELECT JSON_VALUE(profile, '$.email') FROM people", ["email"]],
+      ["sqlserver", "SELECT JSON_VALUE(profile, '$.email') FROM people", ["email"]],
       ["bigquery", "SELECT JSON_EXTRACT_SCALAR(profile, '$.email') FROM people", ["email"]],
     ];
     for (const [dialect, sql, keys] of cases) {
@@ -744,7 +746,7 @@ describe("sensitiveLiterals", () => {
     const cases: Array<[string, string, string[]]> = [
       ["postgresql", "UPDATE billing.firms SET company_name = E'ACME' WHERE id = 1", ["ACME"]],
       ["postgresql", "UPDATE billing.firms SET company_name = $$ACME$$ WHERE id = 1", ["ACME"]],
-      ["transactsql", "INSERT INTO billing.firms (company_name) VALUES (N'ACME')", ["ACME"]],
+      ["sqlserver", "INSERT INTO billing.firms (company_name) VALUES (N'ACME')", ["ACME"]],
       ["postgresql", "UPDATE billing.firms SET company_name = '' WHERE id = 1", []],
     ];
     for (const [dialect, sql, literals] of cases) {
@@ -871,7 +873,7 @@ describe("sensitiveLiterals", () => {
 
   it("reads the string literal a dialect spells its own way", () => {
     expect(
-      sensitiveLiterals("SELECT id FROM firms WHERE company_name = N'ACME'", "transactsql"),
+      sensitiveLiterals("SELECT id FROM firms WHERE company_name = N'ACME'", "sqlserver"),
     ).toEqual(["ACME"]);
     expect(
       sensitiveLiterals('SELECT id FROM firms WHERE company_name = "ACME"', "bigquery"),

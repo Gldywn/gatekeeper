@@ -12,7 +12,7 @@ import type { HistResult } from "../result";
 import { classifyQuery } from "../sql/classify";
 import { formatSql } from "../sql/format";
 import { highlight } from "../sql/highlight";
-import { textSchema } from "../sql/schema";
+import { textSchema } from "../sql/inspect";
 import type { HistItem } from "../types";
 
 // The grid's own header, pager and the row-count footer under it, so a grid scrolled into
@@ -23,7 +23,7 @@ const GRID_MIN_PX = 240;
 interface DetailViewDeps {
   root: HTMLElement;
   annotator: SchemaAnnotator;
-  dialect: () => string;
+  databaseType: () => string;
   // The kept rows of an approved request, opened; throws when they cannot be shown.
   loadRows: (id: string) => Promise<HistResult>;
   // The app's Copy and Export menus, closed so none is left open in the place the rows leave.
@@ -53,7 +53,7 @@ export class DetailView {
   private pending = 0;
   private readonly root: HTMLElement;
   private readonly annotator: SchemaAnnotator;
-  private readonly dialect: () => string;
+  private readonly databaseType: () => string;
   private readonly loadRows: (id: string) => Promise<HistResult>;
   // The one result held in memory: the open item's rows, so reopening it never fetches again.
   private opened: { id: string; result: HistResult } | null = null;
@@ -62,7 +62,7 @@ export class DetailView {
   constructor(deps: DetailViewDeps) {
     this.root = deps.root;
     this.annotator = deps.annotator;
-    this.dialect = deps.dialect;
+    this.databaseType = deps.databaseType;
     this.loadRows = deps.loadRows;
     this.closeMenus = deps.closeMenus;
   }
@@ -96,7 +96,7 @@ export class DetailView {
     panel.innerHTML = detailHtml(
       item,
       annotate === "text" ? "audit" : "hist",
-      this.dialect(),
+      this.databaseType(),
       this.requestOpen === item.id,
       loading,
     );
@@ -121,7 +121,7 @@ export class DetailView {
     this.detailItem = shown;
     if (result?.rows.length) this.opened = { id: item.id, result };
     const block = panel.querySelector(".dt-result");
-    if (block) block.outerHTML = detailResultHtml(shown, this.dialect());
+    if (block) block.outerHTML = detailResultHtml(shown, this.databaseType());
     this.mountGrid(panel, shown);
   }
 
@@ -225,7 +225,7 @@ export class DetailView {
     const raw =
       source === "live"
         ? await this.annotator.schemaFor(item.sql)
-        : textSchema(item.sql, this.dialect());
+        : textSchema(item.sql, this.databaseType());
     if (this.detailItem?.id !== item.id) {
       return;
     }
@@ -236,11 +236,11 @@ export class DetailView {
     // together, as on the pending card.
     const cm = this.root.querySelector<HTMLElement>("#detail-cm");
     if (cm) {
-      const dialect = this.dialect();
+      const databaseType = this.databaseType();
       cm.innerHTML = accessMatrix(
         item.sql,
-        dialect,
-        classifyQuery(item.sql, dialect).class,
+        databaseType,
+        classifyQuery(item.sql, databaseType).class,
         schema,
       );
     }

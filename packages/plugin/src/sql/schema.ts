@@ -1,6 +1,4 @@
 import type { SensitivityRecord } from "@gatekeeper/shared";
-import { prepareSql } from "./identifiers";
-import { parser } from "./sql-parser";
 
 export interface SchemaContext {
   tables: string[];
@@ -125,30 +123,11 @@ export function classifyColumn(column: string): "pii" | "client" | null {
   return null;
 }
 
-// The parser encodes each entry as "{type}::{qualifier}::{name}"; the name we
-// want is always the last segment.
-function lastSegment(entry: string): string {
-  const parts = entry.split("::");
-  return parts[parts.length - 1] ?? "";
-}
-
-// A table entry is "{type}::{schema}::{name}"; the schema is "null" when the SQL
-// left the table unqualified.
-function parseTableRef(entry: string): TableRef | null {
-  const parts = entry.split("::");
-  const name = parts[parts.length - 1] ?? "";
-  if (!name) {
-    return null;
-  }
-  const qualifier = parts.length >= 3 ? (parts[parts.length - 2] ?? "") : "";
-  return { schema: qualifier && qualifier !== "null" ? qualifier : null, name };
-}
-
-function unique(values: string[]): string[] {
+export function unique(values: string[]): string[] {
   return [...new Set(values)];
 }
 
-function dedupeRefs(refs: TableRef[]): TableRef[] {
+export function dedupeRefs(refs: TableRef[]): TableRef[] {
   const seen = new Set<string>();
   const out: TableRef[] = [];
   for (const ref of refs) {
@@ -161,82 +140,12 @@ function dedupeRefs(refs: TableRef[]): TableRef[] {
   return out;
 }
 
-function isNode(x: unknown): x is Record<string, unknown> {
-  return typeof x === "object" && x !== null;
-}
-
-function walk(node: unknown, visit: (n: Record<string, unknown>) => void): void {
-  if (Array.isArray(node)) {
-    for (const child of node) walk(child, visit);
-    return;
-  }
-  if (!isNode(node)) return;
-  visit(node);
-  for (const key of Object.keys(node)) walk(node[key], visit);
-}
-
-// The parser's typings allow a value node as alias besides the usual plain string.
-function aliasName(as: unknown): string | null {
-  if (typeof as === "string") return as;
-  if (isNode(as) && typeof as.value === "string") return as.value;
-  return null;
-}
-
-// A relation renames its columns inside the alias itself, which the parser hands back
-// unsplit as the raw string "f(company_name, ...)". A quoted alias holding parentheses is
-// indistinguishable and is split too; a quoted column name holding them never matches.
-const RELATION_COLUMN_LIST = /^[^()]+\(([^()]*)\)$/;
-
-function relationColumnAliases(as: unknown): string[] {
-  const alias = aliasName(as);
-  const columns = alias ? RELATION_COLUMN_LIST.exec(alias.trim())?.[1] : undefined;
-  if (columns === undefined) return [];
-  return columns
-    .split(",")
-    .map((c) => c.trim())
-    .filter(Boolean);
-}
-
-// A table function has no relation to rename, so its alias names the single output column
-// it returns ("FROM unnest(tags) AS contact_email") instead of standing for a table.
-function isFunctionRelation(item: Record<string, unknown>): boolean {
-  return item.type === "unnest" || (isNode(item.expr) && item.expr.type === "function");
-}
-
-// The parser's columnList carries only the source column, so "c.name AS company_name"
-// reaches the classifier as a bare "name" unless the alias is collected from the AST.
-// RETURNING is a select list under its own node type, hence the second type here.
-function outputAliases(ast: unknown): string[] {
-  const aliases: string[] = [];
-  walk(ast, (n) => {
-    if ((n.type === "select" || n.type === "returning") && Array.isArray(n.columns)) {
-      for (const item of n.columns) {
-        const alias = isNode(item) ? aliasName(item.as) : null;
-        if (alias) aliases.push(alias);
-      }
-    }
-    if (Array.isArray(n.from)) {
-      for (const item of n.from) {
-        if (!isNode(item)) continue;
-        const renamed = relationColumnAliases(item.as);
-        if (renamed.length > 0) {
-          aliases.push(...renamed);
-          continue;
-        }
-        const alias = isFunctionRelation(item) ? aliasName(item.as) : null;
-        if (alias) aliases.push(alias);
-      }
-    }
-  });
-  return unique(aliases);
-}
-
-// Accessors that read one key out of a JSON document; the parser keeps the key in
-// the right operand and reports only the containing column.
+// Accessors that read one key out of a JSON document; the key, not the containing column,
+// is what the query exposes.
 export const JSON_OPERATORS = new Set(["->", "->>", "#>", "#>>"]);
 // Outside snowflake, every dialect names its JSON functions with "json" in them
 // (json_extract, jsonb_extract_path_text, JSON_VALUE): a dialect-generic match.
-const JSON_FUNCTION = /json/i;
+export const JSON_FUNCTION = /json/i;
 // A path operand ("$.contact.email", "{contact,email}") holds a key per segment, while
 // anything else is one literal key whose dots belong to it ("email.txt").
 const JSON_PATH = /^\s*[${]/;
@@ -256,52 +165,6 @@ export function jsonKeyNames(path: string): string[] {
   );
 }
 
-// The parser spreads a function name over name.name[] and name.schema (an unqualified
-// bigquery name lands in the latter, a qualifier in the other), so any part counts.
-function isJsonFunction(node: Record<string, unknown>): boolean {
-  let match = false;
-  walk(node.name, (n) => {
-    if (typeof n.value === "string" && JSON_FUNCTION.test(n.value)) match = true;
-  });
-  return match;
-}
-
-// The operands one node reads its keys from: what an accessor operator takes on the
-// right (a path, or an array of them), the subscripts of a bracketed column, or the
-// arguments a JSON function takes after the document itself.
-function keyOperands(node: Record<string, unknown>): unknown[] {
-  if (node.type === "binary_expr" && JSON_OPERATORS.has(String(node.operator))) {
-    const right = node.right;
-    const list = isNode(right) && isNode(right.expr_list) ? right.expr_list.value : null;
-    return Array.isArray(list) ? list : [right];
-  }
-  if (node.type === "column_ref" && Array.isArray(node.array_index)) {
-    return node.array_index.map((entry) => (isNode(entry) ? entry.index : null));
-  }
-  if (node.type !== "function" || !isJsonFunction(node)) {
-    return [];
-  }
-  const args = isNode(node.args) && Array.isArray(node.args.value) ? node.args.value : [];
-  // The document comes first and the keys after it; a call that already starts on a
-  // string builds or parses a document rather than reading one.
-  return args.length < 2 || stringLiteral(args[0]) !== null ? [] : args.slice(1);
-}
-
-function accessorKeys(node: Record<string, unknown>): string[] {
-  return keyOperands(node).flatMap((operand) => {
-    const path = stringLiteral(operand);
-    return path === null ? [] : jsonKeyNames(path);
-  });
-}
-
-function jsonKeys(ast: unknown): string[] {
-  const keys: string[] = [];
-  walk(ast, (n) => {
-    keys.push(...accessorKeys(n));
-  });
-  return unique(keys);
-}
-
 export interface ParsedQuery {
   tables: TableRef[];
   // Source column names as the parser resolves them, plus the column lists it folds into
@@ -316,189 +179,21 @@ export interface ParsedQuery {
   star: boolean;
 }
 
-// Returns null when the parser cannot handle the statement, so the caller can
-// skip annotation rather than show something wrong.
-export function analyzeSql(sql: string, dialect: string): ParsedQuery | null {
-  try {
-    const input = prepareSql(sql, dialect);
-    const { tableList, columnList, ast } = parser.parse(input.sql, { database: dialect });
-    const refs = tableList
-      .map(parseTableRef)
-      .filter((ref): ref is TableRef => ref !== null)
-      .map((ref) => ({
-        schema: ref.schema === null ? null : input.name(ref.schema),
-        name: input.name(ref.name),
-      }));
-    let star = false;
-    const columns: string[] = [];
-    for (const entry of columnList) {
-      const name = lastSegment(entry);
-      if (name === "(.*)" || name === "*") {
-        star = true;
-        continue;
-      }
-      if (name) {
-        columns.push(input.name(name));
-      }
-    }
-    return {
-      tables: dedupeRefs(refs),
-      columns: unique(columns),
-      aliases: outputAliases(input.restoreAst(ast)),
-      jsonKeys: jsonKeys(ast),
-      star,
-    };
-  } catch {
-    return null;
-  }
+// The tables a statement writes versus reads, for the card's Writes/Deletes annotation.
+export interface TableOps {
+  writes: string[];
+  reads: string[];
+  writeOp: string | null;
 }
 
-function formatRef(ref: TableRef): string {
-  return ref.schema ? `${ref.schema}.${ref.name}` : ref.name;
-}
-
-interface WriteTarget {
-  ref: TableRef;
+// The one operation a simple statement performs and the tables it names, for the decided receipt.
+export interface Receipt {
   op: string;
+  tables: string[];
 }
 
-// Only the keyword separates a file from a table: a quoted Postgres identifier reaches
-// `expr` as a string literal exactly like an OUTFILE path, and MySQL accepts a path in
-// double quotes. Anything else is the table "SELECT ... INTO t" creates.
-function intoTarget(node: Record<string, unknown>): WriteTarget | null {
-  const keyword = typeof node.keyword === "string" ? node.keyword.toUpperCase() : null;
-  if (keyword === "OUTFILE" || keyword === "DUMPFILE") {
-    const path = stringLiteral(node.expr);
-    return path === null ? null : { ref: { schema: null, name: path }, op: "export" };
-  }
-  // "INTO @var" holds var nodes rather than a name, and binds nothing durable.
-  const name = typeof node.expr === "string" ? node.expr : stringLiteral(node.expr);
-  return name === null ? null : { ref: { schema: null, name }, op: "create" };
-}
-
-// CREATE VIEW keeps its target in the create node ("{db, view}"), never in tableList.
-function viewTarget(node: Record<string, unknown>): WriteTarget | null {
-  const view = node.view;
-  if (!isNode(view) || typeof view.view !== "string") {
-    return null;
-  }
-  return {
-    ref: { schema: typeof view.db === "string" ? view.db : null, name: view.view },
-    op: "create",
-  };
-}
-
-// The write destinations tableList does not carry, because the parser keeps them in the
-// statement node instead of the table list: a SELECT ... INTO target and a CREATE VIEW.
-function astWriteTargets(ast: unknown): WriteTarget[] {
-  const targets: WriteTarget[] = [];
-  walk(ast, (n) => {
-    // A select with no INTO still carries an `into` placeholder, without a type.
-    if (n.type === "into") {
-      const target = intoTarget(n);
-      if (target) targets.push(target);
-      return;
-    }
-    if (n.type === "create" && n.keyword === "view") {
-      const target = viewTarget(n);
-      if (target) targets.push(target);
-    }
-  });
-  return targets;
-}
-
-// The tables a modifying query writes to versus reads from: the table list split on its
-// per-entry operation prefix ("{op}::{schema}::{table}"), plus the destinations that live
-// in the AST alone. Feeds the card's Writes/Deletes annotation.
-export function analyzeTableOps(
-  sql: string,
-  dialect: string,
-): { writes: string[]; reads: string[]; writeOp: string | null } | null {
-  let tableList: string[];
-  let ast: unknown;
-  let input: ReturnType<typeof prepareSql>;
-  try {
-    input = prepareSql(sql, dialect);
-    ({ tableList, ast } = parser.parse(input.sql, { database: dialect }));
-    ast = input.restoreAst(ast);
-  } catch {
-    return null;
-  }
-  const writes: TableRef[] = [];
-  const reads: TableRef[] = [];
-  let writeOp: string | null = null;
-  for (const entry of tableList) {
-    const op = entry.split("::")[0]?.toLowerCase() ?? "";
-    const ref = parseTableRef(entry);
-    if (!ref) {
-      continue;
-    }
-    ref.name = input.name(ref.name);
-    if (ref.schema !== null) ref.schema = input.name(ref.schema);
-    if (op === "select") {
-      reads.push(ref);
-    } else {
-      writes.push(ref);
-      writeOp ??= op;
-    }
-  }
-  for (const target of astWriteTargets(ast)) {
-    writes.push(target.ref);
-    writeOp ??= target.op;
-  }
-  return {
-    writes: dedupeRefs(writes).map(formatRef),
-    reads: dedupeRefs(reads).map(formatRef),
-    writeOp,
-  };
-}
-
-// The one operation a simple statement performs and the tables it names, for the decided
-// receipt. Anything the parse cannot vouch for (several statements, a CTE, SELECT ... INTO,
-// MERGE, a call, several targets) gets null, and the receipt stays generic.
-const RECEIPT_OPS = new Set(["select", "insert", "update", "delete", "drop", "truncate"]);
-export function statementReceipt(
-  sql: string,
-  dialect: string,
-): { op: string; tables: string[] } | null {
-  let ast: unknown;
-  try {
-    ({ ast } = parser.parse(prepareSql(sql, dialect).sql, { database: dialect }));
-  } catch {
-    return null;
-  }
-  if (Array.isArray(ast)) {
-    if (ast.length !== 1) return null;
-    ast = ast[0];
-  }
-  if (!isNode(ast) || typeof ast.type !== "string" || ast.with) {
-    return null;
-  }
-  const type = ast.type.toLowerCase();
-  const ops = RECEIPT_OPS.has(type) ? analyzeTableOps(sql, dialect) : null;
-  if (!ops) {
-    return null;
-  }
-  if (type === "select") {
-    return ops.writes.length || !ops.reads.length ? null : { op: "SELECT", tables: ops.reads };
-  }
-  return ops.writes.length === 1 && ops.writeOp === type
-    ? { op: type.toUpperCase(), tables: ops.writes }
-    : null;
-}
-
-// A driver's affected count measures rows only for a statement that changes rows: DDL reports a
-// conventional zero. SQL the parser cannot read is judged by its leading verb.
-const ROW_OPS = new Set(["insert", "update", "delete", "replace", "merge"]);
-export function countsRows(sql: string, dialect: string): boolean {
-  try {
-    const { ast } = parser.parse(prepareSql(sql, dialect).sql, { database: dialect });
-    const top = Array.isArray(ast) ? ast : [ast];
-    return top.length === 1 && isNode(top[0]) && ROW_OPS.has(String(top[0].type).toLowerCase());
-  } catch {
-    const bare = sql.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/--[^\n]*/g, " ");
-    return /^\s*(insert|update|delete|replace|merge)\b/i.test(bare);
-  }
+export function formatRef(ref: TableRef): string {
+  return ref.schema ? `${ref.schema}.${ref.name}` : ref.name;
 }
 
 type ExposedInput = Pick<ParsedQuery, "columns" | "star"> &
@@ -529,193 +224,13 @@ export function clientColumns(parsed: ExposedInput, tableColumns: string[]): str
   return unique(exposedColumns(parsed, tableColumns).filter((c) => classifyColumn(c) === "client"));
 }
 
-const COMPARISON_OPS = new Set([
-  "=",
-  "!=",
-  "<>",
-  "<",
-  ">",
-  "<=",
-  ">=",
-  "LIKE",
-  "ILIKE",
-  "NOT LIKE",
-  "NOT ILIKE",
-  "SIMILAR TO",
-  "NOT SIMILAR TO",
-  "~",
-  "~*",
-  "!~",
-  "!~*",
-  // MySQL/MariaDB and SQLite spell the regex family their own way.
-  "REGEXP",
-  "NOT REGEXP",
-  "RLIKE",
-  "NOT RLIKE",
-  "GLOB",
-  "IN",
-  "NOT IN",
-  "BETWEEN",
-  "NOT BETWEEN",
-  // SQLite compares values with IS/IS NOT; on "IS NULL" they carry no literal anyway.
-  "IS",
-  "IS NOT",
-]);
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const IBAN_RE = /^[A-Za-z]{2}\d{2}[A-Za-z0-9]{10,30}$/;
-const CARD_LIKE_RE = /^\d{13,19}$/;
-
-// A column name as the parser spells it: a plain string, a value node, or a nested
-// expr, depending on the dialect and on whether the identifier was quoted.
-function columnLabel(node: unknown): string | null {
-  if (typeof node === "string") return node;
-  if (isNode(node)) {
-    if (typeof node.value === "string") return node.value;
-    if (isNode(node.expr) && typeof node.expr.value === "string") return node.expr.value;
-  }
-  return null;
-}
-
-function columnName(node: unknown): string | null {
-  if (!isNode(node) || node.type !== "column_ref") return null;
-  return columnLabel(node.column);
-}
-
-// The quoted spans of a raw SQL fragment the parser kept as text instead of modelling,
-// escapes included so the value still matches the query text. Single quotes only: the
-// parser re-quotes an unmodelled operand (IS DISTINCT FROM) with double quotes, where a
-// value and a bare column read alike.
-const RAW_QUOTED = /'((?:[^'\\]|''|\\.)*)'/g;
-
-// Node types holding a plain string literal, one per dialect family: "string" is
-// BigQuery's double-quoted form, "var_string" the T-SQL N'ACME' one.
-const STRING_NODES = new Set([
-  "single_quote_string",
-  "double_quote_string",
-  "string",
-  "var_string",
-]);
-
-// The literal values a node carries. Beyond the string nodes, the parser leaves E'ACME'
-// as raw text in a "default" node, and dollar-quoted $$ACME$$ as a "var" whose prefix and
-// suffix match (which a $1 bind parameter, having no suffix, never does).
-function literalValues(node: unknown): string[] {
-  if (!isNode(node)) return [];
-  const t = node.type;
-  if (typeof t === "string" && STRING_NODES.has(t) && typeof node.value === "string") {
-    return [node.value];
-  }
-  if (t === "var" && typeof node.name === "string" && typeof node.prefix === "string") {
-    return node.prefix === node.suffix ? [node.name] : [];
-  }
-  if (t === "default" && typeof node.value === "string") {
-    return [...node.value.matchAll(RAW_QUOTED)].map((m) => m[1]);
-  }
-  return [];
-}
-
-// A node the grammar allows only one string in: an OUTFILE path, a SELECT ... INTO target.
-function stringLiteral(node: unknown): string | null {
-  return literalValues(node)[0] ?? null;
-}
-
-// Either side of a comparison can wrap what it compares: lower(col), col::text,
-// COALESCE(col, ''), max(col), = ANY(ARRAY[...]). Descending those wrappers yields
-// the operands that carry the signal, and stopping at every other node keeps a
-// subquery's own literals out.
-function operands(node: unknown): Record<string, unknown>[] {
-  if (!isNode(node)) return [];
-  const t = node.type;
-  // A JSON function is an operand in itself: splitting it into arguments would drop the
-  // key it reads (json_extract(profile, '$.email')), which is where its meaning sits.
-  if (t === "function" && !isJsonFunction(node)) return operands(node.args);
-  if (t === "aggr_func") return operands(isNode(node.args) ? node.args.expr : null);
-  if (t === "cast") return operands(node.expr);
-  if (t === "array") return operands(node.expr_list);
-  if (t === "expr_list") return Array.isArray(node.value) ? node.value.flatMap(operands) : [];
-  return [node];
-}
-
-// An operand names what it compares through its column or, for a JSON accessor, through
-// its key (profile->>'company_name' carries its meaning in the key, never in "profile").
-function hasSensitiveColumn(node: unknown): boolean {
-  return operands(node).some((operand) => {
-    const col = columnName(operand);
-    if (col !== null && classifyColumn(col) !== null) return true;
-    return accessorKeys(operand).some((key) => classifyColumn(key) !== null);
-  });
-}
-
-// String literals that expose a sensitive value in the query text itself: a value
-// bound to a PII/client column (WHERE company_name = 'ACME', SET company_name = 'ACME',
-// an inserted row), or one whose shape is itself sensitive. Display and sharing checks
-// consume the same detection, before display preferences are applied.
-export function sensitiveLiterals(sql: string, dialect: string): string[] {
-  let ast: unknown;
-  try {
-    const input = prepareSql(sql, dialect);
-    ast = input.restoreAst(parser.astify(input.sql, { database: dialect }));
-  } catch {
-    return [];
-  }
-  const found = new Set<string>();
-  // An empty value carries nothing and would tint every '' in the rendered query.
-  const add = (value: string) => {
-    if (value !== "") {
-      found.add(value);
-    }
-  };
-  const addLiteral = (node: unknown) => {
-    for (const value of literalValues(node)) add(value);
-  };
-  walk(ast, (n) => {
-    for (const value of literalValues(n)) {
-      if (
-        EMAIL_RE.test(value) ||
-        IBAN_RE.test(value) ||
-        CARD_LIKE_RE.test(value.replace(/[ -]/g, ""))
-      ) {
-        add(value);
-      }
-    }
-    // Assignments hang off `set` wherever they appear: UPDATE, MySQL INSERT ... SET,
-    // and the update branch of an upsert (ON CONFLICT / ON DUPLICATE KEY).
-    if (Array.isArray(n.set)) {
-      for (const item of n.set) {
-        if (!isNode(item)) continue;
-        const col = columnLabel(item.column);
-        if (col && classifyColumn(col)) addLiteral(item.value);
-      }
-    }
-    // INSERT/REPLACE ... VALUES: the column list lines up positionally with each row.
-    if (Array.isArray(n.columns) && isNode(n.values) && Array.isArray(n.values.values)) {
-      const columns = n.columns.map(columnLabel);
-      for (const row of n.values.values) {
-        if (!isNode(row) || !Array.isArray(row.value)) continue;
-        row.value.forEach((value, i) => {
-          const col = columns[i];
-          if (col && classifyColumn(col)) addLiteral(value);
-        });
-      }
-    }
-    if (n.type !== "binary_expr" || !COMPARISON_OPS.has(String(n.operator).toUpperCase())) {
-      return;
-    }
-    for (const [side, other] of [
-      [n.left, n.right],
-      [n.right, n.left],
-    ] as const) {
-      if (!hasSensitiveColumn(side)) {
-        continue;
-      }
-      for (const operand of operands(other)) {
-        for (const value of literalValues(operand)) {
-          add(value);
-        }
-      }
-    }
-  });
-  return [...found];
+// A value whose shape is sensitive whatever column it meets: an email, an IBAN, a card number.
+export function sensitiveShape(value: string): boolean {
+  return (
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) ||
+    /^[A-Za-z]{2}\d{2}[A-Za-z0-9]{10,30}$/.test(value) ||
+    /^\d{13,19}$/.test(value.replace(/[ -]/g, ""))
+  );
 }
 
 /** Local sensitive-name screening for every source, alias and JSON key sent for evaluation. */
@@ -730,22 +245,6 @@ export function sensitiveReference(name: string): boolean {
     /^(?:ip|ipaddress|ipv4address|ipv6address)$/i.test(name.replace(/_/g, "")) ||
     /(?:^|_)ip(?:_|$)/i.test(name)
   );
-}
-
-// What the statement text alone exposes: no table columns, so a SELECT * shows nothing
-// here. The Audit Trail reads this instead of querying the database it audits.
-export function textSchema(sql: string, dialect: string): SchemaContext | null {
-  const parsed = analyzeSql(sql, dialect);
-  if (!parsed) {
-    return null;
-  }
-  return {
-    tables: parsed.tables.map((t) => (t.schema ? `${t.schema}.${t.name}` : t.name)),
-    pii: piiColumns(parsed, []),
-    client: clientColumns(parsed, []),
-    literals: sensitiveLiterals(sql, dialect),
-    star: parsed.star,
-  };
 }
 
 export function sensitivityOf(schema: SchemaContext): SensitivityRecord {

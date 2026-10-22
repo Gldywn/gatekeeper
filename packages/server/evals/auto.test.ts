@@ -7,13 +7,9 @@ import {
   AUTO_POLICY as PLUGIN_POLICY,
   AUTO_THRESHOLDS as PLUGIN_THRESHOLDS,
 } from "../../plugin/src/sql/auto";
+import { analyzeSql, sensitiveLiterals } from "../../plugin/src/sql/inspect";
 import { planRead } from "../../plugin/src/sql/read-analysis";
-import {
-  analyzeSql,
-  looksLikeClientData,
-  looksLikePii,
-  sensitiveLiterals,
-} from "../../plugin/src/sql/schema";
+import { looksLikeClientData, looksLikePii } from "../../plugin/src/sql/schema";
 import {
   AUTO_MODEL,
   AUTO_POLICY,

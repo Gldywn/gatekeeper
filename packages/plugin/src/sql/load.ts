@@ -1,7 +1,7 @@
-import { stripExplain } from "./classify";
 import { prepareSql } from "./identifiers";
+import { stripExplain } from "./nsp/classify";
+import { parser } from "./nsp/parser";
 import { identifierLiteral, preparePgSql } from "./pg/syntax";
-import { parser } from "./sql-parser";
 
 // The proposal is never planned before approval: the PostgreSQL planner evaluates
 // IMMUTABLE and STABLE functions, and EXPLAIN takes the statement's locks.

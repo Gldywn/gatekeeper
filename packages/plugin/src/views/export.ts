@@ -36,11 +36,11 @@ import {
 interface ExportDialogDeps {
   root: HTMLElement;
   broker: Pick<BrokerClient, "activity">;
-  // The broker's scope key, the connection's display name and its dialect, captured on open so a
+  // The broker's scope key, the connection's display name and its databaseType, captured on open so a
   // connection switch mid-export cannot mix two connections in one file.
   scope: () => string | undefined;
   connectionName: () => string;
-  dialect: () => string;
+  databaseType: () => string;
 }
 
 const FILTERS: Record<ExportFormat, { name: string; extensions: string[] }> = {
@@ -64,7 +64,7 @@ export class ExportDialog {
   private feed: ExportFeed | null = null;
   private bounds: PeriodBounds = periodBounds(new Date());
   private connection = "";
-  private dialect = "";
+  private databaseType = "";
   private period: ExportPeriod = "last7";
   private format: ExportFormat = "md";
   private pick: DayPick = emptyPick();
@@ -137,7 +137,7 @@ export class ExportDialog {
     this.gen++;
     this.open_ = true;
     this.connection = this.deps.connectionName();
-    this.dialect = this.deps.dialect();
+    this.databaseType = this.deps.databaseType();
     this.feed = new ExportFeed(this.deps.broker, this.deps.scope());
     this.bounds = periodBounds(new Date());
     this.period = "last7";
@@ -347,7 +347,7 @@ export class ExportDialog {
     try {
       const flags = await exportFlags(
         entries,
-        this.dialect,
+        this.databaseType,
         (done) => {
           if (gen !== this.gen) return;
           this.preparing = { done, total: entries.length };

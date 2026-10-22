@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isReadOnlyQuery, mapDialect } from "./readonly";
+import { isReadOnlyQuery } from "./readonly";
 
 describe("isReadOnlyQuery", () => {
   it("allows a plain SELECT", () => {
@@ -40,21 +40,5 @@ describe("isReadOnlyQuery", () => {
     expect(isReadOnlyQuery("")).toBe(false);
     expect(isReadOnlyQuery("   ")).toBe(false);
     expect(isReadOnlyQuery("-- just a comment")).toBe(false);
-  });
-});
-
-describe("mapDialect", () => {
-  it("maps sqlserver to the parser's transactsql", () => {
-    expect(mapDialect("sqlserver")).toBe("transactsql");
-  });
-
-  it("passes through parser-supported dialects", () => {
-    expect(mapDialect("mysql")).toBe("mysql");
-    expect(mapDialect("sqlite")).toBe("sqlite");
-  });
-
-  it("defaults unknown database types to postgresql", () => {
-    expect(mapDialect("cockroach")).toBe("postgresql");
-    expect(mapDialect("")).toBe("postgresql");
   });
 });

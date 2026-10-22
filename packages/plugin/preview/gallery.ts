@@ -24,7 +24,7 @@ import { CONNECTION, duplicateRows, NOW, SQL, session, weekRows } from "./fixtur
 if (!(await loadPgParser())) console.error("[preview] PostgreSQL parser failed to load");
 
 const MIN = 60_000;
-const DIALECT = "postgresql";
+const DATABASE_TYPE = "postgresql";
 
 const SQL_MORE = {
   purge: `DELETE FROM sessions WHERE last_seen < now() - interval '90 days'`,
@@ -557,8 +557,8 @@ const label = (text: string) => `<div class="g-label">${escapeHtml(text)}</div>`
 function rowsSection(): string {
   const lines = DONE.map(
     (s, i) => `<div class="g-row">${label(s.label)}
-      <section class="pane pane-list g-pane"><div class="pane-body">${recentRowHtml(s.hist, i === 0, DIALECT)}</div></section>
-      <section class="pane pane-list g-pane"><div class="pane-body">${activityEntryHtml(s.entry, i === 0, DIALECT)}</div></section>
+      <section class="pane pane-list g-pane"><div class="pane-body">${recentRowHtml(s.hist, i === 0, DATABASE_TYPE)}</div></section>
+      <section class="pane pane-list g-pane"><div class="pane-body">${activityEntryHtml(s.entry, i === 0, DATABASE_TYPE)}</div></section>
     </div>`,
   ).join("");
   return `<h2 id="rows">Rows</h2><p class="g-note">Left, Recently resolved. Right, the Audit Trail. Both list the server's record; the first row is selected.</p>
@@ -569,7 +569,7 @@ function cardsSection(): string {
   return `<h2 id="pending">Pending approval detail</h2>${CARDS.map((c) => {
     const drafts = new Map<string, string>(c.draft ? [[c.card.id, c.draft]] : []);
     return `<div class="g-detail">${label(c.label + (c.mode ? ` (mode: ${c.mode})` : ""))}
-      <section class="pane pane-detail g-pane-detail"><div class="pane-body"><div class="queue">${whoLine(c.card.session)}${cardHtml(c.card, DIALECT, drafts, c.mode ?? "read", c.connReadOnly ?? false)}</div></div></section>
+      <section class="pane pane-detail g-pane-detail"><div class="pane-body"><div class="queue">${whoLine(c.card.session)}${cardHtml(c.card, DATABASE_TYPE, drafts, c.mode ?? "read", c.connReadOnly ?? false)}</div></div></section>
     </div>`;
   }).join("")}`;
 }

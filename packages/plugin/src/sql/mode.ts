@@ -12,7 +12,7 @@ export function modeRank(mode: RiskMode): number {
 
 // Whether the armed mode may approve this query: never a blocked (multi-statement,
 // unparseable) one, and only up to the mode's own risk rank.
-export function isApprovable(sql: string, dialect: string, mode: RiskMode): boolean {
-  const v = classifyQuery(sql, dialect);
+export function isApprovable(sql: string, databaseType: string, mode: RiskMode): boolean {
+  const v = classifyQuery(sql, databaseType);
   return !v.blocked && rank(v.class) <= modeRank(mode);
 }

@@ -3,7 +3,7 @@
 process.env.TZ = "UTC";
 
 import { describe, expect, it, vi } from "vitest";
-import { textSchema } from "../sql/schema";
+import { textSchema } from "../sql/inspect";
 import type { ActivityEntry } from "../types";
 import {
   activityCsv,

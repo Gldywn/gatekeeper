@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { classifyQuery } from "./classify";
 import { prepareSql } from "./identifiers";
+import { analyzeSql, analyzeTableOps, sensitiveLiterals } from "./inspect";
+import { parser } from "./nsp/parser";
 import { identifierLiteral, validIdentifier } from "./pg/syntax";
-import { analyzeSql, analyzeTableOps, sensitiveLiterals } from "./schema";
-import { parser } from "./sql-parser";
 
 describe("PostgreSQL identifier parser contract", () => {
   it("represents ordered array aggregation and text formatting explicitly", () => {
