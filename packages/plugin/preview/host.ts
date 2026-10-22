@@ -6,6 +6,7 @@ import type {
   PrimaryKey,
   RunQueryResult,
   Table,
+  TableIndex,
   TableKey,
 } from "@beekeeperstudio/plugin";
 import { installBroker } from "./broker";
@@ -92,6 +93,11 @@ export async function getPrimaryKeys(): Promise<PrimaryKey[]> {
 }
 
 export async function getOutgoingKeys(): Promise<TableKey[]> {
+  return [];
+}
+
+// Asked only for a table with a large estimate, which the failing catalog reads never give.
+export async function getTableIndexes(): Promise<TableIndex[]> {
   return [];
 }
 
