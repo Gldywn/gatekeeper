@@ -220,3 +220,28 @@ describe("sensitivity record read back", () => {
     }
   });
 });
+
+describe("request history", () => {
+  it("refuses the delete servers before 0.3.0 still run, and keeps the request", () => {
+    const ctx = createContext();
+    try {
+      migrate(ctx.db);
+      ctx.db
+        .prepare(`INSERT INTO requests
+        (id, created_at, session_id, sql, state, decided_at, expires_at)
+        VALUES ('old', 1, 's1', 'SELECT 1', 'approved', 2, 3)`)
+        .run();
+      // The retention statement of 0.1.x and 0.2.0, verbatim.
+      const legacy = ctx.db.prepare(
+        "DELETE FROM requests WHERE decided_at IS NOT NULL AND decided_at < ?",
+      );
+      expect(() => legacy.run(Date.now())).toThrow("Request history is kept");
+      // Opening the store again and today's sweep are unaffected.
+      migrate(ctx.db);
+      sweep(ctx);
+      expect(get(ctx, "old")?.id).toBe("old");
+    } finally {
+      ctx.db.close();
+    }
+  });
+});
