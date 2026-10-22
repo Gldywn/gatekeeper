@@ -12,12 +12,16 @@ import { AUTO_EVALUATING, cardHtml } from "../src/render/queue";
 import { capResult, type HistResult } from "../src/result";
 import { AUTO_POLICY, AUTO_THRESHOLDS } from "../src/sql/auto";
 import type { RiskMode } from "../src/sql/mode";
+import { loadPgParser } from "../src/sql/pg/parse";
 import type { SchemaContext } from "../src/sql/schema";
 import type { Card, HistItem } from "../src/types";
 import { CONNECTION, duplicateRows, NOW, SQL, session, weekRows } from "./fixtures";
 
 // Every state a row, a pending card and a decided detail can take, drawn by the plugin's
 // own renderers, so a redesign is judged against all of them at once.
+
+// The cards below classify their SQL, so the grammar loads first, as in src/main.ts.
+if (!(await loadPgParser())) console.error("[preview] PostgreSQL parser failed to load");
 
 const MIN = 60_000;
 const DIALECT = "postgresql";

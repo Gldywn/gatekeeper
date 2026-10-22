@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
+import { libpgQueryWasm } from "./vite.libpg-query";
 
 // A dev-only preview of the real plugin fed by fixtures (preview/). It deliberately loads
 // neither vite.config.ts nor the Beekeeper Vite plugin, which installs itself into
@@ -14,6 +15,7 @@ export default defineConfig({
   define: {
     __GK_BUILD__: JSON.stringify({ version: "0.3.1", dev: { branch: "preview" } }),
   },
+  plugins: [libpgQueryWasm()],
   resolve: {
     alias: [{ find: /^@beekeeperstudio\/plugin$/, replacement: here("preview/host.ts") }],
   },

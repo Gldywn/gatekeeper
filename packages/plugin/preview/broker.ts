@@ -114,8 +114,16 @@ async function route(url: URL, init?: RequestInit): Promise<Response> {
 }
 
 export function installBroker(): void {
+  const native = window.fetch.bind(window);
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
+    const url = new URL(
+      typeof input === "string" || input instanceof URL ? input : input.url,
+      location.href,
+    );
+    // The PostgreSQL grammar's WASM is a static asset of this page, not a broker call.
+    if (url.origin === location.origin && url.pathname.endsWith("/libpg-query.wasm")) {
+      return native(input, init);
+    }
     if (url.origin !== BROKER) {
       throw new Error(`[preview broker] blocked ${url.href}`);
     }
