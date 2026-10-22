@@ -4,19 +4,23 @@ import type { BrokerClient } from "../net/broker";
 import {
   activityCsv,
   activityDayBodyHtml,
+  activityDayChunks,
   activityDaysHtml,
   activityFlagLabels,
   activityJson,
   activityMarkdown,
+  activityMonthHtml,
   activityShell,
   activityTailError,
   activityTailLoading,
+  activityTailMore,
   entryFlags,
 } from "../render/activity";
+import { emptyListHtml } from "../render/inbox";
 import { textSchema } from "../sql/schema";
 import type { ActivityEntry } from "../types";
 
-// How far below the overlay's fold the list end may sit and still start the next load.
+// How far below the pane's fold the list end may sit and still start the next load.
 const PREFETCH_PX = 240;
 
 const dayOf = (e: ActivityEntry) => dayKey(e.decidedAt ?? e.createdAt);
@@ -42,26 +46,29 @@ interface ActivityViewDeps {
   // Raw connection name for the broker's scope header, which unlike the display
   // connectionName has no databaseName/"connection" fallback.
   scope: () => string | undefined;
-  // The audit-trail head's connection chip, built from the live snapshot by app.ts.
-  connChip: () => string;
   // The connection dialect, so each entry's read/write/destructive class can be parsed.
   dialect: () => string;
+  // The entry open in the Inbox's right pane, marked as current in the list.
+  selected: () => string | null;
+  // Called once the first page is on screen, so the right pane can follow an empty trail.
+  rendered?: () => void;
 }
 
-// Owns the connection-scoped activity overlay (#activity): a durable, PII-safe audit
-// of what ran on this connection. Holds the fetched feed and which rows are expanded;
-// reuses the .detail overlay chrome and is refreshed on every open.
+// Owns the connection-scoped Audit Trail in the Inbox's left pane (#listAudit): a durable,
+// PII-safe audit of what ran on this connection. Holds the fetched feed; refreshed every time
+// the tab opens.
 export class ActivityView {
-  // The durable activity feed, fetched fresh each time the overlay opens; the set
-  // tracks which entries have their full SQL expanded in place.
+  // The durable activity feed, fetched fresh each time the tab opens.
   private activity: ActivityEntry[] = [];
-  private readonly activityExpanded = new Set<string>();
   private readonly root: HTMLElement;
   private readonly broker: BrokerClient;
   private readonly connectionName: () => string;
   private readonly scope: () => string | undefined;
-  private readonly connChip: () => string;
   private readonly dialect: () => string;
+  private readonly selected: () => string | null;
+  private readonly rendered: () => void;
+  // The first page has been shown since the last open, so an empty feed is known to be empty.
+  private settled = false;
   // Fetched but not shown: the oldest day reached so far, held until a later page (or the
   // end of history) proves it whole, so every day on screen has its full count and export.
   private partial: ActivityEntry[] = [];
@@ -80,43 +87,50 @@ export class ActivityView {
     this.broker = deps.broker;
     this.connectionName = deps.connectionName;
     this.scope = deps.scope;
-    this.connChip = deps.connChip;
     this.dialect = deps.dialect;
+    this.selected = deps.selected;
+    this.rendered = deps.rendered ?? (() => {});
   }
 
   async open(): Promise<void> {
-    const panel = this.root.querySelector<HTMLDivElement>("#activity");
+    const panel = this.root.querySelector<HTMLDivElement>("#listAudit");
     if (!panel) {
       return;
     }
     this.stop();
-    // A fresh open forgets the previous feed and which rows were expanded.
     this.activity = [];
     this.partial = [];
     this.more = undefined;
-    this.activityExpanded.clear();
-    panel.innerHTML = activityShell("", this.connChip());
-    panel.hidden = false;
+    this.settled = false;
+    panel.innerHTML = activityShell();
     await this.loadOlder();
   }
 
   close(): void {
     // Abandon any in-flight load; its rows are about to be torn down.
     this.stop();
-    const panel = this.root.querySelector<HTMLDivElement>("#activity");
-    if (panel && !panel.hidden) {
-      panel.hidden = true;
+    const panel = this.root.querySelector<HTMLDivElement>("#listAudit");
+    if (panel) {
       panel.innerHTML = "";
     }
   }
 
-  // Connection switch: drop the feed and close the overlay, which now shows a
-  // different connection's audit trail.
+  // Connection switch: drop the feed, which belonged to the previous connection.
   reset(): void {
+    this.settled = false;
     this.activity = [];
     this.partial = [];
-    this.activityExpanded.clear();
     this.close();
+  }
+
+  // The newest decision fetched, for the trail's first view.
+  newest(): ActivityEntry | undefined {
+    return this.activity[0];
+  }
+
+  // An entry already on screen, for the right pane.
+  entry(id: string): ActivityEntry | undefined {
+    return this.activity.find((e) => e.id === id);
   }
 
   private stop(): void {
@@ -185,16 +199,27 @@ export class ActivityView {
       this.activity = entries;
       this.renderActivity();
     } else {
-      // Older whole days only ever go below: what the human has open above stays as is.
+      // Older whole days only ever go below: what the human has open above stays as is. A
+      // page that continues a month already shown lands inside that month, not under a twin.
       this.activity.push(...entries);
-      this.root
-        .querySelector<HTMLElement>("#activity .act-body")
-        ?.insertAdjacentHTML(
-          "beforeend",
-          activityDaysHtml(entries, this.activityExpanded, this.dialect(), false),
-        );
+      const body = this.root.querySelector<HTMLElement>("#listAudit .act-body");
+      for (const chunk of activityDayChunks(entries, this.selected(), this.dialect(), false)) {
+        const month =
+          chunk.month &&
+          body?.querySelector<HTMLElement>(
+            `.act-month[data-month-key="${chunk.month}"] .act-month-body`,
+          );
+        if (month) {
+          month.insertAdjacentHTML("beforeend", chunk.html);
+        } else {
+          body?.insertAdjacentHTML(
+            "beforeend",
+            chunk.month ? activityMonthHtml(chunk) : chunk.html,
+          );
+        }
+      }
     }
-    this.setTail("");
+    this.setTail(this.more === true ? activityTailMore() : "");
     if (this.more === true) {
       this.watchTail();
     } else {
@@ -206,8 +231,8 @@ export class ActivityView {
   // Loads the next days while the list end is still within PREFETCH_PX of the fold, so
   // scrolling rarely meets the placeholder rows.
   private watchTail(): void {
-    const panel = this.root.querySelector<HTMLElement>("#activity");
-    const tail = this.root.querySelector<HTMLElement>("#activity .act-tail");
+    const panel = this.root.querySelector<HTMLElement>("#listAudit");
+    const tail = this.root.querySelector<HTMLElement>("#listAudit .act-tail");
     if (!panel || !tail) {
       return;
     }
@@ -215,7 +240,7 @@ export class ActivityView {
     if (!this.observer) {
       this.observer = new IntersectionObserver(
         (entries) => {
-          // A callback already queued when its overlay closed must not load into the next one.
+          // A callback already queued when its list closed must not load into the next one.
           if (gen === this.gen && entries.some((e) => e.isIntersecting)) {
             void this.loadOlder();
           }
@@ -238,29 +263,44 @@ export class ActivityView {
   }
 
   private setActivityBody(html: string): void {
-    const body = this.root.querySelector<HTMLElement>("#activity .act-body");
+    const body = this.root.querySelector<HTMLElement>("#listAudit .act-body");
     if (body) {
       body.innerHTML = html;
     }
   }
 
   private setTail(html: string): void {
-    const tail = this.root.querySelector<HTMLElement>("#activity .act-tail");
+    const tail = this.root.querySelector<HTMLElement>("#listAudit .act-tail");
     if (tail) {
       tail.innerHTML = html;
     }
   }
 
   private renderActivity(): void {
-    if (!this.activity.length) {
-      this.setActivityBody('<p class="act-status">No activity on this connection yet.</p>');
-      return;
+    this.settled = true;
+    this.setActivityBody(
+      this.activity.length
+        ? activityDaysHtml(this.activity, this.selected(), this.dialect())
+        : emptyListHtml("audit", this.connectionName()),
+    );
+    this.rendered();
+  }
+
+  // Loaded, and nothing recorded on this connection: no entry now, none held, none older.
+  isEmpty(): boolean {
+    return this.settled && !this.activity.length && !this.partial.length && this.more !== true;
+  }
+
+  // Fold a past month open or closed; its days keep their own state inside.
+  toggleMonth(head: HTMLElement): void {
+    const month = head.closest<HTMLElement>(".act-month");
+    if (month) {
+      head.setAttribute("aria-expanded", String(!month.classList.toggle("collapsed")));
     }
-    this.setActivityBody(activityDaysHtml(this.activity, this.activityExpanded, this.dialect()));
   }
 
   // Fold a day open or closed in place. A day that arrived folded has no rows yet: build
-  // them the first time it opens, leaving every other day and expanded row untouched.
+  // them the first time it opens, leaving every other day untouched.
   toggleDay(head: HTMLElement): void {
     const day = head.closest<HTMLElement>(".act-day");
     if (!day) {
@@ -274,33 +314,10 @@ export class ActivityView {
       body.innerHTML = activityDayBodyHtml(
         key,
         this.activity.filter((e) => dayOf(e) === key),
-        this.activityExpanded,
+        this.selected(),
         this.dialect(),
       );
     }
-  }
-
-  // Toggle a single entry's full SQL in place so expanding one row never rebuilds
-  // the list or loses the scroll position.
-  toggle(id: string): void {
-    const open = this.activityExpanded.has(id);
-    if (open) {
-      this.activityExpanded.delete(id);
-    } else {
-      this.activityExpanded.add(id);
-    }
-    const entry = this.root.querySelector<HTMLElement>(`#activity [data-act="${CSS.escape(id)}"]`);
-    if (!entry) {
-      return;
-    }
-    entry.classList.toggle("open", !open);
-    const detail = entry.querySelector<HTMLElement>(".act-detail");
-    if (detail) {
-      detail.hidden = open;
-    }
-    entry
-      .querySelector<HTMLElement>("[data-act-sql]")
-      ?.setAttribute("aria-expanded", String(!open));
   }
 
   // Deliberate human export of one session-day's timeline via the host's save dialog, as

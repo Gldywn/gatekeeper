@@ -65,12 +65,55 @@ describe("formatSql", () => {
     );
   });
 
+  it("lists SET assignments and WHERE conditions one per line, RETURNING on its own", () => {
+    const out = formatSql(
+      "UPDATE invoices AS i SET status = 'void', voided_at = now() WHERE i.id = 'x' AND i.amount_eur = 120 OR i.copies > 1 RETURNING i.id, i.status",
+    );
+    expect(out).toBe(
+      [
+        "UPDATE invoices AS i",
+        "SET",
+        "  status = 'void',",
+        "  voided_at = now()",
+        "WHERE i.id = 'x'",
+        "  AND i.amount_eur = 120",
+        "  OR i.copies > 1",
+        "RETURNING i.id, i.status",
+      ].join("\n"),
+    );
+  });
+
+  it("keeps the AND of a BETWEEN, any inside a CASE, and those of a subquery on their line", () => {
+    expect(formatSql("SELECT id FROM t WHERE a BETWEEN 1 AND 5 AND b = 2")).toBe(
+      ["SELECT", "  id", "FROM t", "WHERE a BETWEEN 1 AND 5", "  AND b = 2"].join("\n"),
+    );
+    expect(
+      formatSql("SELECT id FROM t WHERE CASE WHEN a = 1 AND b = 2 THEN true END AND c = 3"),
+    ).toBe(
+      [
+        "SELECT",
+        "  id",
+        "FROM t",
+        "WHERE CASE WHEN a = 1 AND b = 2 THEN true END",
+        "  AND c = 3",
+      ].join("\n"),
+    );
+    expect(
+      formatSql("SELECT id FROM t WHERE NOT EXISTS (SELECT 1 FROM u WHERE u.a = 1 AND u.b = 2)"),
+    ).toContain("WHERE NOT EXISTS (SELECT 1 FROM u WHERE u.a = 1 AND u.b = 2)");
+    // A BETWEEN inside a CASE must not swallow the next top-level AND.
+    expect(
+      formatSql("SELECT id FROM t WHERE CASE WHEN a BETWEEN 1 AND 5 THEN 1 END = 1 AND b = 2"),
+    ).toContain("END = 1\n  AND b = 2");
+  });
+
   it("is idempotent", () => {
     for (const sql of [
       "SELECT a, b FROM t WHERE a = 1",
       "select 1",
       "SELECT * FROM x LEFT OUTER JOIN y ON y.id = x.id",
       "SELECT id FROM users WHERE id IN (SELECT user_id FROM orders)",
+      "UPDATE t SET a = 1, b = 2 WHERE x = 1 AND y BETWEEN 1 AND 2 RETURNING id",
     ]) {
       const once = formatSql(sql);
       expect(formatSql(once)).toBe(once);

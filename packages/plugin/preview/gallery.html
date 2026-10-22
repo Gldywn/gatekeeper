@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gatekeeper states</title>
+    <style>
+      #gallery { max-width: 1240px; margin: 0 auto; padding: 24px 24px 80px; color: var(--text); font-family: var(--font-ui); }
+      #gallery h2 { margin: 40px 0 6px; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+      .g-nav { position: sticky; top: 0; z-index: 10; display: flex; gap: 18px; padding: 10px 0; background: var(--ground); font-size: 12px; }
+      .g-nav a { color: var(--muted); }
+      .g-note { margin: 0 0 12px; font-size: 12px; color: var(--faint); }
+      .g-row { display: grid; grid-template-columns: 240px 380px 380px; gap: 16px; align-items: start; margin-bottom: 10px; }
+      .g-head span { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); }
+      .g-label { padding-top: 10px; font-size: 12px; color: var(--muted); }
+      .g-pane, .g-pane-detail { height: auto; }
+      .g-pane .pane-body, .g-pane-detail .pane-body { overflow: visible; }
+      .g-detail { display: grid; grid-template-columns: 240px minmax(0, 760px); gap: 16px; align-items: start; margin-bottom: 18px; }
+    </style>
+  </head>
+  <body>
+    <div id="gallery"></div>
+    <script type="module" src="/preview/gallery.ts"></script>
+  </body>
+</html>

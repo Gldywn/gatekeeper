@@ -453,6 +453,54 @@ export function analyzeTableOps(
   };
 }
 
+// The one operation a simple statement performs and the tables it names, for the decided
+// receipt. Anything the parse cannot vouch for (several statements, a CTE, SELECT ... INTO,
+// MERGE, a call, several targets) gets null, and the receipt stays generic.
+const RECEIPT_OPS = new Set(["select", "insert", "update", "delete", "drop", "truncate"]);
+export function statementReceipt(
+  sql: string,
+  dialect: string,
+): { op: string; tables: string[] } | null {
+  let ast: unknown;
+  try {
+    ({ ast } = parser.parse(prepareSql(sql, dialect).sql, { database: dialect }));
+  } catch {
+    return null;
+  }
+  if (Array.isArray(ast)) {
+    if (ast.length !== 1) return null;
+    ast = ast[0];
+  }
+  if (!isNode(ast) || typeof ast.type !== "string" || ast.with) {
+    return null;
+  }
+  const type = ast.type.toLowerCase();
+  const ops = RECEIPT_OPS.has(type) ? analyzeTableOps(sql, dialect) : null;
+  if (!ops) {
+    return null;
+  }
+  if (type === "select") {
+    return ops.writes.length || !ops.reads.length ? null : { op: "SELECT", tables: ops.reads };
+  }
+  return ops.writes.length === 1 && ops.writeOp === type
+    ? { op: type.toUpperCase(), tables: ops.writes }
+    : null;
+}
+
+// A driver's affected count measures rows only for a statement that changes rows: DDL reports a
+// conventional zero. SQL the parser cannot read is judged by its leading verb.
+const ROW_OPS = new Set(["insert", "update", "delete", "replace", "merge"]);
+export function countsRows(sql: string, dialect: string): boolean {
+  try {
+    const { ast } = parser.parse(prepareSql(sql, dialect).sql, { database: dialect });
+    const top = Array.isArray(ast) ? ast : [ast];
+    return top.length === 1 && isNode(top[0]) && ROW_OPS.has(String(top[0].type).toLowerCase());
+  } catch {
+    const bare = sql.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/--[^\n]*/g, " ");
+    return /^\s*(insert|update|delete|replace|merge)\b/i.test(bare);
+  }
+}
+
 type ExposedInput = Pick<ParsedQuery, "columns" | "star"> &
   Partial<Pick<ParsedQuery, "aliases" | "jsonKeys">>;
 

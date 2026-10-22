@@ -3,7 +3,7 @@
   "mcp": {
     "gatekeeper": {
       "type": "local",
-      "command": ["node", "scripts/dev-server.mjs"],
+      "command": ["node", "packages/server/dist/index.js"],
       "cwd": ".",
       "enabled": true
     }

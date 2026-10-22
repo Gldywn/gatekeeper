@@ -214,8 +214,8 @@ itself is in neither the URL nor the prompt.
 - **Result caps.** The plugin caps the rows it forwards to the agent, by count and by
   serialized size, so a bulk read never floods the agent context or the LLM provider, and
   never overruns the broker body limit. The agent still learns the shape: the result
-  carries `truncated` and the true `rowCount`, and the human sees the cap in the history
-  row.
+  carries `truncated` and the true `rowCount`, and the human sees the cap under the
+  result grid.
 - **Cleartext local store.** Proposals live in a SQLite database under `~/.gatekeeper`
   (`0700`). That database holds proposal SQL, intent and engine errors, which can contain
   personal data. Returned rows and fields remain for the approved-result window. The
@@ -252,6 +252,9 @@ itself is in neither the URL nor the prompt.
   with the decision as three booleans (`policy_json.sensitivity`), never a table, column or
   value; requests decided before that, or never shown on a card, are
   flagged from their SQL text alone, which cannot see the columns behind a `SELECT *`.
+- Opening an entry shows result rows only while this plugin tab still holds them in memory
+  for that same approved request (Recently resolved). The broker never serves rows to the
+  trail.
 
 ## Supply-chain policy
 

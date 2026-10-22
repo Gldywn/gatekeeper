@@ -308,8 +308,11 @@ describe("check lifecycle", () => {
       confirmModal: { cancel: vi.fn() },
       annotator: { clearCache: vi.fn() },
       history: [],
-      activityView: { reset: vi.fn() },
+      activityView: { reset: vi.fn(), open: vi.fn() },
+      detailView: { close: vi.fn() },
       settingsView: { close: vi.fn() },
+      tab: "queue",
+      selection: { queue: { kind: "hist", id: "req_old" }, audit: { kind: "audit", id: "req_a" } },
       renderModeSurfaces: vi.fn(),
       renderHistory: vi.fn(),
       renderRoster: vi.fn(),
@@ -319,12 +322,121 @@ describe("check lifecycle", () => {
     });
     query.mockClear();
     app.onConnectionSwitch();
+    // Nothing the old connection had open stays on screen.
+    expect(app.selection).toEqual({ queue: null, audit: null });
+    expect(app.detailView.close).toHaveBeenCalled();
+    expect(app.activityView.reset).toHaveBeenCalled();
     expect(app.mode).toBe("read");
     expect(app.endpointRO).toBeNull();
     expect(app.layerRows()).toMatch(/Gatekeeper<\/span><span class="ro-state ok">/);
     expect(app.layerRows()).toMatch(/Endpoint<\/span><span class="ro-state mut">/);
     await settle();
     expect(query).toHaveBeenCalledOnce();
+  });
+});
+
+describe("server link", () => {
+  it("dates the last answer on a 2xx only, though an error status still reads connected", async () => {
+    const T = 1_800_000_000_000;
+    const now = vi.spyOn(Date, "now").mockReturnValue(T);
+    try {
+      vi.stubGlobal("window", { innerHeight: 800, setTimeout: vi.fn() });
+      const app = harness();
+      const pending = vi.fn().mockResolvedValue({ status: 204, ok: true, headers: new Headers() });
+      Object.assign(app, {
+        broker: { pending },
+        setServerHeader: vi.fn(),
+        connectionState: "connecting",
+        brokerAnsweredAt: 0,
+        pollFailures: 0,
+      });
+      await app.poll();
+      expect(app.connectionState).toBe("connected");
+      expect(app.brokerAnsweredAt).toBe(T);
+      now.mockReturnValue(T + 6_000);
+      pending.mockResolvedValue({ status: 500, ok: false, headers: new Headers() });
+      await app.poll();
+      expect(app.connectionState).toBe("connected");
+      expect(app.brokerAnsweredAt).toBe(T);
+    } finally {
+      now.mockRestore();
+    }
+  });
+});
+
+describe("status popovers", () => {
+  it("hides the open server popover once, and leaves Escape alone over the database one", () => {
+    const app = harness();
+    const attrs = new Set<string>();
+    const link = {
+      hasAttribute: (name: string) => attrs.has(name),
+      toggleAttribute: (name: string) => attrs.add(name),
+      querySelector: () => ({}),
+    };
+    let dbHovered = true;
+    app.root = {
+      querySelector: (s: string) => (s === "#agentLink" ? link : dbHovered ? {} : null),
+    };
+    expect(app.dismissAgentPop()).toBe(false);
+    dbHovered = false;
+    expect(app.dismissAgentPop()).toBe(true);
+    expect(attrs.has("data-dismissed")).toBe(true);
+    // Already hidden: this Escape goes on to whatever overlay is open.
+    expect(app.dismissAgentPop()).toBe(false);
+  });
+
+  it("hides an open legend entry's names once, then lets Escape go on", () => {
+    const app = harness();
+    const attrs = new Set<string>();
+    const slot = { toggleAttribute: (name: string) => attrs.add(name) && true };
+    let selector = "";
+    app.root = {
+      querySelector: (s: string) => {
+        selector = s;
+        return attrs.size ? null : slot;
+      },
+    };
+    expect(app.dismissLegendPop()).toBe(true);
+    expect(attrs.has("data-dismissed")).toBe(true);
+    expect(selector).toBe(".lg-slot:is(:hover, :focus-within):not([data-dismissed])");
+    expect(app.dismissLegendPop()).toBe(false);
+  });
+
+  it("rearms the hidden server popover only when its glyph is entered from outside", () => {
+    const app = harness();
+    app.root = { querySelector: () => null };
+    const link = { removeAttribute: vi.fn() };
+    const inner = { closest: () => glyph };
+    const glyph = { contains: (node: unknown) => node === inner, closest: () => link };
+    app.enterPopGlyph({ target: inner, relatedTarget: inner });
+    expect(link.removeAttribute).not.toHaveBeenCalled();
+    app.enterPopGlyph({ target: inner, relatedTarget: null });
+    expect(link.removeAttribute).toHaveBeenCalledWith("data-dismissed");
+  });
+
+  it("opens the server popover leftwards only when rightwards would cross the header", () => {
+    const app = harness();
+    const rect = (left: number, right: number) => ({
+      getBoundingClientRect: () => ({ left, right }),
+    });
+    const pop = {
+      offsetWidth: 200,
+      flip: false,
+      toggleAttribute(_: string, on: boolean) {
+        this.flip = on;
+      },
+    };
+    const parts: Record<string, unknown> = {
+      ".ag-ico": rect(450, 466),
+      "#agentPop": pop,
+      ".bar": rect(0, 600),
+    };
+    app.root = { querySelector: (s: string) => parts[s] ?? null };
+    app.placeAgentPop();
+    expect(pop.flip).toBe(true);
+    parts[".ag-ico"] = rect(300, 316);
+    app.placeAgentPop();
+    expect(pop.flip).toBe(false);
   });
 });
 
@@ -491,5 +603,48 @@ describe("server version for Stop", () => {
     pending.resolve(passing("PostgreSQL 16.2 on x86_64"));
     await settle();
     expect(app.serverVersion).toBeNull();
+  });
+});
+
+describe("narrow Back and audit rows", () => {
+  it("returns to the row left when it is on screen, else to the open tab", () => {
+    vi.stubGlobal("CSS", { escape: (s: string) => s });
+    const app = harness();
+    const tab = { focus: vi.fn() };
+    const row = { offsetParent: {} as unknown, focus: vi.fn() };
+    let held: typeof row | null = row;
+    const asked: string[] = [];
+    app.root = {
+      querySelector: (s: string) => {
+        asked.push(s);
+        if (s === "#inbox") return { setAttribute: vi.fn() };
+        if (s === '[data-tab][aria-selected="true"]') return tab;
+        return s === '#listAudit [data-row="q1"]' ? held : null;
+      },
+    };
+    app.tab = "audit";
+    app.selection = { audit: { kind: "audit", id: "q1" } };
+    app.showList();
+    expect(row.focus).toHaveBeenCalledTimes(1);
+    // Folded inside a closed day: in the DOM, with no box.
+    row.offsetParent = null;
+    app.showList();
+    // Gone after a reload, or pruned from Recently resolved.
+    held = null;
+    app.showList();
+    expect(row.focus).toHaveBeenCalledTimes(1);
+    expect(tab.focus).toHaveBeenCalledTimes(2);
+    vi.unstubAllGlobals();
+  });
+
+  it("attaches the rows this tab still holds to an audit record, and drops them once evicted", () => {
+    const app = harness();
+    const record = { id: "q1", status: "approved", note: "", sql: "SELECT 1" };
+    const held = { fields: [{ name: "a" }], rows: [{ a: 1 }], rowCount: 1, truncated: false };
+    const local = { ...record, result: held };
+    app.history = [local];
+    expect(app.withLocalRows(record).result).toBe(held);
+    local.result = { ...held, rows: [] };
+    expect(app.withLocalRows(record)).toBe(record);
   });
 });

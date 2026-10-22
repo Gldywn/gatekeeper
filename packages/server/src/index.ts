@@ -2,13 +2,14 @@
 // The npm `bin` entry points at the compiled dist/index.js; tsc preserves this
 // shebang, so `npx @gldywn/gatekeeper-mcp-server` execs it directly.
 import { randomBytes } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createBroker } from "./broker.js";
 import {
   BROKER_HOST,
   brokerPort,
+  brokerSocket,
   dbPath,
   MAX_PENDING_PER_SESSION,
   PROPOSAL_TTL_MS,
@@ -87,6 +88,10 @@ async function main(): Promise<void> {
 
   const broker = createBroker(store, pluginId, token, undefined, undefined, notifier);
   const port = brokerPort();
+  // Only a clean close unlinks the socket, so a child that crashed leaves it behind. The
+  // launcher's dir is private and tsx starts one child at a time: the file is never live.
+  const socket = brokerSocket();
+  if (socket) rmSync(socket, { force: true });
   let brokerOwner = false;
   let shuttingDown = false;
 
@@ -100,11 +105,13 @@ async function main(): Promise<void> {
         }
         resolve(false);
       };
-      broker.once("error", onError);
-      broker.listen(port, BROKER_HOST, () => {
+      const onListening = () => {
         broker.off("error", onError);
         resolve(true);
-      });
+      };
+      broker.once("error", onError);
+      if (socket) broker.listen(socket, onListening);
+      else broker.listen(port, BROKER_HOST, onListening);
     });
 
   brokerOwner = await tryBind();

@@ -16,6 +16,6 @@
     "erasableSyntaxOnly": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["src"],
+  "include": ["src", "preview"],
   "exclude": ["src/**/*.test.ts"]
 }

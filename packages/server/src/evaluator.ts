@@ -257,6 +257,26 @@ const holdReasons = new Set([
   "Auto mode disabled while evaluating",
   "Pairing lost",
   "Heavy query",
+  // Reachable from the plugin's PostgreSQL analysis; fixed text, never a source name.
+  "String escape semantics require manual review",
+  "Mixed set operation precedence needs manual review",
+  "Unresolved JSON path",
+  "Named windows need manual review",
+  "Unresolved cast",
+  "System information needs manual review",
+  "Custom function needs manual review",
+  "Whole JSON or opaque output needs manual review",
+  "Unresolved output type",
+  "Unresolved ordering or grouping type",
+  "Custom operator class needs manual review",
+  "Custom cast needs manual review",
+  "Function effects need manual review",
+  "Unresolved function or operator",
+  "Custom function or operator needs manual review",
+  "Custom operator needs manual review",
+  "System data needs manual review",
+  "Cast target needs manual review",
+  "Cast source needs manual review",
 ]);
 
 export const autoHoldRecord = z

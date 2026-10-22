@@ -2,7 +2,7 @@
 process.env.TZ = "UTC";
 
 import type { ActivityPage } from "@gatekeeper/shared";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BrokerClient } from "../net/broker";
 import type { ActivityEntry } from "../types";
 
@@ -65,6 +65,7 @@ function element() {
     insertAdjacentHTML(_where: string, html: string) {
       this.innerHTML += html;
     },
+    querySelector: (_sel: string): unknown => null,
   };
 }
 
@@ -80,9 +81,9 @@ function harness() {
     getBoundingClientRect: () => ({ top: tailTop, bottom: tailTop }),
   };
   const nodes: Record<string, unknown> = {
-    "#activity": panel,
-    "#activity .act-body": body,
-    "#activity .act-tail": tail,
+    "#listAudit": panel,
+    "#listAudit .act-body": body,
+    "#listAudit .act-tail": tail,
   };
   const activity = vi.fn<(scope?: string, before?: unknown) => Promise<ActivityPage | null>>();
   const view = new ActivityView({
@@ -90,7 +91,7 @@ function harness() {
     broker: { activity } as unknown as BrokerClient,
     connectionName: () => "conn",
     scope: () => "scope",
-    connChip: () => "",
+    selected: () => null,
     dialect: () => "postgresql",
   });
   const days = () => [...body.innerHTML.matchAll(/data-day="([^"]+)"/g)].map((m) => m[1]);
@@ -106,6 +107,9 @@ const runFrames = () => {
 };
 
 beforeEach(() => {
+  // Which days count as this month depends on the clock: pin it to the fixtures' date.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(T0);
   seq = 0;
   frames.clear();
   tailTop = 500;
@@ -116,6 +120,10 @@ beforeEach(() => {
     return frameId;
   });
   vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("splitWholeDays", () => {
@@ -247,7 +255,7 @@ describe("ActivityView paging", () => {
     expect(activity).toHaveBeenCalledTimes(3);
   });
 
-  it("ignores an observer callback that outlived its overlay", async () => {
+  it("ignores an observer callback that outlived its list", async () => {
     const { view, activity } = harness();
     activity.mockResolvedValueOnce({ activity: [entry(0), entry(1)], more: true });
     await view.open();
@@ -315,8 +323,8 @@ describe("ActivityView paging", () => {
       getAttribute: () => "2026-10-08",
     } as unknown as HTMLElement;
     view.toggleDay(head);
-    expect(body.innerHTML).toContain('data-act="req_000000000002"');
-    expect(body.innerHTML).not.toContain('data-act="req_000000000001"');
+    expect(body.innerHTML).toContain('data-row="req_000000000002"');
+    expect(body.innerHTML).not.toContain('data-row="req_000000000001"');
 
     body.childElementCount = 1;
     body.innerHTML = "kept";
@@ -334,7 +342,7 @@ describe("ActivityView paging", () => {
     expect(activity).toHaveBeenCalledTimes(1);
   });
 
-  it("drops a chained load queued before the overlay closed", async () => {
+  it("drops a chained load queued before the list closed", async () => {
     const { view, activity } = harness();
     activity
       .mockResolvedValueOnce({ activity: [entry(0), entry(1)], more: true })
@@ -344,5 +352,44 @@ describe("ActivityView paging", () => {
     view.close();
     runFrames();
     expect(activity).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("ActivityView months", () => {
+  it("folds a past month under one head and appends its later days inside it", async () => {
+    const { view, activity, body } = harness();
+    // T0 is Oct 9: two September days on the first page, a third on the next one.
+    const thisMonth = entry(0);
+    const sept30 = entry(9);
+    const sept28 = entry(11);
+    const sept20 = entry(19);
+    activity
+      .mockResolvedValueOnce({ activity: [thisMonth, sept30, sept28], more: true })
+      .mockResolvedValueOnce({ activity: [sept20], more: false });
+    await view.open();
+    // The current month's day stands on its own; September arrives folded, under its name.
+    expect(body.innerHTML).toContain('data-day="2026-10-09" aria-expanded="true"');
+    expect(body.innerHTML).toContain('data-month="2026-09" aria-expanded="false"');
+    expect(body.innerHTML).toContain("September 2026");
+    const september = element();
+    body.querySelector = (sel: string) =>
+      sel.includes('data-month-key="2026-09"') ? september : null;
+    await view.loadOlder();
+    expect(september.innerHTML).toContain('data-day="2026-09-20"');
+    expect(body.innerHTML.match(/data-month="2026-09"/g)).toHaveLength(1);
+  });
+});
+
+describe("ActivityView load control", () => {
+  it("ends the list on Load older days while older days exist, and on nothing once they do not", async () => {
+    const { view, activity, tail } = harness();
+    activity
+      .mockResolvedValueOnce({ activity: [entry(0), entry(1)], more: true })
+      .mockResolvedValueOnce({ activity: [entry(2)], more: false });
+    await view.open();
+    expect(tail.innerHTML).toContain("data-act-older");
+    expect(tail.innerHTML).toContain("Load older days");
+    await view.loadOlder();
+    expect(tail.innerHTML).toBe("");
   });
 });

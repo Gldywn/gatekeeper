@@ -4,62 +4,56 @@ import {
   activityLatency,
   capitalize,
   clockTime,
-  countsLabel,
   dayKey,
   dayLabel,
   escapeHtml,
   outcomeMeta,
-  previewSql,
-  rowsLabel,
 } from "../html";
 import {
+  agentBadge,
   alertTriangleIcon,
   chevronDown,
-  copyIcon,
   downloadIcon,
-  harnessIcon,
-  historyIcon,
   jsonIcon,
   markdownIcon,
-  pencilIcon,
   tableIcon,
-  trashIcon,
-  xIcon,
 } from "../icons";
-import { classifyQuery } from "../sql/classify";
-import { formatSql } from "../sql/format";
-import { highlight } from "../sql/highlight";
 import { visibleControls } from "../sql/sanitize";
 import { type SchemaContext, sensitivityOf, textSchema } from "../sql/schema";
 import type { ActivityEntry } from "../types";
-import { approvalHtml, approvalLabel, autoIcon } from "./auto";
+import { approvalLabel } from "./auto";
 import { flyoutMenu } from "./controls";
+import { auditItem, doneRowHtml } from "./inbox";
 
-export function activityShell(body: string, connChip: string): string {
-  return `
-      <div class="detail-card activity-card">
-        <div class="panel-head">
-          <span class="panel-head-ico">${historyIcon}</span>
-          <span class="panel-title">Audit Trail</span>
-          ${connChip}
-          <button class="detail-close" type="button" data-close aria-label="Close audit trail">${xIcon}</button>
-        </div>
-        <div class="act-body">${body}</div>
-        <div class="act-tail" aria-live="polite"></div>
-      </div>`;
+// The Audit Trail in the Inbox's left pane: its rows, then the tail that loads older days.
+export function activityShell(): string {
+  return '<div class="act-body"></div><div class="act-tail" aria-live="polite"></div>';
 }
+
+// The days of one feed, newest first: the current month's days stand on their own, and every
+// earlier day goes under its month, which arrives folded.
+export interface DayChunk {
+  // YYYY-MM for a past month's days; null for the current month's.
+  month: string | null;
+  monthLabel: string;
+  html: string;
+  // Holds the one day that starts open, so its month starts open too.
+  open: boolean;
+}
+
+const monthOf = (key: string) => key.slice(0, 7);
 
 // Group the feed by day, then by session within each day, preserving the server's
 // newest-first order throughout. Today lands open; older days fold so the log opens
 // on the latest activity, one click from any deeper day.
-export function activityDaysHtml(
+export function activityDayChunks(
   activity: ActivityEntry[],
-  expanded: Set<string>,
+  selected: string | null,
   dialect: string,
   // false for an older page appended below: it arrives all folded.
   openNewest = true,
-): string {
-  const days: { key: string; label: string; entries: ActivityEntry[] }[] = [];
+): DayChunk[] {
+  const days: { key: string; ts: number; entries: ActivityEntry[] }[] = [];
   for (const e of activity) {
     const ts = e.decidedAt ?? e.createdAt;
     const key = dayKey(ts);
@@ -67,39 +61,96 @@ export function activityDaysHtml(
     if (day) {
       day.entries.push(e);
     } else {
-      days.push({ key, label: dayLabel(ts), entries: [e] });
+      days.push({ key, ts, entries: [e] });
     }
   }
-  const today = dayKey(Date.now());
+  const now = Date.now();
+  const today = dayKey(now);
+  const thisMonth = monthOf(today);
   // Today when present, else the newest day, so exactly one day starts open.
   const openKey = openNewest ? (days.find((d) => d.key === today)?.key ?? days[0]?.key) : null;
-  return days
-    .map((d) => {
-      const total = d.entries.length;
-      const sessions = new Set(d.entries.map((e) => e.sessionId)).size;
-      const collapsed = d.key !== openKey;
-      const count = `&middot; ${total} ${total === 1 ? "query" : "queries"} &middot; ${sessions} ${sessions === 1 ? "session" : "sessions"}`;
-      // A folded day ships without its rows: the view builds them on first unfold, so a
-      // long prefetched history costs one line per day.
-      const body = collapsed ? "" : activityDayBodyHtml(d.key, d.entries, expanded, dialect);
-      return `
-        <section class="act-day${collapsed ? " collapsed" : ""}">
-          <button class="act-day-head" type="button" data-day="${escapeHtml(d.key)}" aria-expanded="${!collapsed}">
+  const chunks: DayChunk[] = [];
+  for (const d of days) {
+    const month = monthOf(d.key) === thisMonth ? null : monthOf(d.key);
+    const html = dayHtml(d.key, d.ts, d.entries, d.key === openKey, selected, dialect);
+    const open = d.key === openKey;
+    const last = chunks.at(-1);
+    if (last && last.month === month) {
+      last.html += html;
+      last.open ||= open;
+    } else {
+      const label = new Date(d.ts).toLocaleDateString(undefined, {
+        month: "long",
+        year: "numeric",
+      });
+      chunks.push({ month, monthLabel: label, html, open });
+    }
+  }
+  return chunks;
+}
+
+// A past month: a head that folds its days, folded unless it holds the one open day.
+export function activityMonthHtml(chunk: DayChunk, open = false): string {
+  return `
+        <section class="act-month${open ? "" : " collapsed"}" data-month-key="${escapeHtml(chunk.month ?? "")}">
+          <button class="act-month-head" type="button" data-month="${escapeHtml(chunk.month ?? "")}" aria-expanded="${open}">
+            <span class="act-month-label">${escapeHtml(chunk.monthLabel)}</span>
             <span class="act-day-chev">${chevronDown}</span>
-            <span class="act-day-label">${escapeHtml(d.label)}</span>
-            <span class="act-day-count">${count}</span>
+          </button>
+          <div class="act-month-body">${chunk.html}</div>
+        </section>`;
+}
+
+export function activityDaysHtml(
+  activity: ActivityEntry[],
+  selected: string | null,
+  dialect: string,
+  openNewest = true,
+): string {
+  return activityDayChunks(activity, selected, dialect, openNewest)
+    .map((c) => (c.month === null ? c.html : activityMonthHtml(c, c.open)))
+    .join("");
+}
+
+// One day: its date as a calendar tile, Today or Yesterday by name, its totals, then its rows.
+function dayHtml(
+  key: string,
+  ts: number,
+  entries: ActivityEntry[],
+  open: boolean,
+  selected: string | null,
+  dialect: string,
+): string {
+  const total = entries.length;
+  const sessions = new Set(entries.map((e) => e.sessionId)).size;
+  const count = `${total} ${total === 1 ? "query" : "queries"}, ${sessions} ${sessions === 1 ? "session" : "sessions"}`;
+  const named = dayLabel(ts);
+  // Built from parts: a combined weekday-and-month format comes out "Jan Thu" in some runtimes.
+  const date = new Date(ts);
+  const short = `${date.toLocaleDateString(undefined, { weekday: "short" })}, ${date.toLocaleDateString(undefined, { month: "short" })}`;
+  const label =
+    named === "Today" || named === "Yesterday"
+      ? `${named}<span class="act-day-sub">${escapeHtml(short)}</span>`
+      : escapeHtml(short);
+  // A folded day ships without its rows: the view builds them on first unfold, so a
+  // long prefetched history costs one line per day.
+  const body = open ? activityDayBodyHtml(key, entries, selected, dialect) : "";
+  return `
+        <section class="act-day${open ? "" : " collapsed"}">
+          <button class="act-day-head" type="button" data-day="${escapeHtml(key)}" aria-expanded="${open}">
+            <span class="act-day-tile">${date.getDate()}</span>
+            <span class="act-day-text"><span class="act-day-label">${label}</span><span class="act-day-count">${count}</span></span>
+            <span class="act-day-chev">${chevronDown}</span>
           </button>
           <div class="act-day-body">${body}</div>
         </section>`;
-    })
-    .join("");
 }
 
 // One day's rows, grouped by session in first-seen (newest-first) order.
 export function activityDayBodyHtml(
   day: string,
   entries: ActivityEntry[],
-  expanded: Set<string>,
+  selected: string | null,
   dialect: string,
 ): string {
   const sessions = new Map<string, ActivityEntry[]>();
@@ -112,7 +163,7 @@ export function activityDayBodyHtml(
     }
   }
   return [...sessions.entries()]
-    .map(([sid, group]) => activityGroupHtml(day, sid, group, expanded, dialect))
+    .map(([sid, group]) => activityGroupHtml(day, sid, group, selected, dialect))
     .join("");
 }
 
@@ -122,6 +173,11 @@ export function activityTailLoading(): string {
   const row =
     '<div class="act-tail-row act-skel" aria-hidden="true"><span class="act-tail-slot"><span class="act-skel-dot"></span></span><span class="act-skel-bar"></span><span class="act-skel-bar"></span></div>';
   return `<div role="status" aria-label="Loading older days">${row}${row}${row}</div>`;
+}
+
+// Older days exist: the list ends on the control that loads them, beside the prefetch on scroll.
+export function activityTailMore(): string {
+  return '<div class="act-tail-row"><button class="act-retry" type="button" data-act-older>Load older days</button></div>';
 }
 
 // A failed page: what is shown stays, and the list ends on this row. `first`: nothing was
@@ -138,53 +194,36 @@ function shortSession(id: string): string {
   return id.length > 14 ? `${id.slice(0, 9)}…${id.slice(-4)}` : id;
 }
 
-function sessionMeta(
-  project: string | undefined,
-  harness: string | null,
-  sessionId: string,
-): string {
-  const parts: string[] = [];
-  if (project) {
-    parts.push(`<span class="act-proj">${escapeHtml(project)}</span>`);
-  }
-  if (harness) {
-    parts.push(escapeHtml(harness));
-  }
-  parts.push(escapeHtml(shortSession(sessionId)));
-  return parts.join(" &middot; ");
-}
-
+// One agent session within a day: who it was and what it worked on, its count, and the export
+// of that session-day, then its decisions.
 export function activityGroupHtml(
-  day: string,
+  _day: string,
   sessionId: string,
   entries: ActivityEntry[],
-  expanded: Set<string>,
+  selected: string | null,
   dialect: string,
 ): string {
   const first = entries[0];
   const harness = first.harness?.trim() || null;
-  const project = first.project?.trim();
-  // The session task is the group's hero; the meta line above it carries the context.
+  const name = first.project?.trim() || harness || shortSession(sessionId);
   const title = first.sessionLabel?.trim();
   const titleText = title ? escapeHtml(capitalize(title)) : "";
+  // TODO(v1-19): count and export hidden during the Inbox redesign; a global export (pick the
+  // days) brings export back in its own PR, which can reuse `exportControl` below.
   return `
         <section class="act-group">
-          <div class="act-group-head">
-            <span class="act-avatar">${harnessIcon(harness)}</span>
-            <span class="act-sess-idblock">
-              <span class="act-sess-meta">${sessionMeta(project, harness, sessionId)}</span>
-              ${title ? `<span class="act-sess-title" title="${titleText}">${titleText}</span>` : ""}
-            </span>
-            <span class="act-sess-n">${entries.length}</span>
-            ${exportControl(day, sessionId)}
+          <div class="act-group-head" title="${escapeHtml(sessionId)}">
+            ${agentBadge(harness)}
+            <span class="act-sess-name">${escapeHtml(name)}</span>
+            ${title ? `<span class="act-sess-title" title="${titleText}">${titleText}</span>` : ""}
           </div>
-          <div class="act-entries">${entries.map((e) => activityEntryHtml(e, expanded, dialect)).join("")}</div>
+          <div class="act-entries">${entries.map((e) => activityEntryHtml(e, selected === e.id, dialect)).join("")}</div>
         </section>`;
 }
 
 // The per-session-day export: the shared flyout keyed on the session-day so the click
 // handler stays stateless, offering the whole timeline as Markdown, CSV, or JSON.
-function exportControl(day: string, sessionId: string): string {
+export function exportControl(day: string, sessionId: string): string {
   return flyoutMenu("export", `${day}|${sessionId}`, downloadIcon, "Export", [
     { fmt: "md", icon: markdownIcon, name: "Markdown" },
     { fmt: "csv", icon: tableIcon, name: "CSV" },
@@ -192,87 +231,19 @@ function exportControl(day: string, sessionId: string): string {
   ]);
 }
 
-type RiskClass = ReturnType<typeof classifyQuery>["class"];
-
-// A pencil for a write, a trash for a destructive, nothing for a read (the norm), so the eye
-// lands on the entries that changed data. Reuses the pending cards' classifier for one truth.
-function riskIcon(cls: RiskClass): string {
-  if (cls === "write") {
-    return `<span class="act-risk write" title="Write">${pencilIcon}</span>`;
-  }
-  if (cls === "destructive") {
-    return `<span class="act-risk destructive" title="Destructive">${trashIcon}</span>`;
-  }
-  return "";
-}
-
-// The one right-side metric, and only when it means something: what an approved write
-// changed, else what the query returned, each said in full so neither can be read as the
-// other. A blank beats a filler, and an unknown count stays blank.
-function activityMetric(e: ActivityEntry): string {
-  if (e.state !== "approved") {
-    return "";
-  }
-  if (typeof e.affectedRows === "number") {
-    return rowsLabel(e.affectedRows, "changed");
-  }
-  return typeof e.rowCount === "number" ? rowsLabel(e.rowCount, "returned") : "";
-}
-
-// The bolt says Auto mode was involved at all, whether it ran the read, evaluated it
-// before a human decided, or stopped it on a local check. Who decided in the end is the
-// status chip's job, which turns cyan when nothing human did.
-function autoFlag(e: ActivityEntry): string {
-  const evaluation = e.approval?.evaluation ?? e.evaluation;
-  if (!evaluation && !e.autoHold) {
-    return "";
-  }
-  const label =
-    e.approval?.source === "automatic"
-      ? "Approved automatically by Auto mode"
-      : evaluation
-        ? "Evaluated by Auto mode, decided by you"
-        : "Auto mode stopped this read before evaluation";
-  return `<span class="act-flag auto" title="${label}" aria-label="${label}">${autoIcon}</span>`;
-}
-
-export function activityEntryHtml(
-  e: ActivityEntry,
-  expanded: Set<string>,
-  dialect: string,
-): string {
+// One decision as a selectable row; the right pane shows it in full. The sensitivity flags
+// stay on the row so the eye finds them while scanning.
+export function activityEntryHtml(e: ActivityEntry, selected: boolean, dialect: string): string {
   const ts = e.decidedAt ?? e.createdAt;
-  const intent = e.intent?.trim();
-  const headline = intent ? capitalize(intent) : previewSql(e.sql);
-  const isExpanded = expanded.has(e.id);
-  const state = e.state;
-  const label = capitalize(outcomeMeta(state).label);
-  // The full reason/error rides the expanded panel, tinted toward the outcome colour.
-  const note = state === "rejected" ? e.reason?.trim() : state === "failed" ? e.error?.trim() : "";
-  const cls = classifyQuery(e.sql, dialect).class;
-  // The row shows the leading fact; the open panel has room for both.
-  const counts =
-    state === "approved" ? countsLabel({ rowCount: e.rowCount, affectedRows: e.affectedRows }) : "";
-  const rows = counts ? ` &middot; ${escapeHtml(counts)}` : "";
-  // Highlighting needs column names, which only the SQL text has; the chips prefer the record.
-  const text = textSchema(e.sql, dialect);
-  const flags = entryFlags(e, text);
-  return `
-          <div class="act-entry${isExpanded ? " open" : ""}" data-act="${escapeHtml(e.id)}">
-            <button class="act-row" type="button" data-act-sql="${escapeHtml(e.id)}" aria-expanded="${isExpanded}">
-              <span class="chev">${chevronDown}</span>
-              <span class="act-time">${escapeHtml(clockTime(ts))}</span>
-              <span class="act-state ${escapeHtml(state)}${e.approval?.source === "automatic" ? " auto" : ""}">${escapeHtml(label)}</span>
-              ${riskIcon(cls)}<span class="act-intent">${escapeHtml(headline)}</span>
-              ${autoFlag(e)}<span class="act-flags">${flags ? activityFlagsHtml(flags) : ""}</span>
-              <span class="act-metric">${escapeHtml(activityMetric(e))}</span>
-            </button>
-            <div class="act-detail"${isExpanded ? "" : " hidden"}>
-              <div class="act-meta">${escapeHtml(e.id)} &middot; ${escapeHtml(new Date(ts).toLocaleString())}${rows}</div>
-              ${approvalHtml(e.approval, e.evaluation, e.autoHold)}${note ? `<div class="act-enote ${escapeHtml(state)}">${escapeHtml(note)}</div>` : ""}
-              <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(visibleControls(e.sql))}" aria-label="Copy SQL">${copyIcon}</button><code>${highlight(formatSql(e.sql), text?.pii, text?.client, text?.literals)}</code></pre>
-            </div>
-          </div>`;
+  return doneRowHtml(
+    auditItem(e, null),
+    selected,
+    "audit",
+    `<span class="act-time">${escapeHtml(clockTime(ts))}</span>`,
+    dialect,
+    entryFlags(e, textSchema(e.sql, dialect)),
+    true,
+  );
 }
 
 // The decision's recorded flags when the broker sends a well-formed record, else what the
@@ -288,21 +259,6 @@ export function entryFlags(e: ActivityEntry, text: SchemaContext | null): Sensit
     return r;
   }
   return text ? sensitivityOf(text) : null;
-}
-
-// The condensed sensitivity flags on a row: presence only, never which columns.
-export function activityFlagsHtml(flags: SensitivityRecord): string {
-  let html = "";
-  if (flags.pii) {
-    html += '<span class="act-flag pii">PII</span>';
-  }
-  if (flags.value) {
-    html += '<span class="act-flag val">Value</span>';
-  }
-  if (flags.client) {
-    html += '<span class="act-flag client">Client</span>';
-  }
-  return html;
 }
 
 // Spelled-out sensitivity labels for the export, from the same flags the row chips read.

@@ -23,31 +23,34 @@ describe("dbLink", () => {
 
 describe("dbStatusHtml", () => {
   it("names the engine when it has no check", () => {
-    const html = dbStatusHtml({ ...base, supported: false }, "SQLite");
+    const html = dbStatusHtml({ ...base, supported: false });
     expect(html).toContain('class="db-note"');
-    expect(html).toContain("This feature is not available on SQLite.");
+    expect(html).toContain("PostgreSQL, MySQL or MariaDB is required to check the database.");
   });
 
   it("renders nothing before the first check completes", () => {
-    expect(dbStatusHtml({ ...base, checkedAt: 0 }, "PostgreSQL")).toBe("");
+    expect(dbStatusHtml({ ...base, checkedAt: 0 })).toBe("");
   });
 
-  it("shows a passed check with no error box", () => {
-    const html = dbStatusHtml({ ...base, error: "stale" }, "PostgreSQL");
+  it("shows a passed check under a Database heading, with no error box", () => {
+    const html = dbStatusHtml({ ...base, error: "stale" });
+    expect(html.startsWith('<div class="ro-pop-head" aria-hidden="true">Database</div>')).toBe(
+      true,
+    );
     expect(html).toContain('class="db-status passed"');
     expect(html).toContain("Last check passed");
     expect(html).not.toContain("db-err");
   });
 
   it("shows the escaped driver error under a failed check", () => {
-    const html = dbStatusHtml({ ...base, failures: 1, error: "<b>refused</b>" }, "PostgreSQL");
+    const html = dbStatusHtml({ ...base, failures: 1, error: "<b>refused</b>" });
     expect(html).toContain('class="db-status failed"');
     expect(html).toContain("Last check failed");
     expect(html).toContain('<span class="db-err">&lt;b&gt;refused&lt;/b&gt;</span>');
   });
 
   it("counts the failures in a row once failing, and caps a long error", () => {
-    const html = dbStatusHtml({ ...base, failures: 4, error: "x".repeat(500) }, "PostgreSQL");
+    const html = dbStatusHtml({ ...base, failures: 4, error: "x".repeat(500) });
     expect(html).toContain('class="db-status failing"');
     expect(html).toContain("4 checks failed in a row");
     expect(html).toContain(`>${"x".repeat(200)}<`);

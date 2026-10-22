@@ -8,6 +8,7 @@
     "build": "tsc && vite build",
     "typecheck": "tsc",
     "preview": "vite preview",
+    "preview:fixtures": "vite --config vite.preview.config.ts",
     "test": "vitest run"
   },
   "dependencies": {

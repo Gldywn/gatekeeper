@@ -42,6 +42,9 @@ it.each([
   ["Sensitive source or alias: 'private@example.test'", "Sensitive source or alias"],
   ["Needs review: Heavy query", "Heavy query"],
   ["Provider error with private@example.test", "Automatic review required"],
+  // A family the plugin's analysis reaches today, its dynamic name stripped.
+  ["Function effects need manual review: public.audit_user", "Function effects need manual review"],
+  ["Unresolved JSON path", "Unresolved JSON path"],
 ])("bounds persisted hold reason %s without storing source values", (reason, expected) => {
   expect(autoHoldRecord.parse({ sent: false, reason })).toEqual({ sent: false, reason: expected });
 });

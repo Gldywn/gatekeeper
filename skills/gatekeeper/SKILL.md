@@ -114,12 +114,15 @@ Reads (one `SELECT`, or a read-only CTE) are always allowed. Writes (INSERT/UPDA
 
 ## Get the query right the first time
 
-A query that fails on first run wastes a human round trip. Before proposing:
+A query that fails on first run, or that a reviewer cannot follow, wastes a human round trip. Before proposing:
 
 - Verify table and column names and their types; do not infer them. Call `get_schema` first, it costs no approval. Spell identifiers exactly as it reports them, and quote the ones that are mixed-case or reserved words.
 - When Schema access is off, propose one introspection query against the engine's own catalog as your first query, asking only for schema, table and column names and types (itself PII-free): `information_schema.columns` where the engine has it, leaving out the engine's own catalog schemas (`information_schema`, `pg_catalog`, `sys`) rather than keeping only the default schema, since the tables you need may live in another one. On MySQL and MariaDB also add `table_schema = DATABASE()`, because their catalog spans every database the account can see. On SQLite, table names from `sqlite_master`, then `SELECT ... FROM pragma_table_info('<table>')` for a table it listed, never a bare `PRAGMA` statement, which Gatekeeper treats as destructive.
 - Write in the dialect `databaseType` names (from `get_connection_info`): row limits, identifier quoting and date functions differ between engines. Qualify tables by schema when the database uses several, and cast literals to the column's type when the dialect is strict.
 - Ask for the columns you need rather than `SELECT *`, and prefer a count or an aggregate when it answers the question just as well. Everything you pull back lands in your context and in front of the human who reads it before approving, and a wide read is also the one that trips the row cap.
+- Write SQL a reviewer can follow top to bottom at a glance. Default to standard SQL and basic functions (`count`, `sum`, `coalesce`, `case`, `cast`), split a multi-step query into named CTEs that each do one thing, and prefer a join to a correlated subquery in the select list when it returns the same rows. Readable does not mean dumbed down, so keep the query as short as the question allows.
+- Give each output column an alias that says what it holds (`verified_accounts`, `plan_code`), and keep words that read as personal or customer data (`email`, `phone`, `address`) out of an alias whose value holds none, since a reviewer reads such an alias as personal data.
+- Keep constructs that not every engine supports (JSON operators, `FILTER`, `LATERAL`, array functions) for when no plain equivalent can answer the question or the construct is clearly more efficient on a large table, and say why in one sentence of the intent.
 - Give a clear `intent` (see "Write the intent for a human") so the human can approve at a glance.
 
 ## When a query fails

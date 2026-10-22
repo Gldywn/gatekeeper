@@ -1,5 +1,6 @@
-import { escapeHtml } from "../html";
-import { gearIcon, xIcon } from "../icons";
+import { escapeHtml, withSqlKeywords } from "../html";
+import { gearIcon, schemaIcon, xIcon } from "../icons";
+import { takeOver } from "../modal";
 import { autoSettingsHtml } from "../render/auto";
 import { modeDropdown, switchInput } from "../render/controls";
 import {
@@ -19,7 +20,7 @@ interface SettingsViewDeps {
   version?: () => string;
 }
 
-interface ToggleSpec {
+export interface ToggleSpec {
   key: keyof Settings;
   name: string;
   desc: string;
@@ -30,7 +31,7 @@ interface ToggleSpec {
 
 // The tables and columns a query reads are always resolved and shown (2026-09-21
 // decision); only what is highlighted on top of them stays a preference.
-const DETECTION_TOGGLES: ToggleSpec[] = [
+export const DETECTION_TOGGLES: ToggleSpec[] = [
   {
     key: "piiFlagging",
     name: "PII flagging",
@@ -61,6 +62,7 @@ export class SettingsView {
   private readonly auto: () => boolean;
   private readonly keySaved: () => boolean;
   private readonly version: () => string;
+  private release: (() => void) | undefined;
 
   constructor(deps: SettingsViewDeps) {
     this.root = deps.root;
@@ -71,13 +73,22 @@ export class SettingsView {
     this.version = deps.version ?? (() => "");
   }
 
+  // Callers that open on one section focus it after this; the rest start on the close control.
+  // Reopened in place (a reset), it keeps a focus that was inside on that same control.
   open(): void {
     const panel = this.root.querySelector<HTMLDivElement>("#settings");
     if (!panel) {
       return;
     }
+    const inside = panel.contains(panel.ownerDocument?.activeElement ?? null);
+    if (panel.hidden) {
+      // Opened from the gear's menu, whose button hides at once: the gear takes the focus back.
+      this.release = takeOver(panel, () => this.root.querySelector<HTMLElement>("#settingsGear"));
+    }
+    const fresh = panel.hidden || inside;
     panel.innerHTML = this.html();
     panel.hidden = false;
+    if (fresh) panel.querySelector<HTMLElement>("[data-close]")?.focus({ preventScroll: true });
   }
 
   close(): void {
@@ -85,16 +96,18 @@ export class SettingsView {
     if (panel && !panel.hidden) {
       panel.hidden = true;
       panel.innerHTML = "";
+      this.release?.();
+      this.release = undefined;
     }
   }
 
   private html(): string {
     const s = this.settings();
     return `
-      <div class="detail-card settings-card">
+      <div class="detail-card settings-card" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
         <div class="panel-head">
           <span class="panel-head-ico">${gearIcon}</span>
-          <span class="panel-title">Settings</span>
+          <span class="panel-title" id="settingsTitle">Settings</span>
           <button class="detail-close" type="button" data-close aria-label="Close settings">${xIcon}</button>
         </div>
         <div class="starbar">
@@ -111,7 +124,7 @@ export class SettingsView {
           <div class="set-row">
             <div class="set-text">
               <span class="set-name">Execution mode</span>
-              <span class="set-desc">Which statements Gatekeeper will run once you approve.</span>
+              <span class="set-desc">Which statements can run once you approve.</span>
               <span class="set-note">Resets to read-only on load or a connection switch.</span>
             </div>
             <span class="set-control" id="modeCtlSettings">${modeDropdown(this.mode(), false, this.auto())}</span>
@@ -143,7 +156,7 @@ export class SettingsView {
           <div id="autoSettings" data-on="${this.auto()}">${autoSettingsHtml(this.auto(), this.keySaved())}</div>
           <div class="set-row recommend">
             <div class="set-text">
-              <span class="set-name"><span class="set-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3"/></svg></span>Schema access <span class="set-rec">recommended</span></span>
+              <span class="set-name"><span class="set-ico">${schemaIcon}</span>Schema access <span class="set-rec">recommended</span></span>
               <span class="set-desc">Give connected agents your database structure (tables, columns, types, keys) so they write more accurate, valid SQL instead of guessing names. Never exposes any row data. <span class="set-note">Off by default.</span></span>
             </div>
             <span class="set-control">${switchInput("schemaAccess", "Schema access", s.schemaAccess)}</span>
@@ -191,15 +204,20 @@ function groupHead(name: string): string {
   return `<div class="set-group-head"><span class="set-group-name">${name}</span></div>`;
 }
 
-function toggleRow(t: ToggleSpec, s: Settings): string {
-  const example = t.example
+// The detection's sample in its own on-card style, beside its name here and in the quick menu.
+export function exampleChip(t: Pick<ToggleSpec, "example">): string {
+  return t.example
     ? `<span class="set-ex ${t.example.cls}">${escapeHtml(t.example.text)}</span>`
     : "";
+}
+
+function toggleRow(t: ToggleSpec, s: Settings): string {
+  const example = exampleChip(t);
   return `
           <div class="set-row">
             <div class="set-text">
               <span class="set-name-line"><span class="set-name">${escapeHtml(t.name)}</span>${example}</span>
-              <span class="set-desc">${escapeHtml(t.desc)}</span>
+              <span class="set-desc">${withSqlKeywords(t.desc)}</span>
             </div>
             <span class="set-control">${switchInput(t.key, t.name, Boolean(s[t.key]))}</span>
           </div>`;

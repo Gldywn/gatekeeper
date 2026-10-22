@@ -19,6 +19,7 @@ import { createConnection } from "node:net";
 import { homedir, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { findServers } from "./servers.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const thisRoot = resolve(scriptDir, "..");
@@ -170,6 +171,25 @@ function brokerAlive(port = Number(process.env.GATEKEEPER_BROKER_PORT ?? 9999)) 
   });
 }
 
+// Answers "which server is the plugin talking to". Each read is a separate snapshot, so a
+// process that exits in between just leaves a field as "?".
+function portOwner(port) {
+  const run = (cmd, args) => {
+    const r = spawnSync(cmd, args, { encoding: "utf8" });
+    return r.status === 0 ? r.stdout.trim() : "";
+  };
+  const pid = run("lsof", ["-nP", "-t", `-iTCP@127.0.0.1:${port}`, "-sTCP:LISTEN"]).split("\n")[0];
+  if (!pid) return null;
+  const cwd = run("lsof", ["-a", "-p", pid, "-d", "cwd", "-Fn"])
+    .split("\n")
+    .find((l) => l.startsWith("n"));
+  return {
+    pid,
+    command: run("ps", ["-o", "command=", "-p", pid]) || "?",
+    cwd: cwd?.slice(1) || "?",
+  };
+}
+
 function build(root) {
   console.log("· building (pnpm build)…");
   const r = spawnSync("pnpm", ["build"], { cwd: root, stdio: "inherit" });
@@ -203,22 +223,16 @@ function link() {
 // plugin keeps talking to dev code. Published servers (gatekeeper-mcp-server) are
 // left alone: a non-owner retries the port and takes over once the dev one exits.
 function stopDevServers() {
-  const out = spawnSync("ps", ["-axo", "pid=,command="], { encoding: "utf8" }).stdout || "";
   let stopped = 0;
-  for (const line of out.split("\n")) {
-    const m = line.match(/^\s*(\d+)\s+(.*)$/);
-    if (!m || !/\bnode\b/.test(m[2])) continue;
-    if (!/gatekeeper[^\s]*[/\\]server[/\\](?:dist[/\\]index\.js|src[/\\]index\.ts)/.test(m[2]))
-      continue;
-    const pid = Number(m[1]);
+  for (const { pid, cmd } of findServers({ published: false })) {
     if (dry) {
-      console.log(`· would stop dev server ${pid}: ${m[2]}`);
+      console.log(`· would stop dev server ${pid}: ${cmd}`);
       continue;
     }
     try {
       process.kill(pid, "SIGTERM");
       stopped++;
-      console.log(`· stopped dev server ${pid}: ${m[2]}`);
+      console.log(`· stopped dev server ${pid}: ${cmd}`);
     } catch (err) {
       console.log(`· could not stop dev server ${pid}: ${err.message}`);
     }
@@ -281,8 +295,13 @@ async function status() {
     if (existsSync(skillBackup(link))) console.log(`  stashed real folder: ${skillBackup(link)}`);
   }
 
-  const up = await brokerAlive();
-  console.log(`\nbroker 127.0.0.1:9999 : ${up ? "up" : "down"}`);
+  const port = Number(process.env.GATEKEEPER_BROKER_PORT ?? 9999);
+  // Held, not healthy: the dev launcher keeps the port even while its server restarts.
+  const held = await brokerAlive(port);
+  console.log(`\nbroker port 127.0.0.1:${port} : ${held ? "held" : "free"}`);
+  const owner = held && portOwner(port);
+  if (owner) console.log(`  by pid ${owner.pid}: ${owner.command} (cwd ${owner.cwd})`);
+  else if (held) console.log("  by an unknown process (no lsof, or it exited meanwhile)");
   console.log(
     `~/.gatekeeper/broker-token : ${existsSync(join(stateDir(), "broker-token")) ? "present" : "absent"}`,
   );
