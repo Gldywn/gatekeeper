@@ -38,8 +38,11 @@ export function readPg(sql: string): PgText | "ambiguous" | null {
 export function writtenString(tokens: ScanToken[], location: number): string | null {
   const text = tokens.find((t) => t.start === location && t.tokenType === SCONST)?.text;
   if (text === undefined) return null;
-  const dollar = /^\$[A-Za-z_]*[A-Za-z0-9_]*\$/.exec(text)?.[0];
-  if (dollar) return text.slice(dollar.length, -dollar.length);
+  if (text.startsWith("$")) {
+    // The tag is whatever the scanner accepted, non-ASCII letters included: take it as written.
+    const tag = text.slice(0, text.indexOf("$", 1) + 1);
+    return text.slice(tag.length, -tag.length);
+  }
   return text.replace(/^[eE]/, "").slice(1, -1);
 }
 

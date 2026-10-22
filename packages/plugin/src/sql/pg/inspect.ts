@@ -64,13 +64,33 @@ function byLocation(a: RangeVar, b: RangeVar): number {
   return (a.location ?? 0) - (b.location ?? 0);
 }
 
-// A CTE is named like a table but is not one: an unqualified reference to it reads no relation.
-function cteNames(read: PgText): Set<string> {
-  const names = new Set<string>();
-  walk(read.tree, (n, key) => {
-    if (key === "CommonTableExpr" && typeof n.ctename === "string") names.add(n.ctename);
-  });
-  return names;
+// A CTE is named like a table but is not one: an unqualified reference to a CTE visible where it
+// sits reads no relation, while the same name outside that WITH is a real table.
+function cteReferences(read: PgText): Set<Node> {
+  const refs = new Set<Node>();
+  const visit = (node: unknown, ctes: ReadonlySet<string>): void => {
+    if (Array.isArray(node)) {
+      for (const child of node) visit(child, ctes);
+      return;
+    }
+    if (!isNode(node)) return;
+    const defined = isNode(node.withClause) ? node.withClause.ctes : null;
+    const scope = Array.isArray(defined)
+      ? new Set([
+          ...ctes,
+          ...defined.flatMap((c) => {
+            const name = isNode(c) && isNode(c.CommonTableExpr) ? c.CommonTableExpr.ctename : null;
+            return typeof name === "string" ? [name] : [];
+          }),
+        ])
+      : ctes;
+    const rv = node.RangeVar;
+    if (isNode(rv) && !rv.schemaname && typeof rv.relname === "string" && scope.has(rv.relname))
+      refs.add(rv);
+    for (const value of Object.values(node)) visit(value, scope);
+  };
+  visit(read.tree, new Set());
+  return refs;
 }
 
 interface Relations {
@@ -90,7 +110,7 @@ const DROPPED = new Set(["OBJECT_TABLE", "OBJECT_VIEW", "OBJECT_MATVIEW", "OBJEC
 // The relations a statement writes (with the operation) and reads, in source order. Created
 // relations do not exist yet, so they are writes and never tables to look columns up in.
 function relations(read: PgText): Relations {
-  const ctes = cteNames(read);
+  const ctes = cteReferences(read);
   const writes: Relations["writes"] = [];
   const created = new Set<RangeVar>();
   const targets = new Set<Node>();
@@ -117,7 +137,7 @@ function relations(read: PgText): Relations {
       }
     if (key === "RangeVar" && typeof n.relname === "string") all.push(n as RangeVar);
   });
-  const reads = all.filter((rv) => !targets.has(rv) && !(!rv.schemaname && ctes.has(rv.relname)));
+  const reads = all.filter((rv) => !targets.has(rv) && !ctes.has(rv));
   writes.sort((a, b) => byLocation(a.rv, b.rv));
   return { reads: reads.sort(byLocation), writes, created };
 }
@@ -150,6 +170,7 @@ function isJsonFunction(call: Node): boolean {
 }
 
 function stringValue(node: unknown): string | null {
+  if (isNode(node) && isNode(node.TypeCast)) return stringValue(node.TypeCast.arg);
   const constant = isNode(node) ? node.A_Const : null;
   if (!isNode(constant) || !isNode(constant.sval)) return null;
   return typeof constant.sval.sval === "string" ? constant.sval.sval : "";
@@ -162,13 +183,20 @@ function accessorKeys(node: Node): string[] {
   });
 }
 
+// The name an operand compares: a column, or the field a composite selection reaches,
+// as in (t.profile).company_name.
 function columnName(node: Node): string | null {
   const column = node.ColumnRef;
-  if (!isNode(column)) return null;
-  return strings(column.fields).at(-1) ?? null;
+  if (isNode(column)) return strings(column.fields).at(-1) ?? null;
+  const indirection = node.A_Indirection;
+  if (!isNode(indirection)) return null;
+  const field = strings(indirection.indirection).at(-1);
+  return field ?? (isNode(indirection.arg) ? columnName(indirection.arg) : null);
 }
 
 const SELECTS = new Set(["SelectStmt", "larg", "rarg"]);
+// FROM items whose alias can rename their columns: t(a, b), (SELECT ...) s(a), (x JOIN y) j(a).
+const RENAMING = new Set(["RangeVar", "RangeSubselect", "RangeFunction", "JoinExpr"]);
 
 export function analyzePg(sql: string): ParsedQuery | null {
   const read = text(sql);
@@ -187,6 +215,7 @@ export function analyzePg(sql: string): ParsedQuery | null {
       if (isNode(last) && "A_Star" in last) star = true;
       else columns.push(...strings([last]));
     }
+    if (key === "A_Indirection") columns.push(...strings(n.indirection));
     jsonKeys.push(...accessorKeys(n));
     // Output names come from a SELECT list (set-operation branches arrive unwrapped as larg and
     // rarg) or a RETURNING list, never from an UPDATE's SET.
@@ -196,7 +225,7 @@ export function analyzePg(sql: string): ParsedQuery | null {
       if (typeof name === "string") aliases.push(name);
     }
     if (key === "CommonTableExpr") aliases.push(...strings(n.aliascolnames));
-    if (key === "RangeVar" || key === "RangeSubselect" || key === "RangeFunction") {
+    if (RENAMING.has(key)) {
       const alias = isNode(n.alias) ? n.alias : null;
       const renamed = strings(alias?.colnames);
       aliases.push(...renamed);
@@ -212,7 +241,7 @@ export function analyzePg(sql: string): ParsedQuery | null {
     }
   });
   for (const w of writes)
-    if (w.op === "insert" || w.op === "update") columns.push(...assignedColumns(read, w.rv));
+    if (["insert", "update", "merge"].includes(w.op)) columns.push(...assignedColumns(read, w.rv));
   return {
     tables: dedupeRefs(tables),
     columns: unique(columns),
@@ -226,12 +255,28 @@ export function analyzePg(sql: string): ParsedQuery | null {
 function assignedColumns(read: PgText, target: RangeVar): string[] {
   const names: string[] = [];
   walk(read.tree, (n, key) => {
-    if ((key !== "InsertStmt" && key !== "UpdateStmt") || n.relation !== target) return;
-    for (const item of [n.cols, n.targetList].flatMap((l) => (Array.isArray(l) ? l : [])))
-      if (isNode(item) && isNode(item.ResTarget) && typeof item.ResTarget.name === "string")
-        names.push(item.ResTarget.name);
+    if (!(key in WRITTEN) || n.relation !== target) return;
+    const clauses = Array.isArray(n.mergeWhenClauses)
+      ? n.mergeWhenClauses.map((c) => (isNode(c) ? c.MergeWhenClause : null))
+      : [];
+    for (const list of [
+      n.cols,
+      n.targetList,
+      ...clauses.map((c) => (isNode(c) ? c.targetList : null)),
+    ])
+      names.push(...targetNames(list).filter((name): name is string => name !== undefined));
   });
   return names;
+}
+
+// The statements that name the columns they write, which appear in no ColumnRef.
+const WRITTEN: Record<string, true> = { InsertStmt: true, UpdateStmt: true, MergeStmt: true };
+
+function targetNames(list: unknown): (string | undefined)[] {
+  return (Array.isArray(list) ? list : []).map((item) => {
+    const name = isNode(item) && isNode(item.ResTarget) ? item.ResTarget.name : undefined;
+    return typeof name === "string" ? name : undefined;
+  });
 }
 
 export function tableOpsPg(sql: string): TableOps | null {
@@ -366,6 +411,14 @@ export function sensitiveLiteralsPg(sql: string): string[] {
       if (value) found.add(value);
     }
   };
+  // An inserted row lines up positionally with its column list.
+  const inserted = (columns: (string | undefined)[], values: unknown) => {
+    if (!Array.isArray(values)) return;
+    values.forEach((value, i) => {
+      const column = columns[i];
+      if (column !== undefined && classifyColumn(column)) add(value);
+    });
+  };
   const assigned = (targets: unknown) => {
     for (const item of Array.isArray(targets) ? targets : []) {
       const target = isNode(item) ? item.ResTarget : null;
@@ -384,22 +437,15 @@ export function sensitiveLiteralsPg(sql: string): string[] {
   walk(read.tree, (n, key) => {
     const value = stringValue(n);
     if (value && sensitiveShape(value)) add(n);
-    if (key === "UpdateStmt") assigned(n.targetList);
-    if (key === "onConflictClause") assigned(n.targetList);
+    if (key === "UpdateStmt" || key === "onConflictClause") assigned(n.targetList);
+    if (key === "MergeWhenClause" && n.commandType === "CMD_UPDATE") assigned(n.targetList);
+    if (key === "MergeWhenClause" && n.commandType === "CMD_INSERT")
+      inserted(targetNames(n.targetList), n.values);
     if (key === "InsertStmt") {
-      const columns = (Array.isArray(n.cols) ? n.cols : []).map((c) =>
-        isNode(c) && isNode(c.ResTarget) ? c.ResTarget.name : undefined,
-      );
       const select = isNode(n.selectStmt) ? n.selectStmt.SelectStmt : null;
       const rows = isNode(select) && Array.isArray(select.valuesLists) ? select.valuesLists : [];
-      for (const row of rows) {
-        const items = isNode(row) && isNode(row.List) ? row.List.items : null;
-        if (Array.isArray(items))
-          items.forEach((item, i) => {
-            const column = columns[i];
-            if (typeof column === "string" && classifyColumn(column)) add(item);
-          });
-      }
+      for (const row of rows)
+        inserted(targetNames(n.cols), isNode(row) && isNode(row.List) ? row.List.items : null);
     }
     if (key !== "A_Expr" || !isComparison(n)) return;
     for (const [side, other] of [

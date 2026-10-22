@@ -990,6 +990,49 @@ describe("PostgreSQL's own parse tree", () => {
     expect(statementReceipt("TRUNCATE a.t1, t2", pg)).toBeNull();
   });
 
+  it("keeps a real table whose name a CTE in a subquery reuses", () => {
+    const sql =
+      "SELECT * FROM real_table WHERE EXISTS (WITH real_table AS (SELECT 1) SELECT 1 FROM real_table)";
+    expect(analyzeSql(sql, pg)?.tables).toEqual([{ schema: null, name: "real_table" }]);
+  });
+
+  it("screens the columns and values a MERGE updates or inserts", () => {
+    const sql =
+      "MERGE INTO users u USING src s ON u.id = s.id WHEN MATCHED THEN UPDATE SET company_name = 'ACME' WHEN NOT MATCHED THEN INSERT (company_name) VALUES ('BETA')";
+    expect(analyzeSql(sql, pg)?.columns).toContain("company_name");
+    expect(sensitiveLiterals(sql, pg).sort()).toEqual(["ACME", "BETA"]);
+  });
+
+  it("reads the field a composite selection reaches as the column compared", () => {
+    const sql = "SELECT id FROM t WHERE (t.profile).company_name = 'ACME'";
+    expect(analyzeSql(sql, pg)?.columns).toContain("company_name");
+    expect(sensitiveLiterals(sql, pg)).toEqual(["ACME"]);
+  });
+
+  it("takes the columns a join alias renames as output names", () => {
+    expect(
+      analyzeSql("SELECT * FROM (t JOIN s USING (id)) AS j(company_name, n)", pg)?.aliases,
+    ).toEqual(["company_name", "n"]);
+  });
+
+  it("reads a JSON key written as a cast string", () => {
+    expect(analyzeSql("SELECT profile ->> 'email'::text FROM people", pg)?.jsonKeys).toEqual([
+      "email",
+    ]);
+    expect(
+      sensitiveLiterals(
+        "SELECT id FROM people WHERE profile ->> 'company_name'::text = 'ACME'",
+        pg,
+      ),
+    ).toEqual(["ACME"]);
+  });
+
+  it("returns a dollar-quoted value as written whatever its tag", () => {
+    expect(sensitiveLiterals("SELECT id FROM t WHERE company_name = $é$ACME$é$", pg)).toEqual([
+      "ACME",
+    ]);
+  });
+
   it("reads a statement node-sql-parser could not, without inventing tables for it", () => {
     expect(analyzeTableOps("VACUUM crm.people", pg)).toBeNull();
     expect(countsRows("VACUUM crm.people", pg)).toBe(false);
