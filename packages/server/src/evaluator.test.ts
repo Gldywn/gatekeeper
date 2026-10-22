@@ -1,3 +1,4 @@
+import { readdirSync, readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AUTO_MODEL,
@@ -46,6 +47,51 @@ it.each([
   ["Unresolved JSON path", "Unresolved JSON path"],
 ])("bounds persisted hold reason %s without storing source values", (reason, expected) => {
   expect(autoHoldRecord.parse({ sent: false, reason })).toEqual({ sent: false, reason: expected });
+});
+
+// The plugin writes the hold reasons, this server keeps only the ones it lists: an unlisted
+// one is stored as "Automatic review required" and its cause is lost. Read every call shape
+// that can set an Auto hold in the plugin sources and require each reason to survive.
+it("keeps every hold reason the plugin can record", () => {
+  const src = new URL("../../plugin/src/", import.meta.url);
+  const files = [
+    ...readdirSync(new URL("sql/", src), { recursive: true })
+      .map(String)
+      .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
+      .map((f) => `sql/${f}`),
+    "annotate.ts",
+    "app.ts",
+  ];
+  const shapes = [
+    /\b(?:hold|resetAuto)\(\s*["`]([^"`]+)/g,
+    /\breviewCard\(\s*card,\s*["`]([^"`]+)/g,
+    /\bimplAllowed\([^,]+,\s*["`]([^"`]+)/g,
+    /\breasons: \[\s*["`]([^"`]+)/g,
+  ];
+  const reasons = new Set<string>();
+  for (const file of files) {
+    const text = readFileSync(new URL(file, src), "utf8");
+    const found = [
+      ...shapes,
+      ...(file === "sql/read-analysis.ts" ? [/\breturn ["`]([^"`]+)/g] : []),
+    ]
+      .flatMap((shape) => [...text.matchAll(shape)])
+      .map((m) => m[1].split(/:|\$\{/)[0].trim());
+    for (const reason of found) reasons.add(reason);
+  }
+  // Each extraction branch must still find something, or a broken pattern would pass empty.
+  for (const reason of [
+    "Custom cast needs manual review",
+    "Custom operator needs manual review",
+    "A parsed single read is required",
+    "Metadata query failed",
+    "Evaluation timed out. Approve manually",
+    "Tab ownership changed",
+  ])
+    expect(reasons).toContain(reason);
+  expect(reasons.size).toBeGreaterThan(40);
+  for (const reason of reasons)
+    expect(autoHoldRecord.parse({ sent: false, reason }).reason, reason).toBe(reason);
 });
 
 describe("native Jev contract (mocked, not calibration)", () => {

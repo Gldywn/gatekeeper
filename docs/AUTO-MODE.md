@@ -436,8 +436,11 @@ provider submission was attempted. Late evaluator responses cannot approve the r
 provider receipt. The reason is limited to 200 characters, restricted to known
 diagnostics, and stripped of source-name suffixes. Unknown wording becomes
 `Automatic review required`, so this field does not retain literals, rows or provider
-error text. This result-time record does not cover a card lost to a crash, cancellation
-or expiry before the plugin posts its outcome.
+error text. A server test reads the plugin's hold sites and fails when one of their reasons
+is missing from that list. A catalog query the host rejects is recorded as
+`Metadata query failed`; catalog SQL the analysis cannot build, or main catalog rows that
+fail validation, stay `Metadata unavailable`. This result-time record does not cover a card
+lost to a crash, cancellation or expiry before the plugin posts its outcome.
 
 ## Verification and limits
 
