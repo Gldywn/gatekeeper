@@ -11,7 +11,6 @@ import { recentRowHtml } from "../src/render/inbox";
 import { AUTO_EVALUATING, cardHtml } from "../src/render/queue";
 import { capResult, type HistResult } from "../src/result";
 import { AUTO_POLICY, AUTO_THRESHOLDS } from "../src/sql/auto";
-import type { LoadResult } from "../src/sql/load";
 import type { RiskMode } from "../src/sql/mode";
 import type { SchemaContext } from "../src/sql/schema";
 import type { Card, HistItem } from "../src/types";
@@ -24,9 +23,6 @@ const MIN = 60_000;
 const DIALECT = "postgresql";
 
 const SQL_MORE = {
-  heavy: "SELECT status, count(*) FROM payment_attempt GROUP BY status",
-  heavyJoin:
-    "SELECT a.id, i.number FROM payment_attempt a, invoices i WHERE a.failure_code = 'card_declined'",
   purge: `DELETE FROM sessions WHERE last_seen < now() - interval '90 days'`,
   contact: `SELECT c.email, c.company_name FROM customers c WHERE c.email = 'jane@example.com'`,
   two: "SELECT count(*) FROM invoices; SELECT count(*) FROM payments",
@@ -121,47 +117,6 @@ const bigResult: HistResult = {
   truncated: true,
 };
 
-// The load check's states, its row estimates beside the title.
-const HEAVY: LoadResult = {
-  lines: [
-    [
-      "Reads every row of ",
-      { code: "payment_attempt" },
-      " without a ",
-      { code: "WHERE" },
-      " clause",
-    ],
-  ],
-  notes: [],
-  estimates: [{ table: "payment_attempt", rows: 41_213_877 }],
-  heavy: true,
-  complete: true,
-};
-const HEAVY_JOIN: LoadResult = {
-  lines: [
-    [
-      "Missing join condition pairs every row of ",
-      { code: "a" },
-      " with every row of ",
-      { code: "i" },
-    ],
-    [
-      "Filter on ",
-      { code: "failure_code" },
-      " uses no index and may scan all of ",
-      { code: "payment_attempt" },
-    ],
-  ],
-  notes: [],
-  estimates: [
-    { table: "payment_attempt", rows: 41_213_877 },
-    { table: "invoices", rows: 1_806_412 },
-  ],
-  heavy: true,
-  complete: true,
-};
-const AUTO_DENIED =
-  "Rejected automatically by the load check. The query reads a table without a WHERE clause.";
 const DONE: DoneState[] = [
   done(
     "Read · approved by you · rows returned",
@@ -367,34 +322,6 @@ const DONE: DoneState[] = [
     { rowCount: 4, intent: "count invoices by status" },
     noProject,
   ),
-  done(
-    "Read · declined by the load check",
-    SQL_MORE.heavy,
-    {
-      status: "rejected",
-      note: "heavy query, auto-denied",
-      intent: "count payment attempts by status",
-      sent: AUTO_DENIED,
-      autoDenied: true,
-    },
-    { state: "rejected", reason: AUTO_DENIED, intent: "count payment attempts by status" },
-  ),
-  done(
-    "Read · declined with a reason and load hints",
-    SQL_MORE.heavy,
-    {
-      status: "rejected",
-      note: "Count this month only",
-      reason: "Count this month only",
-      intent: "count payment attempts by status",
-      sent: "Count this month only. The query reads a table without a WHERE clause.",
-    },
-    {
-      state: "rejected",
-      reason: "Count this month only. The query reads a table without a WHERE clause.",
-      intent: "count payment attempts by status",
-    },
-  ),
 ];
 
 const schemaDup: SchemaContext = {
@@ -530,34 +457,6 @@ const CARDS: CardState[] = [
       intent: "find duplicate invoice numbers this month",
       schema: schemaDup,
       autoStatus: "Needs review: Reads customer_email.",
-    }),
-  },
-  {
-    label: "Read · heavy query",
-    card: card({
-      sql: SQL_MORE.heavy,
-      intent: "count payment attempts by status",
-      schema: null,
-      loadResult: HEAVY,
-    }),
-  },
-  {
-    label: "Read · heavy query, two findings",
-    card: card({
-      sql: SQL_MORE.heavyJoin,
-      intent: "list declined card payments with their invoice",
-      schema: null,
-      loadResult: HEAVY_JOIN,
-    }),
-  },
-  {
-    label: "Auto mode · held for a heavy query",
-    card: card({
-      sql: SQL_MORE.heavy,
-      intent: "count payment attempts by status",
-      schema: null,
-      loadResult: HEAVY,
-      autoStatus: "Needs review: Heavy query",
     }),
   },
   {
