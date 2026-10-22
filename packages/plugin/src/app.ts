@@ -53,6 +53,7 @@ import { connChipInner } from "./render/connchip";
 import { modeDropdown, switchInput } from "./render/controls";
 import { type DbCheck, dbLink, dbLinkLabel, dbStatusHtml, nextCheckText } from "./render/dblink";
 import { CANCELLED_NOTE, NOT_DELIVERED_NOTE } from "./render/detail";
+import { exportTriggerHtml } from "./render/export";
 import {
   agentsStripHtml,
   auditItem,
@@ -122,6 +123,7 @@ import {
 } from "./version";
 import { ActivityView } from "./views/activity";
 import { DetailView } from "./views/detail";
+import { ExportDialog } from "./views/export";
 import { DETECTION_TOGGLES, exampleChip, SettingsView } from "./views/settings";
 
 const BROKER_URL = "http://localhost:9999";
@@ -383,6 +385,7 @@ export class Gatekeeper {
   private readonly detailView: DetailView;
   private readonly activityView: ActivityView;
   private readonly settingsView: SettingsView;
+  private readonly exportDialog: ExportDialog;
   private readonly confirmModal: ConfirmModal;
 
   constructor(root: HTMLElement) {
@@ -403,7 +406,15 @@ export class Gatekeeper {
       // The trail opens on its newest decision, or on what it keeps when it holds none.
       rendered: () => {
         this.openNewestAudit();
+        this.applyAuditActions();
       },
+    });
+    this.exportDialog = new ExportDialog({
+      root,
+      broker: this.broker,
+      scope: () => this.connScopeKey(),
+      connectionName: () => this.connectionName,
+      dialect: () => this.dialect,
     });
     this.settingsView = new SettingsView({
       root,
@@ -425,6 +436,12 @@ export class Gatekeeper {
       }
       if ((e.target as HTMLElement).closest("[data-auto-settings]")) {
         this.openAutoSettings();
+        return;
+      }
+      if ((e.target as HTMLElement).closest("[data-export-open]")) {
+        // A menu left open in the Inbox would sit under the modal, inert but still drawn.
+        this.closeFlyoutMenus();
+        this.exportDialog.open();
         return;
       }
       const toggle = (e.target as HTMLElement).closest<HTMLButtonElement | HTMLInputElement>(
@@ -452,6 +469,9 @@ export class Gatekeeper {
         // The arm/confirm modal sits on top of everything; it swallows the first
         // Escape (cancelling) before any overlay beneath it can close.
         if (this.confirmModal.cancel()) {
+          return;
+        }
+        if (this.exportDialog.close()) {
           return;
         }
         // An open mode or flyout menu swallows the first Escape so it dismisses without
@@ -1340,6 +1360,7 @@ export class Gatekeeper {
     this.confirmModal.cancel();
     this.settingsView.close();
     this.hideDbNotice();
+    this.exportDialog.close();
   }
 
   private renderShell(): void {
@@ -1362,7 +1383,7 @@ export class Gatekeeper {
                 <button class="pane-tab" role="tab" type="button" id="tabQueue" data-tab="queue" aria-selected="true" aria-controls="listQueue">Queue<span class="n" id="queueCount"></span></button>
                 <button class="pane-tab" role="tab" type="button" id="tabAudit" data-tab="audit" aria-selected="false" aria-controls="listAudit" tabindex="-1">${historyIcon}Audit Trail</button>
               </div>
-              <span class="pane-actions" id="auditActions" hidden></span>
+              <span class="pane-actions" id="auditActions" hidden>${exportTriggerHtml()}</span>
             </div>
             <div class="ov-rail" aria-hidden="true"></div><div class="pane-body" id="listQueue" role="tabpanel" aria-labelledby="tabQueue"></div>
             <div class="ov-rail" aria-hidden="true"></div><div class="pane-body" id="listAudit" role="tabpanel" aria-labelledby="tabAudit" hidden></div>
@@ -1386,6 +1407,7 @@ export class Gatekeeper {
           </div>
         </footer>
         <div class="detail settings-overlay" id="settings" hidden></div>
+        <div class="detail export-overlay" id="export" hidden></div>
         <div class="detail confirm-overlay" id="confirm" hidden></div>
         <div class="detail db-notice-overlay" id="notice" hidden></div>
       </div>`;
@@ -1554,14 +1576,7 @@ export class Gatekeeper {
       this.closeFlyoutMenus();
       const fmt = opt.getAttribute("data-flyout-fmt")!;
       const action = opt.getAttribute("data-flyout-action");
-      if (opt.closest("#listAudit")) {
-        if (action === "export") {
-          void this.activityView.exportSession(
-            opt.getAttribute("data-flyout-key")!,
-            fmt as "md" | "csv" | "json",
-          );
-        }
-      } else if (action === "export") {
+      if (action === "export") {
         void this.detailView.exportResult(fmt as "csv" | "json");
       } else {
         void this.detailView.copyResult(fmt as "md");
@@ -1664,6 +1679,7 @@ export class Gatekeeper {
     if (tab === "audit") {
       void this.activityView.open();
     } else {
+      this.exportDialog.close();
       this.activityView.close();
     }
     this.renderSelection(true);
@@ -1677,10 +1693,16 @@ export class Gatekeeper {
     }
     const queue = this.root.querySelector<HTMLElement>("#listQueue");
     const audit = this.root.querySelector<HTMLElement>("#listAudit");
-    const actions = this.root.querySelector<HTMLElement>("#auditActions");
     if (queue) queue.hidden = this.tab !== "queue";
     if (audit) audit.hidden = this.tab !== "audit";
-    if (actions) actions.hidden = this.tab !== "audit";
+    this.applyAuditActions();
+  }
+
+  // The export shows on the Audit Trail tab unless the trail has loaded and holds nothing; while
+  // the first page loads, or after it failed, there may well be something to export.
+  private applyAuditActions(): void {
+    const actions = this.root.querySelector<HTMLElement>("#auditActions");
+    if (actions) actions.hidden = this.tab !== "audit" || this.activityView.isEmpty();
   }
 
   // The Audit Trail opens on the first decision it lists, with no selection of its own yet. It
@@ -1879,6 +1901,7 @@ export class Gatekeeper {
   private resetInbox(): void {
     this.selection.queue = null;
     this.selection.audit = null;
+    this.exportDialog.close();
     this.activityView.reset();
     this.detailView.close();
     this.root.querySelector("#inbox")?.setAttribute("data-show", "list");

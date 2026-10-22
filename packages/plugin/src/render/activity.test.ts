@@ -11,9 +11,8 @@ import {
   activityEntryHtml,
   activityGroupHtml,
   activityJson,
-  activityMarkdown,
+  activityMarkdownDays,
   entryFlags,
-  exportControl,
 } from "./activity";
 
 const T = new Date("2026-01-01T09:30:00Z").getTime();
@@ -76,34 +75,38 @@ describe("render/activity", () => {
     expect(html).not.toContain("read-only only");
   });
 
-  it("shows no count or export in the session head during the redesign", () => {
+  it("shows no count or export in the session head", () => {
     const html = activityGroupHtml("2026-01-01", "s1", [approved], null, "postgresql");
     expect(html).not.toContain('class="act-sess-n"');
     expect(html).not.toContain("data-flyout-trigger");
   });
 
-  it("keeps the export trigger and its Markdown/CSV/JSON format menu for the global export", () => {
-    const html = exportControl("2026-01-01", "s1");
-    expect(html).toContain('data-flyout-trigger="2026-01-01|s1"');
-    expect(html).toContain("data-flyout-menu");
-    expect(html).toContain(
-      'data-flyout-action="export" data-flyout-key="2026-01-01|s1" data-flyout-fmt="md"',
-    );
-    expect(html).toContain(
-      'data-flyout-action="export" data-flyout-key="2026-01-01|s1" data-flyout-fmt="csv"',
-    );
-    expect(html).toContain(
-      'data-flyout-action="export" data-flyout-key="2026-01-01|s1" data-flyout-fmt="json"',
-    );
-  });
-
-  it("renders a session-day markdown export with intent in the title, flags and latency", () => {
+  it("renders the Markdown export as days, then sessions, then each decision, oldest first", () => {
     const flags = new Map([["q_ab12", ["PII", "sensitive value"]]]);
-    expect(
-      activityMarkdown("2026-01-01", "s1", [approved, rejected], "prod-analytics", flags),
-    ).toBe(
-      "# Gatekeeper Audit Trail\n\n- Connection: prod-analytics\n- Day: 2026-01-01\n- Session: gatekeeper (s1)\n- Harness: claude-code\n- Task: audit review\n- Queries: 2 (1 Approved · 1 Declined)\n\n## 9:29:30 AM · Declined · Remove a user\n- Request: q_cd34\n- Reason: read-only only\n\n```sql\nDELETE FROM audit.users WHERE id = 1\n```\n\n## 9:30:00 AM · Approved · List account contacts\n- Flags: PII, sensitive value\n- Latency: 5.0s\n- Request: q_ab12\n- Rows returned: 3\n\n```sql\nSELECT email FROM audit.users\n```\n",
+    const nextDay: ActivityEntry = {
+      ...rejected,
+      id: "q_ef56",
+      createdAt: T + 86_400_000 - 400,
+      decidedAt: T + 86_400_000,
+      sessionId: "s2",
+      harness: "codex",
+      project: null,
+      sessionLabel: null,
+      sql: "SELECT * FROM orders",
+      intent: null,
+      state: "failed",
+      reason: null,
+      error: "statement timeout",
+    };
+    expect(activityMarkdownDays([nextDay, approved, rejected], "prod-analytics", flags)).toBe(
+      "# Gatekeeper Audit Trail\n\n- Connection: prod-analytics\n- Days: 2026-01-01 to 2026-01-02 (2 days)\n- Queries: 3 (1 Failed · 1 Approved · 1 Declined)\n- Sessions: 2\n\n" +
+        "## 2026-01-01\n\n### gatekeeper (s1)\n- Harness: claude-code\n- Task: audit review\n\n" +
+        "#### 9:29:30 AM · Declined · Remove a user\n- Request: q_cd34\n- Reason: read-only only\n\n```sql\nDELETE FROM audit.users WHERE id = 1\n```\n\n" +
+        "#### 9:30:00 AM · Approved · List account contacts\n- Flags: PII, sensitive value\n- Latency: 5.0s\n- Request: q_ab12\n- Rows returned: 3\n\n```sql\nSELECT email FROM audit.users\n```\n\n" +
+        "## 2026-01-02\n\n### codex (s2)\n- Harness: codex\n\n" +
+        "#### 9:30:00 AM · Failed\n- Latency: 400ms\n- Request: q_ef56\n- Error: statement timeout\n\n```sql\nSELECT * FROM orders\n```\n",
     );
+    expect(activityMarkdownDays([approved], "", flags)).toContain("- Day: 2026-01-01\n");
   });
 
   it("renders a session-day CSV export: BOM, session_id first, flattened SQL", () => {
@@ -155,7 +158,7 @@ describe("render/activity", () => {
       id: "q_bt",
       sql: "SELECT `a```b` FROM t",
     };
-    const md = activityMarkdown("2026-01-01", "s1", [withBackticks], "prod", new Map());
+    const md = activityMarkdownDays([withBackticks], "prod", new Map());
     // Longest inner run is 3 backticks, so the opening fence must be at least 4.
     expect(md).toContain("````sql\nSELECT `a```b` FROM t\n````");
   });
@@ -167,7 +170,7 @@ describe("render/activity", () => {
       id: "q_bidi",
       sql: `SELECT 1 -- ${rlo}evil`,
     };
-    const md = activityMarkdown("2026-01-01", "s1", [trojan], "prod", new Map());
+    const md = activityMarkdownDays([trojan], "prod", new Map());
     expect(md).not.toContain(rlo);
     expect(md).toContain("[U+202E]");
     const json = JSON.parse(activityJson([trojan]));
