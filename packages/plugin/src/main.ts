@@ -19,9 +19,7 @@ async function bootstrap(): Promise<void> {
     return;
   }
   if (!(await loadPgParser())) {
-    log.error(
-      "PostgreSQL parser failed to load; PostgreSQL queries fall back to the strict text check",
-    );
+    log.error("PostgreSQL parser failed to load");
   }
   const app = new Gatekeeper(root);
   void app.start();
