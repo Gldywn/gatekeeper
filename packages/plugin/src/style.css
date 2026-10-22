@@ -3044,6 +3044,10 @@ label.qs-row {
   margin-top: 18px;
 }
 .dbn-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
   font-size: 11.5px;
   color: var(--faint);
   cursor: pointer;
