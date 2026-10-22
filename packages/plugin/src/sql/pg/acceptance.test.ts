@@ -941,9 +941,9 @@ describe("parser-only PostgreSQL spellings", () => {
     ["a schema-qualified type", "SELECT id FROM public.orders WHERE note = public.text 'a'"],
     ["FETCH without a literal count", "SELECT id FROM public.orders FETCH FIRST ROW ONLY"],
     ["FETCH WITH TIES", "SELECT id FROM public.orders ORDER BY id FETCH FIRST 5 ROWS WITH TIES"],
-  ])("keeps %s unparsed", (_, sql) => {
-    expect(parsed(sql).parseOk).toBe(false);
-    expect(planRead(sql, "postgresql")).toBe("A parsed single read is required");
+  ])("reads %s with PostgreSQL's grammar but keeps it out of Auto", (_, sql) => {
+    expect(parsed(sql)).toEqual({ class: "read", parseOk: true, blocked: false });
+    expect(typeof planRead(sql, "postgresql")).toBe("string");
   });
   it.each([
     ["a string", "SELECT id FROM public.orders WHERE note = 'uuid ''x'' fetch first 5 rows only'"],

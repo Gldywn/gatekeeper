@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { z } from "zod";
 import { analyzeWithFixture, type FixtureOptions } from "../../plugin/src/sql/pg/catalog-fixture";
+import { loadPgParser } from "../../plugin/src/sql/pg/parse";
 import { planRead } from "../../plugin/src/sql/read-analysis";
 import {
   AUTO_MODEL,
@@ -409,6 +410,7 @@ const root = fileURLToPath(new URL("../../../", import.meta.url));
 const load = async (path: string) => JSON.parse(await readFile(resolve(root, path), "utf8"));
 
 async function main() {
+  if (!(await loadPgParser())) throw new Error("PostgreSQL parser failed to load");
   const { values } = parseArgs({
     options: {
       live: { type: "boolean" },

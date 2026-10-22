@@ -8,6 +8,7 @@ import {
   AUTO_THRESHOLDS as PLUGIN_THRESHOLDS,
 } from "../../plugin/src/sql/auto";
 import { analyzeSql, sensitiveLiterals } from "../../plugin/src/sql/inspect";
+import { loadPgParser } from "../../plugin/src/sql/pg/parse";
 import { planRead } from "../../plugin/src/sql/read-analysis";
 import { looksLikeClientData, looksLikePii } from "../../plugin/src/sql/schema";
 import {
@@ -27,6 +28,9 @@ import {
   summarize,
   validateReport,
 } from "./auto";
+
+// The plugin's PostgreSQL grammar is WASM: the bench loads it once, as the plugin does.
+if (!(await loadPgParser())) throw new Error("PostgreSQL parser failed to load");
 
 const allCases = corpusSchema.parse(
   JSON.parse(await readFile(new URL("auto-cases.json", import.meta.url), "utf8")),

@@ -4,6 +4,7 @@ import { prepareSql } from "./identifiers";
 import { analyzeSql, analyzeTableOps, sensitiveLiterals } from "./inspect";
 import { parser } from "./nsp/parser";
 import { identifierLiteral, validIdentifier } from "./pg/syntax";
+import { planRead } from "./read-analysis";
 
 describe("PostgreSQL identifier parser contract", () => {
   it("represents ordered array aggregation and text formatting explicitly", () => {
@@ -192,8 +193,12 @@ describe("PostgreSQL identifier parser contract", () => {
     "SELECT 1 /* unfinished",
     "SELECT 'unfinished",
     "SELECT $$unfinished",
-    'SELECT U&"d\\0061t" FROM public.products',
   ])("does not authorize syntax the adapter cannot preserve: %s", (sql) =>
     expect(classifyQuery(sql).parseOk).toBe(false),
   );
+  it("reads a Unicode-escaped identifier at the gate but keeps it out of Auto", () => {
+    const sql = 'SELECT U&"d\\0061t" FROM public.products';
+    expect(classifyQuery(sql)).toEqual({ class: "read", parseOk: true, blocked: false });
+    expect(typeof planRead(sql, "postgresql")).toBe("string");
+  });
 });

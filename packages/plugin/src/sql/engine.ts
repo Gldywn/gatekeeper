@@ -1,4 +1,5 @@
 import { nspEngine } from "./nsp/engine";
+import { pgEngine } from "./pg/engine";
 import type { RiskVerdict } from "./risk";
 import type { ParsedQuery, Receipt, TableOps } from "./schema";
 
@@ -16,7 +17,8 @@ export interface SqlEngine {
   countsRows(sql: string): boolean | null;
 }
 
-// The single place that maps Beekeeper's databaseType to a parser.
+// The single place that maps Beekeeper's databaseType to a parser. Only a real PostgreSQL
+// connection gets PostgreSQL's own grammar: Redshift or DuckDB merely look like it.
 export function engineFor(databaseType: string): SqlEngine {
-  return nspEngine(databaseType);
+  return databaseType === "postgresql" ? pgEngine : nspEngine(databaseType);
 }
