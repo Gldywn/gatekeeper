@@ -122,7 +122,8 @@ export interface AutoEvaluation {
     | "auto-beta-4"
     | "auto-beta-5"
     | "auto-beta-6"
-    | "auto-beta-7";
+    | "auto-beta-7"
+    | "auto-beta-8";
   evaluatedAt: number;
   sqlDigest: string;
   eligible: boolean;

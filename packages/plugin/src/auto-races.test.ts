@@ -128,7 +128,7 @@ function harness() {
     getColumns: async () => [],
     getMetadata: async (sql) => {
       const result = await query(sql);
-      if (result.error) throw new Error("Metadata unavailable");
+      if (result.error) throw new Error("Metadata query failed");
       return result.results[0]?.rows ?? [];
     },
   });
@@ -149,7 +149,7 @@ function evaluation(): AutoEvaluation {
   return {
     provider: "typesafe",
     model: "jev-1.13.0",
-    policy: "auto-beta-7",
+    policy: "auto-beta-8",
     evaluatedAt: Date.now(),
     sqlDigest: "a".repeat(64),
     eligible: true,
@@ -492,7 +492,7 @@ describe("shared manual/automatic execution authority", () => {
     const { app, card } = harness();
     query.mockResolvedValue({ error: "metadata unavailable", results: [] });
     await app.evaluateNext();
-    expect(card.autoStatus).toContain("Metadata unavailable");
+    expect(card.autoStatus).toContain("Metadata query failed");
     expect(app.broker.evaluate).not.toHaveBeenCalled();
   });
   it("holds email locally before catalog access or inference", async () => {

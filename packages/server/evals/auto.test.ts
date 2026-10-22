@@ -41,6 +41,9 @@ const freshCases = corpusSchema.parse(
 const aliasCases = corpusSchema.parse(
   JSON.parse(await readFile(new URL("auto-alias-cases.json", import.meta.url), "utf8")),
 );
+const nameCases = corpusSchema.parse(
+  JSON.parse(await readFile(new URL("auto-name-cases.json", import.meta.url), "utf8")),
+);
 const sourceValidationCases = corpusSchema.parse(
   JSON.parse(await readFile(new URL("auto-source-validation-cases.json", import.meta.url), "utf8")),
 );
@@ -135,6 +138,7 @@ describe("Auto evaluation bench (synthetic, no calibration)", () => {
     ...allCases,
     ...freshCases,
     ...aliasCases,
+    ...nameCases,
     ...sourceValidationCases.filter((c) => c.expected !== "local"),
     ...confirmationCases,
   ])("$id: enforces its expected local/provider boundary", (c) => {
@@ -249,6 +253,15 @@ describe("Auto evaluation bench (synthetic, no calibration)", () => {
     await expect(
       runLive(report, "synthetic-key", new AbortController().signal, async () => {}),
     ).rejects.toThrow("Local boundary regression");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it("refuses a live run of a report prepared under an older policy", async () => {
+    const fetch = vi.fn(async () => answer());
+    vi.stubGlobal("fetch", fetch);
+    const report = { ...prepare(allCases, questions, "validation"), baselinePolicy: "auto-beta-7" };
+    await expect(
+      runLive(report, "synthetic-key", new AbortController().signal, async () => {}),
+    ).rejects.toThrow("Prepared under another policy");
     expect(fetch).not.toHaveBeenCalled();
   });
   it("runs all 239 provider candidates with mocked fetch and never sends the 33 local queries", async () => {
@@ -478,7 +491,7 @@ describe("Auto evaluation bench (synthetic, no calibration)", () => {
     expect(PLUGIN_MODEL).toBe(AUTO_MODEL);
     expect(AUTO_MODEL).toBe("jev-1.13.0");
     expect(PLUGIN_POLICY).toBe(AUTO_POLICY);
-    expect(report.baselinePolicy).toBe("auto-beta-7");
+    expect(report.baselinePolicy).toBe("auto-beta-8");
   });
   it.each(Object.keys(productionThresholds))(
     "server and plugin enforce the retained %s cutoff independently",

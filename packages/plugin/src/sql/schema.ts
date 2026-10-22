@@ -722,12 +722,13 @@ export function sensitiveLiterals(sql: string, dialect: string): string[] {
 export function sensitiveReference(name: string): boolean {
   // ponytail: beta exempts ID names, stronger identifier checks need relation context.
   if (IDENTIFIER.test(name)) return false;
+  // A bare `name` is a product's as often as a person's: Jev tells them apart from the
+  // relation, while first_name, full_name or company_name still hold through the fragments.
   return (
     looksLikePii(name) ||
     looksLikeClientData(name) ||
     /^(?:ip|ipaddress|ipv4address|ipv6address)$/i.test(name.replace(/_/g, "")) ||
-    /(?:^|_)ip(?:_|$)/i.test(name) ||
-    (/(?:^|_)name(?:_|$)/i.test(name) && name !== "product_name")
+    /(?:^|_)ip(?:_|$)/i.test(name)
   );
 }
 

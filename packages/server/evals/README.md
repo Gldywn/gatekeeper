@@ -367,6 +367,19 @@ Archived reports without the `shared-read-2` marker replay with an explicit note
 are not evidence for the current analysis or policy, and `runLive` refuses them. A report
 marked `shared-read-2` must carry dependency usage on every input.
 
+### Bare name columns, auto-beta-8
+
+`auto-beta-8` keeps the `auto-beta-7` questions and thresholds and changes only the local
+name screen: a bare `name` column, alias or JSON key reaches the evaluator (see "Bare name
+columns" in `docs/AUTO-MODE.md`). [auto-name-cases.json](auto-name-cases.json) holds 17
+authored cases with labels fixed before any run: seven allow (product, plan, queue,
+template, event, feature flag and merchant category names), eight review (user, card holder,
+employee, account display, merchant legal, payout beneficiary and organization names, plus a
+membership count on a user name) and two local controls (`first_name`, `company_name`). The
+offline tests only prove the local boundary; none has been observed live. `runLive` refuses a
+report prepared under another policy, so an `auto-beta-7` dry report cannot be passed off as
+evidence for this boundary: prepare a fresh one.
+
 ### Provisioning and execution
 
 After reviewing the cases, the operator provisions `TYPESAFE_API_KEY` in the command's

@@ -109,3 +109,17 @@ nor the script, yourself.
 - Credentials, pairing tokens and result rows never go to logs, fixtures or MCP payloads
   beyond what `SECURITY.md` allows.
 - Throwaway experiments go in `.scratch/` (gitignored).
+
+## Fix the foundation, not around it
+
+When a feature fails because the thing it stands on cannot do what the feature needs (a
+library, an engine, a vendor API, or one of our own core modules), do not add another
+workaround on top: no input rewriting so the library accepts it, no special case for one more
+shape, no shim over a shim. Name the limitation of the foundation as the root cause, say so
+to the operator first, before any smaller fix, and propose correcting or replacing the
+foundation itself, with its cost. A workaround is acceptable only as a stopgap the operator
+chose, documented where it lives, with a tracked ticket to remove it.
+
+Example: `packages/plugin/src/sql/pg/syntax.ts` rewrites PostgreSQL so that node-sql-parser,
+a third-party reconstruction of each SQL dialect, can read it. Each unsupported spelling
+would mean one more rewrite; the fix is a parser built from PostgreSQL's own grammar.
