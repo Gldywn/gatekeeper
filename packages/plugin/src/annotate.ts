@@ -88,22 +88,35 @@ export class SchemaAnnotator {
   ): Promise<ReadSnapshot | undefined> {
     const plan = planRead(sql, this.deps.dialect());
     if (typeof plan === "string") return { complete: false, reasons: [plan] };
-    if (!this.deps.getMetadata) return { complete: false, reasons: ["Metadata unavailable"] };
+    const getMetadata = this.deps.getMetadata;
+    if (!getMetadata) return { complete: false, reasons: ["Metadata unavailable"] };
     const generation = this.deps.generation();
     const revision = this.revision;
     const current = () =>
       authorized() && generation === this.deps.generation() && revision === this.revision;
+    // Only a host rejection means the query failed. Building the catalog SQL or validating
+    // its rows can fail too, and those stay "Metadata unavailable".
+    const query = async (text: string) => {
+      try {
+        return await getMetadata(text);
+      } catch {
+        return null;
+      }
+    };
+    const failed = { complete: false, reasons: ["Metadata query failed"] };
     try {
       if (!current()) return undefined;
-      const path = await this.deps.getMetadata(readSearchPathSql());
+      const path = await query(readSearchPathSql());
       if (!current()) return undefined;
+      if (!path) return failed;
       if (!searchPathVerified(path))
         return {
           complete: false,
           reasons: ["PostgreSQL catalog must come first in the search path"],
         };
-      const rows = await this.deps.getMetadata(readMetadataSql(plan));
+      const rows = await query(readMetadataSql(plan));
       if (!current()) return undefined;
+      if (!rows) return failed;
       return resolveRead(plan, rows);
     } catch {
       return current() ? { complete: false, reasons: ["Metadata unavailable"] } : undefined;

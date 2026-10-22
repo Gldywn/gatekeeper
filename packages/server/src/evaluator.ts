@@ -240,6 +240,7 @@ const holdReasons = new Set([
   "Unsupported SQL representation",
   "Metadata unavailable",
   "Metadata unavailable or relation unresolved",
+  "Metadata query failed",
   "Views, foreign tables, RLS and inherited relations need manual review",
   "Unresolved or unsupported source",
   "Evaluation timed out. Approve manually",

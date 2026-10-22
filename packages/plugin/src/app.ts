@@ -301,7 +301,7 @@ export class Gatekeeper {
     getColumns,
     getMetadata: async (sql) => {
       const result = await runQuery(sql);
-      if (result.error) throw new Error("Metadata unavailable");
+      if (result.error) throw new Error("Metadata query failed");
       return result.results[0]?.rows ?? [];
     },
     dialect: () => this.dialect,
