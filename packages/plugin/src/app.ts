@@ -40,6 +40,7 @@ import {
   warnIcon,
   xIcon,
 } from "./icons";
+import { takeOver } from "./modal";
 import { BrokerClient } from "./net/broker";
 import { connectionScopeKey } from "./net/scope";
 import { SingleInstance, type SingleInstanceWire } from "./net/singleinstance";
@@ -319,6 +320,7 @@ export class Gatekeeper {
   private prevCardIds = new Set<string>();
   private stripObserver?: ResizeObserver;
   private overlayScrolls: (() => void)[] = [];
+  private noticeRelease: (() => void) | undefined;
   // Agents the roster shows as there, and whether one is active, for the empty right pane.
   private liveAgents = 0;
   private agentsActive = false;
@@ -756,8 +758,15 @@ export class Gatekeeper {
     }
     const overlay = this.root.querySelector<HTMLElement>("#notice");
     if (overlay) {
+      // A modal dialog like Settings and the confirms; with no opener left, the open tab.
+      if (overlay.hidden) {
+        this.noticeRelease = takeOver(overlay, () =>
+          this.root.querySelector<HTMLElement>('[data-tab][aria-selected="true"]'),
+        );
+      }
       overlay.innerHTML = this.dbNoticeHtml(type);
       overlay.hidden = false;
+      overlay.querySelector<HTMLElement>("[data-notice-continue]")?.focus({ preventScroll: true });
     }
   }
 
@@ -767,12 +776,14 @@ export class Gatekeeper {
       overlay.hidden = true;
       overlay.innerHTML = "";
     }
+    this.noticeRelease?.();
+    this.noticeRelease = undefined;
   }
 
   private dbNoticeHtml(type: string): string {
     const name = escapeHtml(dbDisplayName(type));
-    return `<div class="detail-card db-notice">
-        <h2 class="dbn-title"><span class="dbn-ico">${alertTriangleIcon}</span>Not officially tested with ${name} yet</h2>
+    return `<div class="detail-card db-notice" role="dialog" aria-modal="true" aria-labelledby="dbnTitle">
+        <h2 class="dbn-title" id="dbnTitle"><span class="dbn-ico">${alertTriangleIcon}</span>Not officially tested with ${name} yet</h2>
         <p class="dbn-body">SQL execution uses Beekeeper Studio's database APIs. PostgreSQL and MySQL are officially tested so far. Support for ${name} has not been verified end to end.</p>
         <div class="dbn-enc">
           <div class="dbn-h">Help make ${name} official</div>
@@ -782,7 +793,7 @@ export class Gatekeeper {
           </div>
         </div>
         <div class="dbn-actions">
-          <span class="dbn-link" data-notice-hush>Don't show this again</span>
+          <button class="dbn-link" type="button" data-notice-hush>Don't show this again</button>
           <button class="dbn-go" type="button" data-notice-continue>Continue</button>
         </div>
       </div>`;
@@ -1322,12 +1333,13 @@ export class Gatekeeper {
   }
 
   // Every render that replaces the root lets go of what the old shell held: the thumbs observing
-  // its panes, and an open confirm or Settings, whose hold on the page would outlive its nodes.
+  // its panes, and an open confirm, Settings or notice, whose hold would outlive its nodes.
   private releaseShell(): void {
     for (const dispose of this.overlayScrolls) dispose();
     this.overlayScrolls = [];
     this.confirmModal.cancel();
     this.settingsView.close();
+    this.hideDbNotice();
   }
 
   private renderShell(): void {

@@ -217,13 +217,14 @@ The outcome comes first, then what was asked.
 
 ## Overlays
 
-Every overlay window is a modal dialog: `role="dialog"`, `aria-modal`, the visible elements
-beside it inert while open (`takeOver` in `src/modal.ts`), the focus inside, then back on the
-control that opened it (the gear, for Settings opened from its menu, whose own button is gone
-by then). Settings and the confirms follow it; the database notice does not yet, and stays
-until one of its own buttons (Escape does not dismiss it). Their frame reads solid over the
-Inbox's veil: a dark outer line, a light inner line, a shadow, and an engraved Settings head
-(`.detail > .detail-card`).
+Every overlay window (Settings, the confirms, the database notice) is a modal dialog:
+`role="dialog"`, `aria-modal`, the visible elements beside it inert while open (`takeOver` in
+`src/modal.ts`), the focus inside, then back on the control that opened it, or on a fallback
+when that control is gone (the gear for Settings opened from its menu, the open tab for the
+notice, which opens on its own). Every action in it is a real button, reachable by keyboard.
+The database notice opens on Continue and stays until one of its own buttons: Escape does not
+dismiss it. Their frame reads solid over the Inbox's veil: a dark outer line, a light inner
+line, a shadow, and an engraved Settings head (`.detail > .detail-card`).
 
 Escape removes one layer per press: an open confirm first, then an open menu or popover, then
 Settings, then the Queue's open item.

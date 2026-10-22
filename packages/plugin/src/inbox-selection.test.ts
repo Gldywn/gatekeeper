@@ -133,15 +133,48 @@ describe("overlay thumbs", () => {
       app.overlayScrolls = [...dispose];
       app.stopProbe = vi.fn();
       app.root = { innerHTML: "", querySelector: () => null };
-      // An open confirm or Settings must not keep its hold on the shell being replaced.
+      // An open confirm, Settings or notice must not keep its hold on the shell being replaced.
       app.confirmModal = { cancel: vi.fn() };
       app.settingsView = { close: vi.fn() };
+      const noticeRelease = vi.fn();
+      app.noticeRelease = noticeRelease;
       app[leave]();
       for (const d of dispose) expect(d).toHaveBeenCalledOnce();
       expect(app.overlayScrolls).toEqual([]);
       expect(app.confirmModal.cancel).toHaveBeenCalledOnce();
       expect(app.settingsView.close).toHaveBeenCalledOnce();
+      expect(noticeRelease).toHaveBeenCalledOnce();
+      expect(app.noticeRelease).toBeUndefined();
     }
+  });
+});
+
+describe("the database notice", () => {
+  it("opens as a modal dialog on Continue, and lets the page go when it closes", async () => {
+    const app = harness();
+    app.conn = { databaseType: "sqlite" };
+    const focused: string[] = [];
+    const background = { inert: false, hidden: false };
+    const overlay = {
+      hidden: true,
+      innerHTML: "",
+      parentElement: { children: [] as object[] },
+      querySelector: (s: string) => ({ focus: () => focused.push(s) }),
+    };
+    overlay.parentElement.children.push(background, overlay);
+    app.root = { querySelector: (s: string) => (s === "#notice" ? overlay : null) };
+    await app.maybeShowDbNotice();
+    expect(overlay.hidden).toBe(false);
+    expect(overlay.innerHTML).toContain(
+      'role="dialog" aria-modal="true" aria-labelledby="dbnTitle"',
+    );
+    expect(overlay.innerHTML).toContain('<button class="dbn-link" type="button" data-notice-hush>');
+    expect(focused).toEqual(["[data-notice-continue]"]);
+    expect(background.inert).toBe(true);
+    app.hideDbNotice();
+    expect(overlay.hidden).toBe(true);
+    expect(background.inert).toBe(false);
+    expect(app.noticeRelease).toBeUndefined();
   });
 });
 

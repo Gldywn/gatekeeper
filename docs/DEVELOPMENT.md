@@ -106,9 +106,10 @@ The repo ships its dev wiring, so a clone is ready without hand-editing config:
   plugin at `http://127.0.0.1:5199/preview/index.html` over a fake Beekeeper host and an
   in-memory broker (`packages/plugin/preview/`), so an agent can screenshot a layout without
   Beekeeper, a database or the broker. URL parameters set the scenario (`agents`, `queue`,
-  `history`, `delay`), and `preview/frame.html?w=440&h=800` renders it at a fixed size. Port
-  5199 is held strictly, so a second worktree adds `--port <free port>`. Agents judge UI work
-  there (`AGENTS.md`); the human checks the real plugin in Beekeeper before merging.
+  `history`, `delay`, `engine=sqlite` for the untested-engine notice), and
+  `preview/frame.html?w=440&h=800` renders it at a fixed size. Port 5199 is held strictly, so
+  a second worktree adds `--port <free port>`. Agents judge UI work there (`AGENTS.md`); the
+  human checks the real plugin in Beekeeper before merging.
 - **Auto mode catalog fixture:** `test-db/auto-catalog/` holds SQL applied by hand in
   Beekeeper to the synthetic Postgres database, never run automatically. It backs the
   human-driven "Real catalog check" in [Auto mode](AUTO-MODE.md). `cleanup.sql` removes it.
