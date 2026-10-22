@@ -37,6 +37,15 @@ One package at a time: `pnpm --filter @gatekeeper/plugin test` or
 `pnpm --filter @gldywn/gatekeeper-mcp-server test` (the server keeps its npm name, so
 `@gatekeeper/server` matches nothing and exits 0 without running a test).
 
+## Proposing a plugin UI change
+
+A new element, style or presentation starts with how strong products present the same
+information. Then propose several directions in a mock-up built on the plugin's real stylesheet,
+each in its real states (wide and narrow, empty and full), next to the current design rebuilt
+from the same data, with a recommendation. The operator picks. Agree the implementation plan
+with an agent of another model family before writing code, not only at the final cross-read,
+and record the rules the operator sets in `packages/plugin/DESIGN.md`.
+
 ## Seeing a plugin change
 
 Agents judge UI work in the fixture preview: the real plugin, with its stylesheet and
