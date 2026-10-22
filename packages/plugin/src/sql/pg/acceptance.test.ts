@@ -672,7 +672,7 @@ describe("set operations and literal projections", () => {
         "public.transfers": { email: "text" },
       }).reasons[0],
     ).toMatch(/Sensitive/);
-    expect(analyze("SELECT status AS check_name FROM public.transfers", flows).reasons[0]).toMatch(
+    expect(analyze("SELECT status AS full_name FROM public.transfers", flows).reasons[0]).toMatch(
       /Sensitive/,
     );
   });

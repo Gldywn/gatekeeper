@@ -36,12 +36,9 @@ describe("Auto mode deterministic boundary", () => {
     "SELECT email FROM public.users LIMIT 5",
     "SELECT email AS product_name FROM public.products",
     "SELECT product_name AS email FROM public.products",
-    "SELECT name FROM public.products",
     "SELECT first_name FROM public.products",
     "SELECT last_name FROM public.products",
     "SELECT full_name FROM public.products",
-    "SELECT display_name FROM public.products",
-    "SELECT contact_name FROM public.products",
     "SELECT customer_name FROM public.products",
     "SELECT product_name_email FROM public.products",
     "SELECT email = 'alice@example.com' AS match FROM public.users",
@@ -58,6 +55,37 @@ describe("Auto mode deterministic boundary", () => {
     "SELECT quantity FROM public.products; SELECT quantity FROM public.products",
   ])("keeps unsupported or sensitive SQL manual before any catalog access: %s", (sql) => {
     expect(typeof planRead(sql, "postgresql")).toBe("string");
+  });
+  it.each([
+    "SELECT name FROM public.products",
+    "SELECT display_name FROM public.products",
+    "SELECT contact_name FROM public.products",
+    "SELECT sku AS event_name FROM public.products",
+    "SELECT sku FROM public.products WHERE name = 'Widget'",
+    "WITH p(item_name) AS (SELECT sku FROM public.products) SELECT item_name FROM p",
+    "SELECT profile->>'name' AS label FROM public.products",
+  ])("leaves a bare name to the evaluator, which sees its relation: %s", (sql) => {
+    const relations = {
+      "public.products": {
+        sku: "text",
+        name: "text",
+        display_name: "text",
+        contact_name: "text",
+        profile: "jsonb",
+      },
+    };
+    expect(analyzeWithFixture(sql, relations).reasons).toEqual([]);
+  });
+  it.each([
+    "SELECT first_name FROM public.products",
+    "SELECT full_name FROM public.products",
+    "SELECT owner_name FROM public.products",
+    "SELECT company_name FROM public.products",
+    "SELECT customer_name FROM public.products",
+    "SELECT sku AS full_name FROM public.products",
+    "SELECT profile->>'last_name' FROM public.products",
+  ])("still holds a person or company name locally: %s", (sql) => {
+    expect(planRead(sql, "postgresql")).toMatch(/^Sensitive/);
   });
   it.each([
     "SELECT custom_function() FROM public.products",
@@ -95,11 +123,11 @@ describe("Auto mode deterministic boundary", () => {
 });
 
 describe("Auto policy pin", () => {
-  it("keeps an auto-beta-6 decision readable but unable to authorize under auto-beta-7", () => {
+  it("keeps older decisions readable but unable to authorize under auto-beta-8", () => {
     const current = {
       provider: "typesafe" as const,
       model: "jev-1.13.0",
-      policy: "auto-beta-7" as const,
+      policy: "auto-beta-8" as const,
       evaluatedAt: Date.now(),
       sqlDigest: "a".repeat(64),
       eligible: true,
@@ -111,11 +139,12 @@ describe("Auto policy pin", () => {
         insufficient_context: 0.001,
       },
     };
-    expect(AUTO_POLICY).toBe("auto-beta-7");
+    expect(AUTO_POLICY).toBe("auto-beta-8");
     expect(AUTO_THRESHOLDS).not.toHaveProperty("read_only");
     expect(AUTO_THRESHOLDS.personal_disclosure).toBe(0.2);
     expect(validEvaluation(current)).toBe(true);
     expect(validEvaluation({ ...current, policy: "auto-beta-6" })).toBe(false);
+    expect(validEvaluation({ ...current, policy: "auto-beta-7" })).toBe(false);
     expect(
       validEvaluation({ ...current, probabilities: { ...current.probabilities, read_only: 1 } }),
     ).toBe(false);

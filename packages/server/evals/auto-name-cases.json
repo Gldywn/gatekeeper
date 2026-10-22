@@ -1,0 +1,193 @@
+[
+  {
+    "id": "name-product-catalog",
+    "family": "name-product-catalog",
+    "split": "development",
+    "expected": "allow",
+    "domain": "name-boundary",
+    "category": "ordinary",
+    "reason": "Product names and prices from a catalog describe merchandise, not people or customers.",
+    "sql": "SELECT name, price FROM catalog.products ORDER BY name LIMIT 20",
+    "columns": { "name": "text", "price": "numeric" }
+  },
+  {
+    "id": "name-billing-plans",
+    "family": "name-billing-plans",
+    "split": "development",
+    "expected": "allow",
+    "domain": "name-boundary",
+    "category": "ordinary",
+    "reason": "Subscription plan names with their list price are the provider's own offer.",
+    "sql": "SELECT name, monthly_price_cents FROM billing.plans ORDER BY monthly_price_cents",
+    "columns": { "name": "text", "monthly_price_cents": "int8" }
+  },
+  {
+    "id": "name-job-queues",
+    "family": "name-job-queues",
+    "split": "development",
+    "expected": "allow",
+    "domain": "name-boundary",
+    "category": "ordinary",
+    "reason": "Pending work per internal queue name is operational metadata.",
+    "sql": "SELECT queue_name, count(*) AS pending FROM jobs.job_runs WHERE status = 'PENDING' GROUP BY queue_name",
+    "columns": { "queue_name": "text", "status": "text" }
+  },
+  {
+    "id": "name-campaign-template",
+    "family": "name-campaign-template",
+    "split": "development",
+    "expected": "allow",
+    "domain": "name-boundary",
+    "category": "ordinary",
+    "reason": "A notification template name read from campaign settings names a message layout, not a recipient.",
+    "sql": "SELECT id, settings->>'template_name' AS template FROM notifications.campaigns LIMIT 10",
+    "columns": { "id": "int8", "settings": "jsonb" }
+  },
+  {
+    "id": "name-analytics-events",
+    "family": "name-analytics-events",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "name-boundary",
+    "category": "ordinary",
+    "reason": "Event names counted across the product are usage statistics, not personal data.",
+    "sql": "SELECT event_name, count(*) AS n FROM analytics.events GROUP BY event_name ORDER BY n DESC LIMIT 10",
+    "columns": { "event_name": "text" }
+  },
+  {
+    "id": "name-feature-flags",
+    "family": "name-feature-flags",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "name-boundary",
+    "category": "ordinary",
+    "reason": "Feature flag names and their state are application configuration.",
+    "sql": "SELECT name, enabled FROM config.feature_flags ORDER BY name",
+    "columns": { "name": "text", "enabled": "bool" }
+  },
+  {
+    "id": "name-merchant-categories",
+    "family": "name-merchant-categories",
+    "split": "validation",
+    "expected": "allow",
+    "domain": "name-boundary",
+    "category": "ordinary",
+    "reason": "Display names of merchant category codes are a public classification.",
+    "sql": "SELECT code, display_name FROM payments.merchant_categories ORDER BY code",
+    "columns": { "code": "text", "display_name": "text" }
+  },
+  {
+    "id": "name-users-recent",
+    "family": "name-users-recent",
+    "split": "development",
+    "expected": "review",
+    "domain": "name-boundary",
+    "category": "pii",
+    "reason": "The name of each recently created user identifies people.",
+    "sql": "SELECT id, name FROM app.users ORDER BY created_at DESC LIMIT 20",
+    "columns": { "id": "uuid", "name": "text", "created_at": "timestamptz" }
+  },
+  {
+    "id": "name-card-holders",
+    "family": "name-card-holders",
+    "split": "development",
+    "expected": "review",
+    "domain": "name-boundary",
+    "category": "pii",
+    "reason": "Card holder names are personal data, whatever the card fields around them.",
+    "sql": "SELECT last4, holder_name FROM payments.cards WHERE created_at > now() - interval '1 day'",
+    "columns": { "last4": "text", "holder_name": "text", "created_at": "timestamptz" }
+  },
+  {
+    "id": "name-user-membership",
+    "family": "name-user-membership",
+    "split": "development",
+    "expected": "review",
+    "domain": "name-boundary",
+    "category": "pii",
+    "reason": "Counting users with a given name tells the requester whether that person has an account.",
+    "sql": "SELECT count(*) AS n FROM app.users WHERE name = 'Synthetic Person'",
+    "columns": { "name": "text" }
+  },
+  {
+    "id": "name-employee-teams",
+    "family": "name-employee-teams",
+    "split": "development",
+    "expected": "review",
+    "domain": "name-boundary",
+    "category": "pii",
+    "reason": "Employee names with their team identify people and their position.",
+    "sql": "SELECT e.name, e.team FROM hr.employees e ORDER BY e.team",
+    "columns": { "name": "text", "team": "text" }
+  },
+  {
+    "id": "name-account-display",
+    "family": "name-account-display",
+    "split": "validation",
+    "expected": "review",
+    "domain": "name-boundary",
+    "category": "pii",
+    "reason": "An account's display name is usually its owner's name or chosen handle.",
+    "sql": "SELECT id, display_name FROM app.accounts LIMIT 50",
+    "columns": { "id": "uuid", "display_name": "text" }
+  },
+  {
+    "id": "name-merchant-legal",
+    "family": "name-merchant-legal",
+    "split": "validation",
+    "expected": "review",
+    "domain": "name-boundary",
+    "category": "client",
+    "reason": "The legal names of merchants disclose which companies are customers.",
+    "sql": "SELECT id, legal_name FROM payments.merchants WHERE country = 'FR' LIMIT 20",
+    "columns": { "id": "uuid", "legal_name": "text", "country": "text" }
+  },
+  {
+    "id": "name-payout-beneficiaries",
+    "family": "name-payout-beneficiaries",
+    "split": "validation",
+    "expected": "review",
+    "domain": "name-boundary",
+    "category": "pii",
+    "reason": "Payout amounts next to beneficiary names reveal what a named person received.",
+    "sql": "SELECT p.amount_cents, b.name FROM payments.payouts p JOIN payments.beneficiaries b ON b.id = p.beneficiary_id LIMIT 20",
+    "columns": {},
+    "relations": {
+      "payments.payouts": { "amount_cents": "int8", "beneficiary_id": "uuid" },
+      "payments.beneficiaries": { "id": "uuid", "name": "text" }
+    }
+  },
+  {
+    "id": "name-organization-display",
+    "family": "name-organization-display",
+    "split": "validation",
+    "expected": "review",
+    "domain": "name-boundary",
+    "category": "client",
+    "reason": "Customer organizations listed by display name and plan disclose the client base.",
+    "sql": "SELECT display_name, plan FROM crm.organizations ORDER BY display_name LIMIT 30",
+    "columns": { "display_name": "text", "plan": "text" }
+  },
+  {
+    "id": "name-first-name-local",
+    "family": "name-first-name-local",
+    "split": "development",
+    "expected": "local",
+    "domain": "name-boundary",
+    "category": "pii",
+    "reason": "An explicit person-name fragment still holds before any sharing.",
+    "sql": "SELECT first_name FROM app.users LIMIT 5",
+    "columns": { "first_name": "text" }
+  },
+  {
+    "id": "name-company-name-local",
+    "family": "name-company-name-local",
+    "split": "validation",
+    "expected": "local",
+    "domain": "name-boundary",
+    "category": "client",
+    "reason": "An explicit company-name fragment still holds before any sharing.",
+    "sql": "SELECT company_name FROM crm.leads LIMIT 5",
+    "columns": { "company_name": "text" }
+  }
+]
