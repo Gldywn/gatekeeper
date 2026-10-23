@@ -395,6 +395,7 @@ export class Gatekeeper {
       root,
       annotator: this.annotator,
       dialect: () => this.dialect,
+      closeMenus: () => this.closeFlyoutMenus(),
     });
     this.activityView = new ActivityView({
       root,
@@ -485,8 +486,13 @@ export class Gatekeeper {
         ) {
           return;
         }
-        // Then one layer per press: Settings, the settings popover, and in a narrow tab the
-        // list behind an open item. The database notice stays until its own buttons.
+        // Then one layer per press: the enlarged rows, Settings, the settings popover, and in a
+        // narrow tab the list behind an open item. The database notice stays until its own
+        // buttons, whatever it covers.
+        const notice = this.root.querySelector<HTMLElement>("#notice");
+        if (notice?.hidden !== false && this.detailView.shrink()) {
+          return;
+        }
         const settings = this.root.querySelector<HTMLElement>("#settings");
         if (settings && !settings.hidden) {
           this.settingsView.close();
@@ -497,7 +503,7 @@ export class Gatekeeper {
           this.setSettingsOpen(false);
           return;
         }
-        if (!this.root.querySelector<HTMLElement>("#notice")?.hidden) {
+        if (!notice?.hidden) {
           return;
         }
         const list = this.root.querySelector<HTMLElement>(".pane-list");
@@ -778,8 +784,10 @@ export class Gatekeeper {
     }
     const overlay = this.root.querySelector<HTMLElement>("#notice");
     if (overlay) {
-      // A modal dialog like Settings and the confirms; with no opener left, the open tab.
+      // A modal dialog like Settings and the confirms; with no opener left, the open tab. Rows
+      // enlarged meanwhile go back first, so the two holds never stack.
       if (overlay.hidden) {
+        this.detailView.shrink(false);
         this.noticeRelease = takeOver(overlay, () =>
           this.root.querySelector<HTMLElement>('[data-tab][aria-selected="true"]'),
         );
@@ -1353,7 +1361,8 @@ export class Gatekeeper {
   }
 
   // Every render that replaces the root lets go of what the old shell held: the thumbs observing
-  // its panes, and an open confirm, Settings or notice, whose hold would outlive its nodes.
+  // its panes, an open confirm, Settings or notice, whose hold would outlive its nodes, and the
+  // detail's grid, enlarged or not.
   private releaseShell(): void {
     for (const dispose of this.overlayScrolls) dispose();
     this.overlayScrolls = [];
@@ -1361,6 +1370,7 @@ export class Gatekeeper {
     this.settingsView.close();
     this.hideDbNotice();
     this.exportDialog.close();
+    this.detailView.close();
   }
 
   private renderShell(): void {
@@ -1406,6 +1416,7 @@ export class Gatekeeper {
             <button class="cta-fab fb" type="button" data-gh-feedback aria-label="Request a feature">${feedbackGlyph}<span class="cta-lbl">Request a feature</span></button>
           </div>
         </footer>
+        <div class="detail results-overlay" id="results" hidden></div>
         <div class="detail settings-overlay" id="settings" hidden></div>
         <div class="detail export-overlay" id="export" hidden></div>
         <div class="detail confirm-overlay" id="confirm" hidden></div>
@@ -1429,6 +1440,10 @@ export class Gatekeeper {
     const inbox = this.root.querySelector<HTMLElement>("#inbox")!;
     inbox.addEventListener("click", (e) => this.onInboxClick(e));
     inbox.addEventListener("keydown", (e) => this.onInboxKey(e));
+    // The enlarged rows keep the Inbox's Copy and Export, and their own Close and Queue.
+    this.root
+      .querySelector<HTMLElement>("#results")!
+      .addEventListener("click", (e) => this.onInboxClick(e));
     // The armed banner's X drops straight back to read-only (no confirm on a drop).
     this.root.querySelector<HTMLElement>("#armed")!.addEventListener("click", (e) => {
       if ((e.target as HTMLElement).closest("[data-disarm]")) {
@@ -1589,6 +1604,18 @@ export class Gatekeeper {
       return;
     }
     this.closeFlyoutMenus();
+    if (target.closest("[data-result-zoom]")) {
+      this.detailView.enlarge();
+      return;
+    }
+    if (target.closest("[data-results-close]")) {
+      this.detailView.shrink();
+      return;
+    }
+    if (target.closest("[data-results-queue]")) {
+      this.openQueue();
+      return;
+    }
     const tab = target.closest<HTMLElement>("[data-tab]");
     if (tab) {
       this.setTab(tab.dataset.tab as InboxTab);
@@ -1803,13 +1830,26 @@ export class Gatekeeper {
     else this.focusOpenTab();
   }
 
-  // A rebuild that took the focused control with it (Approve, Stop, a sent reason) hands the
-  // focus to the open row, so the keyboard keeps its place and Escape still reaches the Inbox.
+  // A rebuild that took the focused control with it (Approve, Stop, a sent reason, rows enlarged
+  // over the tab) hands the focus to the open row, so the keyboard keeps its place and Escape
+  // still reaches the Inbox.
   private renderSelection(force = false): void {
-    const pane = this.root.querySelector<HTMLElement>("#detailBody");
-    const focused = Boolean(pane?.contains(document.activeElement));
+    const holds = () =>
+      Boolean(
+        this.root.querySelector("#detailBody")?.contains(document.activeElement) ||
+          this.root.querySelector("#results:not([hidden])")?.contains(document.activeElement),
+      );
+    const focused = holds();
     this.paintSelection(force);
-    if (focused && !pane?.contains(document.activeElement)) this.focusSelectedRow();
+    if (focused && !holds()) this.focusSelectedRow();
+  }
+
+  // From the enlarged rows to what waits: the Queue tab and its list, its selection kept.
+  private openQueue(): void {
+    this.detailView.shrink(false);
+    this.setTab("queue");
+    this.root.querySelector("#inbox")?.setAttribute("data-show", "list");
+    this.root.querySelector<HTMLElement>("#tabQueue")?.focus({ preventScroll: true });
   }
 
   // The right pane shows exactly the current selection. A decided request reopens only when
@@ -2916,6 +2956,7 @@ export class Gatekeeper {
     if (count) {
       count.textContent = ready > 0 ? String(ready) : "";
     }
+    this.detailView.setPendingCount(ready);
     this.renderQueueList();
     // The empty pane counts what waits, so it follows the queue too.
     const sel = this.selection[this.tab];

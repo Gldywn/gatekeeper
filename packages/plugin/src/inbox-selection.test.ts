@@ -44,6 +44,7 @@ function harness() {
     root: { querySelector: () => null },
     settingsStore: { get: () => ({ recentlyResolved: 20, resultCacheMb: 4 }) },
     confirmModal: { dismissFor: vi.fn() },
+    detailView: { setPendingCount: vi.fn(), shrink: vi.fn(() => false), close: vi.fn() },
     renderQueueList: vi.fn(),
     renderSelection: vi.fn(),
     updateTabTitle: vi.fn(),
@@ -62,6 +63,36 @@ describe("Inbox selection", () => {
     app.renderQueue("b");
     expect(app.selection.queue).toBeNull();
     expect(app.renderSelection).toHaveBeenCalledOnce();
+  });
+
+  it("gives the enlarged rows the tab's own count of what waits, executing cards apart", () => {
+    const app = harness();
+    app.cards[1].state = "executing";
+    app.renderQueue();
+    expect(app.detailView.setPendingCount).toHaveBeenLastCalledWith(1);
+    app.cards = [];
+    app.renderQueue();
+    expect(app.detailView.setPendingCount).toHaveBeenLastCalledWith(0);
+  });
+
+  it("goes from the enlarged rows to the Queue's list and tab, keeping its selection", () => {
+    const app = harness();
+    app.tab = "audit";
+    app.selection = { queue: { kind: "hist", id: "h" }, audit: { kind: "audit", id: "x" } };
+    const inbox = { setAttribute: vi.fn() };
+    const tab = { focus: vi.fn() };
+    app.root = {
+      querySelector: (s: string) => (s === "#inbox" ? inbox : s === "#tabQueue" ? tab : null),
+    };
+    app.applyTab = vi.fn();
+    app.exportDialog = { close: vi.fn() };
+    app.activityView = { close: vi.fn() };
+    app.openQueue();
+    expect(app.detailView.shrink).toHaveBeenCalledWith(false);
+    expect(app.tab).toBe("queue");
+    expect(app.selection.queue).toEqual({ kind: "hist", id: "h" });
+    expect(inbox.setAttribute).toHaveBeenCalledWith("data-show", "list");
+    expect(tab.focus).toHaveBeenCalledOnce();
   });
 
   it("rebuilds the open card for its own changes only", () => {
@@ -139,6 +170,7 @@ describe("overlay thumbs", () => {
       const noticeRelease = vi.fn();
       app.noticeRelease = noticeRelease;
       app.exportDialog = { close: vi.fn() };
+      app.detailView = { close: vi.fn() };
       app[leave]();
       for (const d of dispose) expect(d).toHaveBeenCalledOnce();
       expect(app.overlayScrolls).toEqual([]);
@@ -147,6 +179,8 @@ describe("overlay thumbs", () => {
       expect(noticeRelease).toHaveBeenCalledOnce();
       expect(app.noticeRelease).toBeUndefined();
       expect(app.exportDialog.close).toHaveBeenCalledOnce();
+      // The detail's grid too, enlarged or not.
+      expect(app.detailView.close).toHaveBeenCalledOnce();
     }
   });
 });
@@ -165,7 +199,13 @@ describe("the database notice", () => {
     };
     overlay.parentElement.children.push(background, overlay);
     app.root = { querySelector: (s: string) => (s === "#notice" ? overlay : null) };
+    // Rows enlarged meanwhile go back first, the focus left to the notice.
+    app.detailView.shrink = vi.fn(() => {
+      expect(background.inert).toBe(false);
+      return true;
+    });
     await app.maybeShowDbNotice();
+    expect(app.detailView.shrink).toHaveBeenCalledWith(false);
     expect(overlay.hidden).toBe(false);
     expect(overlay.innerHTML).toContain(
       'role="dialog" aria-modal="true" aria-labelledby="dbnTitle"',
@@ -255,6 +295,33 @@ describe("closing the open item", () => {
     // Nor does one while the focus is elsewhere.
     doc.activeElement = {};
     app.renderSelection();
+    expect(app.focusSelectedRow).toHaveBeenCalledOnce();
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps the focus in the enlarged rows, and finds the row when they go", () => {
+    const app = harness();
+    delete app.renderSelection;
+    const holder = {};
+    const doc = { activeElement: holder as unknown };
+    vi.stubGlobal("document", doc);
+    let enlarged = true;
+    app.root = {
+      querySelector: (s: string) =>
+        s === "#results:not([hidden])" && enlarged
+          ? { contains: (el: unknown) => el === holder }
+          : null,
+    };
+    app.focusSelectedRow = vi.fn();
+    app.paintSelection = vi.fn();
+    app.renderSelection();
+    expect(app.focusSelectedRow).not.toHaveBeenCalled();
+    // Shed rows or another selection close the dialog under the focus.
+    app.paintSelection = vi.fn(() => {
+      enlarged = false;
+      doc.activeElement = {};
+    });
+    app.renderSelection(true);
     expect(app.focusSelectedRow).toHaveBeenCalledOnce();
     vi.unstubAllGlobals();
   });

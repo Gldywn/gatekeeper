@@ -5,7 +5,7 @@ process.env.TZ = "UTC";
 import { describe, expect, it } from "vitest";
 import type { HistResult } from "../result";
 import type { HistItem } from "../types";
-import { CANCELLED_NOTE, detailHtml } from "./detail";
+import { CANCELLED_NOTE, detailHtml, resultsDialogHtml } from "./detail";
 
 const result: HistResult = {
   fields: [{ name: "email" }, { name: "company_name" }],
@@ -94,6 +94,35 @@ describe("render/detail", () => {
     const html = detailHtml({ ...item, result: { ...result, rows: [], rowCount: 0 } }, "hist", pg);
     expect(text(fact(html) ?? "")).toBe("SELECT on audit.users completed, returning 0 rows.");
     expect(html).not.toContain("detail-grid");
+    expect(html).not.toContain("data-result-zoom");
+  });
+
+  it("offers to enlarge held rows only, from the result bar's tools", () => {
+    const html = detailHtml(item, "hist", pg);
+    const zoom = html.indexOf(
+      '<button class="flyout res-zoom" type="button" data-result-zoom aria-label="Enlarge the results" title="Enlarge">',
+    );
+    expect(zoom).toBeGreaterThan(html.indexOf('data-flyout-fmt="json"'));
+    expect(zoom).toBeLessThan(html.indexOf('<span class="res-pg">'));
+    const shed = { ...item, result: { ...result, rows: [], truncated: true } };
+    expect(detailHtml(shed, "hist", pg)).not.toContain("data-result-zoom");
+  });
+
+  it("names the enlarged rows as the fold does, with the Queue's count only while one waits", () => {
+    const html = resultsDialogHtml(item, 0);
+    expect(html).toContain(
+      '<div class="detail-card results-card" role="dialog" aria-modal="true" aria-labelledby="resultsTitle">',
+    );
+    expect(html).toContain(
+      '<span class="panel-title" id="resultsTitle">List account contacts</span>',
+    );
+    expect(html).toContain('data-results-queue hidden>Queue<span class="n">0</span>');
+    expect(html).toContain('data-results-close aria-label="Close" title="Close"');
+    expect(resultsDialogHtml(item, 2)).toContain(
+      'data-results-queue>Queue<span class="n">2</span>',
+    );
+    const unnamed = resultsDialogHtml({ ...item, intent: undefined, sql: "SELECT <b> FROM t" }, 0);
+    expect(unnamed).toContain('id="resultsTitle">SELECT &lt;b&gt; FROM t</span>');
   });
 
   it("keeps the count of rows no longer held, without a line about where they went", () => {

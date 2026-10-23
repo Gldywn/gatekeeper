@@ -203,9 +203,13 @@ The outcome comes first, then what was asked.
   place for the outcome's count; rows that are not held and counts that were not recorded add
   no sentence of their own.
 - **Rows**: only a real table of rows gets a framed surface. Its top bar holds Copy and Export
-  on the left, on the data they act on (the rows this tab holds), the position in those rows
-  ("1–50 of 2,000", "11 of 11") and the pages on the right; no footer. Values keep their
-  type: a real null is not the string NULL, numbers align right.
+  on the left, on the data they act on (the rows this tab holds), then Enlarge, the position in
+  those rows ("1–50 of 2,000", "11 of 11") and the pages on the right; no footer. Values keep
+  their type: a real null is not the string NULL, numbers align right.
+- **Enlarge** is an icon-only square at the height of Copy and Export, with their fill and
+  edge, named on hover and to readers ("Enlarge", "Enlarge the results"). Its icon is the
+  outward arrows, never a magnifier: in a table's bar a magnifier reads as searching the rows.
+  It shows wherever held rows show, and opens them in the results dialog (see Overlays).
 - **Message**: every outcome that did not complete explains itself in one box headed
   "Message", whose tone carries the difference: neutral for an automatic explanation, the error
   tone for an execution error, amber for a reason you typed yourself. A completed query has its
@@ -219,17 +223,26 @@ The outcome comes first, then what was asked.
 
 ## Overlays
 
-Every overlay window (Settings, the export, the confirms, the database notice) is a modal
-dialog: `role="dialog"`, `aria-modal`, the visible elements beside it inert while open
-(`takeOver` in `src/modal.ts`), the focus inside, then back on the control that opened it, or
-on a fallback when that control is gone (the gear for Settings opened from its menu, the open
-tab for the notice, which opens on its own, and for the export). Every action in it is a real
+Every overlay window (Settings, the export, the confirms, the database notice, the enlarged
+rows) is a modal dialog: `role="dialog"`, `aria-modal`, the visible elements beside it inert
+while open (`takeOver` in `src/modal.ts`), the focus inside, then back on the control that opened
+it, or on a fallback when that control is gone (the gear for Settings opened from its menu, the
+open tab for the notice, which opens on its own, and for the export). Every action in it is a real
 button, reachable by keyboard. The database notice opens on Continue and stays until one of its
 own buttons: Escape does not dismiss it. Their frame reads solid over the Inbox's veil: a dark
 outer line, a light inner line, a shadow, and an engraved Settings head (`.detail > .detail-card`).
 
 Escape removes one layer per press: an open confirm first, then the export, then an open menu or
-popover, then Settings, then the Queue's open item.
+popover, then the enlarged rows, then Settings, then the Queue's open item.
+
+**Enlarged rows.** Enlarge moves the decided request's own result bar and grid into a dialog
+over the whole tab, past the shell's width cap: the grid keeps its sort, page, page size and
+column order both ways, uses the height left under its bar up to its last row, and refits its
+column widths to the room; its scroll may start again at the top. The head names the request
+as its fold does, then the Queue's own label and amber count while something waits (the tab is
+under the veil; the button closes the dialog onto the Queue tab and selects nothing), then the
+X. It opens with the focus on the rows, so the arrows and Page Down scroll at once, and closes
+back to Enlarge. A new selection, a reset or the database notice puts the rows back first.
 
 **Confirms.** An arm confirm says what the mode lets you approve and opens on its action; a
 typed challenge (Destructive) opens on its input. When arming turns Auto mode off, one plain
