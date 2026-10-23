@@ -128,7 +128,7 @@ import { DETECTION_TOGGLES, exampleChip, SettingsView } from "./views/settings";
 
 const BROKER_URL = "http://localhost:9999";
 const POLL_MS = 1000;
-// Requests one poll reports as left to a human, the most the broker takes; the rest ride the next.
+// Requests one poll reports as left to a human; the rest ride the next. The broker takes more.
 const ATTENTION_MAX = 64;
 const RENEW_MS = 15_000;
 const TICK_MS = 1000;

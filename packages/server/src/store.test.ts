@@ -1016,6 +1016,45 @@ describe("alerts owed to Auto mode", () => {
     expect(store.remindAlerts(CD)).toBe(false);
   });
 
+  // Every Auto mode run taken by long queries: a read still owed at half its life rings anyway,
+  // once, and that first alert stands for its reminder.
+  it("rings at half life for a read Auto mode still has, then never reminds it", () => {
+    const { store, clock, read } = onAuto();
+    read();
+    clock.t += 29_999;
+    store.stampAuto(scopeOf("app"));
+    expect(store.releaseAlerts(CD)).toBeNull();
+    clock.t += 1;
+    expect(store.releaseAlerts(CD)).toBe("s1");
+    clock.t += CD;
+    expect(store.remindAlerts(CD)).toBe(false);
+  });
+
+  it("never lets a reminder swallow the alert of a request arriving right after it", () => {
+    const { store, clock } = onAuto();
+    store.stampAuto(null);
+    store.submitNew({ sessionId: "s1", sql: "SELECT 1" });
+    clock.t += 30_000;
+    expect(store.remindAlerts(CD)).toBe(true);
+    clock.t += 3_000;
+    expect(store.claimAlert(CD)).toBe(true);
+    // Next to a sound that just rang, a reminder stays quiet.
+    store.submitNew({ sessionId: "s1", sql: "SELECT 2" });
+    clock.t += 30_000;
+    expect(store.claimAlert(CD)).toBe(true);
+    expect(store.remindAlerts(CD)).toBe(false);
+  });
+
+  it("fails at startup when a column cannot be added, instead of running without it", () => {
+    const ctx = createContext();
+    try {
+      ctx.db.exec("CREATE VIEW alerts AS SELECT 1 AS id, 0 AS last_alert_at");
+      expect(() => migrate(ctx.db)).toThrow(/view/i);
+    } finally {
+      ctx.db.close();
+    }
+  });
+
   it("lets only one of two processes ring for the same request", () => {
     const path = join(tmpdir(), `gk-owed-${Date.now()}-${Math.random()}.db`);
     const a = new RequestStore({ path });

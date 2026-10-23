@@ -49,8 +49,9 @@ const IDENTITY_HEADER = encodeURIComponent(JSON.stringify(SERVER_IDENTITY));
 const MAX_BODY_BYTES = 32 * 1024 * 1024;
 const ACTIVITY_PAGE = 200;
 const PAIRING_BODY_BYTES = 1024;
-// Requests the plugin hands to a human in one poll; the rest ride the next ones.
-const MAX_ATTENTION = 64;
+// Requests the plugin may hand to a human in one poll. It sends 64 at most (ATTENTION_MAX in the
+// plugin); the margin lets a later plugin send more to this server without any being dropped.
+const MAX_ATTENTION = 256;
 // The plugin polls at 1 Hz; coalesce its presence writes to this cadence.
 const PRESENCE_STAMP_MS = 15_000;
 // Printable ASCII only, the same rule the plugin applies before sending a key.
@@ -204,10 +205,6 @@ async function handle(broker: Broker, req: IncomingMessage, res: ServerResponse)
 
   if (req.method === "GET" && url.pathname === "/pending") {
     const attention = attentionIds(url.searchParams);
-    if (attention === "invalid") {
-      send(res, 400, { error: "Invalid attention list" });
-      return;
-    }
     const scope = resolveConnection(store, req);
     reportAuto(broker, url.searchParams.get("auto") === "1" ? scope : null, attention);
     const proposal = store.claimNext(pluginId, LEASE_MS, scope);
@@ -589,19 +586,12 @@ function reportAuto(broker: Broker, scope: string | null, attention: string[]): 
   if (broker.notifier) ringHandOff(broker.store, broker.notifier, attention);
 }
 
-// Each id once, in the exact shape the store mints, at most MAX_ATTENTION of them, given once:
-// anything else is a plugin bug, refused whole as a 400 before the poll has any effect.
-function attentionIds(params: URLSearchParams): string[] | "invalid" {
-  const given = params.getAll("attention");
-  if (!given.length) {
-    return [];
-  }
-  const ids = given.length === 1 ? [...new Set(given[0].split(","))] : [];
-  return ids.length &&
-    ids.length <= MAX_ATTENTION &&
-    ids.every((id) => /^req_[0-9a-f]{12}$/.test(id))
-    ? ids
-    : "invalid";
+// Each id once, at most MAX_ATTENTION of them. Nothing here refuses the poll: the list is only
+// advice about alerts, and a plugin or server of another version must never stop the claim
+// behind it. An id no row has simply moves nothing.
+function attentionIds(params: URLSearchParams): string[] {
+  const ids = new Set(params.getAll("attention").flatMap((list) => list.split(",")));
+  return [...ids].filter((id) => id && id.length <= 64).slice(0, MAX_ATTENTION);
 }
 
 // The advisory risk class stamped at submit, surfaced on the proposal so the plugin

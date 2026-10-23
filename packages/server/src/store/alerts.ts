@@ -8,6 +8,8 @@ const WAITING = "state IN ('pending', 'leased') AND expires_at > @now";
 // a request with none, which that plugin can claim too (see claimNext).
 const COVERED = `EXISTS (SELECT 1 FROM alerts WHERE id = 1 AND auto_seen_at > @now - ${AUTO_LIVE_MS}
   AND (requests.connection IS NULL OR requests.connection = auto_scope))`;
+// Half a proposal's life: a request still waiting rings by then, whatever else holds it.
+const PAST_HALF = "created_at + expires_at <= 2 * @now";
 
 // Exactly-once per proposal still means N banners for a burst, since every process
 // submits its own. The conditional UPDATE is the cross-process coalescing point:
@@ -24,28 +26,50 @@ function claimWindow(ctx: StoreContext, cooldownMs: number, now: number): boolea
   return info.changes === 1;
 }
 
+// A reminder keeps a window of its own: it stays quiet next to any recent sound, but claiming
+// the alert window would swallow the banner of a request arriving just after it.
+function claimReminder(ctx: StoreContext, cooldownMs: number, now: number): boolean {
+  ctx.db.prepare("INSERT OR IGNORE INTO alerts (id) VALUES (1)").run();
+  const info = ctx.db
+    .prepare(
+      `UPDATE alerts SET last_remind_at = @now WHERE id = 1
+         AND (last_alert_at = 0 OR last_alert_at <= @since)
+         AND (last_remind_at = 0 OR last_remind_at <= @since)`,
+    )
+    .run({ now, since: now - cooldownMs });
+  return info.changes === 1;
+}
+
 export function claimAlert(ctx: StoreContext, cooldownMs: number): boolean {
   return ctx.db.transaction(() => claimWindow(ctx, cooldownMs, ctx.now())).immediate();
 }
 
-// Moves every matching request one stage on and rings at most once for all of them: rows that
+// Moves every matching request to `stage` and rings at most once for all of them: rows that
 // come due together get one sound, and a window already claimed means one just rang. Returns
 // the session of a moved row when this call rings.
 function advance(
   ctx: StoreContext,
-  to: 1 | 2,
+  stage: string,
   where: string,
   params: Record<string, unknown>,
-  cooldownMs: number,
+  claim: (now: number) => boolean,
 ): string | null {
   const now = ctx.now();
   const run = ctx.db.transaction((): string | null => {
     const moved = ctx.db
-      .prepare(`UPDATE requests SET alert_stage = ${to} WHERE ${where} RETURNING session_id`)
+      .prepare(`UPDATE requests SET alert_stage = ${stage} WHERE ${where} RETURNING session_id`)
       .all({ ...params, now }) as { session_id: string }[];
-    return moved.length && claimWindow(ctx, cooldownMs, now) ? moved[0].session_id : null;
+    return moved.length && claim(now) ? moved[0].session_id : null;
   });
   return run.immediate();
+}
+
+// A first alert past half a proposal's life stands for its reminder too, so it never rings
+// twice in a row.
+function alerted(ctx: StoreContext, where: string, params: Record<string, unknown>, cd: number) {
+  return advance(ctx, `CASE WHEN ${PAST_HALF} THEN 2 ELSE 1 END`, where, params, (now) =>
+    claimWindow(ctx, cd, now),
+  );
 }
 
 /** Whether a read submitted now for this connection can wait for Auto mode to decide. */
@@ -75,23 +99,28 @@ export function handOffAlerts(ctx: StoreContext, ids: string[], cooldownMs: numb
   if (!ids.length) return null;
   const params = Object.fromEntries(ids.map((id, i) => [`id${i}`, id]));
   const list = ids.map((_, i) => `@id${i}`).join(", ");
-  return advance(ctx, 1, `alert_stage = 0 AND id IN (${list}) AND ${WAITING}`, params, cooldownMs);
+  return alerted(ctx, `alert_stage = 0 AND id IN (${list}) AND ${WAITING}`, params, cooldownMs);
 }
 
-/** Requests Auto mode no longer covers: switched off, its plugin gone quiet, or elsewhere. */
+/**
+ * Requests Auto mode no longer covers (switched off, its plugin gone quiet, or elsewhere), and
+ * any it still has at half their life: with every run taken by long queries, it may never get
+ * to them.
+ */
 export function releaseAlerts(ctx: StoreContext, cooldownMs: number): string | null {
-  return advance(ctx, 1, `alert_stage = 0 AND ${WAITING} AND NOT ${COVERED}`, {}, cooldownMs);
+  return alerted(
+    ctx,
+    `alert_stage = 0 AND ${WAITING} AND (NOT ${COVERED} OR ${PAST_HALF})`,
+    {},
+    cooldownMs,
+  );
 }
 
 /** The one reminder a request a human was alerted to gets, once half its life has passed. */
 export function remindAlerts(ctx: StoreContext, cooldownMs: number): boolean {
   return (
-    advance(
-      ctx,
-      2,
-      `alert_stage = 1 AND ${WAITING} AND created_at + expires_at <= 2 * @now`,
-      {},
-      cooldownMs,
+    advance(ctx, "2", `alert_stage = 1 AND ${WAITING} AND ${PAST_HALF}`, {}, (now) =>
+      claimReminder(ctx, cooldownMs, now),
     ) !== null
   );
 }

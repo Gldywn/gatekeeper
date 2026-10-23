@@ -394,22 +394,20 @@ describe("the poll's Auto mode report", () => {
     expect(notify).not.toHaveBeenCalled();
   });
 
-  it("refuses a malformed attention list whole, before the report or the claim", async () => {
+  // The list is advice about alerts: whatever another version puts there, the claim goes on.
+  it("takes what it can from an odd attention list and still claims", async () => {
     await poll("?auto=1");
-    const { request } = store.submitNew({ sessionId: "s1", sql: "SELECT 2", autoEligible: true });
-    const many = Array.from({ length: 65 }, (_, i) => `req_${i.toString(16).padStart(12, "0")}`);
-    for (const query of [
-      "?attention=",
-      "?attention=nope",
-      `?attention=${request.id},nope`,
-      `?attention=${request.id}&attention=${request.id}`,
-      `?attention=${many.join(",")}`,
-    ]) {
-      expect((await poll(query)).status).toBe(400);
+    const many = Array.from({ length: 300 }, (_, i) => `req_${i.toString(16).padStart(12, "0")}`);
+    for (const query of ["?attention=", "?attention=nope", `?attention=${many.join(",")}`]) {
+      expect((await poll(`${query}&auto=1`)).status).toBe(204);
     }
-    expect(read()).toBe(true);
-    expect(store.get(request.id)?.state).toBe("pending");
     expect(notify).not.toHaveBeenCalled();
+    const { request } = store.submitNew({ sessionId: "s1", sql: "SELECT 2", autoEligible: true });
+    expect(
+      (await poll(`?auto=1&attention=nope,${request.id}&attention=${request.id}`)).status,
+    ).toBe(200);
+    expect(notify).toHaveBeenCalledOnce();
+    expect(store.get(request.id)?.state).toBe("leased");
   });
 });
 

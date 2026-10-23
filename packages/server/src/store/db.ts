@@ -105,7 +105,8 @@ export function migrate(db: Database.Database): void {
         id INTEGER PRIMARY KEY CHECK (id = 1),
         last_alert_at INTEGER NOT NULL DEFAULT 0,
         auto_seen_at INTEGER NOT NULL DEFAULT 0,
-        auto_scope TEXT
+        auto_scope TEXT,
+        last_remind_at INTEGER NOT NULL DEFAULT 0
       );
 
       CREATE TABLE IF NOT EXISTS sessions (
@@ -132,14 +133,17 @@ export function migrate(db: Database.Database): void {
     "ALTER TABLE requests ADD COLUMN alert_stage INTEGER NOT NULL DEFAULT 1",
     "ALTER TABLE alerts ADD COLUMN auto_seen_at INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE alerts ADD COLUMN auto_scope TEXT",
+    "ALTER TABLE alerts ADD COLUMN last_remind_at INTEGER NOT NULL DEFAULT 0",
     // A fresh DB is already session_label, so this throws and is swallowed;
     // an existing DB still on session_intent is renamed in place.
     "ALTER TABLE sessions RENAME COLUMN session_intent TO session_label",
   ]) {
     try {
       db.exec(alter);
-    } catch {
-      // already present
+    } catch (err) {
+      // Only "already migrated" is expected. Anything else (a lock held past the busy timeout, a
+      // full disk) would leave this process on a schema its queries need: fail at startup.
+      if (!/duplicate column name|no such column/.test(String((err as Error).message))) throw err;
     }
   }
   // Apply after legacy columns have been migrated. The purge index contains only

@@ -31,7 +31,10 @@ mode approves after such a gap may still have rung.
 
 **A query still waiting rings once more** when half its life has passed, about 7 minutes 30
 seconds after it arrived. The reminder is the sound alone, never a second banner, and comes
-once per query; queries that come due together share one sound. `banner` mode has no reminder.
+once per query; queries that come due together share one sound, and it never keeps a new
+query from raising its own alert. A read Auto mode still has at that point, for instance
+because long queries hold all its runs, rings then for the first time, and that alert is its
+reminder. `banner` mode has no reminder.
 
 The alerts raised after submission (a read Auto mode leaves to you, the 15-second fallback
 and the reminder) come from the one Gatekeeper process that serves the plugin, and follow its
