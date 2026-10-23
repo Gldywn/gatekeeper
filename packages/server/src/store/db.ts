@@ -146,6 +146,14 @@ export function migrate(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit(ts);
     CREATE INDEX IF NOT EXISTS idx_sessions_last_seen ON sessions(last_seen);
   `);
+  // Request history is kept for good. Servers before 0.3.0 still delete decisions older than a
+  // day; on a store a current server has opened, their delete now fails instead.
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS requests_keep BEFORE DELETE ON requests
+    BEGIN
+      SELECT RAISE(ABORT, 'Request history is kept: this Gatekeeper server is outdated, update it.');
+    END;
+  `);
 }
 
 export function token(prefix: string): string {

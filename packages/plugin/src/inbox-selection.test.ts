@@ -133,11 +133,12 @@ describe("overlay thumbs", () => {
       app.overlayScrolls = [...dispose];
       app.stopProbe = vi.fn();
       app.root = { innerHTML: "", querySelector: () => null };
-      // An open confirm, Settings or notice must not keep its hold on the shell being replaced.
+      // An open confirm, Settings, notice or export must not keep its hold on the shell being replaced.
       app.confirmModal = { cancel: vi.fn() };
       app.settingsView = { close: vi.fn() };
       const noticeRelease = vi.fn();
       app.noticeRelease = noticeRelease;
+      app.exportDialog = { close: vi.fn() };
       app[leave]();
       for (const d of dispose) expect(d).toHaveBeenCalledOnce();
       expect(app.overlayScrolls).toEqual([]);
@@ -145,6 +146,7 @@ describe("overlay thumbs", () => {
       expect(app.settingsView.close).toHaveBeenCalledOnce();
       expect(noticeRelease).toHaveBeenCalledOnce();
       expect(app.noticeRelease).toBeUndefined();
+      expect(app.exportDialog.close).toHaveBeenCalledOnce();
     }
   });
 });

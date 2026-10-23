@@ -311,6 +311,7 @@ describe("check lifecycle", () => {
       activityView: { reset: vi.fn(), open: vi.fn() },
       detailView: { close: vi.fn() },
       settingsView: { close: vi.fn() },
+      exportDialog: { close: vi.fn() },
       tab: "queue",
       selection: { queue: { kind: "hist", id: "req_old" }, audit: { kind: "audit", id: "req_a" } },
       renderModeSurfaces: vi.fn(),

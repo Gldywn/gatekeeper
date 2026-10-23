@@ -9,20 +9,11 @@ import {
   escapeHtml,
   outcomeMeta,
 } from "../html";
-import {
-  agentBadge,
-  alertTriangleIcon,
-  chevronDown,
-  downloadIcon,
-  jsonIcon,
-  markdownIcon,
-  tableIcon,
-} from "../icons";
+import { agentBadge, alertTriangleIcon, chevronDown } from "../icons";
 import { visibleControls } from "../sql/sanitize";
 import { type SchemaContext, sensitivityOf, textSchema } from "../sql/schema";
 import type { ActivityEntry } from "../types";
 import { approvalLabel } from "./auto";
-import { flyoutMenu } from "./controls";
 import { auditItem, doneRowHtml } from "./inbox";
 
 // The Audit Trail in the Inbox's left pane: its rows, then the tail that loads older days.
@@ -112,6 +103,21 @@ export function activityDaysHtml(
     .join("");
 }
 
+// A day's name beside its tile: Today or Yesterday spelled out, the weekday and month after it.
+export function dayTitleHtml(ts: number): string {
+  const named = dayLabel(ts);
+  // Built from parts: a combined weekday-and-month format comes out "Jan Thu" in some runtimes.
+  const date = new Date(ts);
+  const short = `${date.toLocaleDateString(undefined, { weekday: "short" })}, ${date.toLocaleDateString(undefined, { month: "short" })}`;
+  return named === "Today" || named === "Yesterday"
+    ? `${named}<span class="act-day-sub">${escapeHtml(short)}</span>`
+    : escapeHtml(short);
+}
+
+export function dayCount(queries: number, sessions: number): string {
+  return `${queries} ${queries === 1 ? "query" : "queries"}, ${sessions} ${sessions === 1 ? "session" : "sessions"}`;
+}
+
 // One day: its date as a calendar tile, Today or Yesterday by name, its totals, then its rows.
 function dayHtml(
   key: string,
@@ -121,25 +127,15 @@ function dayHtml(
   selected: string | null,
   dialect: string,
 ): string {
-  const total = entries.length;
-  const sessions = new Set(entries.map((e) => e.sessionId)).size;
-  const count = `${total} ${total === 1 ? "query" : "queries"}, ${sessions} ${sessions === 1 ? "session" : "sessions"}`;
-  const named = dayLabel(ts);
-  // Built from parts: a combined weekday-and-month format comes out "Jan Thu" in some runtimes.
-  const date = new Date(ts);
-  const short = `${date.toLocaleDateString(undefined, { weekday: "short" })}, ${date.toLocaleDateString(undefined, { month: "short" })}`;
-  const label =
-    named === "Today" || named === "Yesterday"
-      ? `${named}<span class="act-day-sub">${escapeHtml(short)}</span>`
-      : escapeHtml(short);
+  const count = dayCount(entries.length, new Set(entries.map((e) => e.sessionId)).size);
   // A folded day ships without its rows: the view builds them on first unfold, so a
   // long prefetched history costs one line per day.
   const body = open ? activityDayBodyHtml(key, entries, selected, dialect) : "";
   return `
         <section class="act-day${open ? "" : " collapsed"}">
           <button class="act-day-head" type="button" data-day="${escapeHtml(key)}" aria-expanded="${open}">
-            <span class="act-day-tile">${date.getDate()}</span>
-            <span class="act-day-text"><span class="act-day-label">${label}</span><span class="act-day-count">${count}</span></span>
+            <span class="act-day-tile">${new Date(ts).getDate()}</span>
+            <span class="act-day-text"><span class="act-day-label">${dayTitleHtml(ts)}</span><span class="act-day-count">${count}</span></span>
             <span class="act-day-chev">${chevronDown}</span>
           </button>
           <div class="act-day-body">${body}</div>
@@ -194,8 +190,8 @@ function shortSession(id: string): string {
   return id.length > 14 ? `${id.slice(0, 9)}…${id.slice(-4)}` : id;
 }
 
-// One agent session within a day: who it was and what it worked on, its count, and the export
-// of that session-day, then its decisions.
+// One agent session within a day: who it was and what it worked on, then its decisions. The whole
+// trail exports from the list pane's head, never from a session.
 export function activityGroupHtml(
   _day: string,
   sessionId: string,
@@ -208,8 +204,6 @@ export function activityGroupHtml(
   const name = first.project?.trim() || harness || shortSession(sessionId);
   const title = first.sessionLabel?.trim();
   const titleText = title ? escapeHtml(capitalize(title)) : "";
-  // TODO(v1-19): count and export hidden during the Inbox redesign; a global export (pick the
-  // days) brings export back in its own PR, which can reuse `exportControl` below.
   return `
         <section class="act-group">
           <div class="act-group-head" title="${escapeHtml(sessionId)}">
@@ -219,16 +213,6 @@ export function activityGroupHtml(
           </div>
           <div class="act-entries">${entries.map((e) => activityEntryHtml(e, selected === e.id, dialect)).join("")}</div>
         </section>`;
-}
-
-// The per-session-day export: the shared flyout keyed on the session-day so the click
-// handler stays stateless, offering the whole timeline as Markdown, CSV, or JSON.
-export function exportControl(day: string, sessionId: string): string {
-  return flyoutMenu("export", `${day}|${sessionId}`, downloadIcon, "Export", [
-    { fmt: "md", icon: markdownIcon, name: "Markdown" },
-    { fmt: "csv", icon: tableIcon, name: "CSV" },
-    { fmt: "json", icon: jsonIcon, name: "JSON" },
-  ]);
 }
 
 // One decision as a selectable row; the right pane shows it in full. The sensitivity flags
@@ -288,25 +272,32 @@ function codeFence(sql: string): string {
   return "`".repeat(Math.max(3, longest + 1));
 }
 
-export function activityMarkdown(
-  day: string,
-  sessionId: string,
+// The whole selection as one document, newest-first entries in, oldest first out: its totals, then
+// each day, each session in the order it first appears that day, and each of its decisions.
+export function activityMarkdownDays(
   entries: ActivityEntry[],
   connectionName: string,
   flags: ActivityFlagMap = new Map(),
 ): string {
-  const first = entries[0];
-  const label = first.project?.trim() || first.harness?.trim() || sessionId;
+  const oldestFirst = [...entries].reverse();
+  const days = new Map<string, Map<string, ActivityEntry[]>>();
+  for (const e of oldestFirst) {
+    const day = dayKey(e.decidedAt ?? e.createdAt);
+    const sessions = days.get(day) ?? new Map<string, ActivityEntry[]>();
+    days.set(day, sessions);
+    const list = sessions.get(e.sessionId) ?? [];
+    sessions.set(e.sessionId, list);
+    list.push(e);
+  }
+  const keys = [...days.keys()];
   const lines: string[] = ["# Gatekeeper Audit Trail", ""];
   if (connectionName) {
     lines.push(`- Connection: ${connectionName}`);
   }
-  lines.push(`- Day: ${day}`, `- Session: ${label} (${sessionId})`);
-  if (first.harness?.trim()) {
-    lines.push(`- Harness: ${first.harness.trim()}`);
-  }
-  if (first.sessionLabel?.trim()) {
-    lines.push(`- Task: ${first.sessionLabel.trim()}`);
+  if (keys.length === 1) {
+    lines.push(`- Day: ${keys[0]}`);
+  } else if (keys.length) {
+    lines.push(`- Days: ${keys[0]} to ${keys.at(-1)} (${keys.length} days)`);
   }
   const counts = entries.reduce<Record<string, number>>((acc, e) => {
     acc[e.state] = (acc[e.state] ?? 0) + 1;
@@ -316,51 +307,72 @@ export function activityMarkdown(
     .map(([s, n]) => `${n} ${capitalize(outcomeMeta(s).label)}`)
     .join(" · ");
   lines.push(`- Queries: ${entries.length}${breakdown ? ` (${breakdown})` : ""}`);
-  lines.push("");
-  // Oldest-first reads as a timeline.
-  for (const e of [...entries].reverse()) {
-    const ts = e.decidedAt ?? e.createdAt;
-    const status = capitalize(outcomeMeta(e.state).label);
-    const intent = e.intent?.trim();
-    lines.push(
-      `## ${new Date(ts).toLocaleTimeString()} · ${intent ? `${status} · ${capitalize(intent)}` : status}`,
-    );
-    const entryFlags = flags.get(e.id);
-    if (entryFlags?.length) {
-      lines.push(`- Flags: ${entryFlags.join(", ")}`);
+  lines.push(`- Sessions: ${new Set(entries.map((e) => e.sessionId)).size}`, "");
+  for (const [day, sessions] of days) {
+    lines.push(`## ${day}`, "");
+    for (const [sessionId, list] of sessions) {
+      const first = list[0];
+      const label = first.project?.trim() || first.harness?.trim() || sessionId;
+      lines.push(`### ${label} (${sessionId})`);
+      if (first.harness?.trim()) {
+        lines.push(`- Harness: ${first.harness.trim()}`);
+      }
+      if (first.sessionLabel?.trim()) {
+        lines.push(`- Task: ${first.sessionLabel.trim()}`);
+      }
+      lines.push("");
+      for (const e of list) {
+        lines.push(...entryMarkdown(e, flags));
+      }
     }
-    const latency = activityLatency(e);
-    if (latency !== "—") {
-      lines.push(`- Latency: ${latency}`);
-    }
-    lines.push(`- Request: ${e.id}`);
-    if (e.approval)
-      lines.push(
-        `- Approval: ${approvalLabel(e.approval)}`,
-        `- Evaluation: ${JSON.stringify(e.approval.evaluation ?? null)}`,
-      );
-    if (e.autoHold)
-      lines.push(
-        `- Auto mode: ${e.autoHold.sent ? "sent, evaluation unfinished" : "stopped locally, nothing sent"}`,
-        `- Auto mode reason: ${e.autoHold.reason}`,
-      );
-    if (e.state === "approved" && e.affectedRows != null) {
-      lines.push(`- Rows changed: ${e.affectedRows}`);
-    }
-    if (e.state === "approved" && e.rowCount != null) {
-      lines.push(`- Rows returned: ${e.rowCount}`);
-    }
-    if (e.reason?.trim()) {
-      lines.push(`- Reason: ${e.reason.trim()}`);
-    }
-    if (e.error?.trim()) {
-      lines.push(`- Error: ${e.error.trim()}`);
-    }
-    const sqlBody = visibleControls(e.sql.trim());
-    const fence = codeFence(sqlBody);
-    lines.push("", `${fence}sql`, sqlBody, fence, "");
   }
   return lines.join("\n");
+}
+
+// One decision under its session: its time, outcome and intent, the facts recorded with it, then
+// its SQL fenced so no backtick run inside can close the block early.
+function entryMarkdown(e: ActivityEntry, flags: ActivityFlagMap): string[] {
+  const ts = e.decidedAt ?? e.createdAt;
+  const status = capitalize(outcomeMeta(e.state).label);
+  const intent = e.intent?.trim();
+  const lines = [
+    `#### ${new Date(ts).toLocaleTimeString()} · ${intent ? `${status} · ${capitalize(intent)}` : status}`,
+  ];
+  const entryFlags = flags.get(e.id);
+  if (entryFlags?.length) {
+    lines.push(`- Flags: ${entryFlags.join(", ")}`);
+  }
+  const latency = activityLatency(e);
+  if (latency !== "—") {
+    lines.push(`- Latency: ${latency}`);
+  }
+  lines.push(`- Request: ${e.id}`);
+  if (e.approval)
+    lines.push(
+      `- Approval: ${approvalLabel(e.approval)}`,
+      `- Evaluation: ${JSON.stringify(e.approval.evaluation ?? null)}`,
+    );
+  if (e.autoHold)
+    lines.push(
+      `- Auto mode: ${e.autoHold.sent ? "sent, evaluation unfinished" : "stopped locally, nothing sent"}`,
+      `- Auto mode reason: ${e.autoHold.reason}`,
+    );
+  if (e.state === "approved" && e.affectedRows != null) {
+    lines.push(`- Rows changed: ${e.affectedRows}`);
+  }
+  if (e.state === "approved" && e.rowCount != null) {
+    lines.push(`- Rows returned: ${e.rowCount}`);
+  }
+  if (e.reason?.trim()) {
+    lines.push(`- Reason: ${e.reason.trim()}`);
+  }
+  if (e.error?.trim()) {
+    lines.push(`- Error: ${e.error.trim()}`);
+  }
+  const sqlBody = visibleControls(e.sql.trim());
+  const fence = codeFence(sqlBody);
+  lines.push("", `${fence}sql`, sqlBody, fence, "");
+  return lines;
 }
 
 const CSV_HEADER = [
