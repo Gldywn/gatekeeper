@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import type { LoadResult } from "../sql/load";
 import type { Card, RunState, SessionMeta } from "../types";
-import { accessMatrix, cardHtml, paintLegend, runningActions } from "./queue";
+import { accessMatrix, cardHtml, loadInner, paintLegend, runningActions } from "./queue";
 
 // Byte-for-byte lock on the extracted builders: one ready read-only card whose
 // schema annotation and open deny draft exercise every conditional branch.
@@ -480,5 +481,133 @@ describe("paintLegend", () => {
     h.doc.activeElement = {};
     paintLegend(h.el, both, "q1");
     expect(h.focused).toEqual([]);
+  });
+});
+
+describe("the heavy query on the pending card", () => {
+  const big = { code: "big", ref: "public.big" };
+  const heavy = (over: Partial<LoadResult> = {}): LoadResult => ({
+    lines: [["Reads every row of ", big, " without a ", { code: "WHERE", kw: true }, " clause"]],
+    notes: [["daily", " is a view with no row estimate"]],
+    estimates: [{ table: "big", ref: "public.big", rows: 41_213_877 }],
+    heavy: true,
+    complete: false,
+    ...over,
+  });
+  const base = {
+    createdAt: T - 1000,
+    expiresAt: T + 90_000,
+    leaseId: "l",
+    leaseExpiresAt: T + 90_000,
+    sessionId: "s1",
+    session,
+    state: "ready" as const,
+  };
+
+  it("adds a neutral badge after the class badge, never instead of it", () => {
+    const read = cardHtml(
+      { ...base, id: "q_r", sql: "SELECT * FROM public.big", loadResult: heavy() },
+      "postgresql",
+      new Map(),
+    );
+    expect(read).toMatch(
+      /<div class="top">\s*<span class="heavy-slot" id="hb-q_r"><span class="risk-badge heavy">/,
+    );
+    const write = cardHtml(
+      { ...base, id: "q_w", sql: "UPDATE public.big SET a = 1", loadResult: heavy() },
+      "postgresql",
+      new Map(),
+      "write",
+    );
+    expect(write.indexOf("risk-badge write")).toBeLessThan(write.indexOf("risk-badge heavy"));
+    const light = cardHtml({ ...base, id: "q_l", sql: "SELECT 1" }, "postgresql", new Map());
+    expect(light).toContain('<span class="heavy-slot" id="hb-q_l"></span>');
+    expect(light).toContain('<div class="card-load" id="cl-q_l"></div>');
+  });
+
+  it("states each finding as a sentence above the SQL, without the notes", () => {
+    const html = loadInner({ id: "q", result: heavy() }, true);
+    expect(html).toContain(
+      '<p>Reads every row of <code class="name">big</code> without a <code class="kw">WHERE</code> clause.</p>',
+    );
+    expect(html).not.toContain("daily");
+    expect(html).not.toContain("Heavy query");
+    expect(loadInner({ id: "q", result: undefined }, true)).toBe("");
+    expect(loadInner({ id: "q", result: heavy({ lines: [], heavy: false }) }, true)).toBe("");
+  });
+
+  it("makes several findings separate points, with no glyph of its own", () => {
+    const html = loadInner(
+      {
+        id: "q",
+        result: heavy({
+          lines: [
+            [
+              "Missing join condition pairs every row of ",
+              { code: "a" },
+              " with every row of ",
+              { code: "i" },
+            ],
+            ["Filter on ", { code: "code" }, " uses no index"],
+          ],
+        }),
+      },
+      true,
+    );
+    expect(html).toBe(
+      '<div class="cs-heavy" role="status"><ul><li>Missing join condition pairs every row of <code class="name">a</code> with every row of <code class="name">i</code>.</li><li>Filter on <code class="name">code</code> uses no index.</li></ul></div>',
+    );
+  });
+
+  it("opens a table's estimate on its name in the matrix, only for the relation it belongs to", () => {
+    const result = heavy({
+      estimates: [
+        { table: "orders", ref: "public.orders", rows: 3_120_544 },
+        { table: "orders", ref: "audit.orders", rows: 0 },
+      ],
+    });
+    const html = accessMatrix(
+      "SELECT * FROM public.orders o JOIN audit.orders a ON a.id = o.id JOIN public.items i ON i.id = o.id",
+      "postgresql",
+      "read",
+      null,
+      { id: "q", result },
+    );
+    expect(html).toContain(
+      '<span class="est-tip" tabindex="0" data-ref="public.orders" aria-describedby="est-q-0">public.orders<span class="est-pop" id="est-q-0" role="tooltip">Estimated table rows <b>~3.1M</b></span></span>',
+    );
+    // A recorded zero is a count, not an unknown.
+    expect(html).toContain(
+      'data-ref="audit.orders" aria-describedby="est-q-1">audit.orders<span class="est-pop" id="est-q-1" role="tooltip">Estimated table rows <b>0</b>',
+    );
+    // No estimate, nothing to open.
+    expect(html).toContain('<th scope="row" class="nm">public.items</th>');
+  });
+
+  it("attaches no estimate when two relations are written alike", () => {
+    const result = heavy({
+      estimates: [
+        { table: "a.b", ref: "a.b", rows: 10 },
+        { table: "b", ref: "a.b", rows: 20 },
+      ],
+    });
+    expect(
+      accessMatrix("SELECT * FROM a.b", "postgresql", "read", null, { id: "q", result }),
+    ).not.toContain("est-tip");
+  });
+
+  it("puts the estimate on the table's name in the reason when the card has no matrix", () => {
+    const view = { id: "q<1>", result: heavy() };
+    const bare = loadInner(view, false);
+    expect(bare).toContain(
+      '<span class="est-tip" tabindex="0" data-ref="public.big" aria-describedby="estr-q<1>-0"><code class="name">big</code>',
+    );
+    expect(loadInner(view, true)).not.toContain("est-tip");
+    // A name without a reference (an alias, a column) never carries an estimate.
+    const alias = loadInner(
+      { id: "q", result: heavy({ lines: [["Filter on ", { code: "big" }, " uses no index"]] }) },
+      false,
+    );
+    expect(alias).not.toContain("est-tip");
   });
 });

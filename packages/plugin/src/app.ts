@@ -6,6 +6,7 @@ import {
   clipboard,
   getColumns,
   getConnectionInfo,
+  getTableIndexes,
   log,
   openExternal,
   runQuery,
@@ -69,7 +70,9 @@ import {
   type CardGate,
   cardGateFor,
   cardHtml,
+  heavyBadge,
   LONG_RUN_MS,
+  loadInner,
   paintLegend,
   readyActions,
 } from "./render/queue";
@@ -89,6 +92,7 @@ import { AUTO_KEY, currentEvaluation, validEvaluation } from "./sql/auto";
 import { classifyQuery, type RiskClass, rank } from "./sql/classify";
 import { formatSql } from "./sql/format";
 import { highlight } from "./sql/highlight";
+import { agentMessage, checkLoad, type LoadResult, planLoad } from "./sql/load";
 import { modeRank, type RiskMode } from "./sql/mode";
 import { mapDialect } from "./sql/readonly";
 import { type EndpointReadOnly, hasProbe, probeReadOnly, runErrorText } from "./sql/readonly-probe";
@@ -158,6 +162,11 @@ const PROBE_MS = 3000;
 // One scalar endpoint check on the user's database, possibly prod, while the tab is visible.
 // The operator's bound: a dropped connection must show within about 15 s.
 const CHECK_MS = 15_000;
+// The deadline only stops waiting; it cannot cancel a catalog read already sent.
+const LOAD_DEADLINE_MS = 5000;
+const HEAVY_REASON = "Heavy query";
+const AUTO_DENY_NOTE = "heavy query, auto-denied";
+const AUTO_DENY_MESSAGE = "Rejected automatically by the load check.";
 
 // The read-only layer help sentences, revealed by each row's "?" affordance. Each says where
 // the layer sits between this plugin and the database, then what makes it read-only; the
@@ -307,6 +316,8 @@ export class Gatekeeper {
       if (result.error) throw new Error("Metadata query failed");
       return result.results[0]?.rows ?? [];
     },
+    // Resolved on call: Beekeeper before 5.5 has no getTableIndexes.
+    getIndexes: (table, schema) => getTableIndexes(table, schema),
     dialect: () => this.dialect,
     defaultSchema: () => this.conn?.schema ?? undefined,
     generation: () => this.connGeneration,
@@ -624,6 +635,8 @@ export class Gatekeeper {
         this.applyMode("read");
         this.connGeneration++;
         this.annotator.clearCache();
+        for (const card of this.cards) this.startLoad(card, false);
+        this.renderQueue();
         this.scheduleSchemaReport();
       });
     }
@@ -2418,6 +2431,15 @@ export class Gatekeeper {
       card.autoStatus = "Evaluating with Jev";
       this.renderQueue();
       if (!(await this.checkConnection()) || !valid() || controller.signal.aborted) return;
+      // Checked before anything leaves for the provider. Only a finding holds the read, so a
+      // check that could not finish blocks nothing, with or without Auto mode.
+      const load = card.load;
+      const loaded = await load;
+      if (!valid() || controller.signal.aborted || card.load !== load) return;
+      if (loaded?.heavy) {
+        this.reviewCard(card, HEAVY_REASON);
+        return;
+      }
       const analysis = await this.annotator.inspectRead(
         sql,
         () => valid() && !controller.signal.aborted,
@@ -2781,6 +2803,9 @@ export class Gatekeeper {
         existing.leaseId = proposal.leaseId;
         existing.leaseExpiresAt = proposal.leaseExpiresAt;
       }
+      // A check started under an earlier session was or will be cut short at its next host call.
+      if (existing.loadSession !== this.activeGen && existing.state === "ready")
+        this.startLoad(existing, false);
       void this.evaluateNext();
       return;
     }
@@ -2791,6 +2816,7 @@ export class Gatekeeper {
     }
     const card: Card = { ...proposal, state: "ready" };
     this.cards.push(card);
+    this.startLoad(card, true);
     this.renderQueue(card.id);
     void this.analyzeSchema(card);
     void this.evaluateNext();
@@ -2814,6 +2840,134 @@ export class Gatekeeper {
       card.sensitivity = sensitivityOf(schema);
     }
     this.renderCardSchema(card);
+  }
+
+  // One promise per card, shared by the card, Auto mode and auto-deny. Only a card's
+  // arrival may auto-deny it: a recheck after a schema change never rejects a waiting card.
+  private startLoad(card: Card, arrival: boolean): void {
+    const plan = planLoad(card.sql, this.dialect);
+    card.loadSession = this.activeGen;
+    card.loadResult = checkLoad(plan, "pending");
+    // A restart drops the previous result's estimates at once.
+    this.renderCardLoad(card);
+    const bound = {
+      generation: this.connGeneration,
+      active: this.activeGen,
+      lease: card.leaseId,
+      sql: card.sql,
+    };
+    let settle!: (result: LoadResult) => void;
+    const load = new Promise<LoadResult>((resolve) => {
+      settle = resolve;
+    });
+    card.load = load;
+    let expired = false;
+    const timer = window.setTimeout(() => {
+      expired = true;
+      settle(checkLoad(plan, "timeout"));
+    }, LOAD_DEADLINE_MS);
+    const live = () =>
+      !expired &&
+      card.load === load &&
+      card.state === "ready" &&
+      this.cards.includes(card) &&
+      this.activeGen === bound.active;
+    this.annotator
+      .inspectLoad(card.sql, live)
+      .then(
+        (result) => settle(result ?? checkLoad(plan, "unavailable")),
+        () => settle(checkLoad(plan, "unavailable")),
+      )
+      .finally(() => window.clearTimeout(timer));
+    void load.then((result) => {
+      if (
+        card.load !== load ||
+        !this.cards.includes(card) ||
+        bound.generation !== this.connGeneration
+      )
+        return;
+      card.loadResult = result;
+      this.renderCardLoad(card);
+      if (arrival) void this.autoDeny(card, load, bound);
+    });
+  }
+
+  // The badge, the matrix (a table's estimate opens on its name) and the reason move together,
+  // whichever of the load check and the column analysis lands last.
+  private renderCardLoad(card: Card): void {
+    const id = CSS.escape(card.id);
+    const load = { id: card.id, result: card.loadResult };
+    const badge = this.root.querySelector<HTMLElement>(`#hb-${id}`);
+    if (badge) badge.innerHTML = heavyBadge(card.loadResult);
+    const host = this.root.querySelector<HTMLElement>(`#cm-${id}`);
+    const cause = this.root.querySelector<HTMLElement>(`#cl-${id}`);
+    const regions = [host, cause].filter((n): n is HTMLElement => n !== null);
+    const active = regions[0]?.ownerDocument?.activeElement ?? null;
+    const inside = Boolean(active && regions.some((r) => r.contains(active)));
+    const ref = inside ? active?.getAttribute("data-ref") : null;
+    let matrix = "";
+    if (host) {
+      const cls = classifyQuery(card.sql, this.dialect).class;
+      matrix = accessMatrix(card.sql, this.dialect, cls, card.schema, load);
+      host.innerHTML = matrix;
+    }
+    if (cause) cause.innerHTML = loadInner(load, matrix !== "");
+    if (!inside) return;
+    // A reader on a table's estimate stays on that table, in the matrix or in the reason; when
+    // the estimate is gone (a recheck), the focus goes to the open row, as for any rebuild.
+    const next = ref
+      ? regions
+          .map((r) => r.querySelector<HTMLElement>(`[data-ref="${CSS.escape(ref)}"]`))
+          .find(Boolean)
+      : null;
+    if (next) next.focus();
+    else this.focusSelectedRow();
+  }
+
+  // Bound to the session, lease and SQL the load check started under, both before the
+  // reservation and after the post, so a re-pair or re-offer is never decided on stale facts.
+  private async autoDeny(
+    card: Card,
+    load: Promise<LoadResult>,
+    bound: { generation: number; active: number; lease: string; sql: string },
+  ): Promise<void> {
+    const same = () =>
+      this.cards.includes(card) &&
+      card.load === load &&
+      card.leaseId === bound.lease &&
+      card.sql === bound.sql &&
+      this.activeGen === bound.active &&
+      this.connGeneration === bound.generation;
+    if (
+      !card.loadResult?.heavy ||
+      card.state !== "ready" ||
+      card.authorityLost ||
+      !same() ||
+      // Right after a switch get() can still hold the previous connection's preferences.
+      !this.settingsStore.loadedForConnection(this.connectionName) ||
+      !this.settingsStore.get().autoDenyHeavy
+    )
+      return;
+    if (this.autoCard === card) this.autoAbort?.abort();
+    // The audit row and history record why Auto mode stopped, never the evaluation it cut short.
+    if (card.autoStatus === "Evaluating with Jev")
+      card.autoStatus = `Needs review: ${HEAVY_REASON}`;
+    // Reserved before the await, like a click on Reject, so nothing else can take the card.
+    this.setCardState(card.id, "rejecting");
+    const sent = agentMessage(AUTO_DENY_MESSAGE, planLoad(card.sql, this.dialect).hints);
+    const posted = await this.postResult(card, { status: "rejected", reason: sent });
+    // An undelivered rejection only releases the reservation, so the card returns to manual
+    // review undecided. A delivered one is final for the broker, whatever changed meanwhile.
+    if (!posted) {
+      // The reservation above changed the state; TypeScript still narrows it to "ready".
+      if (this.cards.includes(card) && (card.state as CardState) === "rejecting")
+        this.setCardState(card.id, "ready");
+      return;
+    }
+    this.finish(card.id, "rejected", AUTO_DENY_NOTE, undefined, undefined, {
+      sent,
+      autoDenied: true,
+    });
   }
 
   private async renew(): Promise<void> {
@@ -2992,11 +3146,7 @@ export class Gatekeeper {
     // The matrix (a read's tables come from this analysis), the legend and the SQL marks move
     // together, so none of them describes a different analysis than the others.
     const id = CSS.escape(card.id);
-    const matrix = this.root.querySelector<HTMLElement>(`#cm-${id}`);
-    if (matrix) {
-      const cls = classifyQuery(card.sql, this.dialect).class;
-      matrix.innerHTML = accessMatrix(card.sql, this.dialect, cls, card.schema);
-    }
+    this.renderCardLoad(card);
     const legend = this.root.querySelector<HTMLElement>(`#cs-${id}`);
     if (legend) {
       paintLegend(legend, card.schema, card.id);
@@ -3036,6 +3186,7 @@ export class Gatekeeper {
     const auto = this.autoGeneration;
     const lease = card.leaseId;
     const sql = card.sql;
+    const load = card.load;
     const valid = () =>
       gen === this.connGeneration &&
       active === this.activeGen &&
@@ -3047,6 +3198,7 @@ export class Gatekeeper {
       card.leaseExpiresAt > Date.now() &&
       (!evaluation ||
         (this.autoEnabled &&
+          card.load === load &&
           auto === this.autoGeneration &&
           this.mode === "read" &&
           !autoSignal?.aborted &&
@@ -3324,9 +3476,15 @@ export class Gatekeeper {
     // state already says a human declined, and a placeholder would sit in the audit
     // record for good.
     const custom = reason?.trim();
+    // Only a card that showed a Heavy query alert sends hints: on any other decline they would
+    // read as the reason, which the human never gave. The hints come from the SQL text alone.
+    const hints = card.loadResult?.heavy ? planLoad(card.sql, this.dialect).hints : [];
+    const sent = agentMessage(custom, hints);
     this.setCardState(id, "rejecting");
-    await this.postResult(card, { status: "rejected", reason: custom || undefined });
-    this.finish(id, "rejected", "declined", undefined, custom || undefined);
+    const posted = await this.postResult(card, { status: "rejected", reason: sent });
+    this.finish(id, "rejected", "declined", undefined, custom || undefined, {
+      sent: posted ? sent : undefined,
+    });
   }
 
   // Swap only this card's action row in place (no renderQueue) so the lease
@@ -3454,6 +3612,7 @@ export class Gatekeeper {
     note: string,
     result?: HistResult,
     reason?: string,
+    sent: Pick<HistItem, "sent" | "autoDenied"> = {},
   ): void {
     const card = this.cards.find((c) => c.id === id);
     if (!card) {
@@ -3483,6 +3642,7 @@ export class Gatekeeper {
         approval: card.approval,
         evaluation: card.evaluation,
         autoHold: this.autoHold(card),
+        ...sent,
         // The broker's snapshot for this decision; with none posted (an expiry), what the trail
         // falls back to: the SQL text alone.
         sensitivity: card.decisionSensitivity

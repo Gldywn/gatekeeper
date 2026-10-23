@@ -90,7 +90,7 @@ function topClass(top: string): RiskClass {
 
 // node-sql-parser cannot parse EXPLAIN in any dialect (it throws), so peel a leading
 // EXPLAIN off and classify the statement it wraps. Returns null when there is none.
-function stripExplain(sql: string): { inner: string; analyze: boolean } | null {
+export function stripExplain(sql: string): { inner: string; analyze: boolean } | null {
   const lead = /^\s*explain\b/i.exec(sql);
   if (!lead) {
     return null;

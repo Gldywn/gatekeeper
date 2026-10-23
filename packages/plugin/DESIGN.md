@@ -145,7 +145,8 @@ Layering and scrolling hold a few invariants a change can break:
   glyph), Expired, Cancelled.
 - Marks: a pencil for a write, a trash for a destructive query, the PII, Client and Value
   flags. The class icon and the flags show only where the query ran (Completed, Unconfirmed); a
-  pending row keeps its icon. Auto mode shows as one bolt, never twice.
+  pending row keeps its icon. Auto mode shows as one bolt, never twice; a decline by the load
+  check takes its gauge as the row's glyph.
 - The open row is marked by tone, never by a coloured bar. Rows span the pane's full width.
 - Pending approval carries the count awaiting a decision; Recently resolved has no count.
 - The Audit Trail shows the current month day by day and folds earlier months. Each day is a
@@ -166,6 +167,14 @@ first line, the tables, what the SQL marks, the SQL, then the decision.
   the exact names. No list that repeats what the SQL shows.
 - A limit of the analysis sits just above the SQL it qualifies; the state of Auto mode just
   above the decision it hands back. No catch-all findings table.
+- **Heavy query**: the load check is a second assessment, never the operation's class. Its badge
+  follows Write or Destructive on the intent line (alone on a read), solid amber with its ink
+  and a gauge where the class badges are tinted, so it leads the line without reading as a
+  class. Its reason sits just above the SQL, before the legend, on a faint warm surface drawn
+  from the badge's amber: one sentence, or one point per finding when there are several. There,
+  tables and columns stand out on the faint ground of tool names, unlike plain `code.name`. A
+  table's estimated rows open on hover or focus of its name in the matrix, or in the reason when
+  the card has no matrix. What the check could not establish is not shown: no estimate, no claim.
 - An Auto mode hold says where it happened, on this machine before evaluation or at Jev, then
   "Waiting for your review."; a hold on this machine adds "Nothing was sent to TypeSafe." No
   reason chips.
@@ -300,8 +309,8 @@ After `pols.dev/slop.md`:
 
 - One solid action (Approve) with quiet text actions beside it; never the filled-plus-outlined
   pair.
-- No gratuitous pills: the risk badge, agent chips and tool chips each carry a meaning; a
-  status needs no chip.
+- No gratuitous pills: the risk and heavy query badges, agent chips and tool chips each carry a
+  meaning; a status needs no chip.
 - No accent bar down a card edge, no coloured rail as the only signal.
 - No middle-dot separators chaining facts; separate them by position and alignment.
 - No new glow and no new colour for emphasis. Terse copy. Buttons do not move on hover.

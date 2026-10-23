@@ -1386,6 +1386,101 @@ label.qs-row {
   margin-top: 1px;
   color: var(--danger);
 }
+/* The load check. Its badge leads the title line: solid amber where Write and Destructive are
+   tinted, so the alert cannot be missed and still never reads as a class. The slot leaves no gap
+   in the title row when there is nothing to show. */
+.heavy-slot {
+  display: contents;
+}
+.risk-badge.heavy {
+  gap: 5px;
+  color: var(--amber-ink);
+  background: var(--amber);
+  border-color: var(--amber);
+}
+.risk-badge.heavy svg {
+  width: 11px;
+  height: 11px;
+}
+/* Why it is heavy, right above the SQL, on a faint warm surface drawn from the badge's amber:
+   part of the same alert without colouring the card. Several findings are separate points. */
+.card-load:empty {
+  display: none;
+}
+.cs-heavy {
+  padding: 8px 11px;
+  border: 1px solid color-mix(in oklch, var(--amber) 14%, var(--edge));
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--amber) 3%, transparent);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+}
+.cs-heavy p,
+.cs-heavy ul {
+  margin: 0;
+}
+.cs-heavy ul {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0;
+  list-style: none;
+}
+.cs-heavy li {
+  position: relative;
+  padding-left: 13px;
+}
+.cs-heavy li::before {
+  content: "";
+  position: absolute;
+  left: 1px;
+  top: 0.62em;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+/* A table's estimated rows open on hover or keyboard focus of its name. */
+.est-tip {
+  position: relative;
+  cursor: help;
+  text-decoration: underline dotted color-mix(in oklch, var(--text) 40%, transparent);
+  text-underline-offset: 3px;
+}
+.est-tip:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+.est-pop {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  z-index: 8;
+  padding: 5px 9px;
+  border: 1px solid var(--edge);
+  border-radius: 7px;
+  background: var(--surface);
+  box-shadow: var(--elev-2);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--muted);
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+}
+.est-pop b {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  color: var(--text);
+}
+.est-tip:hover .est-pop,
+.est-tip:focus .est-pop {
+  opacity: 1;
+  visibility: visible;
+}
 
 /* The blocked reason rides in a hover popover above the disabled Approve button. */
 .approve-slot {
@@ -3625,6 +3720,14 @@ code.tool,
   color: var(--text);
   background: color-mix(in oklch, var(--text) 8%, transparent);
 }
+/* Tables and columns in a heavy query's reason stand out on the same faint ground, never amber
+   like a keyword. */
+.cs-heavy code.name {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: color-mix(in oklch, var(--text) 8%, transparent);
+  font-weight: 500;
+}
 .set-rec.auto {
   color: var(--auto);
   border-color: color-mix(in oklch, var(--auto) 45%, transparent);
@@ -4935,6 +5038,15 @@ p.auto-message[data-tone="busy"] {
 #queue .top {
   --intent-line: calc(16px * 1.35);
 }
+/* With the heavy query badge the title row may hold two badges: they wrap ahead of the intent
+   rather than squeeze it. */
+#queue .top:has(.risk-badge.heavy) {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+#queue .top:has(.risk-badge.heavy) .intent {
+  flex: 1 1 220px;
+}
 #queue .intent {
   font-size: 16px;
   font-weight: 650;
@@ -4954,6 +5066,12 @@ p.auto-message[data-tone="busy"] {
   margin-bottom: 0;
 }
 #queue .cs-auto > .cs-unparsed {
+  margin: 0;
+}
+#queue .card-load:not(:empty) {
+  margin-top: 14px;
+}
+#queue .card-load > .cs-heavy {
   margin: 0;
 }
 /* The legend explains the SQL right under it. */
