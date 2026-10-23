@@ -1729,7 +1729,8 @@ export class Gatekeeper {
     this.renderSelection(true);
   }
 
-  private select(next: Selection): void {
+  // `moveFocus` false: a selection the human did not make by hand leaves their focus where it is.
+  private select(next: Selection, moveFocus = true): void {
     if (next.kind === "audit") {
       const entry = this.activityView.entry(next.id);
       if (!entry) return;
@@ -1745,7 +1746,7 @@ export class Gatekeeper {
     this.root.querySelector("#inbox")?.setAttribute("data-show", "detail");
     this.renderSelection(true);
     // Narrow: the list just hid under the focused row, so Back takes the focus.
-    if (this.root.querySelector<HTMLElement>(".pane-list")?.offsetParent === null) {
+    if (moveFocus && this.root.querySelector<HTMLElement>(".pane-list")?.offsetParent === null) {
       this.root.querySelector<HTMLElement>("[data-back]")?.focus({ preventScroll: true });
     }
   }
@@ -3565,14 +3566,26 @@ export class Gatekeeper {
       // An open card stays open as its outcome: same request, now decided. The selection holds
       // the item itself, so it outlives the Recently resolved cap while another tab shows.
       const open = this.selection.queue?.kind === "card" && this.selection.queue.id === id;
+      const inbox = this.root.querySelector<HTMLElement>("#inbox");
       // A human decision moves on to the next request waiting for one, as a click on it would,
-      // so the queue reads one request after the other. A failure stays open to be seen.
+      // so the queue reads one request after the other; not from a narrow list the human went
+      // back to meanwhile. A failure stays open to be seen.
       const next =
         open &&
         this.tab === "queue" &&
+        inbox?.getAttribute("data-show") !== "list" &&
         (status === "rejected" || (status === "approved" && card.approval?.source === "human"))
           ? this.nextWaiting(card)
           : undefined;
+      // The focus follows from the decided request (its row, its detail) or from nowhere, as a
+      // click would take it; anywhere else, an overlay or another row, it stays put.
+      const focused = inbox ? document.activeElement : null;
+      const follow =
+        inbox !== null &&
+        (!focused ||
+          focused === document.body ||
+          (focused as HTMLElement).dataset?.row === id ||
+          Boolean(inbox.querySelector("#detailBody")?.contains(focused)));
       if (open) this.selection.queue = { kind: "hist", id, item };
       this.history.unshift(item);
       if (this.history.length > this.settingsStore.get().recentlyResolved) {
@@ -3582,12 +3595,8 @@ export class Gatekeeper {
       // Dropped once its outcome row exists, so the rebuild hands a focused row to that row.
       this.drop(id);
       if (next) {
-        const inInbox = Boolean(
-          this.root.querySelector("#inbox")?.contains(document.activeElement),
-        );
-        this.select({ kind: "card", id: next.id });
-        // A click focuses the row it opens; the keyboard lands there too, not on the outcome.
-        if (inInbox) this.focusSelectedRow();
+        this.select({ kind: "card", id: next.id }, follow);
+        if (follow) this.focusSelectedRow();
       } else if (open && this.tab === "queue") {
         // The Audit Trail's open entry, if that tab shows, keeps its grid's sort and page.
         this.renderSelection(true);

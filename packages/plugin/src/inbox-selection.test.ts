@@ -225,6 +225,51 @@ describe("after a human decision", () => {
     expect(app.selection.queue).toEqual({ kind: "card", id: "c" });
   });
 
+  // A narrow tab: the decided card's detail (or the list it went back to), Back, a hidden list.
+  function narrow(app: ReturnType<typeof harness>, show: "detail" | "list", focused: unknown) {
+    const back = { focus: vi.fn() };
+    const detailBody = { contains: (el: unknown) => el === back };
+    const inbox = {
+      getAttribute: () => show,
+      setAttribute: vi.fn(),
+      querySelector: (s: string) => (s === "#detailBody" ? detailBody : null),
+    };
+    const nodes: Record<string, unknown> = {
+      "#inbox": inbox,
+      ".pane-list": { offsetParent: null },
+      "[data-back]": back,
+    };
+    app.root = { querySelector: (s: string) => nodes[s] ?? null, querySelectorAll: () => [] };
+    vi.stubGlobal("document", { activeElement: focused ?? back, body: {} });
+    return back;
+  }
+
+  it("keeps the focus on an overlay or another row, and still opens the next request", () => {
+    const app = queue("a", "b");
+    const back = narrow(app, "detail", { dataset: {} });
+    decide(app, "a");
+    app.finish("a", "approved", "1 row returned");
+    expect(app.selection.queue).toEqual({ kind: "card", id: "b" });
+    expect(back.focus).not.toHaveBeenCalled();
+  });
+
+  it("takes the focus to Back when it was on the decided request", () => {
+    const app = queue("a", "b");
+    const back = narrow(app, "detail", undefined);
+    decide(app, "a");
+    app.finish("a", "approved", "1 row returned");
+    expect(back.focus).toHaveBeenCalled();
+  });
+
+  it("stays on the outcome when the human went back to a narrow list meanwhile", () => {
+    const app = queue("a", "b");
+    const back = narrow(app, "list", { dataset: {} });
+    decide(app, "a");
+    app.finish("a", "approved", "1 row returned");
+    expect(app.selection.queue).toMatchObject({ kind: "hist", id: "a" });
+    expect(back.focus).not.toHaveBeenCalled();
+  });
+
   it("leaves a selection the human changed meanwhile, or another tab, alone", () => {
     const moved = queue("a", "b", "c");
     decide(moved, "a");
