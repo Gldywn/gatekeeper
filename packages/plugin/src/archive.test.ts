@@ -112,6 +112,22 @@ describe("ResultArchive", () => {
     expect(storage.data.has(`gatekeeper.history.key.${lost.id}`)).toBe(false);
   });
 
+  it("keeps the key as JSON text, the kind of value Beekeeper already stores encrypted", async () => {
+    const storage = memoryStorage();
+    const { id } = await new ResultArchive(storage).ready();
+    expect(typeof storage.data.get(`gatekeeper.history.key.${id}`)).toBe("string");
+  });
+
+  it("gives up on a key storage that never answers, and tries again on the next seal", async () => {
+    const storage = memoryStorage();
+    const get = storage.getItem;
+    storage.getItem = () => new Promise(() => {});
+    const archive = new ResultArchive(storage, 20);
+    await expect(archive.seal(RESULT, "req_1")).rejects.toThrow("Key storage did not answer");
+    storage.getItem = get;
+    expect(await archive.open(await archive.seal(RESULT, "req_1"), "req_1")).toEqual(RESULT);
+  });
+
   it("seals nothing until the key is stored, and tries again on the next seal", async () => {
     const storage = memoryStorage();
     const set = storage.setItem;

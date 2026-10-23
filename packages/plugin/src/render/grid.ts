@@ -75,13 +75,15 @@ export function mountResultGrid(
   return table;
 }
 
-function columnDef(name: string, rows: Record<string, unknown>[]): ColumnDefinition {
+export function columnDef(name: string, rows: Record<string, unknown>[]): ColumnDefinition {
   const numeric = isNumericColumn(name, rows);
   // The pii/client accent rides the same cssClass that Tabulator applies to header and
   // cells, so a sensitive column reads at a glance in the result as it does in the flags.
   const classes = [classifyColumn(name), numeric ? "gk-col-num" : null].filter(Boolean).join(" ");
   return {
     title: name,
+    // Tabulator writes a plain title as HTML, and a column name is whatever the query aliased.
+    titleFormatter: () => span("gk-col-name", name),
     field: name,
     hozAlign: numeric ? "right" : "left",
     headerHozAlign: numeric ? "right" : "left",
@@ -137,7 +139,7 @@ function span(className: string, text: string): HTMLSpanElement {
 
 // The hover expansion: pretty-printed JSON for objects/arrays, the full string for a
 // clipped long value, nothing for short primitives (false hides the tooltip).
-function cellTooltip(_event: Event, cell: CellComponent): HTMLElement | string | boolean {
+export function cellTooltip(_event: Event, cell: CellComponent): HTMLElement | string | boolean {
   const value = cell.getValue();
   if (value && typeof value === "object") {
     const pre = document.createElement("pre");
@@ -145,8 +147,11 @@ function cellTooltip(_event: Event, cell: CellComponent): HTMLElement | string |
     pre.textContent = JSON.stringify(value, null, 2);
     return pre;
   }
+  // A node, never the string: Tabulator writes a returned string as HTML.
   if (typeof value === "string" && value.length > TOOLTIP_MIN_CHARS) {
-    return value;
+    const pop = document.createElement("div");
+    pop.textContent = value;
+    return pop;
   }
   // Empty string = no tooltip; returning the boolean false surfaced a stray "false".
   return "";

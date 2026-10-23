@@ -329,11 +329,17 @@ export function activityMarkdownDays(
   return lines.join("\n");
 }
 
+// The outcome word every export writes, as the trail shows it: a statement the gate refused to run
+// was not run, not declined.
+function statusLabel(e: ActivityEntry): string {
+  return e.state === "rejected" && e.declinedBy === "gate" ? "not run" : outcomeMeta(e.state).label;
+}
+
 // One decision under its session: its time, outcome and intent, the facts recorded with it, then
 // its SQL fenced so no backtick run inside can close the block early.
 function entryMarkdown(e: ActivityEntry, flags: ActivityFlagMap): string[] {
   const ts = e.decidedAt ?? e.createdAt;
-  const status = capitalize(outcomeMeta(e.state).label);
+  const status = capitalize(statusLabel(e));
   const intent = e.intent?.trim();
   const lines = [
     `#### ${new Date(ts).toLocaleTimeString()} · ${intent ? `${status} · ${capitalize(intent)}` : status}`,
@@ -405,7 +411,7 @@ export function activityCsv(entries: ActivityEntry[], flags: ActivityFlagMap = n
     return [
       e.sessionId,
       new Date(ts).toISOString(),
-      outcomeMeta(e.state).label,
+      statusLabel(e),
       latency,
       e.intent?.trim() ?? "",
       (flags.get(e.id) ?? []).join("; "),
@@ -434,7 +440,7 @@ export function activityJson(entries: ActivityEntry[], flags: ActivityFlagMap = 
     return {
       session_id: e.sessionId,
       timestamp: new Date(ts).toISOString(),
-      status: outcomeMeta(e.state).label,
+      status: statusLabel(e),
       latency_ms: latencyMs,
       intent: e.intent?.trim() || null,
       flags: flags.get(e.id) ?? [],

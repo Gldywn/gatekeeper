@@ -3,7 +3,22 @@ import { toTicket } from "../service.js";
 import { listActivity } from "./audit.js";
 import { createContext, migrate } from "./db.js";
 import { get, sweep } from "./requests.js";
-import { outcomeFacts } from "./rows.js";
+
+// One decided request with this raw result_json, read back through the activity view.
+function factsOf(state: string, resultJson: string | null) {
+  const ctx = createContext();
+  try {
+    migrate(ctx.db);
+    ctx.db
+      .prepare(`INSERT INTO requests (id, created_at, session_id, sql, state, decided_at, result_json, expires_at)
+        VALUES ('r', 1, 's1', 'SELECT 1', ?, 2, ?, 3)`)
+      .run(state, resultJson);
+    const [e] = listActivity(ctx, null);
+    return { reason: e.reason, error: e.error, rowCount: e.rowCount, affectedRows: e.affectedRows };
+  } finally {
+    ctx.db.close();
+  }
+}
 
 describe("durable audit counts", () => {
   it.each([
@@ -24,13 +39,58 @@ describe("durable audit counts", () => {
       rowCount: null,
       affectedRows: null,
     },
+    { result: { rows: [{ a: 1 }, { a: 2 }] }, rowCount: 2, affectedRows: null },
+    { result: { rows: "two" }, rowCount: null, affectedRows: null },
   ])("extracts only known scalar counts from $result", ({ result, rowCount, affectedRows }) => {
-    expect(outcomeFacts("approved", JSON.stringify(result))).toEqual({
+    expect(factsOf("approved", JSON.stringify(result))).toEqual({
       reason: null,
       error: null,
       rowCount,
       affectedRows,
     });
+  });
+
+  it("keeps a decline's reason and a failure's error, and reads a malformed record as unknown", () => {
+    expect(factsOf("rejected", JSON.stringify({ reason: "use the replica" })).reason).toBe(
+      "use the replica",
+    );
+    expect(factsOf("rejected", JSON.stringify({ reason: 7 })).reason).toBeNull();
+    expect(factsOf("failed", JSON.stringify({ error: "boom" })).error).toBe("boom");
+    expect(factsOf("approved", "{not json")).toEqual({
+      reason: null,
+      error: null,
+      rowCount: null,
+      affectedRows: null,
+    });
+    expect(factsOf("approved", null).rowCount).toBeNull();
+  });
+
+  it("never brings a result's rows into JavaScript to count them", () => {
+    const ctx = createContext();
+    const parse = vi.spyOn(JSON, "parse");
+    try {
+      migrate(ctx.db);
+      const insert = ctx.db.prepare(`INSERT INTO requests
+        (id, created_at, session_id, sql, state, decided_at, result_json, expires_at)
+        VALUES (?, 1, 's1', 'SELECT 1', 'approved', ?, ?, 3)`);
+      // Results still inside their agent window, 1 MiB of rows each.
+      const rows = Array.from({ length: 4_096 }, (_, i) => ({ i, pad: "x".repeat(240) }));
+      const big = JSON.stringify({
+        rows,
+        fields: [{ name: "i" }],
+        truncated: true,
+        rowCount: 9_000,
+      });
+      for (let i = 0; i < 20; i++) insert.run(`r${i}`, i + 2, big);
+      parse.mockClear();
+      const activity = listActivity(ctx, null, 20);
+      expect(activity.map((e) => e.rowCount)).toEqual(Array(20).fill(9_000));
+      const largest = Math.max(0, ...parse.mock.calls.map(([text]) => String(text).length));
+      expect(largest).toBeLessThan(1_024);
+    } finally {
+      parse.mockRestore();
+      ctx.db.close();
+    }
   });
 
   it("keeps old purged entries unknown after migration and through the agent response", () => {

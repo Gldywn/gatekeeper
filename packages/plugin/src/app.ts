@@ -54,7 +54,7 @@ import { ConfirmModal, runSentence } from "./render/confirm";
 import { connChipInner } from "./render/connchip";
 import { modeDropdown, switchInput } from "./render/controls";
 import { type DbCheck, dbLink, dbLinkLabel, dbStatusHtml, nextCheckText } from "./render/dblink";
-import { CANCELLED_NOTE, NOT_DELIVERED_NOTE } from "./render/detail";
+import { CANCELLED_NOTE, EXECUTION_UNKNOWN, NOT_DELIVERED_NOTE } from "./render/detail";
 import { exportTriggerHtml } from "./render/export";
 import {
   agentsStripHtml,
@@ -327,6 +327,7 @@ export class Gatekeeper {
   // Recently resolved: the newest decisions on this connection as the server records them, and
   // the ones this tab just made, shown at once until that page lists them.
   private recent: HistItem[] = [];
+  private recentSig = "";
   private decided: HistItem[] = [];
   // Endings only this tab saw (an expiry, a lost lease, a result or decline not acknowledged):
   // shown in the open pane until the server's record of the same request replaces them.
@@ -672,6 +673,7 @@ export class Gatekeeper {
     this.connGeneration++;
     this.cards.length = 0;
     this.recent = [];
+    this.recentSig = "";
     this.decided = [];
     this.annotator.clearCache();
     this.activeGen++;
@@ -915,27 +917,36 @@ export class Gatekeeper {
     this.recentAt = Date.now();
     const generation = this.connGeneration;
     try {
-      const page = await this.broker.activity(
-        this.connScopeKey(),
-        undefined,
-        this.settingsStore.get().recentlyResolved,
-      );
+      const limit = this.settingsStore.get().recentlyResolved;
+      const page = await this.broker.activity(this.connScopeKey(), undefined, limit);
       if (!page || generation !== this.connGeneration) return;
-      const connection = this.connectionName || null;
-      this.recent = page.activity.map((e) => ({
-        ...auditItem(e, connection),
-        sensitivity: entryFlags(e, textSchema(e.sql, this.dialect)) ?? undefined,
-      }));
-      // An acknowledged decision leaves the provisional list once the page lists it, or once a
-      // full page reaches past it, which proves it is no longer among the newest.
-      const listed = new Set(this.recent.map((i) => i.id));
-      const full = this.recent.length >= this.settingsStore.get().recentlyResolved;
+      // An older broker ignores the limit and sends its full page.
+      const entries = page.activity.slice(0, limit);
+      // A decided entry never changes, so its id and state say whether the page did; an unchanged
+      // one is neither mapped nor drawn again, so a tick every few seconds costs a request only.
+      const signature = entries.map((e) => `${e.id}:${e.state}`).join(",");
+      const changed = signature !== this.recentSig;
+      if (changed) {
+        this.recentSig = signature;
+        const connection = this.connectionName || null;
+        this.recent = entries.map((e) => ({
+          ...auditItem(e, connection),
+          sensitivity:
+            entryFlags(e, null) ?? entryFlags(e, textSchema(e.sql, this.dialect)) ?? undefined,
+        }));
+      }
+      // A decision leaves the provisional list once the page lists it (unless this tab knows
+      // more than the record), or once a full page reaches past it: it is no longer among the newest.
+      const recorded = new Map(this.recent.map((i) => [i.id, i]));
+      const full = this.recent.length >= limit;
       const oldest = this.recent.at(-1)?.resolvedAt ?? 0;
-      this.decided = this.decided.filter(
-        (i) => !listed.has(i.id) && !(full && i.resolvedAt < oldest),
-      );
+      const before = this.decided.length;
+      this.decided = this.decided.filter((i) => {
+        const record = recorded.get(i.id);
+        return (!record || this.knowsMore(i, record)) && !(full && i.resolvedAt < oldest);
+      });
       this.followRecorded();
-      this.renderQueueList();
+      if (changed || this.decided.length !== before) this.renderQueueList();
     } catch {
       // The next tick tries again; the list keeps what it last showed.
     } finally {
@@ -948,22 +959,37 @@ export class Gatekeeper {
   }
 
   // What Recently resolved lists: the server's page, with this tab's own decisions it does not
-  // show yet slotted in by time.
+  // show yet, or knows better, slotted in by time.
   private recentItems(): HistItem[] {
-    const listed = new Set(this.recent.map((i) => i.id));
-    return [...this.decided.filter((i) => !listed.has(i.id)), ...this.recent]
+    const mine = new Map(this.decided.map((i) => [i.id, i]));
+    const listed = this.recent.filter((r) => !this.knowsMore(mine.get(r.id), r));
+    const ids = new Set(listed.map((i) => i.id));
+    return [...this.decided.filter((i) => !ids.has(i.id)), ...listed]
       .sort((a, b) => b.resolvedAt - a.resolvedAt)
       .slice(0, this.settingsStore.get().recentlyResolved);
   }
 
+  // The database answered this tab but the server never heard it: when the server can only say
+  // the outcome is unknown, what this tab saw ("returned successfully", the engine's error) is
+  // the better fact. Any other record of the request is the server's truth and wins.
+  private knowsMore(mine: HistItem | undefined, record: HistItem): boolean {
+    return (
+      mine !== undefined &&
+      this.unrecorded.has(mine) &&
+      (mine.outcome === NOT_DELIVERED_NOTE || mine.outcome === "query failed") &&
+      record.status === "failed" &&
+      record.note === EXECUTION_UNKNOWN
+    );
+  }
+
   // An open outcome the server never acknowledged is this tab's own view: once the server's
-  // record of that request shows up (a delivery that did land, an execution now unknown), it
-  // replaces it. An acknowledged one already says what the server holds and keeps its grid.
+  // record of that request shows up (a delivery that did land, an expiry), it replaces it, unless
+  // this tab knows more. An acknowledged one already says what the server holds and keeps its grid.
   private followRecorded(): void {
     const sel = this.selection.queue;
     if (sel?.kind !== "hist" || !sel.item || !this.unrecorded.has(sel.item)) return;
     const recorded = this.recent.find((i) => i.id === sel.id);
-    if (!recorded) return;
+    if (!recorded || this.knowsMore(sel.item, recorded)) return;
     sel.item = recorded;
     if (this.tab === "queue") this.renderSelection(true);
   }
@@ -1044,6 +1070,7 @@ export class Gatekeeper {
     // old one cannot leak in. The roster re-fetches on its own timer, Recently resolved once the
     // new connection's settings say how many it lists, and an open Audit Trail reloads.
     this.recent = [];
+    this.recentSig = "";
     this.decided = [];
     this.resetInbox();
     if (this.tab === "audit") void this.activityView.open();
@@ -3596,17 +3623,20 @@ export class Gatekeeper {
       const open = this.selection.queue?.kind === "card" && this.selection.queue.id === id;
       if (open) this.selection.queue = { kind: "hist", id, item };
       // Listed at once when the server acknowledged it, as metadata only: the rows stay with the
-      // open pane, and anything else reopens from the kept copy. An ending the server has not
-      // acknowledged stays in the open pane until the server's own record replaces it.
-      if (recorded) {
+      // open pane, and anything else reopens from the kept copy. So is an ending the database
+      // answered but the server never heard of, which this tab knows better than its later record.
+      // Any other unacknowledged ending stays in the open pane until the server's record replaces it.
+      if (!recorded) this.unrecorded.add(item);
+      const answered = note === NOT_DELIVERED_NOTE || note === "query failed";
+      if (recorded || answered) {
         const rowless = item.result && { ...item.result, fields: [], rows: [] };
-        this.decided.unshift({ ...item, result: rowless, ...(kept ? { kept: true } : {}) });
+        const listed = { ...item, result: rowless, ...(kept ? { kept: true } : {}) };
+        if (!recorded) this.unrecorded.add(listed);
+        this.decided.unshift(listed);
         this.decided.length = Math.min(
           this.decided.length,
           this.settingsStore.get().recentlyResolved,
         );
-      } else {
-        this.unrecorded.add(item);
       }
       // Dropped once its outcome row exists, so the rebuild hands a focused row to that row.
       this.drop(id);

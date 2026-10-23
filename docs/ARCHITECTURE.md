@@ -155,7 +155,8 @@ Every approved result is kept twice, for two readers.
   opens it. It holds exactly what the agent was sent: at most 10,000 rows and 8 MiB, counted in
   UTF-8 bytes over the whole result, so the history never shows a row the agent did not get.
   Decisions from before this copy existed have none, and rows already stripped cannot be
-  recovered.
+  recovered. A server from before this copy ignores it, so results decided while such a server
+  holds the broker port keep none: update the server with the plugin, or before it.
 
 Keys are written once each under their own id (`gatekeeper.history.key.<id>`) and a pointer names
 the one to use, so two tabs creating a key at once leave two valid keys, never a lost one. Every

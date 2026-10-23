@@ -239,9 +239,8 @@ describe("Recently resolved from the server", () => {
   });
 
   it("replaces an unconfirmed open outcome once the server records how it ended", async () => {
-    const { app, answer } = served([
-      [entry("a", Date.now(), { state: "failed", error: "execution_unknown" })],
-    ]);
+    // The result did land: only its acknowledgement was lost.
+    const { app, answer } = served([[entry("a", Date.now())]]);
     const local = {
       id: "a",
       status: "failed",
@@ -253,8 +252,40 @@ describe("Recently resolved from the server", () => {
     const refresh = app.refreshRecent();
     await answer();
     await refresh;
-    expect(app.selection.queue.item).toMatchObject({ status: "failed", note: "execution_unknown" });
+    expect(app.selection.queue.item).toMatchObject({ status: "approved" });
     expect(app.renderSelection).toHaveBeenCalledWith(true);
+  });
+
+  it("keeps what this tab saw when the server can only say the outcome is unknown", async () => {
+    const { app, answer } = served([
+      [entry("a", Date.now(), { state: "failed", error: "execution_unknown" })],
+    ]);
+    app.cards = [card("a")];
+    app.selection.queue = { kind: "card", id: "a" };
+    app.finish("a", "failed", "result not delivered");
+    const local = app.selection.queue.item;
+    expect(app.recentItems()[0]).toMatchObject({ id: "a", outcome: "result not delivered" });
+    // finish() asked the server for its page; it answers with its own record of the request.
+    await answer();
+    expect(app.recent).toHaveLength(1);
+    // The database returned successfully: that stays the fact, in the list and the open pane.
+    expect(app.recentItems()).toHaveLength(1);
+    expect(app.recentItems()[0]).toMatchObject({ id: "a", outcome: "result not delivered" });
+    expect(app.selection.queue.item).toBe(local);
+  });
+
+  it("cuts an older broker's full page to the count, and draws an unchanged page once", async () => {
+    const now = Date.now();
+    const page = Array.from({ length: 30 }, (_, i) => entry(`srv${i}`, now - i * 1_000));
+    const { app, answer } = served([page, page]);
+    const first = app.refreshRecent();
+    await answer();
+    await first;
+    expect(app.recent).toHaveLength(20);
+    const second = app.refreshRecent();
+    await answer();
+    await second;
+    expect(app.renderQueueList).toHaveBeenCalledOnce();
   });
 
   it("leaves an acknowledged open outcome, rows and all, when the server lists it", async () => {

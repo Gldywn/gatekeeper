@@ -64,7 +64,8 @@ export interface ActivityCursor {
 
 /** Terminal requests for a connection, newest first, for the host-side activity
  *  view. Each entry carries the SQL and metadata plus scalar outcome facts
- *  (reason / error / row count) from result_json, but never the result rows. */
+ *  (reason / error / row count) that SQLite reads out of result_json: a result still in its
+ *  agent window can weigh megabytes, and Recently resolved reads this every few seconds. */
 export function listActivity(
   ctx: StoreContext,
   connection: string | null,
@@ -89,9 +90,13 @@ export function listActivity(
            ORDER BY decided_at DESC, id DESC LIMIT @limit
          )
        )
-       SELECT r.id, r.created_at, r.decided_at, r.session_id, r.sql, r.intent, r.state, r.result_json, r.policy_json,
+       SELECT r.id, r.created_at, r.decided_at, r.session_id, r.sql, r.intent, r.state, r.policy_json,
            s.harness, s.project, s.session_label,
-           EXISTS (SELECT 1 FROM results k WHERE k.request_id = r.id) AS kept
+           EXISTS (SELECT 1 FROM results k WHERE k.request_id = r.id) AS kept,
+           CASE WHEN json_valid(r.result_json) THEN json_extract(r.result_json,
+             '$.reason', '$.error', '$.rowCount', '$.affectedRows') END AS facts,
+           CASE WHEN json_valid(r.result_json) THEN CASE json_type(r.result_json, '$.rows')
+             WHEN 'array' THEN json_array_length(r.result_json, '$.rows') END END AS rows_length
          FROM recent JOIN requests r ON r.id = recent.id
          LEFT JOIN sessions s ON s.session_id = r.session_id
          ORDER BY r.decided_at DESC, r.id DESC
@@ -109,7 +114,8 @@ export function listActivity(
     sql: string;
     intent: string | null;
     state: RequestState;
-    result_json: string | null;
+    facts: string | null;
+    rows_length: number | null;
     policy_json: string | null;
     harness: string | null;
     project: string | null;
@@ -117,7 +123,7 @@ export function listActivity(
     kept: number;
   }[];
   return rows.map((row) => {
-    const facts = outcomeFacts(row.state, row.result_json);
+    const facts = outcomeFacts(row.state, row.facts, row.rows_length);
     const policy = row.policy_json ? JSON.parse(row.policy_json) : undefined;
     return {
       id: row.id,

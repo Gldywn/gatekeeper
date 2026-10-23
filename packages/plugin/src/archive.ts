@@ -29,6 +29,42 @@ const beekeeperStorage: KeyStorage = {
   setItem: (key, value) => appStorage.setItem(key, value, { encrypted: true }),
 };
 
+// Beekeeper answers storage requests over postMessage with no time limit. One that never comes
+// must fail the seal, so the agent still gets its rows, instead of holding the decision forever.
+const STORAGE_TIMEOUT_MS = 5_000;
+
+function bounded(storage: KeyStorage, ms: number): KeyStorage {
+  const within = <T>(pending: Promise<T>) =>
+    new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("Key storage did not answer")), ms);
+      pending.then(
+        (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        (err: unknown) => {
+          clearTimeout(timer);
+          reject(err);
+        },
+      );
+    });
+  return {
+    getItem: <T>(key: string) => within(storage.getItem<T>(key)),
+    setItem: (key, value) => within(storage.setItem(key, value)),
+  };
+}
+
+// Kept as JSON text: strings are what the plugin already stores encrypted (the broker token),
+// so the key does not depend on how Beekeeper carries an object through its encryption.
+function parseJwk(raw: unknown): JsonWebKey | null {
+  try {
+    const jwk = typeof raw === "string" ? (JSON.parse(raw) as JsonWebKey) : null;
+    return typeof jwk?.k === "string" ? jwk : null;
+  } catch {
+    return null;
+  }
+}
+
 interface CurrentKey {
   id: string;
   key: CryptoKey;
@@ -39,8 +75,8 @@ export class ResultArchive {
   private current: Promise<CurrentKey> | undefined;
   private readonly keys = new Map<string, Promise<CryptoKey | null>>();
 
-  constructor(storage: KeyStorage = beekeeperStorage) {
-    this.storage = storage;
+  constructor(storage: KeyStorage = beekeeperStorage, timeoutMs = STORAGE_TIMEOUT_MS) {
+    this.storage = bounded(storage, timeoutMs);
   }
 
   // Keys are written once under their own id and the pointer only names the next one to use, so
@@ -114,9 +150,9 @@ export class ResultArchive {
     ]);
     const jwk = await crypto.subtle.exportKey("jwk", key);
     const fresh = bytesHex(crypto.getRandomValues(new Uint8Array(KEY_ID_BYTES)));
-    await this.storage.setItem(entry(fresh), jwk);
-    const back = await this.storage.getItem<JsonWebKey>(entry(fresh));
-    if (back?.k !== jwk.k) {
+    const stored = JSON.stringify(jwk);
+    await this.storage.setItem(entry(fresh), stored);
+    if ((await this.storage.getItem<string>(entry(fresh))) !== stored) {
       throw new Error("Result key was not stored");
     }
     this.keys.set(fresh, Promise.resolve(key));
@@ -127,16 +163,12 @@ export class ResultArchive {
   private key(id: string): Promise<CryptoKey | null> {
     let found = this.keys.get(id);
     if (!found) {
-      found = this.storage
-        .getItem<JsonWebKey>(entry(id))
-        .then((jwk) =>
-          jwk?.k
-            ? crypto.subtle.importKey("jwk", jwk, { name: "AES-GCM" }, false, [
-                "encrypt",
-                "decrypt",
-              ])
-            : null,
-        );
+      found = this.storage.getItem<string>(entry(id)).then((raw) => {
+        const jwk = parseJwk(raw);
+        return jwk
+          ? crypto.subtle.importKey("jwk", jwk, { name: "AES-GCM" }, false, ["encrypt", "decrypt"])
+          : null;
+      });
       // A miss is not remembered: another tab may write that entry a moment later.
       found.then(
         (k) => k ?? this.keys.delete(id),

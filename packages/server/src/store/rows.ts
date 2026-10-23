@@ -105,9 +105,12 @@ export function knownCount(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
+// `extracted` is the JSON array SQLite returns for the reason, error, rowCount and affectedRows
+// paths of result_json; `rowsLength` the length of its rows array when it holds one.
 export function outcomeFacts(
   state: RequestState,
-  resultJson: string | null,
+  extracted: string | null,
+  rowsLength: number | null,
 ): Pick<ActivityEntry, "reason" | "error" | "rowCount" | "affectedRows"> {
   const facts: Pick<ActivityEntry, "reason" | "error" | "rowCount" | "affectedRows"> = {
     reason: null,
@@ -115,29 +118,25 @@ export function outcomeFacts(
     rowCount: null,
     affectedRows: null,
   };
-  if (resultJson === null) {
-    return facts;
-  }
-  let parsed: unknown;
+  let values: unknown;
   try {
-    parsed = JSON.parse(resultJson);
+    values = extracted === null ? null : JSON.parse(extracted);
   } catch {
     return facts;
   }
-  if (typeof parsed !== "object" || parsed === null) {
+  if (!Array.isArray(values)) {
     return facts;
   }
-  const result = parsed as Record<string, unknown>;
+  const [reason, error, rowCount, affectedRows] = values;
   if (state === "rejected") {
-    facts.reason = typeof result.reason === "string" ? result.reason : null;
+    facts.reason = typeof reason === "string" ? reason : null;
   } else if (state === "failed") {
-    facts.error = typeof result.error === "string" ? result.error : null;
+    facts.error = typeof error === "string" ? error : null;
   } else if (state === "approved") {
     // A scalar count only, never the elements. Prefer the stored true count (the plugin
     // may have capped the forwarded rows), falling back to the array length.
-    facts.rowCount =
-      knownCount(result.rowCount) ?? (Array.isArray(result.rows) ? result.rows.length : null);
-    facts.affectedRows = knownCount(result.affectedRows);
+    facts.rowCount = knownCount(rowCount) ?? knownCount(rowsLength);
+    facts.affectedRows = knownCount(affectedRows);
   }
   return facts;
 }

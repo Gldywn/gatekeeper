@@ -26,6 +26,7 @@ declare module "tabulator-tables" {
     title: string;
     field?: string;
     formatter?: string | Formatter;
+    titleFormatter?: Formatter;
     tooltip?: Tooltip;
     cssClass?: string;
     hozAlign?: "left" | "center" | "right";
