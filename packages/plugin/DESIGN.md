@@ -150,7 +150,9 @@ Layering and scrolling hold a few invariants a change can break:
 - Pending approval carries the count awaiting a decision; Recently resolved has no count.
 - The Audit Trail shows the current month day by day and folds earlier months. Each day is a
   calendar tile with its query and session totals, amber while open; Today opens when there is
-  one, otherwise the newest day. Month and session heads carry no count and no export.
+  one, otherwise the newest day. Month and session heads carry no count and no export: the
+  whole trail exports from one icon in the list pane's head, shown on the Audit Trail tab
+  unless the trail has loaded empty.
 
 ## The pending card
 
@@ -225,16 +227,17 @@ The outcome comes first, then what was asked.
 
 ## Overlays
 
-Every overlay window is a modal dialog: `role="dialog"`, `aria-modal`, the visible elements
-beside it inert while open (`takeOver` in `src/modal.ts`), the focus inside, then back on the
-control that opened it (the gear, for Settings opened from its menu, whose own button is gone
-by then). Settings and the confirms follow it; the database notice does not yet, and stays
-until one of its own buttons (Escape does not dismiss it). Their frame reads solid over the
-Inbox's veil: a dark outer line, a light inner line, a shadow, and an engraved Settings head
-(`.detail > .detail-card`).
+Every overlay window (Settings, the export, the confirms, the database notice) is a modal
+dialog: `role="dialog"`, `aria-modal`, the visible elements beside it inert while open
+(`takeOver` in `src/modal.ts`), the focus inside, then back on the control that opened it, or
+on a fallback when that control is gone (the gear for Settings opened from its menu, the open
+tab for the notice, which opens on its own, and for the export). Every action in it is a real
+button, reachable by keyboard. The database notice opens on Continue and stays until one of its
+own buttons: Escape does not dismiss it. Their frame reads solid over the Inbox's veil: a dark
+outer line, a light inner line, a shadow, and an engraved Settings head (`.detail > .detail-card`).
 
-Escape removes one layer per press: an open confirm first, then an open menu or popover, then
-Settings, then the Queue's open item.
+Escape removes one layer per press: an open confirm first, then the export, then an open menu or
+popover, then Settings, then the Queue's open item.
 
 **Confirms.** An arm confirm says what the mode lets you approve and opens on its action; a
 typed challenge (Destructive) opens on its input. When arming turns Auto mode off, one plain
@@ -245,6 +248,15 @@ invoices on <db>, once, when you confirm."; an upsert "adds or changes rows of")
 table matrix and the SQL, its button naming the operation ("Run UPDATE"). It opens on Cancel,
 so Enter twice from Approve never runs a write, and it closes itself when its request expires
 or goes away.
+
+**Export.** The Audit Trail export picks a period first, each with its dates (Today, Last 7
+days by default, This month, Everything, Choose days), then a format, then names what it saves
+("Export 31 queries"). It reads the trail only as far as the period needs, and states the scope
+as facts only once every day in it has been read; until then the line above the action says
+how far reading got. Choose days lists whole days in the trail's anatomy, month by month; a
+ticked month means the calendar month, days not read yet included. Its radios and checkboxes
+are neutral (a muted fill): picking is not a decision, so no colour stands for it. One sentence
+says what the file holds and that result rows never are.
 
 **SQL formatting** is for display only: SET, RETURNING and each top-level AND or OR of a
 condition start a line; subqueries and parenthesised groups stay on one; a canonical token check

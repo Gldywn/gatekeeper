@@ -1,3 +1,4 @@
+import type { ConnectionInfo } from "@beekeeperstudio/plugin";
 import type { ActivityEntry, Proposal, SessionMeta, SessionRoster } from "@gatekeeper/shared";
 import { capResult } from "../src/result";
 import type { HistItem } from "../src/types";
@@ -27,12 +28,16 @@ export const NOW = Date.now();
 const MIN = 60_000;
 const DAY = 86_400_000;
 
+// Any engine but PostgreSQL and MySQL (sqlite, sqlserver...) opens the "not officially tested"
+// notice.
+const engine = (params.get("engine") ?? "postgresql") as ConnectionInfo["databaseType"];
+
 export const CONNECTION = {
-  connectionType: "postgresql",
+  connectionType: engine,
   id: 7,
   workspaceId: 0,
   connectionName: "gatekeeper_test",
-  databaseType: "postgresql" as const,
+  databaseType: engine,
   databaseName: "gatekeeper_test",
   defaultSchema: "public",
   readOnlyMode: false,

@@ -229,7 +229,9 @@ itself is in neither the URL nor the prompt.
   up to 0.2.0 deleted decided requests after 24 hours, also when such a server kept running
   beside a newer one on the same database, so stop every server when upgrading (the
   `update-gatekeeper` skill does). Requests they deleted and counts they purged cannot be
-  recovered.
+  recovered. Once a current server has opened the database, it refuses any deletion of a
+  request (the `requests_keep` trigger): such an older server then fails instead of deleting,
+  though it can still strip the counts of the results it purges.
 - **Engine errors.** A failed query's engine error is returned to the agent and recorded
   in the audit trail. Engine errors can echo fragments of the query or schema; treat them
   as query-derived data, not as a trusted channel.

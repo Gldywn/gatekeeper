@@ -1,7 +1,7 @@
 import type { AutoEvaluation } from "@gatekeeper/shared";
 
 export const AUTO_MODEL = "jev-1.13.0";
-export const AUTO_POLICY = "auto-beta-7";
+export const AUTO_POLICY = "auto-beta-8";
 // No read-only axis: the local analysis decides read-only behavior before Jev is called.
 export const AUTO_THRESHOLDS = {
   personal_disclosure: 0.2,

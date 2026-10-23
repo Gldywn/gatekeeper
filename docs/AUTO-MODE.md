@@ -2,11 +2,13 @@
 
 The [evaluation bench](../packages/server/evals/README.md) holds synthetic reference
 cases and the retained source-focused prompt. It compares recorded thresholds
-without further inference. Policy `auto-beta-7` pairs the dependency-resolving PostgreSQL
+without further inference. Policy `auto-beta-8` pairs the dependency-resolving PostgreSQL
 analysis (`shared-read-2`) with the retained candidate 4 questions and a personal
 disclosure cutoff of 0.20. It permits commercial amounts without personal or company
 identity when every check passes. Its questions were compared live on authored synthetic
-cases only (see "Verification and limits"), which is not a calibration.
+cases only (see "Verification and limits"), which is not a calibration. It differs from
+`auto-beta-7` only in its local name screen: a bare `name` column now reaches Jev (see
+"Bare name columns").
 
 Auto mode is off after loading Gatekeeper. Hover or focus the lightning icon beside the
 Schema access icon, or use the Auto mode switch in Settings. The popover explains
@@ -146,9 +148,6 @@ keys hold instead of being skipped, and `parser-contract.test.ts` pins every nod
 the walker accepts. LIMIT and OFFSET must be nonnegative integers at most 1000000.
 Existing source/output-alias/JSON/literal detections run before sharing. IP addresses
 receive stricter treatment than display annotations.
-`product_name` is allowed past the ambiguous-name check, but this does not approve the
-query. Sensitive sources and nonconstant aliases still block locally, and metadata and
-Jev checks still apply. Other ambiguous `name` fields remain manual.
 There is no automatic fallback for parse failures and no function is implicitly trusted.
 
 ### Deliberate beta limitation: identifier names
@@ -182,6 +181,24 @@ which can miss risk. It is not a guarantee that dates or status fields are anony
 Earlier live results do not validate this expanded input distribution. Quoted camel-case
 columns are now supported through the shared identifier adapter. Other unsupported SQL
 still requires manual review.
+
+### Bare name columns
+
+Since `auto-beta-8`, a column, output alias or JSON key whose only sensitive word is a bare
+`name` no longer holds locally: `name`, `display_name`, `event_name`, `holder_name` or
+`legal_name` stay visible in the SQL sent to Jev, alongside the relation context and the
+typed source dependencies. The same word names a product as often as a person, and only the
+relation tells them apart: `catalog.products.name` should pass, `app.users.name` should be
+held on personal disclosure. Explicit person and
+company names still hold locally through the shared fragments (`first_name`, `last_name`,
+`full_name`, `surname`, `owner_name`, `company_name`, `customer_name`, `client_name`,
+`account_name`), as do every other sensitive fragment, literal and JSON key check. The
+display annotations a reviewer sees never flagged a bare `name` and are unchanged.
+
+This moves a deterministic local decision to Jev, which can miss risk. The 17 authored
+cases in `packages/server/evals/auto-name-cases.json` (seven allow, eight review, two
+local) only prove the local boundary offline: no live observation covers the newly admitted
+inputs yet, and earlier `auto-beta-7` figures say nothing about them.
 
 ### PostgreSQL catalog resolution
 
@@ -310,7 +327,7 @@ and never forwards provider error bodies. The plugin aborts outstanding evaluati
 deactivation and applies its own 15-second deadline. There is no retry or provider fallback.
 
 The native endpoint is `POST https://api.typesafe.ai/v1/systemone`, using Bearer auth and
-`model`, `state`, `questions`. Model `jev-1.13.0` and policy `auto-beta-7` are pinned.
+`model`, `state`, `questions`. Model `jev-1.13.0` and policy `auto-beta-8` are pinned.
 Four focused Noul questions are batched: personal disclosure, organization disclosure,
 access secret disclosure and insufficient context. Noul is a probability of yes, not a
 Choice/Score confidence value. All four conditions must pass:
@@ -394,7 +411,7 @@ clarify the returned type; every local and evaluator check would still apply, an
 Gatekeeper never rewrites the submitted SQL. These are authored, correlated synthetic cases, not a calibration, and the export catalog types have not been
 checked against a real database.
 
-Decisions from `auto-beta-1` through `auto-beta-6` cannot authorize automatic execution,
+Decisions from `auto-beta-1` through `auto-beta-7` cannot authorize automatic execution,
 but remain readable in history and can accompany a human approval. Reload the plugin
 and reconnect the MCP server after updating both components, then activate Auto mode
 again. Mixed policy versions fail to manual review.
@@ -445,8 +462,11 @@ provider submission was attempted. Late evaluator responses cannot approve the r
 provider receipt. The reason is limited to 200 characters, restricted to known
 diagnostics, and stripped of source-name suffixes. Unknown wording becomes
 `Automatic review required`, so this field does not retain literals, rows or provider
-error text. This result-time record does not cover a card lost to a crash, cancellation
-or expiry before the plugin posts its outcome.
+error text. A server test reads the plugin's hold sites and fails when one of their reasons
+is missing from that list. A catalog query the host rejects is recorded as
+`Metadata query failed`; catalog SQL the analysis cannot build, or main catalog rows that
+fail validation, stay `Metadata unavailable`. This result-time record does not cover a card
+lost to a crash, cancellation or expiry before the plugin posts its outcome.
 
 ## Verification and limits
 

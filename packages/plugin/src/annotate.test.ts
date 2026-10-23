@@ -20,11 +20,11 @@ describe("SchemaAnnotator.schemaFor", () => {
     const sql = "SELECT quantity FROM public.products WHERE quantity > 0";
     expect((await annotator.schemaFor(sql))?.analysis).toEqual({
       complete: false,
-      reasons: ["Metadata unavailable"],
+      reasons: ["Metadata query failed"],
     });
     expect(await annotator.inspectRead(sql)).toEqual({
       complete: false,
-      reasons: ["Metadata unavailable"],
+      reasons: ["Metadata query failed"],
     });
   });
   it.each(["mysql", "sqlserver", "sqlite"])(
@@ -58,6 +58,23 @@ describe("SchemaAnnotator.schemaFor", () => {
     expect(await annotator.inspectRead("SELECT quantity FROM public.products")).toEqual({
       complete: false,
       reasons: ["PostgreSQL catalog must come first in the search path"],
+    });
+    expect(getMetadata).toHaveBeenCalledOnce();
+  });
+  it("does not blame the host for catalog SQL it could not build", async () => {
+    const getMetadata = vi.fn(async () => [{ path: '["pg_catalog","public"]' }]);
+    const annotator = new SchemaAnnotator({
+      getColumns: async () => [],
+      getMetadata,
+      dialect: () => "postgresql",
+      defaultSchema: () => "public",
+      generation: () => 0,
+    });
+    // A function name over PostgreSQL's 63-byte limit plans, then fails as a catalog literal.
+    const sql = `SELECT ${"f".repeat(64)}(quantity) FROM public.products`;
+    expect(await annotator.inspectRead(sql)).toEqual({
+      complete: false,
+      reasons: ["Metadata unavailable"],
     });
     expect(getMetadata).toHaveBeenCalledOnce();
   });

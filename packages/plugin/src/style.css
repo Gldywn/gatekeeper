@@ -3049,6 +3049,305 @@ label.qs-row {
   color: var(--danger-ink);
 }
 
+/* ---- Audit Trail export ----
+   One trigger in the list pane's head, then a modal with Settings' frame: the period first, the
+   days for Choose days, the format, the scope as facts, one action. */
+.ex-trigger.detail-close {
+  margin-left: 0;
+}
+.export-card {
+  max-width: min(100%, 520px);
+  margin-top: 6vh;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+.export-card > .panel-head {
+  margin-bottom: 0;
+}
+.export-card .panel-head .detail-close {
+  margin-left: auto;
+}
+.ex-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.ex-sec {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+/* One choice per line, its dates on the right, so the scope reads before anything is picked. */
+.ex-opts {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--edge);
+  border-radius: var(--r);
+  overflow: hidden;
+}
+.ex-opt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 7px 12px;
+  cursor: pointer;
+}
+.ex-opt + .ex-opt {
+  border-top: 1px solid var(--hi);
+}
+.ex-opt:hover {
+  background: color-mix(in oklch, var(--text) 3%, transparent);
+}
+.ex-opt:has(input:checked) {
+  background: var(--hi);
+}
+.ex-name {
+  font-size: 12.5px;
+  font-weight: 560;
+  color: var(--text);
+}
+.ex-when {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* Neutral marks: picking is not a decision, so no colour stands for it. */
+.ex-radio,
+.ex-check {
+  appearance: none;
+  -webkit-appearance: none;
+  margin: 0;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  display: inline-grid;
+  place-items: center;
+  background: var(--sunken);
+  border: 1px solid var(--edge-strong);
+  cursor: pointer;
+  transition:
+    background var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
+}
+.ex-radio {
+  border-radius: 50%;
+}
+.ex-check {
+  border-radius: 3.5px;
+}
+.ex-radio::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ground);
+  opacity: 0;
+}
+.ex-check::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  background: var(--ground);
+  opacity: 0;
+  clip-path: polygon(14% 52%, 0 66%, 38% 100%, 100% 22%, 86% 8%, 38% 72%);
+}
+.ex-radio:checked,
+.ex-check:checked,
+.ex-check:indeterminate {
+  background: var(--muted);
+  border-color: transparent;
+}
+.ex-radio:checked::after,
+.ex-check:checked::after {
+  opacity: 1;
+}
+.ex-check:indeterminate::after {
+  opacity: 1;
+  height: 2px;
+  clip-path: none;
+}
+.ex-radio:focus-visible,
+.ex-check:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+.ex-radio:disabled,
+.ex-check:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+/* Choose days: the trail's day anatomy in a well, the panes' thin thumb colour on its bar. */
+.ex-days {
+  max-height: 252px;
+  overflow-y: auto;
+  border: 1px solid var(--edge);
+  border-radius: var(--r);
+  background: color-mix(in oklch, var(--sunken) 35%, transparent);
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklch, var(--text) 26%, transparent) transparent;
+}
+.ex-days[hidden] {
+  display: none;
+}
+.ex-days-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--hi);
+  font-size: 11.5px;
+}
+.ex-day {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--hi);
+  cursor: pointer;
+}
+.ex-day:first-child {
+  border-top: none;
+}
+.ex-day:hover {
+  background: color-mix(in oklch, var(--text) 3%, transparent);
+}
+.ex-day:has(input:checked) {
+  background: color-mix(in oklch, var(--text) 4%, transparent);
+}
+.ex-day .act-day-tile {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  font-size: 13px;
+}
+/* A month head: its tick and its fold side by side, neither control inside the other. */
+.ex-month {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding-left: 12px;
+  border-top: 1px solid var(--hi);
+}
+.ex-days-bar + .ex-month {
+  border-top: none;
+}
+.ex-month:hover {
+  background: color-mix(in oklch, var(--text) 4%, transparent);
+}
+.ex-month-toggle {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 12px 9px 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.ex-month-toggle:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: -2px;
+  border-radius: 4px;
+}
+.ex-month-toggle .act-day-chev {
+  margin-left: auto;
+  transform: rotate(-90deg);
+}
+.ex-month-toggle[aria-expanded="true"] .act-day-chev {
+  transform: none;
+}
+.ex-month-body {
+  padding-left: 14px;
+}
+.ex-month-body[hidden] {
+  display: none;
+}
+.ex-days .act-tail-row,
+.ex-feed .act-tail-row {
+  padding-inline: 12px;
+}
+.ex-feed:empty {
+  display: none;
+}
+.ex-fmts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+}
+.ex-fmt {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--text);
+  cursor: pointer;
+}
+.ex-ext {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--faint);
+}
+.ex-form .set-note {
+  margin: 2px 0 0;
+}
+/* The scope as facts before the action: numbers in bold, no separators. */
+.ex-status {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+.ex-scope {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.ex-scope b {
+  color: var(--text);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.ex-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: color-mix(in oklch, var(--text) 22%, transparent);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ex-dot {
+    animation: act-skel-breathe 1.6s var(--ease-in-out) infinite;
+  }
+}
+.ex-status .nb-msg,
+.ex-status .cs-unparsed {
+  margin: 0;
+}
+.export-card > .nb-msg {
+  margin-bottom: 0;
+}
+.export-card > .set-note {
+  margin: calc(-1 * var(--s2)) 0 0;
+}
+.export-card .confirm-go {
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---- Untested-database notice ---- */
 .detail-card.db-notice {
   max-width: 460px;
@@ -3139,6 +3438,10 @@ label.qs-row {
   margin-top: 18px;
 }
 .dbn-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
   font-size: 11.5px;
   color: var(--faint);
   cursor: pointer;

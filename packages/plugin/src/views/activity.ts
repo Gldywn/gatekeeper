@@ -1,23 +1,17 @@
-import { log, requestFileSave } from "@beekeeperstudio/plugin";
+import { log } from "@beekeeperstudio/plugin";
 import { dayKey } from "../html";
 import type { BrokerClient } from "../net/broker";
 import {
-  activityCsv,
   activityDayBodyHtml,
   activityDayChunks,
   activityDaysHtml,
-  activityFlagLabels,
-  activityJson,
-  activityMarkdown,
   activityMonthHtml,
   activityShell,
   activityTailError,
   activityTailLoading,
   activityTailMore,
-  entryFlags,
 } from "../render/activity";
 import { emptyListHtml } from "../render/inbox";
-import { textSchema } from "../sql/schema";
 import type { ActivityEntry } from "../types";
 
 // How far below the pane's fold the list end may sit and still start the next load.
@@ -317,58 +311,6 @@ export class ActivityView {
         this.selected(),
         this.dialect(),
       );
-    }
-  }
-
-  // Deliberate human export of one session-day's timeline via the host's save dialog, as
-  // markdown, CSV, or JSON. The SQL is host-side only and no result rows are included; an
-  // approved query contributes just its scalar row count.
-  async exportSession(key: string, format: "md" | "csv" | "json"): Promise<void> {
-    const sep = key.indexOf("|");
-    if (sep === -1) {
-      return;
-    }
-    const day = key.slice(0, sep);
-    const sessionId = key.slice(sep + 1);
-    const entries = this.activity.filter((e) => e.sessionId === sessionId && dayOf(e) === day);
-    if (!entries.length) {
-      return;
-    }
-    // The same flags the row chips show, computed locally before the only await below, so a
-    // connection switch can no longer land between the entries and their labels.
-    const dialect = this.dialect();
-    const flags = new Map<string, string[]>();
-    for (const e of entries) {
-      const found = entryFlags(e, textSchema(e.sql, dialect));
-      const labels = found ? activityFlagLabels(found) : [];
-      if (labels.length) {
-        flags.set(e.id, labels);
-      }
-    }
-    const first = entries[0];
-    const who = (first.project?.trim() || first.harness?.trim() || sessionId).toLowerCase();
-    const slug = who.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "session";
-    const data =
-      format === "csv"
-        ? activityCsv(entries, flags)
-        : format === "json"
-          ? activityJson(entries, flags)
-          : activityMarkdown(day, sessionId, entries, this.connectionName(), flags);
-    const filter =
-      format === "csv"
-        ? { name: "CSV", extensions: ["csv"] }
-        : format === "json"
-          ? { name: "JSON", extensions: ["json"] }
-          : { name: "Markdown", extensions: ["md"] };
-    try {
-      await requestFileSave({
-        data,
-        fileName: `gatekeeper-activity-${day}-${slug}.${format === "md" ? "md" : format}`,
-        encoding: "utf8",
-        filters: [filter],
-      });
-    } catch (err) {
-      log.error(err instanceof Error ? err : String(err));
     }
   }
 }

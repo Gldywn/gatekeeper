@@ -277,6 +277,10 @@ export async function runLive(
     throw new Error(
       "Archived reports are replay-only. Prepare a fresh report for the current analysis",
     );
+  // The local boundary is part of the policy: a report prepared under an older one would pass
+  // its results off as evidence for inputs it never decided.
+  if (report.baselinePolicy !== AUTO_POLICY)
+    throw new Error("Prepared under another policy. Prepare a fresh report for the current one");
   // Check the whole corpus before any sharing, even cases outside this run's split.
   if (report.corpus.some((c) => c.expected === "local" && typeof localInput(c) !== "string"))
     throw new Error("Local boundary regression: no provider calls permitted");

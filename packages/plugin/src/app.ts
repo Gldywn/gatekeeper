@@ -41,6 +41,7 @@ import {
   warnIcon,
   xIcon,
 } from "./icons";
+import { takeOver } from "./modal";
 import { BrokerClient } from "./net/broker";
 import { connectionScopeKey } from "./net/scope";
 import { SingleInstance, type SingleInstanceWire } from "./net/singleinstance";
@@ -53,6 +54,7 @@ import { connChipInner } from "./render/connchip";
 import { modeDropdown, switchInput } from "./render/controls";
 import { type DbCheck, dbLink, dbLinkLabel, dbStatusHtml, nextCheckText } from "./render/dblink";
 import { CANCELLED_NOTE, NOT_DELIVERED_NOTE } from "./render/detail";
+import { exportTriggerHtml } from "./render/export";
 import {
   agentsStripHtml,
   auditItem,
@@ -125,6 +127,7 @@ import {
 } from "./version";
 import { ActivityView } from "./views/activity";
 import { DetailView } from "./views/detail";
+import { ExportDialog } from "./views/export";
 import { DETECTION_TOGGLES, exampleChip, SettingsView } from "./views/settings";
 
 const BROKER_URL = "http://localhost:9999";
@@ -310,7 +313,7 @@ export class Gatekeeper {
     getColumns,
     getMetadata: async (sql) => {
       const result = await runQuery(sql);
-      if (result.error) throw new Error("Metadata unavailable");
+      if (result.error) throw new Error("Metadata query failed");
       return result.results[0]?.rows ?? [];
     },
     // Resolved on call: Beekeeper before 5.5 has no getTableIndexes.
@@ -330,6 +333,7 @@ export class Gatekeeper {
   private prevCardIds = new Set<string>();
   private stripObserver?: ResizeObserver;
   private overlayScrolls: (() => void)[] = [];
+  private noticeRelease: (() => void) | undefined;
   // Agents the roster shows as there, and whether one is active, for the empty right pane.
   private liveAgents = 0;
   private agentsActive = false;
@@ -392,6 +396,7 @@ export class Gatekeeper {
   private readonly detailView: DetailView;
   private readonly activityView: ActivityView;
   private readonly settingsView: SettingsView;
+  private readonly exportDialog: ExportDialog;
   private readonly confirmModal: ConfirmModal;
 
   constructor(root: HTMLElement) {
@@ -412,7 +417,15 @@ export class Gatekeeper {
       // The trail opens on its newest decision, or on what it keeps when it holds none.
       rendered: () => {
         this.openNewestAudit();
+        this.applyAuditActions();
       },
+    });
+    this.exportDialog = new ExportDialog({
+      root,
+      broker: this.broker,
+      scope: () => this.connScopeKey(),
+      connectionName: () => this.connectionName,
+      dialect: () => this.dialect,
     });
     this.settingsView = new SettingsView({
       root,
@@ -434,6 +447,12 @@ export class Gatekeeper {
       }
       if ((e.target as HTMLElement).closest("[data-auto-settings]")) {
         this.openAutoSettings();
+        return;
+      }
+      if ((e.target as HTMLElement).closest("[data-export-open]")) {
+        // A menu left open in the Inbox would sit under the modal, inert but still drawn.
+        this.closeFlyoutMenus();
+        this.exportDialog.open();
         return;
       }
       const toggle = (e.target as HTMLElement).closest<HTMLButtonElement | HTMLInputElement>(
@@ -461,6 +480,9 @@ export class Gatekeeper {
         // The arm/confirm modal sits on top of everything; it swallows the first
         // Escape (cancelling) before any overlay beneath it can close.
         if (this.confirmModal.cancel()) {
+          return;
+        }
+        if (this.exportDialog.close()) {
           return;
         }
         // An open mode or flyout menu swallows the first Escape so it dismisses without
@@ -769,8 +791,15 @@ export class Gatekeeper {
     }
     const overlay = this.root.querySelector<HTMLElement>("#notice");
     if (overlay) {
+      // A modal dialog like Settings and the confirms; with no opener left, the open tab.
+      if (overlay.hidden) {
+        this.noticeRelease = takeOver(overlay, () =>
+          this.root.querySelector<HTMLElement>('[data-tab][aria-selected="true"]'),
+        );
+      }
       overlay.innerHTML = this.dbNoticeHtml(type);
       overlay.hidden = false;
+      overlay.querySelector<HTMLElement>("[data-notice-continue]")?.focus({ preventScroll: true });
     }
   }
 
@@ -780,12 +809,14 @@ export class Gatekeeper {
       overlay.hidden = true;
       overlay.innerHTML = "";
     }
+    this.noticeRelease?.();
+    this.noticeRelease = undefined;
   }
 
   private dbNoticeHtml(type: string): string {
     const name = escapeHtml(dbDisplayName(type));
-    return `<div class="detail-card db-notice">
-        <h2 class="dbn-title"><span class="dbn-ico">${alertTriangleIcon}</span>Not officially tested with ${name} yet</h2>
+    return `<div class="detail-card db-notice" role="dialog" aria-modal="true" aria-labelledby="dbnTitle">
+        <h2 class="dbn-title" id="dbnTitle"><span class="dbn-ico">${alertTriangleIcon}</span>Not officially tested with ${name} yet</h2>
         <p class="dbn-body">SQL execution uses Beekeeper Studio's database APIs. PostgreSQL and MySQL are officially tested so far. Support for ${name} has not been verified end to end.</p>
         <div class="dbn-enc">
           <div class="dbn-h">Help make ${name} official</div>
@@ -795,7 +826,7 @@ export class Gatekeeper {
           </div>
         </div>
         <div class="dbn-actions">
-          <span class="dbn-link" data-notice-hush>Don't show this again</span>
+          <button class="dbn-link" type="button" data-notice-hush>Don't show this again</button>
           <button class="dbn-go" type="button" data-notice-continue>Continue</button>
         </div>
       </div>`;
@@ -1335,12 +1366,14 @@ export class Gatekeeper {
   }
 
   // Every render that replaces the root lets go of what the old shell held: the thumbs observing
-  // its panes, and an open confirm or Settings, whose hold on the page would outlive its nodes.
+  // its panes, and an open confirm, Settings or notice, whose hold would outlive its nodes.
   private releaseShell(): void {
     for (const dispose of this.overlayScrolls) dispose();
     this.overlayScrolls = [];
     this.confirmModal.cancel();
     this.settingsView.close();
+    this.hideDbNotice();
+    this.exportDialog.close();
   }
 
   private renderShell(): void {
@@ -1363,7 +1396,7 @@ export class Gatekeeper {
                 <button class="pane-tab" role="tab" type="button" id="tabQueue" data-tab="queue" aria-selected="true" aria-controls="listQueue">Queue<span class="n" id="queueCount"></span></button>
                 <button class="pane-tab" role="tab" type="button" id="tabAudit" data-tab="audit" aria-selected="false" aria-controls="listAudit" tabindex="-1">${historyIcon}Audit Trail</button>
               </div>
-              <span class="pane-actions" id="auditActions" hidden></span>
+              <span class="pane-actions" id="auditActions" hidden>${exportTriggerHtml()}</span>
             </div>
             <div class="ov-rail" aria-hidden="true"></div><div class="pane-body" id="listQueue" role="tabpanel" aria-labelledby="tabQueue"></div>
             <div class="ov-rail" aria-hidden="true"></div><div class="pane-body" id="listAudit" role="tabpanel" aria-labelledby="tabAudit" hidden></div>
@@ -1387,6 +1420,7 @@ export class Gatekeeper {
           </div>
         </footer>
         <div class="detail settings-overlay" id="settings" hidden></div>
+        <div class="detail export-overlay" id="export" hidden></div>
         <div class="detail confirm-overlay" id="confirm" hidden></div>
         <div class="detail db-notice-overlay" id="notice" hidden></div>
       </div>`;
@@ -1555,14 +1589,7 @@ export class Gatekeeper {
       this.closeFlyoutMenus();
       const fmt = opt.getAttribute("data-flyout-fmt")!;
       const action = opt.getAttribute("data-flyout-action");
-      if (opt.closest("#listAudit")) {
-        if (action === "export") {
-          void this.activityView.exportSession(
-            opt.getAttribute("data-flyout-key")!,
-            fmt as "md" | "csv" | "json",
-          );
-        }
-      } else if (action === "export") {
+      if (action === "export") {
         void this.detailView.exportResult(fmt as "csv" | "json");
       } else {
         void this.detailView.copyResult(fmt as "md");
@@ -1665,6 +1692,7 @@ export class Gatekeeper {
     if (tab === "audit") {
       void this.activityView.open();
     } else {
+      this.exportDialog.close();
       this.activityView.close();
     }
     this.renderSelection(true);
@@ -1678,10 +1706,16 @@ export class Gatekeeper {
     }
     const queue = this.root.querySelector<HTMLElement>("#listQueue");
     const audit = this.root.querySelector<HTMLElement>("#listAudit");
-    const actions = this.root.querySelector<HTMLElement>("#auditActions");
     if (queue) queue.hidden = this.tab !== "queue";
     if (audit) audit.hidden = this.tab !== "audit";
-    if (actions) actions.hidden = this.tab !== "audit";
+    this.applyAuditActions();
+  }
+
+  // The export shows on the Audit Trail tab unless the trail has loaded and holds nothing; while
+  // the first page loads, or after it failed, there may well be something to export.
+  private applyAuditActions(): void {
+    const actions = this.root.querySelector<HTMLElement>("#auditActions");
+    if (actions) actions.hidden = this.tab !== "audit" || this.activityView.isEmpty();
   }
 
   // The Audit Trail opens on the first decision it lists, with no selection of its own yet. It
@@ -1880,6 +1914,7 @@ export class Gatekeeper {
   private resetInbox(): void {
     this.selection.queue = null;
     this.selection.audit = null;
+    this.exportDialog.close();
     this.activityView.reset();
     this.detailView.close();
     this.root.querySelector("#inbox")?.setAttribute("data-show", "list");

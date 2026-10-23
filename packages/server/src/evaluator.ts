@@ -2,7 +2,7 @@ import type { AutoEvaluation, EvaluationInput, KeyStatus } from "@gatekeeper/sha
 import { z } from "zod";
 
 export const AUTO_MODEL = "jev-1.13.0";
-export const AUTO_POLICY = "auto-beta-7";
+export const AUTO_POLICY = "auto-beta-8";
 // No read-only axis: the local analysis decides read-only behavior before Jev is called.
 export const AUTO_THRESHOLDS = {
   personal_disclosure: 0.2,
@@ -26,6 +26,7 @@ export interface NoulQuestion {
 
 // The frozen candidate questions measured live on the synthetic bench, without the read-only
 // question; identical to evals/auto-beta-7-questions.json (checked by the bench tests).
+// auto-beta-8 keeps them and only lets bare `name` columns reach Jev.
 export const evaluationQuestions: Record<string, NoulQuestion> = {
   personal_disclosure: {
     type: "noul",
@@ -239,6 +240,7 @@ const holdReasons = new Set([
   "Automatic LIMIT must be between 1 and 1000",
   "Unsupported SQL representation",
   "Metadata unavailable",
+  "Metadata query failed",
   "Metadata unavailable or relation unresolved",
   "Views, foreign tables, RLS and inherited relations need manual review",
   "Unresolved or unsupported source",
@@ -308,6 +310,7 @@ export const approvalAttribution = z
           "auto-beta-4",
           "auto-beta-5",
           "auto-beta-6",
+          "auto-beta-7",
           AUTO_POLICY,
         ]),
         evaluatedAt: z.number().finite(),

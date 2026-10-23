@@ -137,7 +137,9 @@ cannot reach, shows as unknown.
 The agent-facing technical audit records the lifecycle (decision, timestamps, SQL digest,
 row count) with no raw SQL and no rows. Those events expire after 24 hours. Decided requests
 remain indefinitely in the local store, including SQL, intent, state, timestamps, session
-metadata and Auto mode records. Referenced sessions survive cleanup.
+metadata and Auto mode records; the store itself refuses to delete a request
+(`requests_keep`) once a current server has opened it, so a server from before 0.3.0 cannot
+purge them. Referenced sessions survive cleanup.
 
 Approved result rows and fields are stripped 10 minutes after the decision. The remaining
 result contains `purged: true` and any known `rowCount` (returned rows) and `affectedRows`
