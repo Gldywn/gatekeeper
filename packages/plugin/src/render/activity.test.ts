@@ -3,12 +3,13 @@
 process.env.TZ = "UTC";
 
 import { describe, expect, it, vi } from "vitest";
-import { textSchema } from "../sql/schema";
+import { textSchema } from "../sql/output";
 import type { ActivityEntry } from "../types";
 import {
   activityCsv,
   activityDaysHtml,
   activityEntryHtml,
+  activityFlagLabels,
   activityGroupHtml,
   activityJson,
   activityMarkdownDays,
@@ -353,6 +354,16 @@ describe("audit flags without the database", () => {
     expect(activityEntryHtml({ ...star, sensitivity: recorded }, false, "postgresql")).toContain(
       '<span class="act-flag pii">PII</span>',
     );
+  });
+
+  it("keeps the Value mark a decision recorded before literals stopped being flagged", () => {
+    const legacy = { pii: true, value: true, client: false };
+    const entry = { ...approved, sensitivity: legacy };
+    expect(entryFlags(entry, textSchema(entry.sql, "postgresql"))).toBe(legacy);
+    expect(activityEntryHtml(entry, false, "postgresql")).toContain(
+      '<span class="act-flag val">Value</span>',
+    );
+    expect(activityFlagLabels(legacy)).toEqual(["PII", "sensitive value"]);
   });
 
   it("reads unrecorded entries from the SQL text alone", () => {

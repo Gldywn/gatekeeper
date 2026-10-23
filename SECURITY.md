@@ -276,10 +276,17 @@ itself is in neither the URL nor the prompt.
   connection scoping) does show the raw SQL, because it is the operator's own review view.
   Its Markdown, CSV, and JSON exports carry the SQL with formula-injection and
   trojan-source guards applied, and never include result rows.
-- Its PII, Value and Client flags never query the connected database. The plugin posts them
-  with the decision as three booleans (`policy_json.sensitivity`), never a table, column or
-  value; requests decided before that, or never shown on a card, are
-  flagged from their SQL text alone, which cannot see the columns behind a `SELECT *`.
+- Its PII and Client flags never query the connected database. Flags computed now describe
+  what the statement returns to the agent, never a column it only filters on or a value it
+  carries. The plugin posts them with the decision as three booleans
+  (`policy_json.sensitivity`), never a table, column or value, and records nothing when the
+  output could not be fully traced. The third boolean, Value, is always false since literals
+  stopped being flagged. A stored record is never rewritten: one decided before this change
+  keeps its PII, Client and Value as the earlier rules computed them, filters and literals
+  included. Requests with no stored record, decided before flags were recorded or never shown
+  on a card, are flagged from their SQL text alone with the current rules, which cannot see the
+  columns behind a `SELECT *`. Opening an entry recomputes its legend with the current rules,
+  so it can differ from the marks its row recorded.
 - Opening an approved entry shows its kept rows: the plugin fetches the sealed copy
   (`GET /results/:id`, under the same auth and connection scoping, approved requests only) and
   opens it. The broker cannot read what it serves, and no agent-facing tool reaches it.

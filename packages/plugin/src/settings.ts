@@ -6,7 +6,6 @@ import type { SchemaContext } from "./sql/schema";
 export interface Settings {
   piiFlagging: boolean;
   clientFlagging: boolean;
-  sensitiveValues: boolean;
   // Require a second one-click confirmation before an approved write or destructive
   // statement runs. On by default; a read never prompts.
   confirmWrites: boolean;
@@ -29,7 +28,6 @@ export function defaultSettings(): Settings {
   return {
     piiFlagging: true,
     clientFlagging: true,
-    sensitiveValues: true,
     confirmWrites: true,
     autoDenyHeavy: true,
     schemaAccess: false,
@@ -51,7 +49,6 @@ export function normalizeSettings(raw: unknown): Settings {
   return {
     piiFlagging: asBool(r.piiFlagging, true),
     clientFlagging: asBool(r.clientFlagging, true),
-    sensitiveValues: asBool(r.sensitiveValues, true),
     confirmWrites: asBool(r.confirmWrites, true),
     autoDenyHeavy: asBool(r.autoDenyHeavy, true),
     schemaAccess: asBool(r.schemaAccess, false),
@@ -73,11 +70,9 @@ export function filterSchema(schema: SchemaContext | null, s: Settings): SchemaC
   }
   return {
     tables: schema.tables,
-    star: schema.star,
     pii: s.piiFlagging ? schema.pii : [],
     client: s.clientFlagging ? schema.client : [],
-    literals: s.sensitiveValues ? schema.literals : [],
-    ...(schema.analysis ? { analysis: schema.analysis } : {}),
+    complete: schema.complete,
   };
 }
 

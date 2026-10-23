@@ -12,7 +12,7 @@ import type { HistResult } from "../result";
 import { classifyQuery } from "../sql/classify";
 import { formatSql } from "../sql/format";
 import { highlight } from "../sql/highlight";
-import { textSchema } from "../sql/schema";
+import { textSchema } from "../sql/output";
 import type { HistItem } from "../types";
 
 // The grid's own header, pager and the row-count footer under it, so a grid scrolled into
@@ -250,12 +250,7 @@ export class DetailView {
     }
     const body = this.root.querySelector<HTMLElement>("#detail-sqlbody");
     if (body) {
-      body.innerHTML = highlight(
-        formatSql(item.sql),
-        schema?.pii,
-        schema?.client,
-        schema?.literals,
-      );
+      body.innerHTML = highlight(formatSql(item.sql), schema?.pii, schema?.client);
     }
   }
 

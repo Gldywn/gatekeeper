@@ -360,31 +360,30 @@ body {
   font-size: 12px;
   color: var(--text);
 }
-/* Per-layer "?" help: a small circle that reveals its explanation on hover and
-   keyboard focus. Its aria-label carries the same sentence for screen readers. */
+/* Per-layer help: the same drawn mark as the legend's, centred by its own geometry where a font
+   "?" rode the system font's metrics. Its aria-label carries the sentence for screen readers. */
 .ro-help {
   position: relative;
   display: inline-flex;
-  align-items: center;
-  justify-content: center;
   width: 15px;
   height: 15px;
   flex: none;
   border-radius: 50%;
-  border: 1px solid var(--edge);
   color: var(--faint);
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 15px;
-  text-align: center;
   cursor: help;
   user-select: none;
+}
+.ro-help > svg {
+  width: 15px;
+  height: 15px;
 }
 .ro-help:hover,
 .ro-help:focus-visible {
   color: var(--text);
-  border-color: var(--faint);
-  outline: none;
+}
+.ro-help:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 1px;
 }
 /* Opens to the right of the "?", over its own row: the popover hangs from the header's left
    end, so a tip opening leftwards ran off the window. */
@@ -1276,13 +1275,6 @@ label.qs-row {
 .sql .client-col {
   color: var(--client);
   font-weight: 700;
-}
-/* A sensitive value hardcoded in the query: tint its background so the value itself,
-   not only the column, is impossible to miss. */
-.sql .sensitive-val {
-  background: color-mix(in oklch, var(--danger) 24%, transparent);
-  border-radius: 3px;
-  padding: 0 2px;
 }
 .copy-sql {
   position: absolute;
@@ -2754,10 +2746,6 @@ label.qs-row {
   color: var(--client);
   background: color-mix(in oklch, var(--client) 13%, transparent);
 }
-.set-ex.lit {
-  color: var(--amber);
-  background: color-mix(in oklch, var(--amber) 13%, transparent);
-}
 .set-desc {
   font-size: 11.5px;
   color: var(--muted);
@@ -2920,6 +2908,10 @@ label.qs-row {
 }
 .confirm-mx {
   margin-bottom: var(--s3);
+}
+/* The card's spacing: 16px under the tables, 10px above the SQL the legend explains. */
+.confirm-legend {
+  margin: 4px 0 10px;
 }
 .confirm-text .em-conn {
   font-size: 12px;
@@ -5127,13 +5119,15 @@ p.auto-message[data-tone="busy"] {
   margin: 4px 0 0;
 }
 #detail .cs-matrix:not(:empty),
-#detail .cs-legend:not(:empty),
 #detail .rq-body > .sql,
 #detail .auto-trace {
   margin-top: 14px;
 }
+#detail .cs-legend:not(:empty) {
+  margin-top: 16px;
+}
 #detail .cs-legend:not(:empty) + .sql {
-  margin-top: 6px;
+  margin-top: 10px;
 }
 
 /* The open proposal reads top to bottom with no frame of its own: who asked, the request, the
@@ -5181,13 +5175,15 @@ p.auto-message[data-tone="busy"] {
   margin: 4px 0 0;
 }
 #queue .cs-matrix:not(:empty),
-#queue .cs-legend:not(:empty),
 #queue .card > .sql,
 #queue .sql-ring,
 #queue .card > .cs-unparsed,
 #queue .cs-auto:not(:empty) {
   margin-top: 14px;
   margin-bottom: 0;
+}
+#queue .cs-legend:not(:empty) {
+  margin-top: 16px;
 }
 #queue .cs-auto > .cs-unparsed {
   margin: 0;
@@ -5198,10 +5194,10 @@ p.auto-message[data-tone="busy"] {
 #queue .card-load > .cs-heavy {
   margin: 0;
 }
-/* The legend explains the SQL right under it. */
+/* The legend explains the SQL right under it: closer to it than to the tables above. */
 #queue .cs-legend:not(:empty) + .sql,
 #queue .cs-legend:not(:empty) + .sql-ring {
-  margin-top: 6px;
+  margin-top: 10px;
 }
 /* Tables by role: quiet rules, a check where the statement reads, writes or deletes. */
 .mx {
@@ -5254,14 +5250,19 @@ p.auto-message[data-tone="busy"] {
 .mx td.mk.on.delete {
   color: var(--danger);
 }
-/* Each category as the SQL marks it, with its count. Hover or focus names its objects, hung from
-   the legend's left end so an entry wrapped to the right never pushes them past the pane. */
+/* Each category as the SQL marks it, with its count. Hover or focus names its objects above the
+   entry itself; placeLegendPop slides them left only as far as the pane's edge requires. */
 .cs-legend {
   position: relative;
   display: flex;
   flex-wrap: wrap;
   gap: 6px 16px;
   font-size: 11.5px;
+}
+/* The limit of the trace heads the flags it qualifies. */
+.cs-legend > .cs-unparsed {
+  flex-basis: 100%;
+  margin: 0;
 }
 .lg-slot {
   display: inline-flex;
@@ -5284,8 +5285,8 @@ p.auto-message[data-tone="busy"] {
 }
 .lg-pop {
   position: absolute;
-  bottom: calc(100% + 6px);
-  left: 0;
+  bottom: calc(var(--pop-b, 100%) + 6px);
+  left: var(--pop-x, 0px);
   z-index: 8;
   max-width: min(320px, 100%);
   padding: 6px 10px;
@@ -5330,12 +5331,26 @@ p.auto-message[data-tone="busy"] {
 .lg.client .sw {
   color: var(--client);
 }
-.lg.val .sw {
-  padding: 0 3px;
-  border-radius: 3px;
-  font-weight: 600;
-  color: var(--text);
-  background: color-mix(in oklch, var(--danger) 24%, transparent);
+/* Says the entry opens, quiet until it does. Centred by the line box it sat 0.4px above the
+   cap height's middle and 1.4px above the lowercase's; one pixel down reads centred on both. */
+.lg-hint {
+  position: relative;
+  top: 1px;
+  display: inline-flex;
+  align-self: center;
+  color: var(--faint);
+  transition: color var(--dur) var(--ease);
+}
+.lg-hint svg {
+  display: block;
+  width: 12px;
+  height: 12px;
+}
+.lg.pii:is(:hover, :focus-visible) .lg-hint {
+  color: var(--danger);
+}
+.lg.client:is(:hover, :focus-visible) .lg-hint {
+  color: var(--client);
 }
 .lg .ct {
   color: var(--faint);

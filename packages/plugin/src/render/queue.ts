@@ -4,6 +4,7 @@ import {
   clockIcon,
   copyIcon,
   gaugeIcon,
+  helpCircleIcon,
   messageIcon,
   sendIcon,
   warnIcon,
@@ -159,7 +160,7 @@ export function cardHtml(
       : "";
     bar = blocker + readyActions(card.id, gate, denyDrafts, card.expiresAt);
   }
-  const sql = `<pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(visibleControls(card.sql))}" aria-label="Copy SQL">${copyIcon}</button><code class="sql-body" id="sqlbody-${card.id}">${highlight(formatSql(card.sql), card.schema?.pii, card.schema?.client, card.schema?.literals)}</code></pre>`;
+  const sql = `<pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(visibleControls(card.sql))}" aria-label="Copy SQL">${copyIcon}</button><code class="sql-body" id="sqlbody-${card.id}">${highlight(formatSql(card.sql), card.schema?.pii, card.schema?.client)}</code></pre>`;
   // While Auto mode evaluates, the ring the card frame used to carry runs round the SQL.
   const sqlBlock = evaluating ? `<div class="sql-ring">${sql}</div>` : sql;
   const load = { id: card.id, result: card.loadResult };
@@ -244,27 +245,56 @@ export function accessMatrix(
 type Role = "Read" | "Write" | "Delete";
 const ROLES: Role[] = ["Read", "Write", "Delete"];
 
-// What the SQL marks, explained once just above it: each category written as it is marked in
-// the query, with how many. Nothing when the analysis found nothing to mark.
+export const UNTRACED_NOTE =
+  "Gatekeeper cannot tell every column this statement returns. The flags may be incomplete.";
+
+// What the SQL marks among what it returns, explained once just above it: each category written
+// as it is marked in the query, with how many. Nothing when there is nothing to mark.
 export function sensitiveLegend(schema: SchemaContext | null | undefined, id: string): string {
   if (!schema) {
     return "";
   }
-  const values = schema.literals.map((v) => `'${v}'`);
   const groups: [string, string, string[]][] = [
     ["pii", "Possible PII", schema.pii],
     ["client", "Client data", schema.client],
-    ["val", values.length > 1 ? "Sensitive values" : "Sensitive value", values],
   ];
+  const note = schema.complete
+    ? ""
+    : `<div class="cs-unparsed">${warnIcon}<span>${UNTRACED_NOTE}</span></div>`;
   // Each entry names its objects on hover and keyboard focus, so a reader who cannot tell the
   // colours apart, or a SELECT * whose columns the SQL never spells out, still gets the names.
-  return groups
-    .filter(([, , items]) => items.length > 0)
-    .map(
-      ([k, label, items]) =>
-        `<span class="lg-slot"><button class="lg ${k}" type="button" aria-describedby="lg-${k}-${id}"><span class="sw">${label}</span><span class="ct">${items.length}</span></button><span class="lg-pop" id="lg-${k}-${id}" role="tooltip">${items.map(escapeHtml).join(", ")}</span></span>`,
-    )
-    .join("");
+  return (
+    note +
+    groups
+      .filter(([, , items]) => items.length > 0)
+      .map(
+        ([k, label, items]) =>
+          `<span class="lg-slot"><button class="lg ${k}" type="button" aria-describedby="lg-${k}-${id}"><span class="sw">${label}</span><span class="ct">${items.length}</span><span class="lg-hint">${helpCircleIcon}</span></button><span class="lg-pop" id="lg-${k}-${id}" role="tooltip">${items.map(escapeHtml).join(", ")}</span></span>`,
+      )
+      .join("")
+  );
+}
+
+// Where an entry's names open: from the entry's own left edge, slid left only as far as the
+// legend's width requires. Layout offsets, so a zoomed pane measures the same.
+export function popX(entryLeft: number, legendWidth: number, popWidth: number): number {
+  return Math.max(0, Math.min(entryLeft, legendWidth - popWidth));
+}
+
+// Measured each time the entry opens: the popover's width depends on the names it holds.
+export function placeLegendPop(slot: Element): void {
+  const legend = slot.parentElement;
+  const pop = slot.querySelector<HTMLElement>(".lg-pop");
+  if (!(slot instanceof HTMLElement) || !legend || !pop) {
+    return;
+  }
+  pop.style.removeProperty("--pop-x");
+  pop.style.setProperty(
+    "--pop-x",
+    `${popX(slot.offsetLeft, legend.clientWidth, pop.offsetWidth)}px`,
+  );
+  // A wrapped entry opens above its own row, not above the legend's first one.
+  pop.style.setProperty("--pop-b", `${legend.clientHeight - slot.offsetTop}px`);
 }
 
 // The legend is rebuilt when an analysis lands; a reader on one of its entries stays on the

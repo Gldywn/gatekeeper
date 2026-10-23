@@ -7,21 +7,25 @@ function columns(...names: string[]): Column[] {
 }
 
 describe("SchemaAnnotator.schemaFor", () => {
-  it("exposes incomplete analysis instead of treating failed metadata as clean", async () => {
+  it("leaves the catalog to Auto mode, which reports a failed query as incomplete", async () => {
+    const getMetadata = vi.fn(async () => {
+      throw new Error("private database detail");
+    });
     const annotator = new SchemaAnnotator({
       getColumns: async () => columns("quantity"),
-      getMetadata: async () => {
-        throw new Error("private database detail");
-      },
+      getMetadata,
       dialect: () => "postgresql",
       defaultSchema: () => "public",
       generation: () => 0,
     });
     const sql = "SELECT quantity FROM public.products WHERE quantity > 0";
-    expect((await annotator.schemaFor(sql))?.analysis).toEqual({
-      complete: false,
-      reasons: ["Metadata query failed"],
+    expect(await annotator.schemaFor(sql)).toEqual({
+      tables: ["public.products"],
+      pii: [],
+      client: [],
+      complete: true,
     });
+    expect(getMetadata).not.toHaveBeenCalled();
     expect(await annotator.inspectRead(sql)).toEqual({
       complete: false,
       reasons: ["Metadata query failed"],
@@ -95,7 +99,7 @@ describe("SchemaAnnotator.schemaFor", () => {
     resolve([]);
     expect(await pending).toBeUndefined();
   });
-  it("returns the tables and PII/client/literal annotation for a query", async () => {
+  it("returns the tables and the PII/client names a star returns, not the filter's value", async () => {
     const getColumns = vi.fn(async () => columns("id", "email", "company_name", "status"));
     const annotator = new SchemaAnnotator({
       getColumns,
@@ -110,8 +114,43 @@ describe("SchemaAnnotator.schemaFor", () => {
     expect(schema?.tables).toEqual(["customers"]);
     expect(schema?.pii).toEqual(["email"]);
     expect(schema?.client).toEqual(["company_name"]);
-    expect(schema?.literals).toEqual(["ACME"]);
-    expect(schema?.star).toBe(true);
+    expect(schema?.complete).toBe(true);
+  });
+
+  it("expands a qualified star over its own table only", async () => {
+    const getColumns = vi.fn(async (table: string) =>
+      table === "people" ? columns("id", "email") : columns("id", "company_name"),
+    );
+    const annotator = new SchemaAnnotator({
+      getColumns,
+      dialect: () => "postgresql",
+      defaultSchema: () => "public",
+      generation: () => 0,
+    });
+
+    const schema = await annotator.schemaFor(
+      "SELECT p.* FROM crm.people p JOIN billing.firms f ON f.id = p.firm_id",
+    );
+
+    expect(schema?.pii).toEqual(["email"]);
+    expect(schema?.client).toEqual([]);
+    expect(schema?.complete).toBe(true);
+  });
+
+  it("leaves a star over columns it could not read untraced", async () => {
+    const annotator = new SchemaAnnotator({
+      getColumns: async () => {
+        throw new Error("unknown table");
+      },
+      dialect: () => "postgresql",
+      defaultSchema: () => "public",
+      generation: () => 0,
+    });
+
+    expect(await annotator.schemaFor("SELECT * FROM crm.people")).toMatchObject({
+      pii: [],
+      complete: false,
+    });
   });
 
   it("flags aliased name columns across a cross-schema join", async () => {
@@ -151,11 +190,9 @@ describe("SchemaAnnotator.schemaFor", () => {
     ]);
     expect(schema?.client).toEqual(["customer_name", "company_name"]);
     expect(schema?.pii).toEqual([]);
-    expect(schema?.literals).toEqual([]);
-    expect(schema?.star).toBe(false);
   });
 
-  it("flags the keys read out of a JSON column, and a literal bound to one", async () => {
+  it("flags the key a returned JSON accessor reads, not one the filter only tests", async () => {
     // The stored document is opaque to the schema: only the accessor keys say what
     // the query actually reads out of it.
     const getColumns = vi.fn(async () => columns("id", "profile"));
@@ -172,14 +209,11 @@ describe("SchemaAnnotator.schemaFor", () => {
 
     expect(schema?.tables).toEqual(["crm.people"]);
     expect(schema?.pii).toEqual(["email"]);
-    expect(schema?.client).toEqual(["company_name"]);
-    expect(schema?.literals).toEqual(["ACME"]);
-    expect(schema?.star).toBe(false);
+    expect(schema?.client).toEqual([]);
   });
 
-  it("annotates the value a write assigns to a sensitive column", async () => {
-    // Writes reach the card too (once write mode is armed), and the value they carry
-    // sits in the statement itself, not in a WHERE comparison.
+  it("flags nothing a write without RETURNING only assigns", async () => {
+    // The agent typed the value it writes and gets back only a row count.
     const getColumns = vi.fn(async () => columns("id", "company_name", "status"));
     const annotator = new SchemaAnnotator({
       getColumns,
@@ -193,12 +227,10 @@ describe("SchemaAnnotator.schemaFor", () => {
     );
 
     expect(schema?.tables).toEqual(["billing.firms"]);
-    expect(schema?.client).toEqual(["company_name"]);
-    expect(schema?.literals).toEqual(["ACME"]);
-    expect(schema?.star).toBe(false);
+    expect(schema?.client).toEqual([]);
   });
 
-  it("flags the value of a filter that wraps its sensitive column", async () => {
+  it("flags nothing a filter only tests, however it wraps the column", async () => {
     const getColumns = vi.fn(async () => columns("id", "company_name", "status"));
     const annotator = new SchemaAnnotator({
       getColumns,
@@ -211,8 +243,7 @@ describe("SchemaAnnotator.schemaFor", () => {
       "SELECT id FROM billing.firms WHERE lower(company_name) = 'acme'",
     );
 
-    expect(schema?.client).toEqual(["company_name"]);
-    expect(schema?.literals).toEqual(["acme"]);
+    expect(schema?.client).toEqual([]);
   });
 
   it("flags a sensitive output name a RETURNING clause introduces", async () => {
@@ -233,7 +264,6 @@ describe("SchemaAnnotator.schemaFor", () => {
     expect(schema?.tables).toEqual(["billing.firms"]);
     expect(schema?.pii).toEqual(["contact_email"]);
     expect(schema?.client).toEqual([]);
-    expect(schema?.star).toBe(false);
   });
 
   it("flags a sensitive output name a derived table's column list introduces", async () => {
@@ -252,8 +282,6 @@ describe("SchemaAnnotator.schemaFor", () => {
     expect(schema?.tables).toEqual(["billing.firms"]);
     expect(schema?.client).toEqual(["company_name"]);
     expect(schema?.pii).toEqual([]);
-    // The outer * expands the mocked columns too, so the flag can only come from the alias.
-    expect(schema?.star).toBe(true);
   });
 
   it("returns null when the SQL will not parse", async () => {

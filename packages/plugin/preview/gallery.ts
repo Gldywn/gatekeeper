@@ -25,6 +25,7 @@ const DIALECT = "postgresql";
 const SQL_MORE = {
   purge: `DELETE FROM sessions WHERE last_seen < now() - interval '90 days'`,
   contact: `SELECT c.email, c.company_name FROM customers c WHERE c.email = 'jane@example.com'`,
+  points: "SELECT c.email, f.* FROM customers c CROSS JOIN LATERAL contact_points(c.id) f",
   two: "SELECT count(*) FROM invoices; SELECT count(*) FROM payments",
   vacuum: "VACUUM FULL invoices",
   big: "SELECT * FROM events WHERE created_at >= '2026-10-01'",
@@ -370,8 +371,7 @@ const schemaDup: SchemaContext = {
   tables: ["invoices", "customers"],
   pii: ["customer_email"],
   client: [],
-  literals: [],
-  star: false,
+  complete: true,
 };
 
 function card(over: Partial<Card>): Card {
@@ -387,7 +387,7 @@ function card(over: Partial<Card>): Card {
     sessionId: s.sessionId,
     session: s,
     state: "ready",
-    schema: { tables: ["invoices", "payments"], pii: [], client: [], literals: [], star: false },
+    schema: { tables: ["invoices", "payments"], pii: [], client: [], complete: true },
     ...over,
   };
 }
@@ -420,17 +420,19 @@ const CARDS: CardState[] = [
     }),
   },
   {
-    label: "Read · client data and a sensitive value",
+    label: "Read · possible PII and client data, a filter on PII",
     card: card({
       sql: SQL_MORE.contact,
       intent: "look up one customer's contact",
-      schema: {
-        tables: ["customers"],
-        pii: ["email"],
-        client: ["company_name"],
-        literals: ["jane@example.com"],
-        star: false,
-      },
+      schema: { tables: ["customers"], pii: ["email"], client: ["company_name"], complete: true },
+    }),
+  },
+  {
+    label: "Read · output partly untraced",
+    card: card({
+      sql: SQL_MORE.points,
+      intent: "list every contact point per customer",
+      schema: { tables: ["customers"], pii: ["email"], client: [], complete: false },
     }),
   },
   { label: "Read · lease running low", card: card({ expiresAt: Date.now() + 28_000 }) },

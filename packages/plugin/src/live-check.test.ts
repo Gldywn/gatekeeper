@@ -409,7 +409,11 @@ describe("status popovers", () => {
     app.root = { querySelector: () => null };
     const link = { removeAttribute: vi.fn() };
     const inner = { closest: () => glyph };
-    const glyph = { contains: (node: unknown) => node === inner, closest: () => link };
+    const glyph = {
+      contains: (node: unknown) => node === inner,
+      closest: () => link,
+      matches: () => false,
+    };
     app.enterPopGlyph({ target: inner, relatedTarget: inner });
     expect(link.removeAttribute).not.toHaveBeenCalled();
     app.enterPopGlyph({ target: inner, relatedTarget: null });

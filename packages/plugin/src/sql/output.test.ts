@@ -1,0 +1,889 @@
+import { describe, expect, it } from "vitest";
+import { analyzeOutput, textSchema } from "./output";
+import { recordedSensitivity } from "./schema";
+
+type Live = Record<string, string[]> | null;
+// [dialect, sql, live columns by table (null: SQL text alone), names, complete]; null names: no parse.
+type Case = [string, string, Live, string[] | null, boolean | null];
+
+const lookup = (live: Live) =>
+  live
+    ? (ref: { schema: string | null; name: string }) =>
+        live[ref.schema ? `${ref.schema}.${ref.name}` : ref.name] ?? null
+    : undefined;
+
+function check(cases: Case[]): void {
+  for (const [dialect, sql, live, names, complete] of cases) {
+    const out = analyzeOutput(sql, dialect, lookup(live));
+    if (names === null) {
+      expect(out, sql).toBeNull();
+      continue;
+    }
+    expect(out, sql).not.toBeNull();
+    expect(new Set(out?.names), sql).toEqual(new Set(names));
+    expect(out?.complete, sql).toBe(complete);
+  }
+}
+
+describe("analyzeOutput", () => {
+  it("leaves out what the statement only filters, joins, groups or orders on", () => {
+    check([
+      [
+        "postgresql",
+        "SELECT id FROM crm.people WHERE profile->>'email' IS NOT NULL",
+        null,
+        ["id"],
+        true,
+      ],
+      ["postgresql", "SELECT id FROM t WHERE note = 'john@doe.com'", null, ["id"], true],
+      [
+        "postgresql",
+        "SELECT p.id FROM people p JOIN contacts c ON c.email = p.email",
+        null,
+        ["id"],
+        true,
+      ],
+      ["postgresql", "SELECT p.id FROM people p JOIN contacts c USING (email)", null, ["id"], true],
+      ["postgresql", "SELECT id FROM people GROUP BY id, email", null, ["id"], true],
+      [
+        "postgresql",
+        "SELECT id FROM people GROUP BY id HAVING min(email) IS NOT NULL",
+        null,
+        ["id"],
+        true,
+      ],
+      ["postgresql", "SELECT id FROM people ORDER BY email LIMIT 5 OFFSET 2", null, ["id"], true],
+    ]);
+  });
+
+  it("returns no content for a predicate, a count, a window's partition or an aggregate's filter", () => {
+    check([
+      [
+        "postgresql",
+        "SELECT row_number() OVER (PARTITION BY email ORDER BY phone) AS n FROM people",
+        null,
+        ["n"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT min(id) FILTER (WHERE email IS NOT NULL) AS v FROM people",
+        null,
+        ["id", "v"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT string_agg(id::text, ',' ORDER BY email) AS ids FROM people",
+        null,
+        ["id", "ids"],
+        true,
+      ],
+      ["postgresql", "SELECT email IS NOT NULL FROM people", null, [], true],
+      [
+        "postgresql",
+        "SELECT email = 'known@example.invalid' AS matches FROM people",
+        null,
+        ["matches"],
+        true,
+      ],
+      // The label the agent sees still reads as personal, so it is a name like any other.
+      [
+        "postgresql",
+        "SELECT email IS NOT NULL AS has_email FROM people",
+        null,
+        ["has_email"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT NOT (email = 'known@example.invalid') AS ok FROM people",
+        null,
+        ["ok"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT email IS NOT NULL AND phone IS NOT NULL AS ok FROM people",
+        null,
+        ["ok"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT EXISTS (SELECT email FROM people WHERE phone IS NOT NULL) AS present",
+        null,
+        ["present"],
+        true,
+      ],
+      ["postgresql", "SELECT count(email) AS n FROM people", null, ["n"], true],
+      ["postgresql", "SELECT count(DISTINCT email) AS n FROM people", null, ["n"], true],
+      [
+        "postgresql",
+        "SELECT CASE WHEN email IS NOT NULL THEN id ELSE 0 END AS v FROM people",
+        null,
+        ["id", "v"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT CASE email WHEN 'known@example.invalid' THEN id ELSE 0 END AS v FROM people",
+        null,
+        ["id", "v"],
+        true,
+      ],
+    ]);
+  });
+
+  it("returns nothing for a write without RETURNING or a SELECT that stores its rows", () => {
+    check([
+      [
+        "postgresql",
+        "UPDATE people SET email = 'known@example.invalid' WHERE phone = '123'",
+        null,
+        [],
+        true,
+      ],
+      ["postgresql", "INSERT INTO people (email) VALUES ('known@example.invalid')", null, [], true],
+      ["postgresql", "INSERT INTO archive (email) SELECT email FROM people", null, [], true],
+      ["mysql", "REPLACE INTO people (email) VALUES ('known@example.invalid')", null, [], true],
+      ["postgresql", "SELECT email INTO staging_copy FROM people", null, [], true],
+      ["mysql", "SELECT email INTO OUTFILE '/tmp/people.csv' FROM people", null, [], true],
+      ["mysql", "SELECT email INTO @handle FROM people", null, [], true],
+      ["postgresql", "CREATE TABLE staging_copy AS SELECT email FROM people", null, [], true],
+      ["postgresql", "CREATE VIEW people_v AS SELECT email FROM people", null, [], true],
+      ["postgresql", "DELETE FROM people WHERE email IS NOT NULL", null, [], true],
+    ]);
+  });
+
+  it("traces what the projection returns to its labels and sources", () => {
+    check([
+      ["postgresql", "SELECT id, email FROM people", null, ["id", "email"], true],
+      ["postgresql", "SELECT p.email, p.phone FROM crm.people p", null, ["email", "phone"], true],
+      [
+        "postgresql",
+        "SELECT email AS contact, name AS company_name FROM people",
+        null,
+        ["email", "contact", "name", "company_name"],
+        true,
+      ],
+      [
+        "postgresql",
+        'SELECT p."Email" AS "Contact Email" FROM crm.people p',
+        null,
+        ["Email", "Contact Email"],
+        true,
+      ],
+      ["postgresql", "SELECT min(email) AS v FROM people", null, ["email", "v"], true],
+      ["postgresql", "SELECT lower(email) AS v FROM people", null, ["email", "v"], true],
+      [
+        "postgresql",
+        "SELECT email || ':' || phone AS v FROM people",
+        null,
+        ["email", "phone", "v"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT CASE WHEN id > 0 THEN email ELSE phone END AS v FROM people",
+        null,
+        ["email", "phone", "v"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT (SELECT c.email FROM contacts c WHERE c.phone = p.phone) AS contact FROM people p",
+        null,
+        ["email", "contact"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY salary) AS v FROM people",
+        null,
+        ["salary", "v"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY salary) AS v FROM people",
+        null,
+        ["salary", "v"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT lag(email) OVER (ORDER BY id) AS previous FROM people",
+        null,
+        ["email", "previous"],
+        true,
+      ],
+      ["postgresql", "SELECT 'known@example.invalid' AS email FROM people", null, ["email"], true],
+    ]);
+  });
+
+  it("reads the keys a returned JSON accessor takes, in every dialect", () => {
+    check([
+      [
+        "postgresql",
+        "SELECT profile->>'email' AS e FROM people",
+        null,
+        ["profile", "email", "e"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT profile#>>'{contact,email}' AS e FROM people",
+        null,
+        ["profile", "contact", "email", "e"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT jsonb_extract_path_text(profile, 'email') AS e FROM people",
+        null,
+        ["profile", "email", "e"],
+        true,
+      ],
+      [
+        "mysql",
+        "SELECT profile->>'$.email' AS e FROM people",
+        null,
+        ["profile", "email", "e"],
+        true,
+      ],
+      [
+        "mysql",
+        "SELECT JSON_EXTRACT(profile, '$.email') AS e FROM people",
+        null,
+        ["profile", "email", "e"],
+        true,
+      ],
+      [
+        "sqlite",
+        "SELECT json_extract(profile, '$.email') AS e FROM people",
+        null,
+        ["profile", "email", "e"],
+        true,
+      ],
+      [
+        "transactsql",
+        "SELECT JSON_VALUE(profile, '$.email') AS e FROM people",
+        null,
+        ["profile", "email", "e"],
+        true,
+      ],
+      [
+        "bigquery",
+        "SELECT JSON_EXTRACT_SCALAR(profile, '$.email') AS e FROM people",
+        null,
+        ["profile", "email", "e"],
+        true,
+      ],
+      ["postgresql", "SELECT profile['email'] FROM crm.people", null, ["profile", "email"], true],
+      [
+        "snowflake",
+        "SELECT profile['contact']['email'] FROM crm.people",
+        null,
+        ["profile", "contact", "email"],
+        true,
+      ],
+    ]);
+  });
+
+  it("returns every value a JSON constructor or modifier puts in the document it builds", () => {
+    check([
+      [
+        "postgresql",
+        "SELECT json_build_object('contact', email) AS payload FROM people",
+        null,
+        ["email", "payload"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT json_build_array(id, email) AS payload FROM people",
+        null,
+        ["id", "email", "payload"],
+        true,
+      ],
+      [
+        "mysql",
+        "SELECT JSON_OBJECT('contact', email) AS payload FROM people",
+        null,
+        ["email", "payload"],
+        true,
+      ],
+      [
+        "sqlite",
+        "SELECT json_object('contact', email) AS payload FROM people",
+        null,
+        ["email", "payload"],
+        true,
+      ],
+      [
+        "transactsql",
+        "SELECT JSON_MODIFY(profile, '$.contact', email) AS payload FROM people",
+        null,
+        ["profile", "contact", "email", "payload"],
+        true,
+      ],
+      [
+        "mysql",
+        "SELECT JSON_SET(profile, '$.contact', email) AS payload FROM people",
+        null,
+        ["profile", "contact", "email", "payload"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT string_agg(id::text, email) AS v FROM people",
+        null,
+        ["id", "email", "v"],
+        true,
+      ],
+    ]);
+  });
+
+  it("keeps quoted PostgreSQL names that differ only by case apart", () => {
+    check([
+      [
+        "postgresql",
+        'SELECT s."value" FROM (SELECT id AS "Value", email AS "value" FROM people) s',
+        null,
+        ["email", "value"],
+        true,
+      ],
+      [
+        "postgresql",
+        'SELECT "x".v FROM (SELECT id AS v FROM a) AS "X" CROSS JOIN (SELECT email AS v FROM b) AS "x"',
+        null,
+        ["email", "v"],
+        true,
+      ],
+      [
+        "postgresql",
+        'WITH "X" AS (SELECT email AS v FROM people), "x" AS (SELECT id AS v FROM people) SELECT v FROM "X"',
+        null,
+        ["email", "v"],
+        true,
+      ],
+    ]);
+  });
+
+  it("follows the name PostgreSQL gives an unaliased expression, else stays unknown", () => {
+    check([
+      [
+        "postgresql",
+        "SELECT s.lower FROM (SELECT lower(email) FROM people) s",
+        null,
+        ["email", "lower"],
+        true,
+      ],
+      [
+        "postgresql",
+        "WITH x AS (SELECT min(email) FROM people) SELECT min FROM x",
+        null,
+        ["email", "min"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT s.email FROM (SELECT email::text FROM people) s",
+        null,
+        ["email"],
+        true,
+      ],
+      // A quoted function keeps its case in the name PostgreSQL gives its result.
+      [
+        "postgresql",
+        'SELECT s."F" FROM (SELECT public."F"(email) FROM people) s',
+        null,
+        ["email", "F"],
+        true,
+      ],
+      // MySQL names it by its text: the reference cannot be matched, so it stays unknown.
+      ["mysql", "SELECT s.v FROM (SELECT lower(email) FROM people) s", null, ["email", "v"], false],
+    ]);
+  });
+
+  it("treats a quoted or qualified function named not as a function, and an interval amount as a value", () => {
+    check([
+      ["postgresql", 'SELECT public."not"(email) AS v FROM people', null, ["email", "v"], true],
+      ["mysql", "SELECT now() + INTERVAL salary DAY AS v FROM people", null, ["salary", "v"], true],
+      [
+        "bigquery",
+        "SELECT DATE_ADD(CURRENT_DATE(), INTERVAL salary DAY) AS v FROM people",
+        null,
+        ["salary", "v"],
+        true,
+      ],
+    ]);
+  });
+
+  it("keeps every source when quoted names differ only by case outside PostgreSQL", () => {
+    check([
+      [
+        "snowflake",
+        'SELECT s."value" FROM (SELECT id AS "Value", email AS "value" FROM people) s',
+        null,
+        ["id", "email", "value", "Value"],
+        true,
+      ],
+    ]);
+  });
+
+  it("returns a USING key once, holding either side's value", () => {
+    check([
+      [
+        "postgresql",
+        "SELECT k FROM (SELECT code AS k FROM firms) a FULL JOIN (SELECT email AS k FROM people) b USING (k)",
+        null,
+        ["code", "email", "k"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT s.c FROM (SELECT * FROM a FULL JOIN b USING (id)) s(a, b, c)",
+        { a: ["id", "code"], b: ["id", "email"] },
+        ["email", "c"],
+        true,
+      ],
+      // The keys come first, in USING order, then each side's remaining columns.
+      [
+        "postgresql",
+        "SELECT s.b FROM (SELECT * FROM a JOIN b USING (id)) s(a, b, c)",
+        { a: ["email", "id"], b: ["id", "code"] },
+        ["email", "b"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT s.c FROM (SELECT * FROM a JOIN b USING (id, code)) s(a, b, c, d)",
+        { a: ["email", "code", "id"], b: ["id", "code", "phone"] },
+        ["email", "c"],
+        true,
+      ],
+      // node-sql-parser reads NATURAL as an alias, so the merged columns stay unknown.
+      [
+        "postgresql",
+        "SELECT s.c FROM (SELECT * FROM a NATURAL JOIN b) s(a, b, c)",
+        { a: ["id", "code"], b: ["id", "email"] },
+        ["c", "id"],
+        false,
+      ],
+      [
+        "postgresql",
+        "SELECT a.* FROM a NATURAL JOIN b",
+        { a: ["id", "email"], b: ["id"] },
+        ["id", "email"],
+        true,
+      ],
+      // JOIN binds tighter than the comma: a stays first, then the joined b and c.
+      [
+        "postgresql",
+        "SELECT s.a FROM (SELECT * FROM a, b JOIN c USING (id)) s(a, b, c, d)",
+        { a: ["email"], b: ["code", "id"], c: ["id", "phone"] },
+        ["email", "a"],
+        true,
+      ],
+    ]);
+  });
+
+  it("expands a star or a whole row only over the relations it names, with live columns", () => {
+    check([
+      ["postgresql", "SELECT * FROM people", { people: ["id", "email"] }, ["id", "email"], true],
+      [
+        "postgresql",
+        "SELECT * FROM people p JOIN firms f ON p.company_id = f.id",
+        { people: ["id", "email", "company_id"], firms: ["id", "company_name"] },
+        ["id", "email", "company_id", "company_name"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT p.* FROM people p JOIN firms f ON p.company_id = f.id",
+        { people: ["id", "email"], firms: ["id", "company_name"] },
+        ["id", "email"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT p.* FROM crm.people p",
+        { "crm.people": ["id", "email"] },
+        ["id", "email"],
+        true,
+      ],
+      ["postgresql", "SELECT * FROM people", null, [], false],
+      ["postgresql", "SELECT count(*) AS n FROM people", { people: ["id", "email"] }, ["n"], true],
+      [
+        "bigquery",
+        "SELECT * EXCEPT (email) FROM people",
+        { people: ["id", "email", "phone"] },
+        ["id", "phone"],
+        true,
+      ],
+      [
+        "snowflake",
+        "SELECT * EXCLUDE (email) FROM people",
+        { people: ["id", "email", "phone"] },
+        ["id", "phone"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT p FROM people p",
+        { people: ["id", "email"] },
+        ["p", "id", "email"],
+        true,
+      ],
+      ["postgresql", "SELECT p FROM people p", null, ["p"], false],
+      ["postgresql", "SELECT p FROM people p", { people: ["id", "p", "email"] }, ["p"], true],
+      [
+        "postgresql",
+        "SELECT row_to_json(p) AS record FROM people p",
+        { people: ["id", "email"] },
+        ["id", "email", "record"],
+        true,
+      ],
+    ]);
+  });
+
+  it("follows CTEs, derived tables and positional renames to what the outer projection keeps", () => {
+    check([
+      [
+        "postgresql",
+        "WITH x AS (SELECT email, id FROM people) SELECT id FROM x",
+        null,
+        ["id"],
+        true,
+      ],
+      [
+        "postgresql",
+        "WITH x AS (SELECT email AS e, id FROM people) SELECT e FROM x",
+        null,
+        ["email", "e"],
+        true,
+      ],
+      [
+        "postgresql",
+        "WITH unused AS (SELECT email FROM people) SELECT id FROM firms",
+        null,
+        ["id"],
+        true,
+      ],
+      [
+        "postgresql",
+        "WITH x(company_name) AS (SELECT name FROM firms) SELECT company_name FROM x",
+        null,
+        ["name", "company_name"],
+        true,
+      ],
+      [
+        "postgresql",
+        "WITH x(a, b) AS (SELECT id, email FROM people) SELECT b FROM x",
+        null,
+        ["email", "b"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT f.b FROM (SELECT id, email FROM people) f(a, b)",
+        null,
+        ["email", "b"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT f.b FROM (SELECT * FROM people) f(a, b)",
+        { people: ["id", "email"] },
+        ["email", "b"],
+        true,
+      ],
+      ["postgresql", "SELECT f.b FROM (SELECT * FROM people) f(a, b)", null, ["b"], false],
+      [
+        "postgresql",
+        "SELECT f.a FROM (SELECT * FROM people) f(a, b)",
+        { people: ["email", "id"] },
+        ["email", "a"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT s.e FROM (SELECT email AS e, phone FROM people) s",
+        null,
+        ["email", "e"],
+        true,
+      ],
+      // A column passed through a star keeps its own name, so naming it is enough.
+      ["postgresql", "SELECT s.id FROM (SELECT * FROM people) s", null, ["id"], true],
+      [
+        "postgresql",
+        "SELECT (SELECT p.email) AS contact FROM people p",
+        null,
+        ["email", "contact"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT (SELECT p.id FROM firms p) AS v FROM people p",
+        null,
+        ["id", "v"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT l.e FROM people p CROSS JOIN LATERAL (SELECT p.email AS e) l",
+        null,
+        ["email", "e"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT a FROM people p(a, b)",
+        { people: ["email", "id"] },
+        ["email", "a"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT v.x FROM people p CROSS JOIN LATERAL (VALUES (p.email)) v(x)",
+        null,
+        ["email", "x"],
+        true,
+      ],
+      [
+        "postgresql",
+        "WITH x AS (UPDATE billing.firms SET company_name = 'ACME' RETURNING id) SELECT * FROM x",
+        null,
+        ["id"],
+        true,
+      ],
+    ]);
+  });
+
+  it("labels a set operation by its first branch and drops what EXCEPT removes", () => {
+    check([
+      [
+        "postgresql",
+        "SELECT email AS contact FROM a UNION SELECT phone AS ignored_alias FROM b",
+        null,
+        ["email", "phone", "contact"],
+        true,
+      ],
+      ["postgresql", "SELECT id FROM a UNION ALL SELECT id AS email FROM b", null, ["id"], true],
+      [
+        "postgresql",
+        "SELECT email AS contact FROM a INTERSECT SELECT phone AS ignored_alias FROM b",
+        null,
+        ["email", "phone", "contact"],
+        true,
+      ],
+      ["postgresql", "SELECT id FROM a EXCEPT SELECT email FROM b", null, ["id"], true],
+      [
+        "postgresql",
+        "SELECT id FROM a EXCEPT SELECT email FROM b UNION SELECT phone AS ignored_alias FROM c",
+        null,
+        ["id", "phone"],
+        true,
+      ],
+      // INTERSECT binds tighter, so c belongs to the subtracted operand.
+      [
+        "postgresql",
+        "SELECT id FROM a EXCEPT SELECT phone FROM b INTERSECT SELECT email FROM c",
+        null,
+        ["id"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT s.contact FROM (SELECT email AS contact, id FROM a UNION ALL SELECT phone AS other, id FROM b) s",
+        null,
+        ["email", "phone", "contact"],
+        true,
+      ],
+    ]);
+  });
+
+  it("returns what RETURNING names, over the write's target", () => {
+    check([
+      ["postgresql", "INSERT INTO people (id) VALUES (1) RETURNING email", null, ["email"], true],
+      [
+        "postgresql",
+        "UPDATE people SET phone = '123' WHERE id = 1 RETURNING email AS contact",
+        null,
+        ["email", "contact"],
+        true,
+      ],
+      [
+        "postgresql",
+        "DELETE FROM people WHERE phone IS NOT NULL RETURNING email",
+        null,
+        ["email"],
+        true,
+      ],
+      [
+        "postgresql",
+        "UPDATE people SET phone = '123' RETURNING *",
+        { people: ["id", "email", "phone"] },
+        ["id", "email", "phone"],
+        true,
+      ],
+      [
+        "postgresql",
+        "UPDATE people p SET id = 1 FROM firms f WHERE p.company_id = f.id RETURNING p.*",
+        { people: ["id", "email"], firms: ["id", "company_name"] },
+        ["id", "email"],
+        true,
+      ],
+      ["sqlite", "UPDATE people SET id = 1 RETURNING email", null, ["email"], true],
+      [
+        "sqlite",
+        "DELETE FROM people WHERE id = 1 RETURNING *",
+        { people: ["id", "email"] },
+        ["id", "email"],
+        true,
+      ],
+      ["mariadb", "INSERT INTO people (id) VALUES (1) RETURNING email", null, ["email"], true],
+      ["mariadb", "DELETE FROM people WHERE id = 1 RETURNING email", null, ["email"], true],
+    ]);
+  });
+
+  it("marks output it cannot trace as incomplete, keeping what it could", () => {
+    check([
+      [
+        "postgresql",
+        "WITH RECURSIVE x AS (SELECT 1 UNION ALL SELECT 1 FROM x) SELECT * FROM x",
+        null,
+        [],
+        false,
+      ],
+      ["mysql", "SHOW COLUMNS FROM people", null, [], false],
+      ["mysql", "DESCRIBE people", null, [], false],
+      ["postgresql", "CALL p(1)", null, [], false],
+      // node-sql-parser reads T-SQL's OUTPUT clause as a run of variable assignments.
+      [
+        "transactsql",
+        "INSERT INTO t (email) OUTPUT inserted.email VALUES ('known@example.invalid')",
+        null,
+        [],
+        false,
+      ],
+      ["postgresql", "SELECT * FROM generate_series(1, 3)", null, ["generate_series"], false],
+      [
+        "postgresql",
+        "SELECT p.email, f.* FROM people p, my_func() f",
+        { people: ["id", "email"] },
+        ["email", "f"],
+        false,
+      ],
+      // Naming a field does not say what a function body put in it.
+      ["postgresql", "SELECT f.v FROM my_func() f", null, ["v"], false],
+      ["postgresql", "SELECT f.id FROM my_func() f", null, ["id"], false],
+      ["postgresql", "SELECT 1 FROM (SELECT * FROM people) x", null, [], true],
+      [
+        "postgresql",
+        "SELECT s.known_slot FROM (SELECT 1 AS known_slot, p.* FROM people p) s",
+        null,
+        ["known_slot"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT id FROM people UNION ALL (SELECT email FROM contacts ORDER BY email LIMIT 1)",
+        null,
+        ["id"],
+        false,
+      ],
+    ]);
+  });
+
+  it("recursion moves values between columns, so a recursive CTE's output stays unknown", () => {
+    check([
+      [
+        "postgresql",
+        "WITH RECURSIVE x(a, b, n) AS (SELECT email, id, 1 FROM people UNION ALL SELECT b, a, n + 1 FROM x WHERE n < 2) SELECT b FROM x",
+        null,
+        ["b", "id", "a"],
+        false,
+      ],
+    ]);
+  });
+
+  it("returns null when the statement does not parse", () => {
+    check([
+      [
+        "postgresql",
+        "MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN UPDATE SET a = 1 RETURNING email",
+        null,
+        null,
+        null,
+      ],
+      ["postgresql", "EXPLAIN SELECT email FROM t", null, null, null],
+      ["postgresql", "VALUES ('a@b.co')", null, null, null],
+      [
+        "postgresql",
+        "WITH d AS (DELETE FROM t RETURNING email) SELECT count(*) FROM d",
+        null,
+        null,
+        null,
+      ],
+    ]);
+  });
+});
+
+describe("textSchema", () => {
+  it("flags only what the statement returns, never what it filters on or the values it carries", () => {
+    expect(
+      textSchema("SELECT id FROM crm.people WHERE profile->>'email' IS NOT NULL", "postgresql"),
+    ).toEqual({
+      tables: ["crm.people"],
+      pii: [],
+      client: [],
+      complete: true,
+    });
+    expect(textSchema("SELECT id FROM t WHERE note = 'john@doe.com'", "postgresql")).toMatchObject({
+      pii: [],
+      client: [],
+    });
+    expect(
+      textSchema(
+        "SELECT c.email, c.company_name FROM crm.customers c WHERE c.phone = '+33 6 12 34 56 78'",
+        "postgresql",
+      ),
+    ).toMatchObject({ pii: ["email"], client: ["company_name"], complete: true });
+  });
+
+  it("cannot see the columns behind a star from the text alone", () => {
+    expect(textSchema("SELECT * FROM crm.people", "postgresql")).toMatchObject({
+      pii: [],
+      complete: false,
+    });
+  });
+
+  it("is null when the statement does not parse", () => {
+    expect(textSchema("this is not a query at all !@#", "postgresql")).toBeNull();
+  });
+});
+
+describe("recordedSensitivity", () => {
+  it("records the flags of a fully traced output, never a sensitive value", () => {
+    expect(recordedSensitivity({ tables: [], pii: ["email"], client: [], complete: true })).toEqual(
+      {
+        pii: true,
+        value: false,
+        client: false,
+      },
+    );
+  });
+
+  it("records nothing for an output it could not fully trace, rather than an all-clear", () => {
+    expect(
+      recordedSensitivity({ tables: [], pii: [], client: [], complete: false }),
+    ).toBeUndefined();
+    expect(
+      recordedSensitivity(textSchema("SELECT * FROM crm.people", "postgresql")),
+    ).toBeUndefined();
+    expect(recordedSensitivity(null)).toBeUndefined();
+  });
+});

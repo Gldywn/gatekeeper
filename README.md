@@ -232,10 +232,13 @@ shown as explicit markers, so what you read is what runs. A write or destructive
 carries a coloured class badge and names its verb and its target tables, and a statement the
 parser cannot read says so in standing text and is treated as destructive.
 
-Under the SQL, an annotation names the tables the query reads and the sensitive columns among
-them: person data in one accent, company and commercial data in another, a sensitive value
-flagged even when it only appears in a `WHERE` filter, and a `SELECT *` expanded against the
-real columns so nothing hides behind the star. A dot on the header's database icon shows
+Above the SQL, an annotation names the tables the query reads and flags what will leave the
+database for the agent: the person data in one accent and the company and commercial data in
+another among the columns, aliases and JSON keys the statement returns, with a `SELECT *`
+expanded against the real columns so nothing hides behind the star. A column used only to
+filter, join or sort is not flagged, nor is a value the agent wrote into its own query: it
+already knows it. When part of what a statement returns cannot be traced (a table function, a
+recursive query, `SHOW`), the card says so instead of showing an all-clear. A dot on the header's database icon shows
 whether the last connection check passed, and the icon opens the details: that check, then
 the three read-only layers (the armed mode, the Beekeeper connection and the database
 endpoint). The robot beside it shows the link to the Gatekeeper server that your agents send
