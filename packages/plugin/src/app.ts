@@ -71,7 +71,6 @@ import {
   heavyBadge,
   LONG_RUN_MS,
   loadInner,
-  paintFocused,
   paintLegend,
   readyActions,
 } from "./render/queue";
@@ -2865,15 +2864,27 @@ export class Gatekeeper {
     const load = { id: card.id, result: card.loadResult };
     const badge = this.root.querySelector<HTMLElement>(`#hb-${id}`);
     if (badge) badge.innerHTML = heavyBadge(card.loadResult);
-    let matrix = "";
     const host = this.root.querySelector<HTMLElement>(`#cm-${id}`);
+    const cause = this.root.querySelector<HTMLElement>(`#cl-${id}`);
+    const regions = [host, cause].filter((n): n is HTMLElement => n !== null);
+    const active = regions[0]?.ownerDocument?.activeElement ?? null;
+    const inside = Boolean(active && regions.some((r) => r.contains(active)));
+    const ref = inside ? active?.getAttribute("data-ref") : null;
+    let matrix = "";
     if (host) {
       const cls = classifyQuery(card.sql, this.dialect).class;
       matrix = accessMatrix(card.sql, this.dialect, cls, card.schema, load);
-      paintFocused(host, matrix);
+      host.innerHTML = matrix;
     }
-    const cause = this.root.querySelector<HTMLElement>(`#cl-${id}`);
-    if (cause) paintFocused(cause, loadInner(load, matrix !== ""));
+    if (cause) cause.innerHTML = loadInner(load, matrix !== "");
+    if (!inside) return;
+    // A reader on a table's estimate stays on that table, in the matrix or in the reason; when
+    // the estimate is gone (a recheck), the focus goes to the open row, as for any rebuild.
+    const next = ref
+      ? regions.map((r) => r.querySelector<HTMLElement>(`[data-ref="${CSS.escape(ref)}"]`)).find(Boolean)
+      : null;
+    if (next) next.focus();
+    else this.focusSelectedRow();
   }
 
   // Bound to the session, lease and SQL the load check started under, both before the

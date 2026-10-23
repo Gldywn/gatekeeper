@@ -371,15 +371,6 @@ export function loadInner(view: LoadView, matrix: boolean): string {
   return `<div class="cs-heavy" role="status">${gaugeIcon}<div class="cs-heavy-text">${lines}</div></div>`;
 }
 
-// The badge, the matrix and the reason are repainted when a check settles or restarts; a reader
-// focused on a table's estimate stays on the same table.
-export function paintFocused(host: HTMLElement, html: string): void {
-  const active = host.ownerDocument?.activeElement;
-  const ref = active && host.contains(active) ? active.getAttribute("data-ref") : null;
-  host.innerHTML = html;
-  if (ref) host.querySelector<HTMLElement>(`[data-ref="${CSS.escape(ref)}"]`)?.focus();
-}
-
 export function busyLabel(state: CardState): string {
   if (state === "approving") return "Approving";
   if (state === "executing") return "Running";

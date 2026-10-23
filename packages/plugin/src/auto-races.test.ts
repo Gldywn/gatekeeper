@@ -1785,3 +1785,63 @@ describe("heavy query repaint", () => {
     expect(nodes["#cl-req"].innerHTML).toBe("");
   });
 });
+
+describe("heavy query focus", () => {
+  // Regions that hold one focusable entry per painted data-ref and record what took focus.
+  function regions() {
+    const focused: string[] = [];
+    const doc = { activeElement: null as unknown };
+    type Entry = { getAttribute: (a: string) => string; focus: () => void };
+    const region = () => {
+      let entries: Entry[] = [];
+      return {
+        ownerDocument: doc,
+        get entries() {
+          return entries;
+        },
+        set innerHTML(html: string) {
+          entries = [...html.matchAll(/data-ref="([^"]+)"/g)].map(([, ref]) => ({
+            getAttribute: () => ref,
+            focus: () => focused.push(ref),
+          }));
+        },
+        contains: (n: unknown) => entries.includes(n as Entry),
+        querySelector: (s: string) =>
+          entries.find((e) => s === `[data-ref="${e.getAttribute("data-ref")}"]`) ?? null,
+      };
+    };
+    return { doc, focused, matrix: region(), cause: region() };
+  }
+
+  it("keeps the focus on the table across a repaint, else hands it to the open row", () => {
+    const { app, card } = harness();
+    vi.stubGlobal("CSS", { escape: (s: string) => s });
+    const r = regions();
+    app.root = {
+      querySelector: (sel: string) => ({ "#cm-req": r.matrix, "#cl-req": r.cause })[sel] ?? null,
+    };
+    app.focusSelectedRow = vi.fn();
+    card.sql = "SELECT * FROM public.big";
+    card.schema = { tables: ["public.big"], pii: [], client: [], literals: [], star: true };
+    card.loadResult = {
+      lines: [["Reads every row of ", { code: "big", ref: "public.big" }]],
+      notes: [],
+      estimates: [{ table: "big", ref: "public.big", rows: 2_000_000 }],
+      heavy: true,
+      complete: true,
+    };
+    app.renderCardLoad(card);
+    r.doc.activeElement = r.matrix.entries[0];
+    app.renderCardLoad(card);
+    expect(r.focused).toEqual(["public.big"]);
+    // A recheck drops the estimate: the focus goes to the open row, never to the page.
+    r.doc.activeElement = r.matrix.entries[0];
+    card.loadResult = { ...card.loadResult, lines: [], estimates: [], heavy: false };
+    app.renderCardLoad(card);
+    expect(app.focusSelectedRow).toHaveBeenCalledOnce();
+    // Focus elsewhere is left alone.
+    r.doc.activeElement = {};
+    app.renderCardLoad(card);
+    expect(app.focusSelectedRow).toHaveBeenCalledOnce();
+  });
+});

@@ -1,14 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { LoadResult } from "../sql/load";
 import type { Card, RunState, SessionMeta } from "../types";
-import {
-  accessMatrix,
-  cardHtml,
-  loadInner,
-  paintFocused,
-  paintLegend,
-  runningActions,
-} from "./queue";
+import { accessMatrix, cardHtml, loadInner, paintLegend, runningActions } from "./queue";
 
 // Byte-for-byte lock on the extracted builders: one ready read-only card whose
 // schema annotation and open deny draft exercise every conditional branch.
@@ -593,35 +586,5 @@ describe("the heavy query on the pending card", () => {
       false,
     );
     expect(alias).not.toContain("est-tip");
-  });
-});
-
-describe("paintFocused", () => {
-  it("keeps the focus on the same table's estimate across a repaint", () => {
-    vi.stubGlobal("CSS", { escape: (s: string) => s });
-    const focused: string[] = [];
-    type Entry = { getAttribute: () => string; focus: () => void };
-    let entries: Entry[] = [];
-    const doc = { activeElement: null as unknown };
-    const host = {
-      ownerDocument: doc,
-      set innerHTML(html: string) {
-        entries = [...html.matchAll(/data-ref="([^"]+)"/g)].map(([, ref]) => ({
-          getAttribute: () => ref,
-          focus: () => focused.push(ref),
-        }));
-      },
-      contains: (n: unknown) => entries.includes(n as Entry),
-      querySelector: (s: string) =>
-        entries.find((e) => s === `[data-ref="${e.getAttribute()}"]`) ?? null,
-    } as unknown as HTMLElement;
-    const html = '<span data-ref="public.a"></span><span data-ref="public.b"></span>';
-    paintFocused(host, html);
-    doc.activeElement = entries[1];
-    paintFocused(host, html);
-    expect(focused).toEqual(["public.b"]);
-    doc.activeElement = {};
-    paintFocused(host, html);
-    expect(focused).toEqual(["public.b"]);
   });
 });

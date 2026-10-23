@@ -764,7 +764,16 @@ export function checkLoad(plan: LoadPlan, facts: Facts | Pending): LoadResult {
     named.push(rel);
     return rel.table;
   };
-  const table = (rel: Rel): Segment => ({ code: name(rel), ref: refOf(rel) });
+  // Two relations the SQL writes alike (a quoted name with a dot, a qualified name) share a
+  // reference: neither carries one, so no estimate is ever tied to the other table.
+  const owners = new Map<string, Set<string>>();
+  for (const rel of plan.relations)
+    owners.set(refOf(rel), (owners.get(refOf(rel)) ?? new Set()).add(relKey(rel)));
+  const ownRef = (rel: Rel) => ((owners.get(refOf(rel))?.size ?? 0) > 1 ? undefined : refOf(rel));
+  const table = (rel: Rel): Segment => {
+    const ref = ownRef(rel);
+    return ref ? { code: name(rel), ref } : { code: name(rel) };
+  };
   let indexesMissing = false;
   let unbound = false;
 
@@ -924,9 +933,10 @@ export function checkLoad(plan: LoadPlan, facts: Facts | Pending): LoadResult {
   const shown = new Set<string>();
   for (const rel of named) {
     const rows = factsOf(rel)?.rows;
-    if (rows == null || shown.has(relKey(rel))) continue;
+    const ref = ownRef(rel);
+    if (rows == null || !ref || shown.has(relKey(rel))) continue;
     shown.add(relKey(rel));
-    estimates.push({ table: rel.table, ref: refOf(rel), rows });
+    estimates.push({ table: rel.table, ref, rows });
   }
   const lines = [...rowsChanged, ...scans, ...joins, ...locks];
   const statsSkipped = sizeAware && plan.relations.length > 0 && typeof facts === "string";

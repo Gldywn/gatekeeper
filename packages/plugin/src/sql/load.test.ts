@@ -842,3 +842,29 @@ describe("index-served reads", () => {
     expect(r.complete).toBe(false);
   });
 });
+
+describe("estimates tied to one relation", () => {
+  it("ties no estimate to a reference two relations share, even when only one has a size", () => {
+    const f = facts({ "a.b": { rows: 41_000_000 } });
+    const r = check('SELECT * FROM a.b UNION ALL SELECT * FROM "a.b"', f);
+    expect(r.lines).toContain("Reads every row of `b` without a `WHERE` clause");
+    expect(r.estimates).toEqual([]);
+    const plan = planLoad('SELECT * FROM a.b UNION ALL SELECT * FROM "a.b"', "postgresql");
+    const raw = checkLoad(plan, f);
+    expect(raw.lines.flat().some((s) => typeof s !== "string" && s.ref)).toBe(false);
+  });
+
+  it("tags a table it names with its reference, and a keyword as a keyword", () => {
+    const r = checkLoad(
+      planLoad("SELECT * FROM public.big", "postgresql"),
+      facts({ "public.big": { rows: 41_000_000 } }),
+    );
+    expect(r.lines[0]).toEqual([
+      "Reads every row of ",
+      { code: "big", ref: "public.big" },
+      " without a ",
+      { code: "WHERE", kw: true },
+      " clause",
+    ]);
+  });
+});
