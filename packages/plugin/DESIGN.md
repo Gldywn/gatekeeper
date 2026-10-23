@@ -169,8 +169,8 @@ first line, the tables, what the SQL marks, the SQL, then the decision.
 - **Heavy query**: the load check is a second assessment, never the operation's class. Its badge
   follows Write or Destructive on the intent line (alone on a read), solid amber with its ink
   and a gauge where the class badges are tinted, so it leads the line without reading as a
-  class. Its reason sits just above the SQL, before the legend, on a neutral surface (the badge
-  carries the amber): one sentence, or one point per finding when there are several. There,
+  class. Its reason sits just above the SQL, before the legend, on a faint warm surface drawn
+  from the badge's amber: one sentence, or one point per finding when there are several. There,
   tables and columns stand out on the faint ground of tool names, unlike plain `code.name`. A
   table's estimated rows open on hover or focus of its name in the matrix, or in the reason when
   the card has no matrix. What the check could not establish is not shown: no estimate, no claim.

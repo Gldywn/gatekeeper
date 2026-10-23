@@ -1402,16 +1402,16 @@ label.qs-row {
   width: 11px;
   height: 11px;
 }
-/* Why it is heavy, right above the SQL, on a neutral surface: the badge already carries the
-   amber. Several findings are separate points. */
+/* Why it is heavy, right above the SQL, on a faint warm surface drawn from the badge's amber:
+   part of the same alert without colouring the card. Several findings are separate points. */
 .card-load:empty {
   display: none;
 }
 .cs-heavy {
   padding: 8px 11px;
-  border: 1px solid var(--edge-strong);
+  border: 1px solid color-mix(in oklch, var(--amber) 14%, var(--edge));
   border-radius: 6px;
-  background: color-mix(in oklch, var(--text) 5%, transparent);
+  background: color-mix(in oklch, var(--amber) 3%, transparent);
   font-size: 12px;
   line-height: 1.5;
   color: var(--text);
