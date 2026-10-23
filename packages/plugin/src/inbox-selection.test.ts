@@ -41,7 +41,10 @@ function harness() {
     connectionName: "test",
     tab: "queue",
     selection: { queue: null, audit: null },
-    root: { querySelector: () => null },
+    dialect: "postgresql",
+    autoEnabled: false,
+    autoDeferred: new Set(),
+    root: { querySelector: () => null, querySelectorAll: () => [] },
     settingsStore: { get: () => ({ recentlyResolved: 20, resultCacheMb: 4 }) },
     confirmModal: { dismissFor: vi.fn() },
     renderQueueList: vi.fn(),
@@ -121,6 +124,118 @@ describe("Inbox selection", () => {
     app.finish("b", "expired", "expired");
     expect(app.selection.queue).toEqual({ kind: "card", id: "a" });
     expect(app.renderSelection).not.toHaveBeenCalled();
+  });
+});
+
+describe("after a human decision", () => {
+  function queue(...ids: string[]) {
+    const app = harness();
+    app.cards = ids.map(card);
+    return app;
+  }
+  const decide = (app: ReturnType<typeof harness>, id: string, source = "human") => {
+    app.selection.queue = { kind: "card", id };
+    app.cards.find((c: Card) => c.id === id).approval = { source };
+  };
+
+  it("opens the next request waiting below, as a click on it would", () => {
+    const app = queue("a", "b", "c");
+    decide(app, "b");
+    app.finish("b", "approved", "1 row returned");
+    expect(app.selection.queue).toEqual({ kind: "card", id: "c" });
+    expect(app.history[0]).toMatchObject({ id: "b", status: "approved" });
+    expect(app.renderSelection).toHaveBeenCalledWith(true);
+  });
+
+  it("passes over a request whose proposal or lease has run out", () => {
+    const app = queue("a", "b", "c", "d");
+    app.cards[1].expiresAt = Date.now() - 1;
+    app.cards[2].leaseExpiresAt = Date.now() - 1;
+    decide(app, "a");
+    app.finish("a", "approved", "1 row returned");
+    expect(app.selection.queue).toEqual({ kind: "card", id: "d" });
+  });
+
+  it("goes back to the top from the last row", () => {
+    const app = queue("a", "b", "c");
+    decide(app, "c");
+    app.finish("c", "approved", "1 row returned");
+    expect(app.selection.queue).toEqual({ kind: "card", id: "a" });
+  });
+
+  it("moves on after a decline too", () => {
+    const app = queue("a", "b");
+    app.selection.queue = { kind: "card", id: "a" };
+    app.finish("a", "rejected", "declined");
+    expect(app.selection.queue).toEqual({ kind: "card", id: "b" });
+  });
+
+  it("keeps the outcome open when nothing else waits for a human", () => {
+    const app = queue("a", "b");
+    app.cards[1].state = "executing";
+    decide(app, "a");
+    app.finish("a", "approved", "1 row returned");
+    expect(app.selection.queue).toMatchObject({ kind: "hist", id: "a" });
+  });
+
+  it("stays on the outcome of an Auto mode approval, a failure or an expiry", () => {
+    for (const [status, source] of [
+      ["approved", "automatic"],
+      ["failed", "human"],
+      ["expired", "human"],
+    ] as const) {
+      const app = queue("a", "b");
+      decide(app, "a", source);
+      app.finish("a", status, status);
+      expect(app.selection.queue).toMatchObject({ kind: "hist", id: "a" });
+    }
+  });
+
+  it("skips what Auto mode is evaluating or will evaluate, and stops on what it held", () => {
+    const app = queue("a", "b", "c", "d");
+    Object.assign(app, { autoEnabled: true, autoGeneration: 1, autoCard: app.cards[1] });
+    app.cards[1].autoAttempt = 1;
+    app.cards[3].autoAttempt = 1;
+    decide(app, "a");
+    app.finish("a", "approved", "1 row returned");
+    expect(app.selection.queue).toEqual({ kind: "card", id: "d" });
+  });
+
+  it("stops on a card whose evaluation timed out, before its calls settle", () => {
+    const app = queue("a", "b");
+    const abort = new AbortController();
+    Object.assign(app, { autoEnabled: true, autoGeneration: 1, autoCard: app.cards[1] });
+    app.autoAbort = abort;
+    app.cards[1].autoAttempt = 1;
+    abort.abort();
+    decide(app, "a");
+    app.finish("a", "approved", "1 row returned");
+    expect(app.selection.queue).toEqual({ kind: "card", id: "b" });
+  });
+
+  it("includes a write and a request already waiting when Auto mode was switched on", () => {
+    const app = queue("a", "b", "c");
+    Object.assign(app, { autoEnabled: true, autoGeneration: 1, autoDeferred: new Set(["c"]) });
+    app.cards[1].sql = "DELETE FROM t";
+    decide(app, "a");
+    app.finish("a", "approved", "1 row returned");
+    expect(app.selection.queue).toEqual({ kind: "card", id: "b" });
+    decide(app, "b");
+    app.finish("b", "rejected", "declined");
+    expect(app.selection.queue).toEqual({ kind: "card", id: "c" });
+  });
+
+  it("leaves a selection the human changed meanwhile, or another tab, alone", () => {
+    const moved = queue("a", "b", "c");
+    decide(moved, "a");
+    moved.selection.queue = { kind: "card", id: "c" };
+    moved.finish("a", "approved", "1 row returned");
+    expect(moved.selection.queue).toEqual({ kind: "card", id: "c" });
+    const audit = queue("a", "b");
+    decide(audit, "a");
+    audit.tab = "audit";
+    audit.finish("a", "approved", "1 row returned");
+    expect(audit.selection.queue).toMatchObject({ kind: "hist", id: "a" });
   });
 });
 

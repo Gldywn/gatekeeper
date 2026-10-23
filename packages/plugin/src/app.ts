@@ -327,8 +327,9 @@ export class Gatekeeper {
   private liveAgents = 0;
   private agentsActive = false;
   // The Inbox: which list the left pane shows, and what each list has open on the right. Each
-  // list keeps its own selection, so coming back to a tab finds what was open there. Nothing
-  // is ever selected for the human: a new or next proposal never lands under the pointer.
+  // list keeps its own selection, so coming back to a tab finds what was open there. Only the
+  // human's own decision moves it, to the next request waiting for them: a new proposal or a
+  // live update never lands under the pointer.
   private tab: InboxTab = "queue";
   private readonly selection: Record<InboxTab, Selection | null> = { queue: null, audit: null };
   private polling = false;
@@ -2376,16 +2377,36 @@ export class Gatekeeper {
     this.renderQueue();
   }
 
+  // A ready read this activation has not tried yet: Auto mode evaluates it once the evaluator
+  // and the run budget free up, however long that takes.
+  private autoWillTake(card: Card): boolean {
+    return (
+      card.state === "ready" &&
+      card.autoAttempt !== this.autoGeneration &&
+      !card.authorityLost &&
+      !this.autoDeferred.has(card.id) &&
+      classifyQuery(card.sql, this.dialect).class === "read"
+    );
+  }
+
+  // Ready, still within the deadlines approve() enforces, and Auto mode is neither evaluating
+  // it nor going to: only a human can decide it. A timed-out evaluation hands its card back at
+  // once, before its awaited calls ever settle.
+  private waitsForHuman(card: Card): boolean {
+    const evaluating = card === this.autoCard && !this.autoAbort?.signal.aborted;
+    const now = Date.now();
+    return (
+      card.state === "ready" &&
+      !card.authorityLost &&
+      card.expiresAt > now &&
+      card.leaseExpiresAt > now &&
+      !(this.autoEnabled && (evaluating || this.autoWillTake(card)))
+    );
+  }
+
   private async evaluateNext(): Promise<void> {
     if (!this.autoEnabled || this.autoBusy || this.autoRuns >= AUTO_RUNS_MAX) return;
-    const card = this.cards.find(
-      (c) =>
-        c.state === "ready" &&
-        c.autoAttempt !== this.autoGeneration &&
-        !c.authorityLost &&
-        !this.autoDeferred.has(c.id) &&
-        classifyQuery(c.sql, this.dialect).class === "read",
-    );
+    const card = this.cards.find((c) => this.autoWillTake(c));
     if (!card) return;
     const generation = this.autoGeneration;
     const conn = this.connGeneration;
@@ -3448,6 +3469,14 @@ export class Gatekeeper {
     }
   }
 
+  // The first request below this one in the list that waits for a human, else from the top.
+  private nextWaiting(card: Card): Card | undefined {
+    const i = this.cards.indexOf(card);
+    return [...this.cards.slice(i + 1), ...this.cards.slice(0, i)].find((c) =>
+      this.waitsForHuman(c),
+    );
+  }
+
   private finish(
     id: string,
     status: "approved" | "rejected" | "failed" | "expired",
@@ -3492,6 +3521,14 @@ export class Gatekeeper {
       // An open card stays open as its outcome: same request, now decided. The selection holds
       // the item itself, so it outlives the Recently resolved cap while another tab shows.
       const open = this.selection.queue?.kind === "card" && this.selection.queue.id === id;
+      // A human decision moves on to the next request waiting for one, as a click on it would,
+      // so the queue reads one request after the other. A failure stays open to be seen.
+      const next =
+        open &&
+        this.tab === "queue" &&
+        (status === "rejected" || (status === "approved" && card.approval?.source === "human"))
+          ? this.nextWaiting(card)
+          : undefined;
       if (open) this.selection.queue = { kind: "hist", id, item };
       this.history.unshift(item);
       if (this.history.length > this.settingsStore.get().recentlyResolved) {
@@ -3500,8 +3537,17 @@ export class Gatekeeper {
       this.enforceHistoryBudget();
       // Dropped once its outcome row exists, so the rebuild hands a focused row to that row.
       this.drop(id);
-      // The Audit Trail's open entry, if that tab shows, keeps its grid's sort and page.
-      if (open && this.tab === "queue") this.renderSelection(true);
+      if (next) {
+        const inInbox = Boolean(
+          this.root.querySelector("#inbox")?.contains(document.activeElement),
+        );
+        this.select({ kind: "card", id: next.id });
+        // A click focuses the row it opens; the keyboard lands there too, not on the outcome.
+        if (inInbox) this.focusSelectedRow();
+      } else if (open && this.tab === "queue") {
+        // The Audit Trail's open entry, if that tab shows, keeps its grid's sort and page.
+        this.renderSelection(true);
+      }
     };
     if (el && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       el.classList.add("leaving");
