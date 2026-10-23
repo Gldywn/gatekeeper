@@ -2881,7 +2881,9 @@ export class Gatekeeper {
     // A reader on a table's estimate stays on that table, in the matrix or in the reason; when
     // the estimate is gone (a recheck), the focus goes to the open row, as for any rebuild.
     const next = ref
-      ? regions.map((r) => r.querySelector<HTMLElement>(`[data-ref="${CSS.escape(ref)}"]`)).find(Boolean)
+      ? regions
+          .map((r) => r.querySelector<HTMLElement>(`[data-ref="${CSS.escape(ref)}"]`))
+          .find(Boolean)
       : null;
     if (next) next.focus();
     else this.focusSelectedRow();
