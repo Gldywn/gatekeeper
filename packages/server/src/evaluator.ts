@@ -261,6 +261,7 @@ const holdReasons = new Set([
   "Heavy query",
   // Reachable from the plugin's PostgreSQL analysis; fixed text, never a source name.
   "String escape semantics require manual review",
+  // Sent only by plugins older than the native PostgreSQL parser, which may still be paired.
   "Mixed set operation precedence needs manual review",
   "Unresolved JSON path",
   "Named windows need manual review",
