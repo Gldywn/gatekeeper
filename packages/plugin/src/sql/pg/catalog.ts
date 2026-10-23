@@ -1,4 +1,17 @@
-import { identifierLiteral, validIdentifier } from "./syntax";
+export function validIdentifier(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    !value.includes("\0") &&
+    new TextEncoder().encode(value).length <= 63
+  );
+}
+
+// Explicit E strings escape both delimiters and backslashes independently of session settings.
+export function identifierLiteral(value: string): string {
+  if (!validIdentifier(value)) throw new Error("Invalid relation");
+  return `E'${value.replaceAll("\\", "\\\\").replaceAll("'", "''")}'`;
+}
 
 /** Anything the analysis cannot prove. The message is a user-visible hold reason. */
 export class Hold extends Error {}

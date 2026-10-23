@@ -106,7 +106,8 @@ const legacyInput = evaluationInput.extend({
     )
     .max(64),
 });
-export const ANALYSIS = "shared-read-2";
+// shared-read-3: Jev's SQL is rendered from PostgreSQL's own parse tree, no longer by node-sql-parser.
+export const ANALYSIS = "shared-read-3";
 const resultSchema = z
   .object({
     id: identifier,
@@ -129,7 +130,7 @@ export const reportSchema = z
     createdAt: z.string().datetime(),
     model: z.literal(AUTO_MODEL),
     baselinePolicy: z.string().min(1),
-    analysis: z.enum(["shared-read-1", ANALYSIS]).optional(),
+    analysis: z.enum(["shared-read-1", "shared-read-2", ANALYSIS]).optional(),
     mode: z.enum(["dry", "live"]),
     split: z.enum(["development", "validation"]),
     corpus: corpusSchema,

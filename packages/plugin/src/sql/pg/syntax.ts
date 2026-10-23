@@ -1,3 +1,5 @@
+import { validIdentifier } from "./catalog";
+
 // Built-in types only, each mapped to a CAST target the parser keeps intact (INT8 would
 // parse as INT(8)). timetz has no such target and stays unparsed, so it holds.
 const TYPED_LITERAL_TARGET: Record<string, string> = {
@@ -139,19 +141,4 @@ function restoreNames<T>(value: T, names: Map<string, string>): T {
       Object.entries(value).map(([k, v]) => [k, restoreNames(v, names)]),
     ) as T;
   return value;
-}
-
-export function validIdentifier(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    value.length > 0 &&
-    !value.includes("\0") &&
-    new TextEncoder().encode(value).length <= 63
-  );
-}
-
-// Explicit E strings escape both delimiters and backslashes independently of session settings.
-export function identifierLiteral(value: string): string {
-  if (!validIdentifier(value)) throw new Error("Invalid relation");
-  return `E'${value.replaceAll("\\", "\\\\").replaceAll("'", "''")}'`;
 }

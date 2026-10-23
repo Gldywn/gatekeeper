@@ -355,7 +355,8 @@ and 7 local, across both splits. One live `auto-beta-5` run over both splits is 
 exported investigations: 15 allow (one per distinct exported query, with fictitious
 identifiers, company and provider names and catalog types inferred rather than read from
 the real database), 6 local negatives and 2 review negatives covering the new set
-operation, nested IN and JSON path shapes. Its corpus digest changed once, when public
+operation, nested IN and JSON path shapes. Since `shared-read-3` the mixed INTERSECT and
+UNION negative is an allow case: PostgreSQL's own tree keeps the precedence the old parser lost. Its corpus digest changed once, when public
 vendor names were restored (`c23af997…` to `6b50b18d…`), so export results before and after
 that point mix a naming change with any prompt change. Candidate prompts were run live on it
 and on the full corpus; none is in production. Saved reports and candidate question files
@@ -363,9 +364,11 @@ are under `.orch/auto-evals` and are never overwritten. Replaying a report score
 against the labels saved in that report, so figures across relabels must be re-scored
 against the current labels.
 
-Archived reports without the `shared-read-2` marker replay with an explicit note that they
-are not evidence for the current analysis or policy, and `runLive` refuses them. A report
-marked `shared-read-2` must carry dependency usage on every input.
+Archived reports without the current `shared-read-3` marker replay with an explicit note that
+they are not evidence for the current analysis or policy, and `runLive` refuses them. A report
+marked `shared-read-3` must carry dependency usage on every input. `shared-read-3` renders the
+evaluator's SQL from PostgreSQL's own parse tree instead of node-sql-parser's; the dependencies
+of every eligible case are unchanged, only the text's formatting differs.
 
 ### Bare name columns, auto-beta-8
 

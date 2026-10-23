@@ -19,6 +19,7 @@ import {
   evaluationQuestions,
 } from "../src/evaluator.js";
 import {
+  ANALYSIS,
   type Case,
   corpusSchema,
   digest,
@@ -584,7 +585,7 @@ describe("archived reports", () => {
       ),
     ).rejects.toThrow("replay-only");
     const mixed = JSON.parse(JSON.stringify(archived));
-    mixed.analysis = "shared-read-2";
+    mixed.analysis = ANALYSIS;
     expect(() => validateReport(mixed)).toThrow("dependency usage");
   });
 });
@@ -615,7 +616,7 @@ describe("auto-beta-5 broad shapes (prepared, never sent to TypeSafe here)", () 
     let sent = 0;
     for (const split of ["development", "validation"] as const) {
       const report = prepare(broadCases, questions, split);
-      expect(report.analysis).toBe("shared-read-2");
+      expect(report.analysis).toBe(ANALYSIS);
       await runLive(report, "synthetic-key", new AbortController().signal, async () => {});
       sent += report.results.filter((r) => r.probabilities).length;
     }

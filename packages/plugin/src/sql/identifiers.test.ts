@@ -3,7 +3,7 @@ import { classifyQuery } from "./classify";
 import { prepareSql } from "./identifiers";
 import { analyzeSql, analyzeTableOps, sensitiveLiterals } from "./inspect";
 import { parser } from "./nsp/parser";
-import { identifierLiteral, validIdentifier } from "./pg/syntax";
+import { identifierLiteral, validIdentifier } from "./pg/catalog";
 import { planRead } from "./read-analysis";
 
 describe("PostgreSQL identifier parser contract", () => {

@@ -61,7 +61,7 @@ describe("SchemaAnnotator.schemaFor", () => {
     });
     expect(getMetadata).toHaveBeenCalledOnce();
   });
-  it("does not blame the host for catalog SQL it could not build", async () => {
+  it("looks up an overlong name truncated as PostgreSQL truncates it", async () => {
     const getMetadata = vi.fn(async () => [{ path: '["pg_catalog","public"]' }]);
     const annotator = new SchemaAnnotator({
       getColumns: async () => [],
@@ -70,13 +70,12 @@ describe("SchemaAnnotator.schemaFor", () => {
       defaultSchema: () => "public",
       generation: () => 0,
     });
-    // A function name over PostgreSQL's 63-byte limit plans, then fails as a catalog literal.
+    // PostgreSQL's scanner cuts a name at 63 bytes, so the catalog query asks for the function
+    // the server would call, never a name it cannot quote.
     const sql = `SELECT ${"f".repeat(64)}(quantity) FROM public.products`;
-    expect(await annotator.inspectRead(sql)).toEqual({
-      complete: false,
-      reasons: ["Metadata unavailable"],
-    });
-    expect(getMetadata).toHaveBeenCalledOnce();
+    await annotator.inspectRead(sql);
+    expect(getMetadata).toHaveBeenCalledTimes(2);
+    expect(getMetadata.mock.calls[1][0]).toContain(`E'${"f".repeat(63)}'`);
   });
   it("discards a snapshot when catalog identity changes while a table is loading", async () => {
     let resolve!: (rows: Record<string, unknown>[]) => void;

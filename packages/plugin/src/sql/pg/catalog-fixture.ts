@@ -97,6 +97,7 @@ const PSEUDO: [number, string][] = [
   [5077, "anycompatible"],
   [5078, "anycompatiblearray"],
 ];
+// Spellings fixture authors use for column types.
 const ALIASES: Record<string, string> = {
   int: "int4",
   integer: "int4",
@@ -107,6 +108,15 @@ const ALIASES: Record<string, string> = {
   "character varying": "varchar",
   "timestamp with time zone": "timestamptz",
 };
+
+// to_regtype's reading of the quoted, pg_catalog-or-unqualified names the analysis sends; the
+// grammar has already turned integer or timestamp with time zone into int4 or timestamptz.
+// Arrays are left unresolved, as the fixture declares none.
+function regtype(text: string): string | undefined {
+  const parts = /^(?:"((?:[^"]|"")*)"\.)?"((?:[^"]|"")*)"$/.exec(text);
+  if (!parts || (parts[1] !== undefined && parts[1] !== "pg_catalog")) return undefined;
+  return parts[2].replaceAll('""', '"');
+}
 
 const cmp = ["=", "<>", "<", ">", "<=", ">="];
 const scalars = [
@@ -469,7 +479,7 @@ export function catalogRows(
     });
   }
   for (const name of plan.types) {
-    const known = oids.get(ALIASES[name] ?? name);
+    const known = oids.get(regtype(name) ?? "");
     add("target", { name, oid: known ?? null });
   }
   for (const name of options.opclasses ?? []) add("opclass", { type: oid(name) });

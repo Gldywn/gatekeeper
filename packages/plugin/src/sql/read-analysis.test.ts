@@ -116,7 +116,10 @@ describe("shared read analysis", () => {
     const lookup = readMetadataSql(query);
     expect(lookup).toContain("o.oprname = ANY (ARRAY[E'>=', E'~~']::pg_catalog.text[])");
     expect(lookup).toContain("p.proname = ANY (ARRAY[E'lower']::pg_catalog.text[])");
-    expect(lookup).toContain("pg_catalog.unnest(ARRAY[E'numeric']::pg_catalog.text[])");
+    // The grammar names a built-in type by its catalog name, quoted for to_regtype.
+    expect(lookup).toContain(
+      `pg_catalog.unnest(ARRAY[E'"pg_catalog"."numeric"']::pg_catalog.text[])`,
+    );
     expect(lookup).not.toContain("'a%'");
   });
   it.each([
@@ -164,7 +167,7 @@ describe("shared read analysis", () => {
     );
     const shared = snapshot.input?.sql ?? "";
     expect(shared).toContain("FILTER (WHERE");
-    expect(shared).toContain("NOT EXISTS");
+    expect(shared).toContain("NOT (EXISTS");
     expect(shared).not.toContain("2026-01-01");
     expect(shared).not.toContain("synthetic-provider");
     expect(shared).not.toContain("PENDING");
@@ -522,14 +525,14 @@ describe("shared read analysis", () => {
     "SELECT random() FROM public.products",
     "SELECT nextval('seq') FROM public.products",
     "SELECT generate_series(1, quantity) FROM public.products",
-    "SELECT quantity FROM public.products WHERE quantity IS DISTINCT FROM 1",
     "SELECT CURRENT_USER, sku FROM public.products",
     "WITH RECURSIVE r AS (SELECT 1 AS n) SELECT n FROM r",
     "SELECT sku, rank() OVER w FROM public.products WINDOW w AS (ORDER BY price)",
     "SELECT sku FROM public.products, LATERAL (SELECT 1) l",
     "SELECT ARRAY[quantity] FROM public.products",
-    'SELECT quantity::"int4" FROM public.products',
     "SELECT sku FROM public.products GROUP BY ROLLUP (sku)",
+    "SELECT quantity FROM public.products WHERE quantity = ANY (ARRAY[1, 2])",
+    "SELECT quantity FROM public.products WHERE ROW(quantity, sku) IS DISTINCT FROM ROW(1, 'a')",
   ])("never mistakes unsupported or sensitive expressions for verified sources: %s", (sql) => {
     expect(
       analyze(sql, {
@@ -565,5 +568,135 @@ describe("shared read analysis", () => {
     expect(searchPathVerified([{ path: '["public","pg_catalog"]' }])).toBe(false);
     expect(searchPathVerified([{ path: "{pg_catalog}" }])).toBe(false);
     expect(searchPathVerified([])).toBe(false);
+  });
+});
+
+describe("shapes node-sql-parser misread, now read from PostgreSQL's tree", () => {
+  const items = {
+    "public.items": { id: "int4", sku: "text", price: "numeric", seen: "timestamptz" },
+    "public.rates": { id: "int4", sku: "text", amount: "numeric" },
+    "public.stock": { id: "int4", sku: "text", level: "int4" },
+  };
+  const deps = (
+    sql: string,
+    relations: Record<string, Columns> = items,
+    options?: FixtureOptions,
+  ) => {
+    const snapshot = analyze(sql, relations, options);
+    expect(snapshot.reasons, sql).toEqual([]);
+    return snapshot.input?.dependencies.map((d) => `${d.table}.${d.column}:${d.usage}`).sort();
+  };
+
+  it("orders with NULLS FIRST or LAST in a query, a window and a set operation", () => {
+    for (const sql of [
+      "SELECT sku FROM public.items ORDER BY price DESC NULLS LAST",
+      "SELECT sku, rank() OVER (ORDER BY price NULLS FIRST) AS r FROM public.items",
+      "SELECT sku FROM public.items UNION ALL SELECT sku FROM public.rates ORDER BY 1 NULLS LAST",
+    ])
+      deps(sql);
+  });
+
+  it("walks DISTINCT ON keys as control, through an output alias or ordinal too", () => {
+    expect(
+      deps("SELECT DISTINCT ON (sku) sku, price FROM public.items ORDER BY sku, seen DESC"),
+    ).toEqual(["items.price:output", "items.seen:control", "items.sku:both"]);
+    expect(deps("SELECT DISTINCT ON (id) price FROM public.items")).toEqual([
+      "items.id:control",
+      "items.price:output",
+    ]);
+    expect(deps("SELECT DISTINCT ON (2) sku, price AS p FROM public.items")).toEqual([
+      "items.price:both",
+      "items.sku:output",
+    ]);
+    expect(
+      analyze("SELECT DISTINCT ON (email) sku FROM public.items", {
+        "public.items": { sku: "text", email: "text" },
+      }).reasons[0],
+    ).toMatch(/Sensitive source/);
+  });
+
+  it("resolves a bare USING key to the merged column of both inputs", () => {
+    expect(deps("SELECT sku, amount FROM public.items JOIN public.rates USING (sku)")).toEqual([
+      "items.sku:both",
+      "rates.amount:output",
+      "rates.sku:both",
+    ]);
+    expect(
+      deps(
+        "SELECT sku FROM public.items i JOIN public.rates r USING (sku) JOIN public.stock s USING (sku) WHERE sku <> 'x'",
+      ),
+    ).toEqual(["items.sku:both", "rates.sku:both", "stock.sku:both"]);
+    expect(
+      deps("SELECT i.sku, r.amount FROM public.items i LEFT JOIN public.rates r USING (sku)"),
+    ).toEqual(["items.sku:both", "rates.amount:output", "rates.sku:control"]);
+  });
+
+  it("keeps an unrelated same-named column, a custom merging cast and a star over USING held", () => {
+    expect(
+      analyze(
+        "SELECT sku FROM public.items i JOIN public.rates r USING (id) JOIN public.stock s ON s.id = i.id",
+        items,
+      ).reasons[0],
+    ).toMatch(/Unresolved source column/);
+    expect(
+      analyze(
+        "SELECT k FROM public.a JOIN public.b USING (k)",
+        { "public.a": { k: "int4" }, "public.b": { k: "int8" } },
+        {
+          casts: [{ source: "int4", target: "int8", context: "i", func: "int8", schema: "public" }],
+        },
+      ).reasons[0],
+    ).toMatch(/Custom cast/);
+    expect(
+      analyze("SELECT * FROM public.items JOIN public.rates USING (sku)", items).reasons[0],
+    ).toMatch(/Unresolved source column/);
+  });
+
+  it("compares IS [NOT] DISTINCT FROM through =, or as a null test against NULL", () => {
+    for (const sql of [
+      "SELECT sku FROM public.items WHERE price IS DISTINCT FROM 1",
+      "SELECT i.sku FROM public.items i JOIN public.rates r ON i.sku IS NOT DISTINCT FROM r.sku",
+      "SELECT sku FROM public.items WHERE seen IS DISTINCT FROM NULL",
+    ])
+      deps(sql);
+    expect(
+      analyze("SELECT sku FROM public.items WHERE price IS DISTINCT FROM 1", items).input?.sql,
+    ).toBe("SELECT sku FROM public.items WHERE price IS DISTINCT FROM CAST($1 AS int)");
+  });
+
+  it("reads a quoted built-in type name as that type", () => {
+    expect(deps('SELECT id::"int8" AS big FROM public.items')).toEqual(["items.id:output"]);
+  });
+
+  it("shows an EXTRACT unit PostgreSQL defines and keeps any other text local", () => {
+    for (const unit of ["year", "'year'", "isodow"])
+      expect(
+        analyze(`SELECT EXTRACT(${unit} FROM seen) AS u FROM public.items`, items).input?.sql,
+      ).toMatch(/EXTRACT\(/);
+    // Rendered back as the keyword YEAR, which PostgreSQL reads as 'year': not the same tree.
+    expect(
+      analyze("SELECT EXTRACT('YEAR' FROM seen) AS u FROM public.items", items).reasons,
+    ).toEqual(["Unsupported SQL representation"]);
+    // The grammar accepts any word or string as the unit; a value hidden there must not leak.
+    for (const unit of ["'acmeprivateclient'", "confidentialword"]) {
+      const snapshot = analyze(`SELECT EXTRACT(${unit} FROM seen) AS u FROM public.items`, items);
+      expect(snapshot.complete, unit).toBe(false);
+      expect(JSON.stringify(snapshot)).not.toMatch(/acmeprivateclient|confidentialword/i);
+    }
+  });
+
+  it("merges USING keys per join input, as PostgreSQL exposes each input's columns", () => {
+    expect(
+      deps(
+        "SELECT sku FROM public.items JOIN (public.rates JOIN public.stock USING (sku)) USING (sku)",
+      ),
+    ).toEqual(["items.sku:both", "rates.sku:both", "stock.sku:both"]);
+    // The left input of the last join exposes two sku columns: PostgreSQL rejects the USING.
+    expect(
+      analyze(
+        "SELECT level FROM public.items JOIN public.rates USING (sku) CROSS JOIN public.stock s JOIN public.items i2 USING (sku)",
+        items,
+      ).reasons[0],
+    ).toMatch(/Unresolved/);
   });
 });
