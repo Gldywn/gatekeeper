@@ -145,7 +145,8 @@ Layering and scrolling hold a few invariants a change can break:
   glyph), Expired, Cancelled.
 - Marks: a pencil for a write, a trash for a destructive query, the PII, Client and Value
   flags. The class icon and the flags show only where the query ran (Completed, Unconfirmed); a
-  pending row keeps its icon. Auto mode shows as one bolt, never twice.
+  pending row keeps its icon. Auto mode shows as one bolt, never twice; a decline by the load
+  check takes its gauge as the row's glyph.
 - The open row is marked by tone, never by a coloured bar. Rows span the pane's full width.
 - Pending approval carries the count awaiting a decision; Recently resolved has no count.
 - The Audit Trail shows the current month day by day and folds earlier months. Each day is a
