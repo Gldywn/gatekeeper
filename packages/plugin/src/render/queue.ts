@@ -365,10 +365,15 @@ export function loadInner(view: LoadView, matrix: boolean): string {
   }
   let k = 0;
   const tipId = () => `estr-${view.id}-${k++}`;
-  const lines = view.result.lines
-    .map((l: Line) => `<p>${l.map((s) => segmentHtml(s, view, tipId, !matrix)).join("")}.</p>`)
-    .join("");
-  return `<div class="cs-heavy" role="status">${gaugeIcon}<div class="cs-heavy-text">${lines}</div></div>`;
+  const sentences = view.result.lines.map(
+    (l: Line) => `${l.map((s) => segmentHtml(s, view, tipId, !matrix)).join("")}.`,
+  );
+  // The badge names the alert; the reason is only the findings, separate points when several.
+  const body =
+    sentences.length === 1
+      ? `<p>${sentences[0]}</p>`
+      : `<ul>${sentences.map((t) => `<li>${t}</li>`).join("")}</ul>`;
+  return `<div class="cs-heavy" role="status">${body}</div>`;
 }
 
 export function busyLabel(state: CardState): string {

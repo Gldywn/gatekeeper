@@ -1386,53 +1386,60 @@ label.qs-row {
   margin-top: 1px;
   color: var(--danger);
 }
-/* The load check. Its badge sits beside the class badge, neutral, so a heavy read never reads as
-   a write; the slot leaves no gap in the title row when there is nothing to show. */
+/* The load check. Its badge leads the title line: solid amber where Write and Destructive are
+   tinted, so the alert cannot be missed and still never reads as a class. The slot leaves no gap
+   in the title row when there is nothing to show. */
 .heavy-slot {
   display: contents;
 }
 .risk-badge.heavy {
   gap: 5px;
-  color: var(--text);
-  background: color-mix(in oklch, var(--text) 6%, transparent);
-  border-color: var(--edge-strong);
+  color: var(--amber-ink);
+  background: var(--amber);
+  border-color: var(--amber);
 }
 .risk-badge.heavy svg {
   width: 11px;
   height: 11px;
-  color: var(--amber);
 }
-/* Why it is heavy, right above the SQL: a quieter amber than a hold, the gauge on the first line. */
+/* Why it is heavy, right above the SQL, on a neutral surface: the badge already carries the
+   amber. Several findings are separate points. */
 .card-load:empty {
   display: none;
 }
 .cs-heavy {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
   padding: 8px 11px;
-  border: 1px solid color-mix(in oklch, var(--amber) 20%, transparent);
+  border: 1px solid var(--edge-strong);
   border-radius: 6px;
-  background: color-mix(in oklch, var(--amber) 4%, transparent);
+  background: color-mix(in oklch, var(--text) 5%, transparent);
   font-size: 12px;
   line-height: 1.5;
   color: var(--text);
 }
-.cs-heavy > svg {
-  flex: none;
-  width: 14px;
-  height: 14px;
-  margin-top: 2px;
-  color: var(--amber);
+.cs-heavy p,
+.cs-heavy ul {
+  margin: 0;
 }
-.cs-heavy-text {
+.cs-heavy ul {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  min-width: 0;
+  gap: 6px;
+  padding: 0;
+  list-style: none;
 }
-.cs-heavy-text p {
-  margin: 0;
+.cs-heavy li {
+  position: relative;
+  padding-left: 13px;
+}
+.cs-heavy li::before {
+  content: "";
+  position: absolute;
+  left: 1px;
+  top: 0.62em;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--muted);
 }
 /* A table's estimated rows open on hover or keyboard focus of its name. */
 .est-tip {
@@ -3409,6 +3416,14 @@ code.tool,
   font-size: 0.95em;
   color: var(--text);
   background: color-mix(in oklch, var(--text) 8%, transparent);
+}
+/* Tables and columns in a heavy query's reason stand out on the same faint ground, never amber
+   like a keyword. */
+.cs-heavy code.name {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: color-mix(in oklch, var(--text) 8%, transparent);
+  font-weight: 500;
 }
 .set-rec.auto {
   color: var(--auto);

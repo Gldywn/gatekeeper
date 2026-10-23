@@ -536,6 +536,29 @@ describe("the heavy query on the pending card", () => {
     expect(loadInner({ id: "q", result: heavy({ lines: [], heavy: false }) }, true)).toBe("");
   });
 
+  it("makes several findings separate points, with no glyph of its own", () => {
+    const html = loadInner(
+      {
+        id: "q",
+        result: heavy({
+          lines: [
+            [
+              "Missing join condition pairs every row of ",
+              { code: "a" },
+              " with every row of ",
+              { code: "i" },
+            ],
+            ["Filter on ", { code: "code" }, " uses no index"],
+          ],
+        }),
+      },
+      true,
+    );
+    expect(html).toBe(
+      '<div class="cs-heavy" role="status"><ul><li>Missing join condition pairs every row of <code class="name">a</code> with every row of <code class="name">i</code>.</li><li>Filter on <code class="name">code</code> uses no index.</li></ul></div>',
+    );
+  });
+
   it("opens a table's estimate on its name in the matrix, only for the relation it belongs to", () => {
     const result = heavy({
       estimates: [
