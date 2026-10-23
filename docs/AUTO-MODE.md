@@ -437,7 +437,8 @@ not retroactively labelled as human approvals.
 On macOS, a read submitted while Auto mode is on raises no alert until Auto mode leaves it to
 you: a hold, a refusal, a failed or timed-out evaluation, or Auto mode switched off. The plugin
 reports Auto mode and those reads on its `/pending` poll, and the server alerts then; a read
-Auto mode approves stays silent, unless the plugin stopped reporting for 15 seconds first. See
+Auto mode approves stays silent, unless the plugin stopped reporting for 15 seconds first or
+the read was still waiting at half its life (for instance behind long automatic runs). See
 [Desktop notifications](CONFIGURATION.md#desktop-notifications-macos).
 
 The plugin can attach `autoHold: { sent: boolean, reason: string }` to `POST /result`
