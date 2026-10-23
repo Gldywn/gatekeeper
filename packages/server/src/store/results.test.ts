@@ -62,6 +62,45 @@ describe("kept results", () => {
     expect(listActivity(ctx, null)[0]).toMatchObject({ id, rowCount: 5, affectedRows: 2 });
   });
 
+  it("runs no JSON function over a result whose counts are in their columns", () => {
+    const parsed: unknown[] = [];
+    // An application function overloads SQLite's own, so every call the activity view makes lands here.
+    ctx.db.function("json_valid", (text: unknown) => {
+      parsed.push(text);
+      return 1;
+    });
+    const id = approve(SEALED);
+    listActivity(ctx, null);
+    expect(parsed).toEqual([]);
+    // A decision from before the columns still has its counts read through result_json.
+    ctx.db.prepare("UPDATE requests SET row_count = NULL WHERE id = ?").run(id);
+    expect(listActivity(ctx, null)[0].rowCount).toBe(1);
+    expect(parsed.length).toBeGreaterThan(0);
+  });
+
+  it("adds the count columns to a store created before them", () => {
+    const old = createContext();
+    try {
+      old.db.exec(`CREATE TABLE requests (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL,
+        session_id TEXT NOT NULL, sql TEXT NOT NULL, intent TEXT, idempotency_key TEXT,
+        state TEXT NOT NULL, lease_id TEXT, lease_expires_at INTEGER, plugin_id TEXT,
+        decided_at INTEGER, result_json TEXT, policy_json TEXT, expires_at INTEGER NOT NULL,
+        connection TEXT)`);
+      old.db
+        .prepare(`INSERT INTO requests (id, created_at, session_id, sql, state, decided_at, result_json, expires_at)
+          VALUES ('old', 1, 's1', 'SELECT 1', 'approved', 2, '{"purged":true,"rowCount":3}', 3)`)
+        .run();
+      migrate(old.db);
+      const columns = (
+        old.db.prepare("PRAGMA table_info(requests)").all() as { name: string }[]
+      ).map((c) => c.name);
+      expect(columns).toEqual(expect.arrayContaining(["row_count", "affected_rows"]));
+      expect(listActivity(old, null)[0]).toMatchObject({ id: "old", rowCount: 3, kept: false });
+    } finally {
+      old.db.close();
+    }
+  });
+
   it("says nothing is kept for a result sent without its sealed rows", () => {
     const id = approve();
     expect(readArchive(ctx, id, null)).toBeNull();
