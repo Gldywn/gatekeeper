@@ -300,11 +300,12 @@ export function activityMarkdownDays(
     lines.push(`- Days: ${keys[0]} to ${keys.at(-1)} (${keys.length} days)`);
   }
   const counts = entries.reduce<Record<string, number>>((acc, e) => {
-    acc[e.state] = (acc[e.state] ?? 0) + 1;
+    const label = statusLabel(e);
+    acc[label] = (acc[label] ?? 0) + 1;
     return acc;
   }, {});
   const breakdown = Object.entries(counts)
-    .map(([s, n]) => `${n} ${capitalize(outcomeMeta(s).label)}`)
+    .map(([label, n]) => `${n} ${capitalize(label)}`)
     .join(" · ");
   lines.push(`- Queries: ${entries.length}${breakdown ? ` (${breakdown})` : ""}`);
   lines.push(`- Sessions: ${new Set(entries.map((e) => e.sessionId)).size}`, "");

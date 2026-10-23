@@ -63,7 +63,9 @@ export function migrate(db: Database.Database): void {
         result_json TEXT,
         policy_json TEXT,
         expires_at INTEGER NOT NULL,
-        connection TEXT
+        connection TEXT,
+        row_count INTEGER,
+        affected_rows INTEGER
       );
       CREATE INDEX IF NOT EXISTS idx_requests_state ON requests(state, created_at);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_requests_idem
@@ -132,6 +134,9 @@ export function migrate(db: Database.Database): void {
   // Add columns introduced after the first release to pre-existing databases.
   for (const alter of [
     "ALTER TABLE requests ADD COLUMN connection TEXT",
+    // An approved result's counts beside it, so the activity view never parses its rows.
+    "ALTER TABLE requests ADD COLUMN row_count INTEGER",
+    "ALTER TABLE requests ADD COLUMN affected_rows INTEGER",
     "ALTER TABLE sessions ADD COLUMN last_active INTEGER",
     "ALTER TABLE sessions ADD COLUMN connection TEXT",
     "ALTER TABLE sessions ADD COLUMN left_at INTEGER",

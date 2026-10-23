@@ -47,6 +47,21 @@ describe("kept results", () => {
     expect(listActivity(ctx, null)[0]).toMatchObject({ id, kept: true });
   });
 
+  it("keeps an approved result's counts beside it and lists them from there", () => {
+    const id = approve(SEALED);
+    expect(
+      ctx.db.prepare("SELECT row_count, affected_rows FROM requests WHERE id = ?").get(id),
+    ).toEqual({
+      row_count: 1,
+      affected_rows: null,
+    });
+    // The columns win over result_json, which the activity view no longer parses for them.
+    ctx.db
+      .prepare("UPDATE requests SET row_count = 5, affected_rows = 2, result_json = ? WHERE id = ?")
+      .run(JSON.stringify({ rows: [{ ok: 1 }], fields: [], rowCount: 9 }), id);
+    expect(listActivity(ctx, null)[0]).toMatchObject({ id, rowCount: 5, affectedRows: 2 });
+  });
+
   it("says nothing is kept for a result sent without its sealed rows", () => {
     const id = approve();
     expect(readArchive(ctx, id, null)).toBeNull();

@@ -316,7 +316,8 @@ export function resolve(
   ctx.db.transaction(() => {
     const info = ctx.db
       .prepare(
-        `UPDATE requests SET state = ?, result_json = ?, policy_json = ?, decided_at = ?, lease_id = NULL, lease_expires_at = NULL
+        `UPDATE requests SET state = ?, result_json = ?, policy_json = ?, decided_at = ?, lease_id = NULL, lease_expires_at = NULL,
+               row_count = ?, affected_rows = ?
              WHERE id = ? AND lease_id = ? AND state IN ('leased', 'executing') AND lease_expires_at >= ?`,
       )
       .run(
@@ -324,6 +325,8 @@ export function resolve(
         JSON.stringify(result),
         policy == null ? null : JSON.stringify(policy),
         now,
+        "rowCount" in result ? result.rowCount : null,
+        "affectedRows" in result ? result.affectedRows : null,
         id,
         leaseId,
         now,

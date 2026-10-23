@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { StoreContext } from "./db.js";
-import { outcomeFacts, type RawAudit, toAudit } from "./rows.js";
+import { knownCount, outcomeFacts, type RawAudit, toAudit } from "./rows.js";
 import type { ActivityEntry, AuditEntry, RequestState } from "./types.js";
 
 // Parsed where the plugin posts it and where the trail reads it back, since any broker token
@@ -63,9 +63,9 @@ export interface ActivityCursor {
 }
 
 /** Terminal requests for a connection, newest first, for the host-side activity
- *  view. Each entry carries the SQL and metadata plus scalar outcome facts
- *  (reason / error / row count) that SQLite reads out of result_json: a result still in its
- *  agent window can weigh megabytes, and Recently resolved reads this every few seconds. */
+ *  view. Each entry carries the SQL and metadata plus scalar outcome facts (reason / error /
+ *  row count), never the rows: a result still in its agent window can weigh megabytes, and
+ *  Recently resolved reads this every few seconds, so its counts come from their own columns. */
 export function listActivity(
   ctx: StoreContext,
   connection: string | null,
@@ -93,10 +93,12 @@ export function listActivity(
        SELECT r.id, r.created_at, r.decided_at, r.session_id, r.sql, r.intent, r.state, r.policy_json,
            s.harness, s.project, s.session_label,
            EXISTS (SELECT 1 FROM results k WHERE k.request_id = r.id) AS kept,
-           CASE WHEN json_valid(r.result_json) THEN json_extract(r.result_json,
+           r.row_count, r.affected_rows,
+           CASE WHEN r.row_count IS NULL AND json_valid(r.result_json) THEN json_extract(r.result_json,
              '$.reason', '$.error', '$.rowCount', '$.affectedRows') END AS facts,
-           CASE WHEN json_valid(r.result_json) THEN CASE json_type(r.result_json, '$.rows')
-             WHEN 'array' THEN json_array_length(r.result_json, '$.rows') END END AS rows_length
+           CASE WHEN r.row_count IS NULL AND json_valid(r.result_json)
+             THEN CASE json_type(r.result_json, '$.rows')
+               WHEN 'array' THEN json_array_length(r.result_json, '$.rows') END END AS rows_length
          FROM recent JOIN requests r ON r.id = recent.id
          LEFT JOIN sessions s ON s.session_id = r.session_id
          ORDER BY r.decided_at DESC, r.id DESC
@@ -114,6 +116,8 @@ export function listActivity(
     sql: string;
     intent: string | null;
     state: RequestState;
+    row_count: number | null;
+    affected_rows: number | null;
     facts: string | null;
     rows_length: number | null;
     policy_json: string | null;
@@ -123,7 +127,17 @@ export function listActivity(
     kept: number;
   }[];
   return rows.map((row) => {
-    const facts = outcomeFacts(row.state, row.facts, row.rows_length);
+    // A result decided by this version carries its counts in columns; only older or unapproved
+    // decisions, whose result_json is small or purged, are read through it.
+    const facts =
+      row.state === "approved" && row.row_count !== null
+        ? {
+            reason: null,
+            error: null,
+            rowCount: knownCount(row.row_count),
+            affectedRows: knownCount(row.affected_rows),
+          }
+        : outcomeFacts(row.state, row.facts, row.rows_length);
     const policy = row.policy_json ? JSON.parse(row.policy_json) : undefined;
     return {
       id: row.id,

@@ -160,6 +160,10 @@ describe("render/activity", () => {
     ).toEqual(["declined", "not run"]);
     expect(activityCsv([gate])).toContain(",not run,");
     expect(activityMarkdownDays([gate], "prod", new Map())).toContain("· Not run ·");
+    // The summary above the entries counts them the same way.
+    expect(activityMarkdownDays([gate, human], "prod", new Map())).toContain(
+      "- Queries: 2 (1 Not run · 1 Declined)",
+    );
   });
 
   it("uses a Markdown fence longer than any backtick run in the SQL", () => {
