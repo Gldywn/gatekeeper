@@ -68,8 +68,10 @@ import {
   type CardGate,
   cardGateFor,
   cardHtml,
+  heavyBadge,
   LONG_RUN_MS,
   loadInner,
+  paintFocused,
   paintLegend,
   readyActions,
 } from "./render/queue";
@@ -2812,6 +2814,8 @@ export class Gatekeeper {
     const plan = planLoad(card.sql, this.dialect);
     card.loadSession = this.activeGen;
     card.loadResult = checkLoad(plan, "pending");
+    // A restart drops the previous result's estimates at once.
+    this.renderCardLoad(card);
     const bound = {
       generation: this.connGeneration,
       active: this.activeGen,
@@ -2854,9 +2858,22 @@ export class Gatekeeper {
     });
   }
 
+  // The badge, the matrix (a table's estimate opens on its name) and the reason move together,
+  // whichever of the load check and the column analysis lands last.
   private renderCardLoad(card: Card): void {
-    const el = this.root.querySelector<HTMLElement>(`#cl-${CSS.escape(card.id)}`);
-    if (el) el.innerHTML = loadInner(card.loadResult);
+    const id = CSS.escape(card.id);
+    const load = { id: card.id, result: card.loadResult };
+    const badge = this.root.querySelector<HTMLElement>(`#hb-${id}`);
+    if (badge) badge.innerHTML = heavyBadge(card.loadResult);
+    let matrix = "";
+    const host = this.root.querySelector<HTMLElement>(`#cm-${id}`);
+    if (host) {
+      const cls = classifyQuery(card.sql, this.dialect).class;
+      matrix = accessMatrix(card.sql, this.dialect, cls, card.schema, load);
+      paintFocused(host, matrix);
+    }
+    const cause = this.root.querySelector<HTMLElement>(`#cl-${id}`);
+    if (cause) paintFocused(cause, loadInner(load, matrix !== ""));
   }
 
   // Bound to the session, lease and SQL the load check started under, both before the
@@ -3081,11 +3098,7 @@ export class Gatekeeper {
     // The matrix (a read's tables come from this analysis), the legend and the SQL marks move
     // together, so none of them describes a different analysis than the others.
     const id = CSS.escape(card.id);
-    const matrix = this.root.querySelector<HTMLElement>(`#cm-${id}`);
-    if (matrix) {
-      const cls = classifyQuery(card.sql, this.dialect).class;
-      matrix.innerHTML = accessMatrix(card.sql, this.dialect, cls, card.schema);
-    }
+    this.renderCardLoad(card);
     const legend = this.root.querySelector<HTMLElement>(`#cs-${id}`);
     if (legend) {
       paintLegend(legend, card.schema, card.id);

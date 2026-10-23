@@ -3,6 +3,7 @@ import {
   checkIcon,
   clockIcon,
   copyIcon,
+  gaugeIcon,
   messageIcon,
   sendIcon,
   warnIcon,
@@ -11,7 +12,7 @@ import {
 import { classifyQuery, type RiskClass, rank } from "../sql/classify";
 import { formatSql } from "../sql/format";
 import { highlight } from "../sql/highlight";
-import type { Line, LoadResult } from "../sql/load";
+import type { Line, LoadResult, Segment } from "../sql/load";
 import { modeRank, type RiskMode } from "../sql/mode";
 import { visibleControls } from "../sql/sanitize";
 import { analyzeTableOps, type SchemaContext } from "../sql/schema";
@@ -161,14 +162,16 @@ export function cardHtml(
   const sql = `<pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(visibleControls(card.sql))}" aria-label="Copy SQL">${copyIcon}</button><code class="sql-body" id="sqlbody-${card.id}">${highlight(formatSql(card.sql), card.schema?.pii, card.schema?.client, card.schema?.literals)}</code></pre>`;
   // While Auto mode evaluates, the ring the card frame used to carry runs round the SQL.
   const sqlBlock = evaluating ? `<div class="sql-ring">${sql}</div>` : sql;
+  const load = { id: card.id, result: card.loadResult };
+  const matrix = accessMatrix(card.sql, dialect, gate.cls, card.schema, load);
   return `
       <div class="card ${cardClassFor(gate)}${run ? runClass(run) : ""}" data-card="${card.id}">
         <div class="top">
-          ${riskBadge(gate.cls)}<span class="intent">${escapeHtml(card.intent ? capitalize(card.intent) : card.id)}</span>
+          ${riskBadge(gate.cls)}<span class="heavy-slot" id="hb-${card.id}">${heavyBadge(card.loadResult)}</span><span class="intent">${escapeHtml(card.intent ? capitalize(card.intent) : card.id)}</span>
         </div>
         <div class="meta">${escapeHtml(card.id)} &middot; Requested ${relAge(card.createdAt)}</div>
-        <div class="cs-matrix" id="cm-${card.id}">${accessMatrix(card.sql, dialect, gate.cls, card.schema)}</div>
-        ${unparsedNote(gate)}<div class="card-load" id="cl-${card.id}">${loadInner(card.loadResult)}</div><div class="cs-legend" id="cs-${card.id}">${sensitiveLegend(card.schema, card.id)}</div>
+        <div class="cs-matrix" id="cm-${card.id}">${matrix}</div>
+        ${unparsedNote(gate)}<div class="card-load" id="cl-${card.id}">${loadInner(load, matrix !== "")}</div><div class="cs-legend" id="cs-${card.id}">${sensitiveLegend(card.schema, card.id)}</div>
         ${sqlBlock}
         <div class="cs-auto">${autoNote(card)}</div>${executionNote(card)}<div class="dbar">${bar}</div>
       </div>`;
@@ -197,11 +200,13 @@ export function riskBadge(cls: RiskClass): string {
 // Which tables the statement reads, writes or deletes from, one row per table: a table both
 // read and written keeps both marks. Delete only for what removes data (DELETE, DROP, TRUNCATE);
 // a read's tables come from the column analysis once it lands, from the SQL text until then.
+// With the pending card's load view, a table's name opens its estimated rows.
 export function accessMatrix(
   sql: string,
   dialect: string,
   cls: RiskClass,
   schema?: SchemaContext | null,
+  load?: LoadView,
 ): string {
   const ops = analyzeTableOps(sql, dialect);
   const roles = new Map<string, Set<Role>>();
@@ -221,10 +226,16 @@ export function accessMatrix(
     on
       ? `<td class="mk on ${role.toLowerCase()}">${checkIcon}<span class="sr-only">Yes</span></td>`
       : '<td class="mk"><span class="sr-only">No</span></td>';
+  const name = (t: string, k: number) => {
+    const rows = load ? estimateFor(t, load.result) : undefined;
+    return rows === undefined || !load
+      ? escapeHtml(t)
+      : estimateTip(escapeHtml(t), t, rows, `est-${load.id}-${k}`);
+  };
   const rows = [...roles]
     .map(
-      ([t, set]) =>
-        `<tr><th scope="row" class="nm">${escapeHtml(t)}</th>${ROLES.map((r) => cell(set.has(r), r)).join("")}</tr>`,
+      ([t, set], k) =>
+        `<tr><th scope="row" class="nm">${name(t, k)}</th>${ROLES.map((r) => cell(set.has(r), r)).join("")}</tr>`,
     )
     .join("");
   return `<table class="mx"><thead><tr><th scope="col">Table</th>${ROLES.map((r) => `<th scope="col">${r}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table>`;
@@ -312,30 +323,61 @@ export function denyField(id: string, value = ""): string {
 
 const ROWS = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
 
-function rowsLabel(rows: number): string {
-  return `~${ROWS.format(rows)} ${rows === 1 ? "row" : "rows"}`;
+// The heavy query and its estimates as the pending card shows them, keyed by the card's id.
+export interface LoadView {
+  id: string;
+  result: LoadResult | undefined;
 }
 
-function lineHtml(line: Line): string {
-  return line
-    .map((s) => (typeof s === "string" ? escapeHtml(s) : `<code>${escapeHtml(s.code)}</code>`))
-    .join("");
+// A second assessment beside the operation's class, never instead of it: neutral, so a heavy
+// read never reads as a write.
+export function heavyBadge(result: LoadResult | undefined): string {
+  return result?.heavy ? `<span class="risk-badge heavy">${gaugeIcon}Heavy query</span>` : "";
 }
 
-// Only a finding raises the alert. What could not be checked (a view, an unknown size) blocks
-// nothing, so it only rides along with a finding.
-export function loadInner(result: LoadResult | undefined): string {
-  if (!result?.lines.length) {
+// Only an estimate tied to exactly one relation: two relations the SQL writes alike (a quoted
+// name with a dot) get none rather than the other's number.
+function estimateFor(ref: string, result: LoadResult | undefined): number | undefined {
+  const hits = result?.estimates.filter((e) => e.ref === ref) ?? [];
+  return hits.length === 1 ? hits[0].rows : undefined;
+}
+
+// A table's estimated rows, on hover or keyboard focus of its name.
+function estimateTip(inner: string, ref: string, rows: number, tipId: string): string {
+  const count = rows === 0 ? "0" : `~${ROWS.format(rows)}`;
+  return `<span class="est-tip" tabindex="0" data-ref="${escapeHtml(ref)}" aria-describedby="${tipId}">${inner}<span class="est-pop" id="${tipId}" role="tooltip">Estimated table rows <b>${count}</b></span></span>`;
+}
+
+function segmentHtml(s: Segment, view: LoadView, tipId: () => string, withTips: boolean): string {
+  if (typeof s === "string") return escapeHtml(s);
+  if (s.kw) return `<code class="kw">${escapeHtml(s.code)}</code>`;
+  const name = `<code class="name">${escapeHtml(s.code)}</code>`;
+  const rows = withTips && s.ref ? estimateFor(s.ref, view.result) : undefined;
+  return rows === undefined || !s.ref ? name : estimateTip(name, s.ref, rows, tipId());
+}
+
+// Why the query is heavy, right above the SQL, one sentence per finding. What could not be
+// checked is not shown: no estimate means no claim, and auto-stop is the backstop. Without a
+// tables matrix, a table's name in the reason carries its estimate instead.
+export function loadInner(view: LoadView, matrix: boolean): string {
+  if (!view.result?.lines.length) {
     return "";
   }
-  const estimates = result.estimates
-    .map(
-      (e) =>
-        `<span class="load-est" title="PostgreSQL row estimate"><i>${escapeHtml(e.table)}</i>${escapeHtml(rowsLabel(e.rows))}</span>`,
-    )
+  let k = 0;
+  const tipId = () => `estr-${view.id}-${k++}`;
+  const lines = view.result.lines
+    .map((l: Line) => `<p>${l.map((s) => segmentHtml(s, view, tipId, !matrix)).join("")}.</p>`)
     .join("");
-  const items = [...result.lines, ...result.notes].map((l) => `<li>${lineHtml(l)}</li>`).join("");
-  return `<div class="cs-load" role="status"><div class="load-lead"><span>${warnIcon}Heavy query</span>${estimates}</div><ul class="load-list">${items}</ul></div>`;
+  return `<div class="cs-heavy" role="status">${gaugeIcon}<div class="cs-heavy-text">${lines}</div></div>`;
+}
+
+// The badge, the matrix and the reason are repainted when a check settles or restarts; a reader
+// focused on a table's estimate stays on the same table.
+export function paintFocused(host: HTMLElement, html: string): void {
+  const active = host.ownerDocument?.activeElement;
+  const ref = active && host.contains(active) ? active.getAttribute("data-ref") : null;
+  host.innerHTML = html;
+  if (ref) host.querySelector<HTMLElement>(`[data-ref="${CSS.escape(ref)}"]`)?.focus();
 }
 
 export function busyLabel(state: CardState): string {

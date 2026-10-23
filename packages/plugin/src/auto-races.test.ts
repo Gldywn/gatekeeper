@@ -1715,3 +1715,73 @@ describe("schema repaint", () => {
     expect(nodes["#sqlbody-req"].innerHTML).not.toContain("pii-col");
   });
 });
+
+describe("heavy query repaint", () => {
+  const HEAVY: LoadResult = {
+    lines: [
+      [
+        "Reads every row of ",
+        { code: "big", ref: "public.big" },
+        " without a ",
+        { code: "WHERE", kw: true },
+        " clause",
+      ],
+    ],
+    notes: [],
+    estimates: [{ table: "big", ref: "public.big", rows: 2_000_000 }],
+    heavy: true,
+    complete: true,
+  };
+  const schema = { tables: ["public.big"], pii: [], client: [], literals: [], star: true };
+
+  function painted() {
+    const { app, card } = harness();
+    vi.stubGlobal("CSS", { escape: (s: string) => s });
+    const el = () => ({ innerHTML: "" });
+    const nodes: Record<string, { innerHTML: string }> = {
+      "#hb-req": el(),
+      "#cm-req": el(),
+      "#cl-req": el(),
+      "#cs-req": el(),
+      "#sqlbody-req": el(),
+    };
+    app.root = { querySelector: (sel: string) => nodes[sel] ?? null };
+    card.sql = "SELECT * FROM public.big";
+    return { app, card, nodes };
+  }
+
+  it("keeps the estimate on the table's name whichever of the load and the analysis lands last", () => {
+    const loadFirst = painted();
+    loadFirst.card.loadResult = HEAVY;
+    loadFirst.app.renderCardLoad(loadFirst.card);
+    expect(loadFirst.nodes["#hb-req"].innerHTML).toContain("Heavy query");
+    expect(loadFirst.nodes["#cm-req"].innerHTML).toContain('data-ref="public.big"');
+    expect(loadFirst.nodes["#cl-req"].innerHTML).toContain("cs-heavy");
+    loadFirst.card.schema = schema;
+    loadFirst.app.renderCardSchema(loadFirst.card);
+    expect(loadFirst.nodes["#cm-req"].innerHTML).toContain('data-ref="public.big"');
+
+    const schemaFirst = painted();
+    schemaFirst.card.schema = schema;
+    schemaFirst.app.renderCardSchema(schemaFirst.card);
+    expect(schemaFirst.nodes["#cm-req"].innerHTML).not.toContain("est-tip");
+    schemaFirst.card.loadResult = HEAVY;
+    schemaFirst.app.renderCardLoad(schemaFirst.card);
+    expect(schemaFirst.nodes["#cm-req"].innerHTML).toContain('data-ref="public.big"');
+  });
+
+  it("drops the previous result's badge and estimates as soon as a check restarts", () => {
+    const { app, card, nodes } = painted();
+    app.settingsStore = {
+      get: () => ({ confirmWrites: true, resultCacheMb: 4, autoDenyHeavy: true }),
+      loadedForConnection: () => true,
+    };
+    card.loadResult = HEAVY;
+    app.renderCardLoad(card);
+    vi.spyOn(app.annotator, "inspectLoad").mockReturnValue(new Promise(() => {}));
+    app.startLoad(card, false);
+    expect(nodes["#hb-req"].innerHTML).toBe("");
+    expect(nodes["#cm-req"].innerHTML).not.toContain("est-tip");
+    expect(nodes["#cl-req"].innerHTML).toBe("");
+  });
+});

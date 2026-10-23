@@ -83,7 +83,9 @@ describe("rows changed", () => {
     expect(r.lines).toEqual([
       "Filter on `updatedAt` uses no index and may scan all of `payment_intent`",
     ]);
-    expect(r.estimates).toEqual([{ table: "payment_intent", rows: 18_400_000 }]);
+    expect(r.estimates).toEqual([
+      { table: "payment_intent", ref: "public.payment_intent", rows: 18_400_000 },
+    ]);
     expect(r.heavy).toBe(true);
   });
 
@@ -121,7 +123,9 @@ describe("scans", () => {
   it("flags an unfiltered read of a large table", () => {
     const r = check("SELECT status, count(*) FROM public.payment_attempt GROUP BY status", f);
     expect(r.lines).toEqual(["Reads every row of `payment_attempt` without a `WHERE` clause"]);
-    expect(r.estimates).toEqual([{ table: "payment_attempt", rows: BIG }]);
+    expect(r.estimates).toEqual([
+      { table: "payment_attempt", ref: "public.payment_attempt", rows: BIG },
+    ]);
     expect(r.complete).toBe(true);
   });
 

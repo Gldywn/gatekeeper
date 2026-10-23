@@ -8,7 +8,9 @@ import { parser } from "./sql-parser";
 
 type Node = Record<string, unknown>;
 
-export type Segment = string | { code: string };
+// A table segment carries its reference as the SQL names it, so the card can tie an estimate to it
+// without matching display text; a keyword is marked to read as SQL.
+export type Segment = string | { code: string; ref?: string; kw?: true };
 export type Line = Segment[];
 
 export interface Rel {
@@ -36,7 +38,7 @@ export type Facts = Map<string, RelFacts>;
 export interface LoadResult {
   lines: Line[];
   notes: Line[];
-  estimates: { table: string; rows: number }[];
+  estimates: { table: string; ref: string; rows: number }[];
   heavy: boolean;
   // False when part of the check could not run. Informational: nothing blocks on it.
   complete: boolean;
@@ -49,7 +51,10 @@ const MAX_DEPTH = 8;
 export const MAX_RELATIONS = 16;
 
 export const relKey = (r: Rel): string => `${r.schema ?? ""}\u0000${r.table}`;
+// How the SQL and the tables matrix write a relation: qualified only when the SQL qualifies it.
+export const refOf = (r: Rel): string => (r.schema ? `${r.schema}.${r.table}` : r.table);
 const code = (value: string): Segment => ({ code: value });
+const kw = (value: string): Segment => ({ code: value, kw: true });
 
 interface Source {
   alias: string;
@@ -89,7 +94,7 @@ interface Write {
 
 interface Lock {
   rel?: Rel;
-  line: (t: string) => Line;
+  line: (t: Segment) => Line;
   hint: string;
 }
 
@@ -263,14 +268,14 @@ class Walker {
       case "alter":
         // ALTER SEQUENCE, TYPE, VIEW or FUNCTION parse as "alter" too, without a table.
         if (ast.table)
-          this.lock(ast.table, (t) => ["ALTER TABLE may lock and rewrite ", code(t)], ALTER_HINT);
+          this.lock(ast.table, (t) => ["ALTER TABLE may lock and rewrite ", t], ALTER_HINT);
         else this.covered = false;
         return;
       case "lock":
         for (const item of Array.isArray(ast.tables) ? ast.tables : [])
           this.lock(
             node(item) ? item.table : null,
-            (t) => ["LOCK TABLE holds an explicit lock on ", code(t)],
+            (t) => ["LOCK TABLE holds an explicit lock on ", t],
             LOCK_HINT,
           );
         return;
@@ -302,18 +307,14 @@ class Walker {
     if (keyword === "index" && !ast.concurrently)
       this.lock(
         ast.table,
-        (t) => [
-          "CREATE INDEX without CONCURRENTLY blocks writes on ",
-          code(t),
-          " during the build",
-        ],
+        (t) => ["CREATE INDEX without CONCURRENTLY blocks writes on ", t, " during the build"],
         INDEX_HINT,
       );
     if (keyword === "table" && node(ast.query_expr))
       this.statement(ast.query_expr, ctes, depth + 1);
   }
 
-  private lock(table: unknown, line: (t: string) => Line, hint: string): void {
+  private lock(table: unknown, line: (t: Segment) => Line, hint: string): void {
     const item = Array.isArray(table) ? table[0] : table;
     const name = node(item) ? label(item.table) : null;
     const schema = node(item) ? label(item.db) : null;
@@ -503,7 +504,7 @@ function pgCommandLocks(sql: string): Lock[] {
     return [
       {
         rel: reindex[2] === "table" ? relation(text.slice(reindex[0].length)) : undefined,
-        line: (t) => ["REINDEX without CONCURRENTLY blocks writes on ", code(t)],
+        line: (t) => ["REINDEX without CONCURRENTLY blocks writes on ", t],
         hint: REINDEX_HINT,
       },
     ];
@@ -515,7 +516,7 @@ function pgCommandLocks(sql: string): Lock[] {
     return [
       {
         rel: relation(text.slice(vacuum[0].length)),
-        line: (t) => ["VACUUM FULL locks and rewrites ", code(t)],
+        line: (t) => ["VACUUM FULL locks and rewrites ", t],
         hint: REWRITE_HINT,
       },
     ];
@@ -525,7 +526,7 @@ function pgCommandLocks(sql: string): Lock[] {
     return [
       {
         rel: relation(text.slice(cluster[0].length)),
-        line: (t) => ["CLUSTER locks and rewrites ", code(t)],
+        line: (t) => ["CLUSTER locks and rewrites ", t],
         hint: REWRITE_HINT,
       },
     ];
@@ -535,7 +536,7 @@ function pgCommandLocks(sql: string): Lock[] {
     return [
       {
         rel: relation(text.slice(refresh[0].length)),
-        line: (t) => ["REFRESH MATERIALIZED VIEW without CONCURRENTLY blocks reads of ", code(t)],
+        line: (t) => ["REFRESH MATERIALIZED VIEW without CONCURRENTLY blocks reads of ", t],
         hint: REFRESH_HINT,
       },
     ];
@@ -763,6 +764,7 @@ export function checkLoad(plan: LoadPlan, facts: Facts | Pending): LoadResult {
     named.push(rel);
     return rel.table;
   };
+  const table = (rel: Rel): Segment => ({ code: name(rel), ref: refOf(rel) });
   let indexesMissing = false;
   let unbound = false;
 
@@ -796,8 +798,8 @@ export function checkLoad(plan: LoadPlan, facts: Facts | Pending): LoadResult {
     if (w.block.noWhere && w.block.sources.length === 1) {
       rowsChanged.push(
         w.op === "update"
-          ? ["UPDATE without WHERE changes every row of ", code(name(target))]
-          : ["DELETE without WHERE removes every row of ", code(name(target))],
+          ? ["UPDATE without WHERE changes every row of ", table(target)]
+          : ["DELETE without WHERE removes every row of ", table(target)],
       );
     }
   }
@@ -835,12 +837,12 @@ export function checkLoad(plan: LoadPlan, facts: Facts | Pending): LoadResult {
               write.op === "update"
                 ? [
                     "UPDATE may change every row of ",
-                    code(name(s.rel)),
+                    table(s.rel),
                     " since no condition filters it",
                   ]
                 : [
                     "DELETE may remove every row of ",
-                    code(name(s.rel)),
+                    table(s.rel),
                     " since no condition filters it",
                   ],
             );
@@ -849,8 +851,8 @@ export function checkLoad(plan: LoadPlan, facts: Facts | Pending): LoadResult {
         if (!large(s.rel)) continue;
         scans.push(
           b.sources.length === 1 && b.noWhere
-            ? ["Reads every row of ", code(name(s.rel)), " without a ", code("WHERE"), " clause"]
-            : ["Reads every row of ", code(name(s.rel)), " since no condition filters it"],
+            ? ["Reads every row of ", table(s.rel), " without a ", kw("WHERE"), " clause"]
+            : ["Reads every row of ", table(s.rel), " since no condition filters it"],
         );
         continue;
       }
@@ -869,8 +871,8 @@ export function checkLoad(plan: LoadPlan, facts: Facts | Pending): LoadResult {
         if (k) line.push(", ");
         line.push(code(c));
       });
-      line.push(" uses no index and may scan all of ", code(name(s.rel)));
-      if (b.limited) line.push(" despite the ", code("LIMIT"));
+      line.push(" uses no index and may scan all of ", table(s.rel));
+      if (b.limited) line.push(" despite the ", kw("LIMIT"));
       scans.push(line);
     }
     const pair = u.ambiguous ? null : unlinkedPair(b, u);
@@ -909,9 +911,8 @@ export function checkLoad(plan: LoadPlan, facts: Facts | Pending): LoadResult {
   }
 
   for (const l of plan.locks) {
-    if (!l.rel)
-      locks.push(l.line("the tables it covers").map((s) => (typeof s === "string" ? s : s.code)));
-    else if (large(l.rel)) locks.push(l.line(name(l.rel)));
+    if (!l.rel) locks.push(l.line("the tables it covers"));
+    else if (large(l.rel)) locks.push(l.line(table(l.rel)));
   }
 
   if (unbound || facts === "skipped") notes.push(["Part of this query could not be checked"]);
@@ -919,13 +920,13 @@ export function checkLoad(plan: LoadPlan, facts: Facts | Pending): LoadResult {
   if (facts === "timeout") notes.push(["Statistics did not return within 5 seconds"]);
   if (facts === "unavailable") notes.push(["Statistics are unavailable on this connection"]);
 
-  const estimates: { table: string; rows: number }[] = [];
+  const estimates: LoadResult["estimates"] = [];
   const shown = new Set<string>();
   for (const rel of named) {
     const rows = factsOf(rel)?.rows;
     if (rows == null || shown.has(relKey(rel))) continue;
     shown.add(relKey(rel));
-    estimates.push({ table: rel.table, rows });
+    estimates.push({ table: rel.table, ref: refOf(rel), rows });
   }
   const lines = [...rowsChanged, ...scans, ...joins, ...locks];
   const statsSkipped = sizeAware && plan.relations.length > 0 && typeof facts === "string";
