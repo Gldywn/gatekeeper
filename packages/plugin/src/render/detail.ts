@@ -8,8 +8,10 @@ import {
   downloadIcon,
   jsonIcon,
   markdownIcon,
+  maximizeIcon,
   tableIcon,
   xCircleIcon,
+  xIcon,
 } from "../icons";
 import { classifyQuery, type RiskClass } from "../sql/classify";
 import { formatSql } from "../sql/format";
@@ -200,8 +202,8 @@ function resultHtml(item: HistItem, dialect: string, cls: RiskClass): string {
   return `<div class="dt-result">${line}${grid}${cap}</div>`;
 }
 
-// The held rows: Copy and Export left, Tabulator's pager mounted right (views/detail.ts), the
-// position written beside it; no footer under the grid.
+// The held rows: Copy, Export and Enlarge left, Tabulator's pager mounted right
+// (views/detail.ts), the position written beside it; no footer under the grid.
 function resultGrid(): string {
   const copy = flyoutMenu(
     "copy",
@@ -214,7 +216,15 @@ function resultGrid(): string {
     { fmt: "csv", icon: tableIcon, name: "CSV" },
     { fmt: "json", icon: jsonIcon, name: "JSON" },
   ]);
-  return `<div class="res" id="detail-grid"><div class="res-bar"><span class="res-tools">${copy}${exportMenu}</span><span class="res-pg"><span class="res-count" data-grid-count></span><span class="res-pager" data-grid-pager></span></span></div><div class="gk-grid" data-result-grid></div></div>`;
+  const enlarge = `<button class="flyout res-zoom" type="button" data-result-zoom aria-label="Enlarge the results" title="Enlarge">${maximizeIcon}</button>`;
+  return `<div class="res" id="detail-grid"><div class="res-bar"><span class="res-tools">${copy}${exportMenu}${enlarge}</span><span class="res-pg"><span class="res-count" data-grid-count></span><span class="res-pager" data-grid-pager></span></span></div><div class="gk-grid" data-result-grid></div></div>`;
+}
+
+// The held rows over the whole tab: the request named as in its fold, the Queue's own count while
+// its tab is out of sight, then the result bar and grid moved in below (views/detail.ts).
+export function resultsDialogHtml(item: HistItem, pending: number): string {
+  const what = escapeHtml(item.intent ? capitalize(item.intent) : previewSql(item.sql));
+  return `<div class="detail-card results-card" role="dialog" aria-modal="true" aria-labelledby="resultsTitle"><div class="panel-head"><span class="panel-head-ico">${tableIcon}</span><span class="panel-title" id="resultsTitle">${what}</span><button class="results-queue" type="button" data-results-queue${pending ? "" : " hidden"}>Queue<span class="n">${pending}</span></button><button class="detail-close" type="button" data-results-close aria-label="Close" title="Close">${xIcon}</button></div></div>`;
 }
 
 function requestHtml(item: HistItem, dialect: string, cls: RiskClass): string {

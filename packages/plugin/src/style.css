@@ -4815,6 +4815,92 @@ p.auto-message[data-tone="busy"] {
 .res .gk-grid {
   border-radius: 0 0 var(--r) var(--r);
 }
+/* Enlarge: an icon-only twin of Copy and Export at their painted height, their 13px icon in it.
+   Whole pixels on purpose: an icon offset by a fraction rounds apart from its box, a pixel off. */
+.res-zoom {
+  width: 27px;
+  height: 27px;
+  padding: 0;
+  justify-content: center;
+}
+/* The rows enlarged over the whole tab, past the shell's width cap: the result bar, then the
+   grid in the rest of the height. */
+.results-overlay:not([hidden]) {
+  display: flex;
+}
+.results-card {
+  flex: 1;
+  min-width: 0;
+  max-width: none;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+.results-card .panel-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-block: 2px;
+}
+.results-card .res {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+/* Tabulator writes the pane's height cap inline; here the grid's row caps it instead. Sized to its
+   rows as in the pane, so a short result ends at its last row. */
+.results-card .gk-grid.tabulator {
+  align-self: start;
+  max-height: 100% !important;
+}
+.results-card .res-zoom {
+  display: none;
+}
+/* The rows take the focus as the dialog opens; the grid's own rule hides it, so it shows here,
+   drawn inside since the grid clips its overflow. */
+.results-card .gk-grid .tabulator-tableholder:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: -2px;
+}
+/* The Queue carried into the dialog while its tab is out of sight: the tab's own label and amber
+   count, shown only while something waits. */
+.results-queue {
+  flex: none;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 560;
+  cursor: pointer;
+}
+.results-queue[hidden] {
+  display: none;
+}
+.results-queue:hover {
+  background: var(--hi);
+  color: var(--text);
+}
+.results-queue:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 1px;
+}
+.results-queue .n {
+  color: var(--amber);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.results-queue:not([hidden]) + .detail-close {
+  margin-left: var(--s2);
+}
 /* What was asked, folded under one line that names it: the label, then the intent cut to the
    line. The whole line opens it. */
 .rq-row {
