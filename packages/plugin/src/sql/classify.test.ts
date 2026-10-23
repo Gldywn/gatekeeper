@@ -95,7 +95,7 @@ describe("classifyQuery", () => {
     );
   });
 
-  it("reads an EXPLAIN of a SELECT, approvable (the parser cannot parse EXPLAIN itself)", () => {
+  it("reads an EXPLAIN of a SELECT, approvable", () => {
     for (const sql of [
       "EXPLAIN SELECT 1",
       "EXPLAIN VERBOSE SELECT id FROM users",
@@ -300,6 +300,39 @@ describe("classifyQuery on PostgreSQL's own grammar", () => {
       expect(classifyQuery("VACUUM", engine).parseOk, engine).toBe(false);
     }
     expect(classifyQuery("VACUUM", pg).parseOk).toBe(true);
+  });
+});
+
+describe("classifyQuery on node-sql-parser", () => {
+  it("reads what the grammar parses and leaves the rest to the strict text check", () => {
+    for (const [sql, verdict] of [
+      ["EXPLAIN SELECT id FROM users", { class: "read", parseOk: true, blocked: false }],
+      ["EXPLAIN DELETE FROM users", { class: "destructive", parseOk: false, blocked: false }],
+      ["EXPLAIN ANALYZE SELECT 1", { class: "destructive", parseOk: false, blocked: false }],
+    ] as const) {
+      expect(classifyQuery(sql, "mysql"), sql).toEqual(verdict);
+    }
+  });
+
+  it("escalates a row lock wherever the grammar places it", () => {
+    for (const sql of [
+      "SELECT * FROM (SELECT * FROM t FOR UPDATE) s",
+      "SELECT * FROM t LOCK IN SHARE MODE",
+    ]) {
+      expect(classifyQuery(sql, "mysql"), sql).toEqual({
+        class: "write",
+        parseOk: true,
+        blocked: false,
+      });
+    }
+  });
+
+  // The refusal is textual, so an executable comment marker inside a string is refused too.
+  it("does not trust the parse of a MySQL or MariaDB statement holding /*!", () => {
+    for (const engine of ["mysql", "mariadb"]) {
+      expect(classifyQuery("SELECT '/*!' AS x", engine).parseOk, engine).toBe(false);
+    }
+    expect(classifyQuery("SELECT '/*!' AS x", "sqlite").parseOk).toBe(true);
   });
 });
 

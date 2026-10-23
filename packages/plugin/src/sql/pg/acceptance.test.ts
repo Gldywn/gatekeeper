@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { classifyQuery } from "../classify";
-import { prepareSql } from "../identifiers";
 import { planRead, readMetadataSql, resolveRead } from "../read-analysis";
 import {
   ACCEPTANCE_QUERIES,
@@ -955,18 +954,6 @@ describe("parser-only PostgreSQL spellings", () => {
     const sql = `SELECT id FROM public.orders WHERE ${where}`;
     expect(parsed(sql)).toEqual({ class: "read", parseOk: true, blocked: false });
     expect(analyze(sql, orders).reasons[0]).toMatch(reason);
-  });
-  it.each([
-    ["a string", "SELECT id FROM public.orders WHERE note = 'uuid ''x'' fetch first 5 rows only'"],
-    [
-      "a comment",
-      "SELECT id FROM public.orders /* text 'x' fetch first 5 rows only */ WHERE id = 1",
-    ],
-    ["a quoted identifier", 'SELECT "text" FROM public.orders WHERE id = 1'],
-  ])("leaves type names and FETCH inside %s untouched", (_, sql) => {
-    const prepared = prepareSql(sql, "postgresql").sql;
-    expect(prepared).not.toContain("CAST(");
-    expect(prepared).not.toContain("limit 5");
   });
 });
 

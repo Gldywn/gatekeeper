@@ -1,4 +1,3 @@
-import { prepareSql } from "../identifiers";
 import {
   classifyColumn,
   dedupeRefs,
@@ -55,21 +54,6 @@ function aliasName(as: unknown): string | null {
   return null;
 }
 
-// A relation renames its columns inside the alias itself, which the parser hands back
-// unsplit as the raw string "f(company_name, ...)". A quoted alias holding parentheses is
-// indistinguishable and is split too; a quoted column name holding them never matches.
-const RELATION_COLUMN_LIST = /^[^()]+\(([^()]*)\)$/;
-
-function relationColumnAliases(as: unknown): string[] {
-  const alias = aliasName(as);
-  const columns = alias ? RELATION_COLUMN_LIST.exec(alias.trim())?.[1] : undefined;
-  if (columns === undefined) return [];
-  return columns
-    .split(",")
-    .map((c) => c.trim())
-    .filter(Boolean);
-}
-
 // A table function has no relation to rename, so its alias names the single output column
 // it returns ("FROM unnest(tags) AS contact_email") instead of standing for a table.
 function isFunctionRelation(item: Record<string, unknown>): boolean {
@@ -91,11 +75,6 @@ function outputAliases(ast: unknown): string[] {
     if (Array.isArray(n.from)) {
       for (const item of n.from) {
         if (!isNode(item)) continue;
-        const renamed = relationColumnAliases(item.as);
-        if (renamed.length > 0) {
-          aliases.push(...renamed);
-          continue;
-        }
         const alias = isFunctionRelation(item) ? aliasName(item.as) : null;
         if (alias) aliases.push(alias);
       }
@@ -154,15 +133,8 @@ function jsonKeys(ast: unknown): string[] {
 // skip annotation rather than show something wrong.
 export function analyzeSql(sql: string, grammar: string): ParsedQuery | null {
   try {
-    const input = prepareSql(sql, grammar);
-    const { tableList, columnList, ast } = parser.parse(input.sql, { database: grammar });
-    const refs = tableList
-      .map(parseTableRef)
-      .filter((ref): ref is TableRef => ref !== null)
-      .map((ref) => ({
-        schema: ref.schema === null ? null : input.name(ref.schema),
-        name: input.name(ref.name),
-      }));
+    const { tableList, columnList, ast } = parser.parse(sql, { database: grammar });
+    const refs = tableList.map(parseTableRef).filter((ref): ref is TableRef => ref !== null);
     let star = false;
     const columns: string[] = [];
     for (const entry of columnList) {
@@ -172,13 +144,13 @@ export function analyzeSql(sql: string, grammar: string): ParsedQuery | null {
         continue;
       }
       if (name) {
-        columns.push(input.name(name));
+        columns.push(name);
       }
     }
     return {
       tables: dedupeRefs(refs),
       columns: unique(columns),
-      aliases: outputAliases(input.restoreAst(ast)),
+      aliases: outputAliases(ast),
       jsonKeys: jsonKeys(ast),
       star,
     };
@@ -243,11 +215,8 @@ function astWriteTargets(ast: unknown): WriteTarget[] {
 export function analyzeTableOps(sql: string, grammar: string): TableOps | null {
   let tableList: string[];
   let ast: unknown;
-  let input: ReturnType<typeof prepareSql>;
   try {
-    input = prepareSql(sql, grammar);
-    ({ tableList, ast } = parser.parse(input.sql, { database: grammar }));
-    ast = input.restoreAst(ast);
+    ({ tableList, ast } = parser.parse(sql, { database: grammar }));
   } catch {
     return null;
   }
@@ -260,8 +229,6 @@ export function analyzeTableOps(sql: string, grammar: string): TableOps | null {
     if (!ref) {
       continue;
     }
-    ref.name = input.name(ref.name);
-    if (ref.schema !== null) ref.schema = input.name(ref.schema);
     if (op === "select") {
       reads.push(ref);
     } else {
@@ -287,7 +254,7 @@ const RECEIPT_OPS = new Set(["select", "insert", "update", "delete", "drop", "tr
 export function statementReceipt(sql: string, grammar: string): Receipt | null {
   let ast: unknown;
   try {
-    ({ ast } = parser.parse(prepareSql(sql, grammar).sql, { database: grammar }));
+    ({ ast } = parser.parse(sql, { database: grammar }));
   } catch {
     return null;
   }
@@ -315,7 +282,7 @@ export function statementReceipt(sql: string, grammar: string): Receipt | null {
 const ROW_OPS = new Set(["insert", "update", "delete", "replace", "merge"]);
 export function countsRows(sql: string, grammar: string): boolean | null {
   try {
-    const { ast } = parser.parse(prepareSql(sql, grammar).sql, { database: grammar });
+    const { ast } = parser.parse(sql, { database: grammar });
     const top = Array.isArray(ast) ? ast : [ast];
     return top.length === 1 && isNode(top[0]) && ROW_OPS.has(String(top[0].type).toLowerCase());
   } catch {
@@ -372,12 +339,6 @@ function columnName(node: unknown): string | null {
   return columnLabel(node.column);
 }
 
-// The quoted spans of a raw SQL fragment the parser kept as text instead of modelling,
-// escapes included so the value still matches the query text. Single quotes only: the
-// parser re-quotes an unmodelled operand (IS DISTINCT FROM) with double quotes, where a
-// value and a bare column read alike.
-const RAW_QUOTED = /'((?:[^'\\]|''|\\.)*)'/g;
-
 // Node types holding a plain string literal, one per dialect family: "string" is
 // BigQuery's double-quoted form, "var_string" the T-SQL N'ACME' one.
 const STRING_NODES = new Set([
@@ -387,22 +348,12 @@ const STRING_NODES = new Set([
   "var_string",
 ]);
 
-// The literal values a node carries. Beyond the string nodes, the parser leaves E'ACME'
-// as raw text in a "default" node, and dollar-quoted $$ACME$$ as a "var" whose prefix and
-// suffix match (which a $1 bind parameter, having no suffix, never does).
 function literalValues(node: unknown): string[] {
   if (!isNode(node)) return [];
   const t = node.type;
-  if (typeof t === "string" && STRING_NODES.has(t) && typeof node.value === "string") {
-    return [node.value];
-  }
-  if (t === "var" && typeof node.name === "string" && typeof node.prefix === "string") {
-    return node.prefix === node.suffix ? [node.name] : [];
-  }
-  if (t === "default" && typeof node.value === "string") {
-    return [...node.value.matchAll(RAW_QUOTED)].map((m) => m[1]);
-  }
-  return [];
+  return typeof t === "string" && STRING_NODES.has(t) && typeof node.value === "string"
+    ? [node.value]
+    : [];
 }
 
 // A node the grammar allows only one string in: an OUTFILE path, a SELECT ... INTO target.
@@ -444,8 +395,7 @@ function hasSensitiveColumn(node: unknown): boolean {
 export function sensitiveLiterals(sql: string, grammar: string): string[] {
   let ast: unknown;
   try {
-    const input = prepareSql(sql, grammar);
-    ast = input.restoreAst(parser.astify(input.sql, { database: grammar }));
+    ast = parser.astify(sql, { database: grammar });
   } catch {
     return [];
   }
