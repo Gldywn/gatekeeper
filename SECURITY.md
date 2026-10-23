@@ -176,20 +176,46 @@ itself is in neither the URL nor the prompt.
 
 ## Data at rest and in flight
 
-- **Result caps.** The plugin caps the rows it forwards to the agent, by count and by
-  serialized size, so a bulk read never floods the agent context or the LLM provider, and
-  never overruns the broker body limit. The agent still learns the shape: the result
-  carries `truncated` and the true `rowCount`, and the human sees the cap under the
-  result grid.
-- **Cleartext local store.** Proposals live in a SQLite database under `~/.gatekeeper`
-  (`0700`). That database holds proposal SQL, intent and engine errors, which can contain
-  personal data. Returned rows and fields remain for the approved-result window. The
-  database is local and owner-only, but it is not encrypted at rest by Gatekeeper.
-- **Retention.** Approved result rows and fields are stripped 10 minutes after the
-  decision. Decided requests remain indefinitely with SQL, intent, state, timestamps,
-  referenced session metadata, Auto mode attribution and available `rowCount` and
-  `affectedRows` scalars. Technical lifecycle events in `audit` and inactive sessions
-  unreferenced by any request expire after 24 hours. The Audit Trail pages through the
+- **Result caps.** The plugin caps the rows it forwards to the agent, by count (10,000) and by
+  size (8 MiB, counted in UTF-8 bytes over the whole result), so a bulk read never floods the
+  agent context or the LLM provider, and never overruns the broker body limit with the sealed
+  copy that rides beside it. The agent still learns the shape: the result carries `truncated`
+  and the true `rowCount`, and the human sees the cap under the result grid. The history keeps
+  exactly this capped result, never more.
+- **Local store.** Proposals live in a SQLite database under `~/.gatekeeper` (`0700`). That
+  database holds proposal SQL, intent and engine errors in clear, which can contain personal
+  data. It also holds approved results twice:
+  - the agent's copy, in clear, for the 10-minute window the agent can read it in;
+  - the kept copy, for good, sealed by the plugin (gzip, then AES-256-GCM bound to the request
+    id) with a key the server never holds. The key lives in Beekeeper's encrypted plugin
+    storage, the same place as the broker token. A result has no kept copy when the plugin
+    could not seal it (the agent still gets its rows) or the broker refused the sealed copy as
+    malformed or over 9 MiB; decisions made before this version have none either.
+- **What the encryption protects.** Beekeeper encrypts its plugin storage with a random key it
+  keeps in its own data folder, itself encrypted with a constant that ships in Beekeeper's
+  source. It is not the operating system's keychain. In plain words:
+  - someone with a copy of `~/.gatekeeper` alone (a backup of that folder, a store attached to a
+    bug report) cannot read the kept rows. They can read the SQL, intents, errors and the agent's
+    copies from the last 10 minutes, and possibly older stripped rows still in SQLite's write-ahead
+    log or free pages;
+  - someone with a copy of the whole home folder or disk, a Time Machine backup included, can
+    read everything, unless the disk or the backup is itself encrypted (FileVault, an encrypted
+    backup);
+  - another process running as the same OS user can read everything, as it already can the
+    broker token (see [Same-user trust boundary](#same-user-trust-boundary));
+  - another OS user cannot read the store at all (`0700`), as before.
+  If Beekeeper's plugin storage is cleared (a reinstall, a reset), the key goes with it and the
+  kept rows can no longer be read; the history keeps everything else. The store turns on
+  SQLite's `secure_delete`, which zeroes deleted content as best-effort hardening: with the
+  write-ahead log, freed bytes in the main file are overwritten only once a checkpoint carries the
+  change, nothing is overwritten in the write-ahead log, snapshots or backups, and there is no
+  erasure deadline.
+- **Retention.** The agent's copy of approved rows and fields is stripped 10 minutes after the
+  decision; the kept copy stays. Decided requests remain indefinitely with SQL, intent, state,
+  timestamps, referenced session metadata, Auto mode attribution, who declined, and available
+  `rowCount` and `affectedRows` scalars. Kept results grow the store (up to 8 MiB each before
+  compression). Technical lifecycle events in `audit` and inactive
+  sessions unreferenced by any request expire after 24 hours. The Audit Trail pages through the
   connection's whole retained history. There is no manual deletion feature yet. Versions
   up to 0.2.0 deleted decided requests after 24 hours, also when such a server kept running
   beside a newer one on the same database, so stop every server when upgrading (the
@@ -219,9 +245,9 @@ itself is in neither the URL nor the prompt.
   with the decision as three booleans (`policy_json.sensitivity`), never a table, column or
   value; requests decided before that, or never shown on a card, are
   flagged from their SQL text alone, which cannot see the columns behind a `SELECT *`.
-- Opening an entry shows result rows only while this plugin tab still holds them in memory
-  for that same approved request (Recently resolved). The broker never serves rows to the
-  trail.
+- Opening an approved entry shows its kept rows: the plugin fetches the sealed copy
+  (`GET /results/:id`, under the same auth and connection scoping, approved requests only) and
+  opens it. The broker cannot read what it serves, and no agent-facing tool reaches it.
 
 ## Supply-chain policy
 

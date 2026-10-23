@@ -3,12 +3,7 @@ import { gearIcon, schemaIcon, xIcon } from "../icons";
 import { takeOver } from "../modal";
 import { autoSettingsHtml } from "../render/auto";
 import { modeDropdown, switchInput } from "../render/controls";
-import {
-  AUTO_STOP_OPTIONS,
-  RECENTLY_RESOLVED_OPTIONS,
-  RESULT_CACHE_OPTIONS,
-  type Settings,
-} from "../settings";
+import { AUTO_STOP_OPTIONS, RECENTLY_RESOLVED_OPTIONS, type Settings } from "../settings";
 import type { RiskMode } from "../sql/mode";
 
 interface SettingsViewDeps {
@@ -164,17 +159,10 @@ export class SettingsView {
           <div class="set-row">
             <div class="set-text">
               <span class="set-name">Recently resolved</span>
-              <span class="set-desc">How many resolved items the history panel keeps.</span>
+              <span class="set-desc">How many of the latest decisions the Queue shows.</span>
+              <span class="set-note">Every decision stays in the Audit Trail with its rows, encrypted on this machine.</span>
             </div>
             <span class="set-control">${selectHtml(s.recentlyResolved)}</span>
-          </div>
-          <div class="set-row">
-            <div class="set-text">
-              <span class="set-name">Result memory</span>
-              <span class="set-desc">How much result data this tab keeps in memory so you can reopen a past result and scroll its full table.</span>
-              <span class="set-note">Once the limit is reached, the oldest results are dropped.</span>
-            </div>
-            <span class="set-control">${cacheSelectHtml(s.resultCacheMb)}</span>
           </div>
         </section>
         <section class="set-group" id="versionSettings" tabindex="-1">${this.version()}</section>
@@ -228,15 +216,4 @@ function autoStopSelectHtml(value: number): string {
       `<option value="${n}"${n === value ? " selected" : ""}>${n ? `${n} min` : "Never"}</option>`,
   ).join("");
   return `<select class="set-select" data-setting="autoStopMinutes" aria-label="Auto-stop long queries after">${opts}</select>`;
-}
-
-function cacheLabel(mb: number): string {
-  return mb >= 1024 ? `${mb / 1024} GB` : `${mb} MB`;
-}
-
-function cacheSelectHtml(value: number): string {
-  const opts = RESULT_CACHE_OPTIONS.map(
-    (n) => `<option value="${n}"${n === value ? " selected" : ""}>${cacheLabel(n)}</option>`,
-  ).join("");
-  return `<select class="set-select" data-setting="resultCacheMb" aria-label="Result memory budget">${opts}</select>`;
 }

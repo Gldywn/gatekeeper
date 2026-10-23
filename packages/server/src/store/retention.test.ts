@@ -98,6 +98,11 @@ describe("durable audit counts", () => {
             [null, "alpha", "beta"][i % 3],
           );
         }
+        // Every tenth decision kept its sealed rows, so the kept flag has both answers to find.
+        const keep = ctx.db.prepare("INSERT INTO results VALUES (?, ?, 1)");
+        for (let i = 0; i < 100_000; i += 10) {
+          keep.run(String(i).padStart(6, "0"), Buffer.alloc(256, 1));
+        }
       })();
       const afterBytes =
         Number(ctx.db.pragma("page_count", { simple: true })) *
@@ -119,6 +124,7 @@ describe("durable audit counts", () => {
         affectedRows: 0,
         evaluation,
       });
+      expect(activity.every((entry) => entry.kept === (Number(entry.id) % 10 === 0))).toBe(true);
       expect(listActivity(ctx, null)).toHaveLength(200);
       expect(listActivity(ctx, null).every((entry) => Number(entry.id) % 3 === 0)).toBe(true);
       sweep(ctx);
@@ -131,6 +137,10 @@ describe("durable audit counts", () => {
       expect(
         JSON.stringify(activityPlan).match(/USING COVERING INDEX idx_requests_activity/g),
       ).toHaveLength(2);
+      // The kept flag is one primary-key probe per served entry, never a scan of the payloads.
+      expect(JSON.stringify(activityPlan)).toContain(
+        "SEARCH k USING COVERING INDEX sqlite_autoindex_results_1 (request_id=?)",
+      );
       const purgeSql = statements.find((sql) => sql.includes("AS row_count"))!;
       expect(
         JSON.stringify(ctx.db.prepare(`EXPLAIN QUERY PLAN ${purgeSql}`).all(10 ** 12)),

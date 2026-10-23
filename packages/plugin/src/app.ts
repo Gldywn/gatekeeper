@@ -15,10 +15,12 @@ import type {
   AutoEvaluation,
   AutoHold,
   BuildIdentity,
+  DeclinedBy,
   SensitivityRecord,
 } from "@gatekeeper/shared";
 import { enter, type Loop, pulse, reveal } from "./anim";
 import { SchemaAnnotator } from "./annotate";
+import { ResultArchive } from "./archive";
 import { capitalize, clock, countsLabel, escapeHtml, relAge } from "./html";
 import {
   agentBadge,
@@ -45,9 +47,9 @@ import { BrokerClient } from "./net/broker";
 import { connectionScopeKey } from "./net/scope";
 import { SingleInstance, type SingleInstanceWire } from "./net/singleinstance";
 import { overlayScroll } from "./overlay-scroll";
+import { entryFlags } from "./render/activity";
 import { agentLinkAge, agentLinkLabel, agentLinkStatusHtml } from "./render/agentlink";
 import { AUTO_APPROVED, autoIcon, autoPopHtml, refusalReason, SAVED_KEY_MASK } from "./render/auto";
-
 import { ConfirmModal, runSentence } from "./render/confirm";
 import { connChipInner } from "./render/connchip";
 import { modeDropdown, switchInput } from "./render/controls";
@@ -84,7 +86,7 @@ import {
 } from "./render/version";
 import { capResult, type Field, type HistResult } from "./result";
 import { collectSchema } from "./schema-collect";
-import { filterSchema, resultBudgetBytes, type Settings, SettingsStore } from "./settings";
+import { filterSchema, type Settings, SettingsStore } from "./settings";
 import { AUTO_KEY, currentEvaluation, validEvaluation } from "./sql/auto";
 import { classifyQuery, type RiskClass, rank } from "./sql/classify";
 import { formatSql } from "./sql/format";
@@ -185,6 +187,16 @@ interface Selection {
   item?: HistItem;
 }
 
+// How a request this tab handled ended. `recorded`: the server acknowledged the decision, so it
+// may be listed before the server's own page shows it; `kept`: its sealed rows went with it.
+interface Finished {
+  result?: HistResult;
+  reason?: string;
+  declinedBy?: DeclinedBy;
+  recorded?: boolean;
+  kept?: boolean;
+}
+
 // The host sends affectedRows on every result (Beekeeper >= 5.4) but the SDK type does not
 // declare it, so read it defensively: an absent count must stay absent rather than become a
 // fabricated zero the agent would read as "changed nothing".
@@ -227,11 +239,9 @@ const ISSUES_URL = `${REPO_URL}/issues/new/choose`;
 const RELEASES_URL = `${REPO_URL}/releases`;
 const STARRED_KEY = "gatekeeper.starred";
 
-// The rows forwarded to the agent are capped independently of the local history budget:
-// a bulk read must never flood the agent context (and the LLM provider) or overrun the
-// broker's body limit. The true count still reaches the agent via rowCount + truncated.
-const AGENT_MAX_ROWS = 10_000;
-const AGENT_MAX_BYTES = 8 * 1024 * 1024;
+// Recently resolved follows the server at the sweep's own cadence, so expiries, cancellations
+// and decisions made elsewhere show without a local guess.
+const RECENT_REFRESH_MS = 5_000;
 
 // Officially tested engines; every other Beekeeper database type gets the untested notice.
 const DB_SUPPORTED = new Set(["postgresql", "mysql"]);
@@ -314,7 +324,17 @@ export class Gatekeeper {
   // Open deny forms and their in-progress reason text, keyed by card id, so a
   // half-typed reason survives a queue rebuild from a concurrent proposal.
   private readonly denyDrafts = new Map<string, string>();
-  private readonly history: HistItem[] = [];
+  // Recently resolved: the newest decisions on this connection as the server records them, and
+  // the ones this tab just made, shown at once until that page lists them.
+  private recent: HistItem[] = [];
+  private decided: HistItem[] = [];
+  // Endings only this tab saw (an expiry, a lost lease, a result or decline not acknowledged):
+  // shown in the open pane until the server's record of the same request replaces them.
+  private readonly unrecorded = new WeakSet<HistItem>();
+  private recentAt = 0;
+  private recentLoading = false;
+  private recentAgain = false;
+  private readonly archive = new ResultArchive();
   private roster: SessionRoster[] = [];
   private rosterSig = "";
   private rosterLoops: Loop[] = [];
@@ -395,6 +415,7 @@ export class Gatekeeper {
       root,
       annotator: this.annotator,
       dialect: () => this.dialect,
+      loadRows: (id) => this.loadRows(id),
     });
     this.activityView = new ActivityView({
       root,
@@ -628,8 +649,13 @@ export class Gatekeeper {
       });
     }
     this.polling = true;
+    // Started now so the first seal rarely waits for it; sealing awaits it either way.
+    this.archive
+      .ready()
+      .catch((err: unknown) => log.error(err instanceof Error ? err : String(err)));
     void this.loadInflight();
     void this.poll();
+    void this.refreshRecent();
     void this.pollRoster(++this.pollGeneration);
     void this.reportConnection();
     void this.reportSchema();
@@ -645,7 +671,8 @@ export class Gatekeeper {
     this.mode = "read";
     this.connGeneration++;
     this.cards.length = 0;
-    this.history.length = 0;
+    this.recent = [];
+    this.decided = [];
     this.annotator.clearCache();
     this.activeGen++;
     this.polling = false;
@@ -866,6 +893,81 @@ export class Gatekeeper {
     return this.conn ? connectionScopeKey(this.conn) : undefined;
   }
 
+  // Read and opened under one connection: rows that arrive after a switch belong to no list.
+  private async loadRows(id: string): Promise<HistResult> {
+    const generation = this.connGeneration;
+    const sealed = await this.broker.resultArchive(id, this.connScopeKey());
+    if (!sealed) throw new Error("No kept rows");
+    const result = await this.archive.open(sealed, id);
+    if (generation !== this.connGeneration) throw new Error("Connection changed");
+    return result;
+  }
+
+  // The newest decisions on this connection, as many as Recently resolved shows. Requests that
+  // overlap coalesce into one more read, and a page that lands after a switch is dropped.
+  private async refreshRecent(): Promise<void> {
+    if (!this.polling) return;
+    if (this.recentLoading) {
+      this.recentAgain = true;
+      return;
+    }
+    this.recentLoading = true;
+    this.recentAt = Date.now();
+    const generation = this.connGeneration;
+    try {
+      const page = await this.broker.activity(
+        this.connScopeKey(),
+        undefined,
+        this.settingsStore.get().recentlyResolved,
+      );
+      if (!page || generation !== this.connGeneration) return;
+      const connection = this.connectionName || null;
+      this.recent = page.activity.map((e) => ({
+        ...auditItem(e, connection),
+        sensitivity: entryFlags(e, textSchema(e.sql, this.dialect)) ?? undefined,
+      }));
+      // An acknowledged decision leaves the provisional list once the page lists it, or once a
+      // full page reaches past it, which proves it is no longer among the newest.
+      const listed = new Set(this.recent.map((i) => i.id));
+      const full = this.recent.length >= this.settingsStore.get().recentlyResolved;
+      const oldest = this.recent.at(-1)?.resolvedAt ?? 0;
+      this.decided = this.decided.filter(
+        (i) => !listed.has(i.id) && !(full && i.resolvedAt < oldest),
+      );
+      this.followRecorded();
+      this.renderQueueList();
+    } catch {
+      // The next tick tries again; the list keeps what it last showed.
+    } finally {
+      this.recentLoading = false;
+      if (this.recentAgain) {
+        this.recentAgain = false;
+        void this.refreshRecent();
+      }
+    }
+  }
+
+  // What Recently resolved lists: the server's page, with this tab's own decisions it does not
+  // show yet slotted in by time.
+  private recentItems(): HistItem[] {
+    const listed = new Set(this.recent.map((i) => i.id));
+    return [...this.decided.filter((i) => !listed.has(i.id)), ...this.recent]
+      .sort((a, b) => b.resolvedAt - a.resolvedAt)
+      .slice(0, this.settingsStore.get().recentlyResolved);
+  }
+
+  // An open outcome the server never acknowledged is this tab's own view: once the server's
+  // record of that request shows up (a delivery that did land, an execution now unknown), it
+  // replaces it. An acknowledged one already says what the server holds and keeps its grid.
+  private followRecorded(): void {
+    const sel = this.selection.queue;
+    if (sel?.kind !== "hist" || !sel.item || !this.unrecorded.has(sel.item)) return;
+    const recorded = this.recent.find((i) => i.id === sel.id);
+    if (!recorded) return;
+    sel.item = recorded;
+    if (this.tab === "queue") this.renderSelection(true);
+  }
+
   // No connectionChanged notification exists, so a switch is caught by re-reading
   // getConnectionInfo(): a postMessage round-trip, throttled to ~5s on the tick
   // (a switch is rare) rather than paid every second.
@@ -939,9 +1041,10 @@ export class Gatekeeper {
     // card's annotation cannot describe the old connection.
     this.annotator.clearCache();
     // History, activity, roster and what the Inbox shows are connection-scoped; reset so the
-    // old one cannot leak in. The roster re-fetches on its own timer, and an open Audit Trail
-    // reloads for the new connection.
-    this.history.length = 0;
+    // old one cannot leak in. The roster re-fetches on its own timer, Recently resolved once the
+    // new connection's settings say how many it lists, and an open Audit Trail reloads.
+    this.recent = [];
+    this.decided = [];
     this.resetInbox();
     if (this.tab === "audit") void this.activityView.open();
     this.roster = [];
@@ -963,7 +1066,6 @@ export class Gatekeeper {
       await this.reportSchema();
     })();
     this.renderQueue();
-    this.renderHistory();
     this.renderRoster();
     void this.maybeShowDbNotice();
   }
@@ -1270,6 +1372,7 @@ export class Gatekeeper {
       this.renderShell();
       void this.loadInflight();
       void this.poll();
+      void this.refreshRecent();
       void this.pollRoster(++this.pollGeneration);
       void this.reportConnection();
       void this.reportSchema();
@@ -1511,7 +1614,7 @@ export class Gatekeeper {
         this.confirmModal.open({
           tone: "destructive",
           heading: "Reset all settings?",
-          body: "Every setting on this connection goes back to its default: detection, double confirmation, schema access, and result memory. This can't be undone.",
+          body: "Every setting on this connection goes back to its default: detection, double confirmation, schema access, history and auto-stop. This can't be undone.",
           confirmLabel: "Reset to defaults",
           onConfirm: () => void this.resetSettings(),
         });
@@ -1681,6 +1784,7 @@ export class Gatekeeper {
     } else {
       this.exportDialog.close();
       this.activityView.close();
+      void this.refreshRecent();
     }
     this.renderSelection(true);
   }
@@ -1728,6 +1832,11 @@ export class Gatekeeper {
       if (!entry) return;
       next.item = auditItem(entry, this.connectionName || null);
     }
+    if (next.kind === "hist") {
+      const item = this.recentItems().find((i) => i.id === next.id);
+      if (!item) return;
+      next.item = item;
+    }
     this.selection[this.tab] = next;
     for (const row of this.root.querySelectorAll<HTMLElement>(
       `#${this.tab === "queue" ? "listQueue" : "listAudit"} [data-row]`,
@@ -1741,15 +1850,6 @@ export class Gatekeeper {
     if (this.root.querySelector<HTMLElement>(".pane-list")?.offsetParent === null) {
       this.root.querySelector<HTMLElement>("[data-back]")?.focus({ preventScroll: true });
     }
-  }
-
-  // The server's record stays the fact; rows this tab still holds for the same approved request
-  // are attached when it renders, so rows Result memory has since dropped are not shown here.
-  private withLocalRows(item: HistItem): HistItem {
-    const local = this.history.find((h) => h.id === item.id);
-    return item.status === "approved" && local?.status === "approved" && local.result?.rows.length
-      ? { ...item, result: local.result }
-      : item;
   }
 
   // An Escape meant for the Inbox: from inside it, or from nowhere (a clicked control that went
@@ -1841,11 +1941,7 @@ export class Gatekeeper {
       this.captureDenyDrafts(queue);
       queue.innerHTML = "";
     }
-    const item =
-      sel?.kind === "hist"
-        ? (this.history.find((h) => h.id === sel.id) ?? sel.item)
-        : sel?.item && this.withLocalRows(sel.item);
-    if (sel?.kind === "hist" && item) sel.item = item;
+    const item = sel?.item;
     if (item) {
       empty.innerHTML = "";
       if (force || this.detailView.showing() !== item.id) {
@@ -2593,9 +2689,9 @@ export class Gatekeeper {
     el.innerHTML = `<span class="armed-chip ${tone}"><span class="armed-ico">${icon}</span>${label}<button class="armed-off" type="button" data-disarm title="Disarm, back to read-only" aria-label="Disarm, back to read-only">${xIcon}</button></span>`;
   }
 
-  // A setting changed (from either surface): re-sync both control surfaces, re-apply
-  // the activity-log visibility and history cap, and re-annotate the pending cards so
-  // a dropped detection axis stops flagging at once.
+  // A setting changed (from either surface): re-sync both control surfaces, re-read Recently
+  // resolved at its count, and re-annotate the pending cards so a dropped detection axis stops
+  // flagging at once.
   private onSettingsChanged(): void {
     this.syncSettingControls();
     const hint = this.root.querySelector<HTMLElement>("#schemaHint");
@@ -2604,8 +2700,8 @@ export class Gatekeeper {
       hint.dataset.on = String(on);
       hint.querySelector(".sa-hint")?.setAttribute("aria-label", schemaAccessLabel(on));
     }
-    this.trimHistory();
-    this.renderHistory();
+    this.renderQueueList();
+    void this.refreshRecent();
     for (const card of [...this.cards]) {
       void this.analyzeSchema(card);
     }
@@ -2624,14 +2720,6 @@ export class Gatekeeper {
         el.value = String(value);
       }
     }
-  }
-
-  private trimHistory(): void {
-    const cap = this.settingsStore.get().recentlyResolved;
-    if (this.history.length > cap) {
-      this.history.length = cap;
-    }
-    this.enforceHistoryBudget();
   }
 
   private async poll(): Promise<void> {
@@ -2703,6 +2791,7 @@ export class Gatekeeper {
     }
     void this.poll();
     void this.pollRoster(++this.pollGeneration);
+    if (this.tab === "queue") void this.refreshRecent();
   }
 
   private async pollRoster(generation: number): Promise<void> {
@@ -2851,13 +2940,14 @@ export class Gatekeeper {
     if (card.state !== "ready") {
       return;
     }
+    // Both states are the server's answer to the renewal, so the ending is already recorded.
     if (state === "expired") {
-      this.finish(card.id, "expired", "expired");
+      this.finish(card.id, "expired", "expired", { recorded: true });
       return;
     }
     // No word of its own: the row would read as a timeout, so the note carries the truth.
     if (state === "cancelled") {
-      this.finish(card.id, "expired", CANCELLED_NOTE);
+      this.finish(card.id, "expired", CANCELLED_NOTE, { recorded: true });
       return;
     }
     // Back in the pool (or the broker said nothing): the next poll re-offers it.
@@ -2891,6 +2981,9 @@ export class Gatekeeper {
       }
     }
     this.tickRuns(now);
+    if (this.tab === "queue" && !document.hidden && now - this.recentAt >= RECENT_REFRESH_MS) {
+      void this.refreshRecent();
+    }
     // Keep the resolved-history and roster ages current without re-rendering.
     this.root.querySelectorAll<HTMLSpanElement>("#listQueue .hage, #roster .rage").forEach((el) => {
       const t = Number(el.dataset.age);
@@ -2925,10 +3018,6 @@ export class Gatekeeper {
     this.updateTabTitle();
   }
 
-  private renderHistory(): void {
-    this.renderQueueList();
-  }
-
   private renderQueueList(): void {
     const list = this.root.querySelector<HTMLElement>("#listQueue");
     if (!list) {
@@ -2945,10 +3034,7 @@ export class Gatekeeper {
           )
           .join("")
       : emptyListHtml("pending", this.connectionName);
-    // Defense in depth: a switch already clears history, but never render a row
-    // stamped under a different connection than the one on screen now.
-    const current = this.connectionName || null;
-    const recent = this.history.filter((h) => h.connection === current);
+    const recent = this.recentItems();
     const focused = list.contains(document.activeElement)
       ? (document.activeElement as HTMLElement).dataset.row
       : undefined;
@@ -3062,11 +3148,13 @@ export class Gatekeeper {
     // approve, nor a blocked (empty or multi-statement) one.
     const verdict = classifyQuery(card.sql, this.dialect);
     if (verdict.blocked || rank(verdict.class) > modeRank(this.mode)) {
-      await this.postResult(card, {
+      const reason = this.modeBlockReason(verdict.blocked, verdict.class);
+      const recorded = await this.postResult(card, {
         status: "rejected",
-        reason: this.modeBlockReason(verdict.blocked, verdict.class),
+        reason,
+        declinedBy: "gate",
       });
-      this.finish(id, "failed", "blocked");
+      this.finish(id, "rejected", "blocked", { reason, declinedBy: "gate", recorded });
       return;
     }
     // Second gate: an opt-out double-confirmation before a write or destructive runs.
@@ -3156,18 +3244,29 @@ export class Gatekeeper {
       if (!this.cards.includes(card) || active !== this.activeGen) {
         return;
       }
+      // Only a write answers "how many rows did this change". On a read most drivers report 0,
+      // which would read as an answer instead of a non-answer.
+      const changed = verdict.class !== "read" ? affectedRows : undefined;
+      // What the agent receives is also what the history keeps, with the true count.
+      const forAgent = capResult(rows, fields, undefined, undefined, changed);
+      // Sealed while still executing, so the lease keeps renewing however long sealing takes.
+      // The kept copy rides with the decision; failing to seal it never holds back the rows.
+      const archive = await this.archive.seal(forAgent, id).catch((err: unknown) => {
+        log.error(err instanceof Error ? err : String(err));
+        return undefined;
+      });
+      if (!this.cards.includes(card) || active !== this.activeGen) {
+        return;
+      }
       this.setCardState(id, "posting");
-      // Cap what the agent receives, and keep the true count so it learns the shape.
-      const forAgent = capResult(rows, fields, AGENT_MAX_BYTES, AGENT_MAX_ROWS);
       const posted = await this.postResult(card, {
         status: "approved",
         rows: forAgent.rows,
         fields: forAgent.fields,
         truncated: forAgent.truncated,
         rowCount: forAgent.rowCount,
-        // Only a write answers "how many rows did this change". On a read most drivers
-        // report 0, which would read as an answer instead of a non-answer.
-        ...(verdict.class !== "read" && affectedRows !== undefined ? { affectedRows } : {}),
+        ...(changed !== undefined ? { affectedRows: changed } : {}),
+        ...(archive ? { archive } : {}),
       });
       // The rows already ran on the live database; if the outcome never reached the
       // broker the agent cannot see them, so record a failure rather than a false approve.
@@ -3176,24 +3275,19 @@ export class Gatekeeper {
         return;
       }
       // A write reports what it changed, a read what it returned, and a write that also
-      // returns rows says both. Tell the human too when the agent got fewer rows.
-      const changed = verdict.class !== "read" ? affectedRows : undefined;
-      const counts = countsLabel({ rowCount: forAgent.rowCount, affectedRows: changed });
-      const note = forAgent.truncated
-        ? `${counts} (agent received ${forAgent.rows.length})`
-        : counts;
-      this.finish(
-        id,
-        "approved",
-        note,
-        capResult(rows, fields, resultBudgetBytes(this.settingsStore.get()), undefined, changed),
-      );
+      // returns rows says both.
+      const note = countsLabel({ rowCount: forAgent.rowCount, affectedRows: changed });
+      this.finish(id, "approved", note, {
+        result: forAgent,
+        recorded: true,
+        kept: Boolean(archive),
+      });
     } catch (err) {
       const message = stopNote(run, err instanceof Error ? err.message : String(err));
       // The failure may be the connection itself: check on the next tick, not in 15 s.
       this.nextCheckAt = 0;
-      await this.postResult(card, { status: "approved", error: message });
-      this.finish(id, "failed", "query failed", undefined, message);
+      const recorded = await this.postResult(card, { status: "approved", error: message });
+      this.finish(id, "failed", "query failed", { reason: message, recorded });
     }
   }
 
@@ -3325,8 +3419,16 @@ export class Gatekeeper {
     // record for good.
     const custom = reason?.trim();
     this.setCardState(id, "rejecting");
-    await this.postResult(card, { status: "rejected", reason: custom || undefined });
-    this.finish(id, "rejected", "declined", undefined, custom || undefined);
+    const recorded = await this.postResult(card, {
+      status: "rejected",
+      reason: custom || undefined,
+      declinedBy: "human",
+    });
+    this.finish(id, "rejected", "declined", {
+      reason: custom || undefined,
+      declinedBy: "human",
+      recorded,
+    });
   }
 
   // Swap only this card's action row in place (no renderQueue) so the lease
@@ -3452,8 +3554,7 @@ export class Gatekeeper {
     id: string,
     status: "approved" | "rejected" | "failed" | "expired",
     note: string,
-    result?: HistResult,
-    reason?: string,
+    { result, reason, declinedBy, recorded = false, kept = false }: Finished = {},
   ): void {
     const card = this.cards.find((c) => c.id === id);
     if (!card) {
@@ -3474,6 +3575,7 @@ export class Gatekeeper {
         note: displayNote,
         outcome: note,
         ...(status === "rejected" && reason?.trim() ? { reason: reason.trim() } : {}),
+        ...(status === "rejected" && declinedBy ? { declinedBy } : {}),
         sql: card.sql,
         resolvedAt: Date.now(),
         connection: this.connectionName || null,
@@ -3490,16 +3592,25 @@ export class Gatekeeper {
           : this.textSensitivity(card),
       };
       // An open card stays open as its outcome: same request, now decided. The selection holds
-      // the item itself, so it outlives the Recently resolved cap while another tab shows.
+      // the item itself, rows included, so it outlives the Recently resolved cap.
       const open = this.selection.queue?.kind === "card" && this.selection.queue.id === id;
       if (open) this.selection.queue = { kind: "hist", id, item };
-      this.history.unshift(item);
-      if (this.history.length > this.settingsStore.get().recentlyResolved) {
-        this.history.pop();
+      // Listed at once when the server acknowledged it, as metadata only: the rows stay with the
+      // open pane, and anything else reopens from the kept copy. An ending the server has not
+      // acknowledged stays in the open pane until the server's own record replaces it.
+      if (recorded) {
+        const rowless = item.result && { ...item.result, fields: [], rows: [] };
+        this.decided.unshift({ ...item, result: rowless, ...(kept ? { kept: true } : {}) });
+        this.decided.length = Math.min(
+          this.decided.length,
+          this.settingsStore.get().recentlyResolved,
+        );
+      } else {
+        this.unrecorded.add(item);
       }
-      this.enforceHistoryBudget();
       // Dropped once its outcome row exists, so the rebuild hands a focused row to that row.
       this.drop(id);
+      void this.refreshRecent();
       // The Audit Trail's open entry, if that tab shows, keeps its grid's sort and page.
       if (open && this.tab === "queue") this.renderSelection(true);
     };
@@ -3509,28 +3620,6 @@ export class Gatekeeper {
     } else {
       commit();
     }
-  }
-
-  // Retain the newest results within the configured byte budget; older items keep
-  // their row and SQL but shed their rows so memory stays bounded.
-  private enforceHistoryBudget(): void {
-    const budget = resultBudgetBytes(this.settingsStore.get());
-    let total = 0;
-    let shownShed = false;
-    for (const item of this.history) {
-      if (!item.result || item.result.rows.length === 0) {
-        continue;
-      }
-      const size = item.result.bytes ?? JSON.stringify(item.result.rows).length;
-      if (total + size > budget) {
-        item.result = { ...item.result, rows: [], truncated: true, bytes: 0 };
-        shownShed ||= item.id === this.detailView.showing();
-      } else {
-        total += size;
-      }
-    }
-    // The open detail lets go of rows just shed, from either tab, keeping its request and counts.
-    if (shownShed) this.renderSelection(true);
   }
 
   private copySql(el: HTMLElement): void {

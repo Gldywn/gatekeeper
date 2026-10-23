@@ -1,7 +1,7 @@
 import type { ConnectionSnapshot } from "./connection.js";
 import type { SchemaSnapshot } from "./schema.js";
 import { claimAlert, claimAutoAlert } from "./store/alerts.js";
-import { type ActivityCursor, listActivity, readAudit } from "./store/audit.js";
+import { type ActivityCursor, listActivity, readArchive, readAudit } from "./store/audit.js";
 import { getConnection, setConnection } from "./store/connection.js";
 import { createContext, migrate, type StoreContext } from "./store/db.js";
 import {
@@ -222,6 +222,10 @@ export class RequestStore {
 
   listActivity(connection: string | null, limit = 200, before?: ActivityCursor): ActivityEntry[] {
     return listActivity(this.ctx, connection, limit, before);
+  }
+
+  readArchive(requestId: string, connection: string | null): Buffer | null {
+    return readArchive(this.ctx, requestId, connection);
   }
 
   listInflight(pluginId: string, connection: string | null): GatekeeperRequest[] {

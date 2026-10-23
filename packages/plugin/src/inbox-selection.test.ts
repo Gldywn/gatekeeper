@@ -35,14 +35,17 @@ function harness() {
   const app = Object.create(Gatekeeper.prototype);
   Object.assign(app, {
     cards: [card("a"), card("b")],
-    history: [],
+    recent: [],
+    decided: [],
+    unrecorded: new WeakSet(),
+    refreshRecent: vi.fn(),
     denyDrafts: new Map(),
     connGeneration: 0,
     connectionName: "test",
     tab: "queue",
     selection: { queue: null, audit: null },
     root: { querySelector: () => null },
-    settingsStore: { get: () => ({ recentlyResolved: 20, resultCacheMb: 4 }) },
+    settingsStore: { get: () => ({ recentlyResolved: 20 }) },
     confirmModal: { dismissFor: vi.fn() },
     renderQueueList: vi.fn(),
     renderSelection: vi.fn(),
@@ -73,13 +76,16 @@ describe("Inbox selection", () => {
     expect(app.renderSelection).toHaveBeenCalledOnce();
   });
 
-  it("keeps a decided card open as its outcome", () => {
+  it("keeps a decided card open as its outcome, its rows held by the open pane only", () => {
     const app = harness();
     app.selection.queue = { kind: "card", id: "a" };
-    app.finish("a", "approved", "1 row returned");
-    expect(app.selection.queue).toEqual({ kind: "hist", id: "a", item: app.history[0] });
-    expect(app.history[0]).toMatchObject({ id: "a", status: "approved" });
+    const result = { fields: [{ name: "a" }], rows: [{ a: 1 }], rowCount: 1, truncated: false };
+    app.finish("a", "approved", "1 row returned", { result, recorded: true, kept: true });
+    expect(app.selection.queue).toMatchObject({ kind: "hist", id: "a", item: { result } });
+    expect(app.decided[0]).toMatchObject({ id: "a", status: "approved", kept: true });
+    expect(app.decided[0].result).toEqual({ ...result, fields: [], rows: [] });
     expect(app.renderSelection).toHaveBeenCalledWith(true);
+    expect(app.refreshRecent).toHaveBeenCalledOnce();
   });
 
   it("leaves the Audit Trail's open entry alone when the queue's card is decided", () => {
@@ -96,23 +102,43 @@ describe("Inbox selection", () => {
     expect(app.renderSelection).not.toHaveBeenCalled();
   });
 
-  it("lets the open detail go of rows Result memory sheds, and leaves other details alone", () => {
+  it("lists only the endings the server acknowledged, the gate's refusal included", () => {
     const app = harness();
-    const rows = () => ({ fields: [{ name: "a" }], rows: [{ a: 1 }], rowCount: 1, bytes: 10 });
-    const record = { id: "x", status: "approved", note: "", sql: "SELECT 1" };
-    app.tab = "audit";
-    app.selection.audit = { kind: "audit", id: "x", item: record };
-    app.history = [{ ...record, result: rows() }];
-    let shown = "y";
-    app.detailView = { showing: () => shown };
-    app.settingsStore = { get: () => ({ recentlyResolved: 20, resultCacheMb: 0 }) };
-    app.enforceHistoryBudget();
-    expect(app.renderSelection).not.toHaveBeenCalled();
-    app.history[0].result = rows();
-    shown = "x";
-    app.enforceHistoryBudget();
-    expect(app.renderSelection).toHaveBeenCalledWith(true);
-    expect(app.withLocalRows(record)).toBe(record);
+    app.selection.queue = { kind: "card", id: "a" };
+    app.finish("a", "rejected", "declined", { declinedBy: "human", recorded: false });
+    app.finish("b", "failed", "lease lost");
+    // Both stay in the open pane only: the server acknowledged neither.
+    expect(app.decided).toEqual([]);
+    expect(app.selection.queue).toMatchObject({
+      kind: "hist",
+      item: { status: "rejected", declinedBy: "human" },
+    });
+    expect(app.unrecorded.has(app.selection.queue.item)).toBe(true);
+    const gate = harness();
+    gate.finish("a", "rejected", "blocked", {
+      reason: "Write mode is required.",
+      declinedBy: "gate",
+      recorded: true,
+    });
+    expect(gate.decided[0]).toMatchObject({
+      status: "rejected",
+      reason: "Write mode is required.",
+      declinedBy: "gate",
+    });
+  });
+
+  it("holds no rows in the provisional list and no more entries than Recently resolved shows", () => {
+    const app = harness();
+    const result = { fields: [{ name: "a" }], rows: [{ a: 1 }], rowCount: 1, truncated: false };
+    // Deliveries keep succeeding while no server page arrives to reconcile them.
+    for (let i = 0; i < 30; i++) {
+      app.cards.push(card(`c${i}`));
+      app.finish(`c${i}`, "approved", "1 row returned", { result, recorded: true, kept: true });
+    }
+    expect(app.decided).toHaveLength(20);
+    expect(app.decided.every((i: { result: { rows: unknown[] } }) => !i.result.rows.length)).toBe(
+      true,
+    );
   });
 
   it("drops another card without touching the open one", () => {
@@ -121,6 +147,139 @@ describe("Inbox selection", () => {
     app.finish("b", "expired", "expired");
     expect(app.selection.queue).toEqual({ kind: "card", id: "a" });
     expect(app.renderSelection).not.toHaveBeenCalled();
+  });
+});
+
+describe("Recently resolved from the server", () => {
+  const entry = (id: string, decidedAt: number, patch: Record<string, unknown> = {}) => ({
+    id,
+    createdAt: decidedAt - 1_000,
+    decidedAt,
+    sessionId: "s1",
+    harness: null,
+    project: null,
+    sessionLabel: null,
+    sql: "SELECT 1",
+    intent: null,
+    state: "approved",
+    reason: null,
+    error: null,
+    rowCount: 1,
+    affectedRows: null,
+    ...patch,
+  });
+
+  function served(pages: unknown[][]) {
+    const app = harness();
+    delete app.refreshRecent;
+    let resolveNext: (() => void) | undefined;
+    const activity = vi.fn(
+      (_scope: unknown, _before: unknown, _limit: number) =>
+        new Promise((resolve) => {
+          const page = { activity: pages.shift() ?? [], more: false };
+          resolveNext = () => resolve(page);
+        }),
+    );
+    Object.assign(app, {
+      polling: true,
+      dialect: "postgresql",
+      conn: null,
+      broker: { activity },
+      recentLoading: false,
+      recentAgain: false,
+      recentAt: 0,
+    });
+    const answer = async () => {
+      resolveNext?.();
+      await new Promise((r) => setTimeout(r, 0));
+    };
+    return { app, activity, answer };
+  }
+
+  it("lists the server's newest decisions at its count, this tab's own until the page has them", async () => {
+    const now = Date.now();
+    const { app, activity, answer } = served([[entry("srv", now - 5_000)]]);
+    const mine = { id: "mine", status: "approved", note: "", sql: "SELECT 1", resolvedAt: now };
+    app.decided = [mine];
+    const refresh = app.refreshRecent();
+    await answer();
+    await refresh;
+    expect(activity.mock.calls[0][2]).toBe(20);
+    expect(app.recentItems().map((i: { id: string }) => i.id)).toEqual(["mine", "srv"]);
+    expect(app.renderQueueList).toHaveBeenCalled();
+    // Once the server lists it, the server's record is what shows.
+    const { app: next, answer: again } = served([[entry("mine", now), entry("srv", now - 5_000)]]);
+    next.decided = [mine];
+    const second = next.refreshRecent();
+    await again();
+    await second;
+    expect(next.decided).toEqual([]);
+    expect(next.recentItems()[0]).toMatchObject({ id: "mine", note: "1 row returned" });
+  });
+
+  it("drops a page that lands after a connection switch", async () => {
+    const { app, answer } = served([[entry("old", Date.now())]]);
+    const refresh = app.refreshRecent();
+    app.connGeneration++;
+    await answer();
+    await refresh;
+    expect(app.recent).toEqual([]);
+    expect(app.renderQueueList).not.toHaveBeenCalled();
+  });
+
+  it("folds overlapping refreshes into one more read", async () => {
+    const { app, activity, answer } = served([[], [], []]);
+    const first = app.refreshRecent();
+    void app.refreshRecent();
+    void app.refreshRecent();
+    expect(activity).toHaveBeenCalledOnce();
+    await answer();
+    await first;
+    expect(activity).toHaveBeenCalledTimes(2);
+  });
+
+  it("replaces an unconfirmed open outcome once the server records how it ended", async () => {
+    const { app, answer } = served([
+      [entry("a", Date.now(), { state: "failed", error: "execution_unknown" })],
+    ]);
+    const local = {
+      id: "a",
+      status: "failed",
+      note: "result not delivered",
+      outcome: "result not delivered",
+    };
+    app.unrecorded.add(local);
+    app.selection.queue = { kind: "hist", id: "a", item: local };
+    const refresh = app.refreshRecent();
+    await answer();
+    await refresh;
+    expect(app.selection.queue.item).toMatchObject({ status: "failed", note: "execution_unknown" });
+    expect(app.renderSelection).toHaveBeenCalledWith(true);
+  });
+
+  it("leaves an acknowledged open outcome, rows and all, when the server lists it", async () => {
+    const { app, answer } = served([[entry("a", Date.now())]]);
+    const result = { fields: [{ name: "a" }], rows: [{ a: 1 }], rowCount: 1, truncated: false };
+    const mine = { id: "a", status: "approved", note: "1 row returned", result };
+    app.selection.queue = { kind: "hist", id: "a", item: mine };
+    const refresh = app.refreshRecent();
+    await answer();
+    await refresh;
+    expect(app.selection.queue.item).toBe(mine);
+    expect(app.renderSelection).not.toHaveBeenCalled();
+  });
+
+  it("lets a provisional decision go once a full page reaches past it", async () => {
+    const now = Date.now();
+    const page = Array.from({ length: 20 }, (_, i) => entry(`srv${i}`, now - i * 1_000));
+    const { app, answer } = served([page]);
+    app.decided = [
+      { id: "old", status: "approved", note: "", sql: "SELECT 1", resolvedAt: now - 60_000 },
+    ];
+    const refresh = app.refreshRecent();
+    await answer();
+    await refresh;
+    expect(app.decided).toEqual([]);
   });
 });
 

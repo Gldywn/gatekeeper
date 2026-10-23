@@ -28,7 +28,7 @@ import {
 } from "./evaluator.js";
 import type { Notifier } from "./notify.js";
 import { pairingPage } from "./pairing-page.js";
-import { sensitivityRecord } from "./store/audit.js";
+import { declinedBy, sensitivityRecord } from "./store/audit.js";
 import {
   type ActivityCursor,
   type GatekeeperRequest,
@@ -51,6 +51,10 @@ const CORS: Record<string, string> = {
 // The plugin reads this off its 1 Hz poll, so a new broker owner shows within a second.
 const IDENTITY_HEADER = encodeURIComponent(JSON.stringify(SERVER_IDENTITY));
 const MAX_BODY_BYTES = 32 * 1024 * 1024;
+// The plugin seals at most 8 MiB of result (counted in UTF-8 bytes), gzipped, plus its envelope;
+// the margin covers incompressible input. Its envelope is never shorter than its header and tag.
+const ARCHIVE_MAX_BYTES = 9 * 1024 * 1024;
+const ARCHIVE_MIN_BYTES = 45;
 const ACTIVITY_PAGE = 200;
 const PAIRING_BODY_BYTES = 1024;
 // The plugin polls at 1 Hz; coalesce its presence writes to this cadence.
@@ -187,17 +191,31 @@ async function handle(broker: Broker, req: IncomingMessage, res: ServerResponse)
       send(res, 400, { error: "Invalid activity cursor" });
       return;
     }
+    const size = activityLimit(url.searchParams);
+    if (size === "invalid") {
+      send(res, 400, { error: "Invalid activity limit" });
+      return;
+    }
     // One lookahead row tells the plugin whether anything older exists, without a count.
-    const rows = store.listActivity(
-      resolveConnection(store, req),
-      ACTIVITY_PAGE + 1,
-      before ?? undefined,
-    );
+    const rows = store.listActivity(resolveConnection(store, req), size + 1, before ?? undefined);
     const page: ActivityPage = {
-      activity: rows.slice(0, ACTIVITY_PAGE),
-      more: rows.length > ACTIVITY_PAGE,
+      activity: rows.slice(0, size),
+      more: rows.length > size,
     };
     send(res, 200, page);
+    return;
+  }
+
+  // The kept rows of one approved request, still sealed: only the plugin holds the key. Same
+  // scope as /activity, and the same answer whether nothing was kept or it is out of scope.
+  const resultId = /^\/results\/(req_[0-9a-f]{12})$/.exec(url.pathname)?.[1];
+  if (req.method === "GET" && resultId) {
+    const payload = store.readArchive(resultId, resolveConnection(store, req));
+    if (!payload) {
+      send(res, 404, { error: "not found" });
+      return;
+    }
+    send(res, 200, { payload: payload.toString("base64") });
     return;
   }
 
@@ -527,6 +545,19 @@ function activityCursor(params: URLSearchParams): ActivityCursor | null | "inval
     : "invalid";
 }
 
+// How many entries a page holds: the full page by default, fewer for the Queue's Recently
+// resolved. Any whole number is clamped into range; anything else fails loudly as a 400.
+function activityLimit(params: URLSearchParams): number | "invalid" {
+  const raw = params.getAll("limit");
+  if (!raw.length) {
+    return ACTIVITY_PAGE;
+  }
+  if (raw.length !== 1 || !/^\d+$/.test(raw[0])) {
+    return "invalid";
+  }
+  return Math.min(Math.max(Number(raw[0]), 1), ACTIVITY_PAGE);
+}
+
 // The plugin's header carries the composite scope key for the tab making the
 // request; only when it is absent do we fall back to the last-posted snapshot
 // (shared, so it can lag behind a multi-tab caller's real connection).
@@ -622,12 +653,35 @@ function toOutcome(body: Record<string, unknown>): Outcome {
       // No default: a plugin that cannot report it must leave the agent without an
       // answer rather than with a zero it would trust.
       ...(typeof body.affectedRows === "number" ? { affectedRows: body.affectedRows } : {}),
+      ...archiveOf(body.archive),
     };
   }
+  const by = declinedBy.safeParse(body.declinedBy).data;
   return {
     status: "rejected",
     reason: typeof body.reason === "string" ? body.reason : undefined,
+    ...(by ? { declinedBy: by } : {}),
   };
+}
+
+// Like the sensitivity record, an unreadable archive is dropped rather than refusing the
+// decision: the agent still gets its rows, only the history goes without them.
+function archiveOf(value: unknown): { archive?: Buffer } {
+  if (value === undefined) {
+    return {};
+  }
+  const encoded = typeof value === "string" ? value : "";
+  const fits =
+    encoded.length > 0 &&
+    encoded.length <= Math.ceil(ARCHIVE_MAX_BYTES / 3) * 4 &&
+    encoded.length % 4 === 0 &&
+    /^[A-Za-z0-9+/]*={0,2}$/.test(encoded);
+  const archive = fits ? Buffer.from(encoded, "base64") : null;
+  if (!archive || archive.length < ARCHIVE_MIN_BYTES || archive.length > ARCHIVE_MAX_BYTES) {
+    console.error("[gatekeeper] Result archive refused: not a sealed result of an accepted size");
+    return {};
+  }
+  return { archive };
 }
 
 function baseHeaders(): Record<string, string> {

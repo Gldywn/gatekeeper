@@ -112,7 +112,9 @@ header, then the agents strip), the Inbox, the status line. Only the Inbox panes
   count of what waits: the Queue owns that. Chips that do not fit fold into "+N more", whose
   popover shows the same facts; the session task shows on hover in both.
 - **Inbox**: the list pane and the open item side by side. The list has two tabs, Queue
-  (Pending approval, then Recently resolved) and Audit Trail, each with its own selection. A
+  (Pending approval, then Recently resolved) and Audit Trail, each with its own selection.
+  Recently resolved is the newest end of the Audit Trail's own history, the same decisions
+  however many tabs or sessions made them, not a list kept by this tab. A
   pending row opens its card, a decided row its detail, the same detail in both tabs. The
   Queue never selects by itself; the Audit Trail opens on its newest decision when nothing is
   selected there, without taking the focus or leaving a narrow list.
@@ -141,8 +143,8 @@ Layering and scrolling hold a few invariants a change can break:
   the marks and the time on the right of line 1; the project bottom left and one fact bottom
   right. Under an Audit Trail session head, rows do not repeat the agent or project, and the
   fact takes that slot.
-- Row outcomes: Completed (shown as its fact), Declined, Failed, Unconfirmed (a question-mark
-  glyph), Expired, Cancelled.
+- Row outcomes: Completed (shown as its fact), Declined, Not run (the gate refused to run an
+  approved statement), Failed, Unconfirmed (a question-mark glyph), Expired, Cancelled.
 - Marks: a pencil for a write, a trash for a destructive query, the PII, Client and Value
   flags. The class icon and the flags show only where the query ran (Completed, Unconfirmed); a
   pending row keeps its icon. Auto mode shows as one bolt, never twice.
@@ -193,23 +195,30 @@ The outcome comes first, then what was asked.
 
 - **Status**: the outcome word with its glyph (Completed, Declined, Failed, Not run, Expired,
   Cancelled, Result delivery unconfirmed, Execution outcome unknown), then who decided and
-  when, phrased the same way for what you decided in this tab ("Approved by you", "Declined by
-  you"). A cancelled request reads "Withdrawn by the agent"; an expired one "Not decided in
+  when, as the record states it ("Approved by you", "Declined by you" only where the record
+  says a person declined; a decline from before that was recorded names no one). A cancelled request reads "Withdrawn by the agent"; an expired one "Not decided in
   time", or its approver when it had been approved. No count there.
 - **Receipt**: a completed query gets one sentence, reads and writes alike: the operation in
   SQL style, its tables, then what it reported, numbers and verbs in bold ("`SELECT` on
   invoices completed, returning **39** rows.", "`UPDATE` on invoices completed, affecting **2**
   rows."). A DDL's conventional zero and a write's empty result are left out. This is the one
-  place for the outcome's count; rows that are not held and counts that were not recorded add
-  no sentence of their own.
+  place for the outcome's count; counts that were not recorded add no sentence of their own.
 - **Rows**: only a real table of rows gets a framed surface. Its top bar holds Copy and Export
-  on the left, on the data they act on (the rows this tab holds), the position in those rows
-  ("1–50 of 2,000", "11 of 11") and the pages on the right; no footer. Values keep their
-  type: a real null is not the string NULL, numbers align right.
+  on the left, on the data they act on (the rows kept for this request, exactly what the agent
+  was sent), the position in those rows ("1–50 of 2,000", "11 of 11") and the pages on the
+  right; no footer. Values keep their type: a real null is not the string NULL, numbers align
+  right. While kept rows open, the same frame shows with its tools dimmed and inert and three
+  breathing bars, so the grid lands without moving anything.
+- **Rows that cannot show** get one quiet sentence in their place, whatever the cause (decided
+  before rows were kept, a key Beekeeper no longer holds, rows not sealed at execution, a read
+  that failed): "These rows are not available." No cause-specific wording: the reader can do
+  nothing different about any of them. It shows where rows are owed (a count above zero, or a
+  read whose count was never recorded), never for a known zero or a write's empty result.
 - **Message**: every outcome that did not complete explains itself in one box headed
   "Message", whose tone carries the difference: neutral for an automatic explanation, the error
-  tone for an execution error, amber for a reason you typed yourself. A completed query has its
-  receipt instead.
+  tone for an execution error, amber for a reason a person typed (as the record says). A
+  statement the gate refused to run reads "Not run" with the gate's own sentence, neutral. A
+  completed query has its receipt instead.
 - **Request**: folded under one thin line, "Show request" or "Hide request" followed by the
   intent cut to one line. It starts closed on each item, keeps its state while that item
   updates, and opens in place without touching the grid's page or sort. Open, it shows the same

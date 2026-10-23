@@ -96,8 +96,9 @@ function harness() {
       readOnly: false,
     },
     root: { querySelector: () => null },
-    settingsStore: { get: () => ({ confirmWrites: true, resultCacheMb: 4 }) },
+    settingsStore: { get: () => ({ confirmWrites: true }) },
     confirmModal: { dismissFor: vi.fn() },
+    archive: { seal: vi.fn(async () => "c2VhbGVk") },
     renderQueue: vi.fn(),
     renderAuto: vi.fn(),
     renderModeSurfaces: vi.fn(),
@@ -453,13 +454,10 @@ describe("shared manual/automatic execution authority", () => {
     query.mockResolvedValueOnce({ results: [], error: "Connection terminated unexpectedly" });
     await app.approve(card.id);
     expect(query).toHaveBeenCalledWith(executed(card.sql));
-    expect(app.finish).toHaveBeenCalledWith(
-      card.id,
-      "failed",
-      "query failed",
-      undefined,
-      "Connection terminated unexpectedly",
-    );
+    expect(app.finish).toHaveBeenCalledWith(card.id, "failed", "query failed", {
+      reason: "Connection terminated unexpectedly",
+      recorded: true,
+    });
     expect(app.nextCheckAt).toBe(0);
   });
   it("detects a schema identity change even when connection names match", async () => {
@@ -915,7 +913,7 @@ describe("stopping a running query", () => {
   function running(onStop: (sql: string) => Promise<Answer>, minutes = 0) {
     const { app, card } = harness();
     app.settingsStore = {
-      get: () => ({ confirmWrites: true, resultCacheMb: 4, autoStopMinutes: minutes }),
+      get: () => ({ confirmWrites: true, autoStopMinutes: minutes }),
     };
     const run = deferred<Answer>();
     const stop = vi.fn(onStop);
@@ -937,7 +935,10 @@ describe("stopping a running query", () => {
     expect(message).toMatch(
       /^Stop requested by the operator after \d+s\. The query then ended with: canceling statement due to user request$/,
     );
-    expect(app.finish).toHaveBeenCalledWith(card.id, "failed", "query failed", undefined, message);
+    expect(app.finish).toHaveBeenCalledWith(card.id, "failed", "query failed", {
+      reason: message,
+      recorded: true,
+    });
   });
 
   it("delivers the normal result when the query finishes before the stop lands", async () => {
@@ -1024,7 +1025,7 @@ describe("stopping a running query", () => {
     const { app, card, run, stop, pending } = running(async () => sent, 1);
     await vi.waitFor(() => expect(card.state).toBe("executing"));
     app.settingsStore = {
-      get: () => ({ confirmWrites: true, resultCacheMb: 4, autoStopMinutes: 0 }),
+      get: () => ({ confirmWrites: true, autoStopMinutes: 0 }),
     };
     app.tickRuns(card.run.startedAt + 59_000);
     expect(stop).not.toHaveBeenCalled();
@@ -1236,6 +1237,88 @@ describe("generation changes during an approved run", () => {
     await pending;
     expect(app.broker.result).not.toHaveBeenCalled();
   });
+
+  it("withholds the rows when the connection switches while they are sealed", async () => {
+    const { app, card } = harness();
+    const sealing = deferred<string>();
+    app.archive.seal = vi.fn(() => sealing.promise);
+    query.mockResolvedValue(rows);
+    const pending = app.approve(card.id);
+    await vi.waitFor(() => expect(app.archive.seal).toHaveBeenCalled());
+    app.onConnectionSwitch();
+    sealing.resolve("c2VhbGVk");
+    await pending;
+    expect(app.broker.result).not.toHaveBeenCalled();
+  });
+});
+
+describe("kept results", () => {
+  const rows = { results: [{ rows: [{ quantity: 3 }], fields: [{ name: "quantity" }] }] };
+
+  it("seals what the agent is sent and posts it with the decision", async () => {
+    const { app, card } = harness();
+    query.mockResolvedValue(rows);
+    await app.approve(card.id);
+    const [sealedResult, requestId] = app.archive.seal.mock.calls[0];
+    expect(requestId).toBe(card.id);
+    const body = app.broker.result.mock.calls[0][2];
+    expect(sealedResult).toEqual({
+      fields: body.fields,
+      rows: body.rows,
+      rowCount: body.rowCount,
+      truncated: body.truncated,
+    });
+    expect(body.archive).toBe("c2VhbGVk");
+    expect(app.finish).toHaveBeenCalledWith(card.id, "approved", expect.any(String), {
+      result: sealedResult,
+      recorded: true,
+      kept: true,
+    });
+  });
+
+  it("keeps renewing the execution lease while the result is sealed", async () => {
+    const { app, card } = harness();
+    const sealing = deferred<string>();
+    app.archive.seal = vi.fn(() => sealing.promise);
+    app.broker.renew = vi.fn(async () => ({ ok: true, leaseExpiresAt: Date.now() + 30_000 }));
+    query.mockResolvedValue(rows);
+    const pending = app.approve(card.id);
+    await vi.waitFor(() => expect(app.archive.seal).toHaveBeenCalled());
+    expect(card.state).toBe("executing");
+    await app.renew();
+    expect(app.broker.renew).toHaveBeenCalledWith(card.id, card.leaseId);
+    sealing.resolve("c2VhbGVk");
+    await pending;
+    expect(app.broker.result.mock.calls[0][2].archive).toBe("c2VhbGVk");
+  });
+
+  it.each([
+    ["acknowledged", true],
+    ["refused", false],
+  ])("lists a decline as recorded only when the server %s it", async (_, ok) => {
+    const { app, card } = harness();
+    app.setCardState = vi.fn();
+    app.broker.result = vi.fn(async () => ok);
+    await app.reject(card.id, "use the replica");
+    expect(app.broker.result.mock.calls[0][2]).toMatchObject({ declinedBy: "human" });
+    expect(app.finish).toHaveBeenCalledWith(card.id, "rejected", "declined", {
+      reason: "use the replica",
+      declinedBy: "human",
+      recorded: ok,
+    });
+  });
+
+  it("still delivers the rows to the agent when they cannot be sealed", async () => {
+    const { app, card } = harness();
+    app.archive.seal = vi.fn(async () => {
+      throw new Error("Result key was not stored");
+    });
+    query.mockResolvedValue(rows);
+    await app.approve(card.id);
+    const body = app.broker.result.mock.calls[0][2];
+    expect(body).toMatchObject({ status: "approved", rows: [{ quantity: 3 }] });
+    expect(body).not.toHaveProperty("archive");
+  });
 });
 
 describe("decision-time flags", () => {
@@ -1251,15 +1334,16 @@ describe("decision-time flags", () => {
     // The local row shows what the trail recorded, not the later analysis.
     Object.assign(app, {
       finish: Gatekeeper.prototype["finish" as keyof Gatekeeper],
-      history: [],
+      decided: [],
+      unrecorded: new WeakSet(),
       selection: {},
       drop: vi.fn(),
-      renderHistory: vi.fn(),
-      settingsStore: { get: () => ({ recentlyResolved: 20, resultCacheMb: 4 }) },
+      refreshRecent: vi.fn(),
+      settingsStore: { get: () => ({ recentlyResolved: 20 }) },
     });
-    app.finish(card.id, "approved", "");
-    expect(app.history[0].sensitivity).toEqual(posted);
-    expect(app.history[0].sensitivity?.pii).not.toBe(true);
+    app.finish(card.id, "approved", "", { recorded: true });
+    expect(app.decided[0].sensitivity).toEqual(posted);
+    expect(app.decided[0].sensitivity?.pii).not.toBe(true);
   });
 
   it("posts fresh flags with the next decision once an execution is withdrawn", async () => {
@@ -1282,14 +1366,15 @@ describe("decision-time flags", () => {
     card.sql = "SELECT * FROM public.users";
     Object.assign(app, {
       finish: Gatekeeper.prototype["finish" as keyof Gatekeeper],
-      history: [],
+      decided: [],
+      unrecorded: new WeakSet(),
       selection: {},
       drop: vi.fn(),
-      renderHistory: vi.fn(),
-      settingsStore: { get: () => ({ recentlyResolved: 20, resultCacheMb: 4 }) },
+      refreshRecent: vi.fn(),
+      settingsStore: { get: () => ({ recentlyResolved: 20 }) },
     });
-    app.finish(card.id, "expired", "expired");
-    expect(app.history[0].sensitivity).toEqual(recorded);
+    app.finish(card.id, "expired", "expired", { recorded: true });
+    expect(app.decided[0].sensitivity).toEqual(recorded);
   });
 });
 

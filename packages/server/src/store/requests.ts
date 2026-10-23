@@ -284,9 +284,15 @@ export function resolve(
   // While executing, the /executing record describes this approval and later analysis must not
   // replace it. From leased (a rejection, or after a withdrawn attempt) this result's applies.
   const replace = row.state !== "executing" && Boolean(sensitivity || prior?.sensitivity);
+  const declinedBy = outcome.status === "rejected" ? outcome.declinedBy : undefined;
   const policy =
-    autoHold || replace
-      ? { ...(prior ?? {}), ...(autoHold ? { autoHold } : {}), ...(replace ? { sensitivity } : {}) }
+    autoHold || replace || declinedBy
+      ? {
+          ...(prior ?? {}),
+          ...(autoHold ? { autoHold } : {}),
+          ...(replace ? { sensitivity } : {}),
+          ...(declinedBy ? { declinedBy } : {}),
+        }
       : row.policy;
   const state: RequestState =
     outcome.status === "approved"
@@ -324,6 +330,12 @@ export function resolve(
       );
     if (info.changes !== 1) {
       throw new StoreError("LEASE_CONFLICT", `Request ${id} changed concurrently`);
+    }
+    // In the decision's own transaction, so a decided request never loses rows it was sent with.
+    if (outcome.status === "approved" && outcome.archive) {
+      ctx.db
+        .prepare("INSERT INTO results (request_id, payload, created_at) VALUES (?, ?, ?)")
+        .run(id, outcome.archive, now);
     }
     logAudit(ctx, {
       requestId: id,

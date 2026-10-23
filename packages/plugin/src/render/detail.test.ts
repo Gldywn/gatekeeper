@@ -79,15 +79,16 @@ describe("render/detail", () => {
     expect(html).toContain('<code class="sql-body" id="detail-sqlbody">');
   });
 
-  it("writes the cap the agent's result hit, from the local note", () => {
+  it("says how many rows the agent was sent when the kept result was cut", () => {
     const html = detailHtml(
-      { ...item, note: "12,400 rows returned (agent received 10000)" },
-      "hist",
+      { ...item, result: { ...result, rowCount: 12_400, truncated: true } },
+      "audit",
       pg,
     );
     expect(html).toContain(
-      "Only the first 10,000 rows were sent to the agent to avoid context pollution.",
+      "Only the first 2 rows were sent to the agent to avoid context pollution.",
     );
+    expect(detailHtml(item, "hist", pg)).not.toContain("Only the first");
   });
 
   it("says 0 rows for an empty read, and no grid", () => {
@@ -96,7 +97,7 @@ describe("render/detail", () => {
     expect(html).not.toContain("detail-grid");
   });
 
-  it("keeps the count of rows no longer held, without a line about where they went", () => {
+  it("keeps the count of rows it cannot show, and says only that they are not available", () => {
     const html = detailHtml(
       { ...item, result: { ...result, rows: [], rowCount: 42 } },
       "audit",
@@ -104,8 +105,35 @@ describe("render/detail", () => {
     );
     expect(text(fact(html) ?? "")).toBe("SELECT on audit.users completed, returning 42 rows.");
     expect(html).toContain("Recorded Jan 1, 09:30 AM");
-    expect(html).not.toContain("no longer held");
+    expect(html).toContain('<p class="dt-fact dt-quiet">These rows are not available.</p>');
     expect(html).not.toContain("detail-grid");
+    // A read whose count was never recorded is still owed its rows; a known zero and a write
+    // with no returned rows are not.
+    const unknown = { ...item, result: { ...result, rows: [], rowCount: null } };
+    expect(detailHtml(unknown, "audit", pg)).toContain("These rows are not available.");
+    expect(detailHtml({ ...item, result: undefined }, "audit", pg)).toContain("not available");
+    const zero = { ...item, result: { ...result, rows: [], rowCount: 0 } };
+    expect(detailHtml(zero, "audit", pg)).not.toContain("not available");
+    const write = {
+      ...item,
+      sql: "UPDATE invoices SET status = 'void' WHERE id = 1",
+      result: { fields: [], rows: [], rowCount: null, affectedRows: 2, truncated: false },
+    };
+    expect(detailHtml(write, "audit", pg)).not.toContain("not available");
+  });
+
+  it("opens kept rows in the grid's own frame, its tools inert until they arrive", () => {
+    const html = detailHtml(
+      { ...item, kept: true, result: { ...result, rows: [], rowCount: 42 } },
+      "audit",
+      pg,
+      false,
+      true,
+    );
+    expect(html).toContain('<div class="res loading" id="detail-grid" aria-busy="true">');
+    expect(html).toContain('<span class="res-tools" inert>');
+    expect(html).toContain('<div class="res-skel" role="status" aria-label="Loading rows">');
+    expect(html).not.toContain("not available");
   });
 
   it("puts an execution error in the Message box, and a stop request on its own line", () => {
@@ -137,61 +165,53 @@ describe("render/detail", () => {
     expect(stopped).toContain(">Failed</span>");
   });
 
-  it("gives every decline a Message, and only a local one reads as your own words", () => {
-    const local = detailHtml(
-      {
-        ...item,
-        status: "rejected",
-        note: "use a bind param",
-        reason: "use a bind param",
-        result: undefined,
-      },
-      "hist",
-      pg,
-    );
-    expect(local).toContain(">Declined</span>");
-    expect(local).toContain('<div class="dt-sub">Declined by you &middot; Resolved');
-    expect(local).toContain(
-      '<div class="dt-msg reason"><span class="q">Message</span>use a bind param</div>',
-    );
-    const plain = detailHtml(
-      { ...item, status: "rejected", note: "declined", result: undefined },
-      "hist",
-      pg,
-    );
-    expect(plain).toContain(
+  it("gives every decline a Message, and only one recorded as a person's reads as your words", () => {
+    const declined = (patch: Partial<HistItem>) =>
+      ({ ...item, status: "rejected", note: "declined", result: undefined, ...patch }) as HistItem;
+    const typed = declined({ note: "use a bind param", reason: "use a bind param" });
+    for (const source of ["hist", "audit"] as const) {
+      const yours = detailHtml({ ...typed, declinedBy: "human" }, source, pg);
+      expect(yours).toContain(">Declined</span>");
+      expect(yours).toContain('<div class="dt-sub">Declined by you &middot; ');
+      expect(yours).toContain(
+        '<div class="dt-msg reason"><span class="q">Message</span>use a bind param</div>',
+      );
+    }
+    expect(detailHtml(declined({ declinedBy: "human" }), "hist", pg)).toContain(
       '<div class="dt-msg"><span class="q">Message</span>You declined this proposal without giving a reason.</div>',
     );
-    // The gate's own block is recorded as a decline with its sentence: no author, no tint.
-    const audit = detailHtml(
+    // Before the author was recorded a decline may be the gate's own: no author, no tint.
+    const unmarked = detailHtml(typed, "hist", pg);
+    expect(unmarked).toContain('<div class="dt-sub">Resolved Jan 1, 09:30 AM</div>');
+    expect(unmarked).toContain(
+      '<div class="dt-msg"><span class="q">Message</span>use a bind param</div>',
+    );
+    expect(detailHtml(declined({}), "audit", pg)).toContain("The proposal was declined.");
+    // A typed "declined" is still a typed reason, told apart from a decline with none.
+    const literal = detailHtml(declined({ reason: "declined", declinedBy: "human" }), "hist", pg);
+    expect(literal).toContain(
+      '<div class="dt-msg reason"><span class="q">Message</span>declined</div>',
+    );
+  });
+
+  it("says a statement the gate refused to run was not run, in the gate's own words", () => {
+    const html = detailHtml(
       {
         ...item,
         status: "rejected",
-        note: "use a bind param",
-        reason: "use a bind param",
+        note: "Write mode is required to approve this query.",
+        reason: "Write mode is required to approve this query.",
+        declinedBy: "gate",
         result: undefined,
       },
       "audit",
       pg,
     );
-    expect(audit).toContain('<div class="dt-sub">Recorded Jan 1, 09:30 AM</div>');
-    expect(audit).toContain(
-      '<div class="dt-msg"><span class="q">Message</span>use a bind param</div>',
-    );
-    const auditPlain = detailHtml(
-      { ...item, status: "rejected", note: "declined", result: undefined },
-      "audit",
-      pg,
-    );
-    expect(auditPlain).toContain("The proposal was declined.");
-    // A typed "declined" is still a typed reason, told apart from a decline with none.
-    const literal = detailHtml(
-      { ...item, status: "rejected", note: "declined", reason: "declined", result: undefined },
-      "hist",
-      pg,
-    );
-    expect(literal).toContain(
-      '<div class="dt-msg reason"><span class="q">Message</span>declined</div>',
+    expect(html).toContain('<div class="dt-status mut">');
+    expect(html).toContain(">Not run</span>");
+    expect(html).toContain('<div class="dt-sub">Recorded Jan 1, 09:30 AM</div>');
+    expect(html).toContain(
+      '<div class="dt-msg"><span class="q">Message</span>Write mode is required to approve this query.</div>',
     );
   });
 
@@ -243,9 +263,9 @@ describe("render/detail", () => {
       pg,
     );
     expect(unknown).toContain(">Execution outcome unknown</span>");
-    const blocked = detailHtml({ ...local("blocked"), result: undefined }, "hist", pg);
-    expect(blocked).toContain(">Not run</span>");
-    expect(blocked).toContain("Execution was blocked.");
+    const lost = detailHtml({ ...local("lease lost"), result: undefined }, "hist", pg);
+    expect(lost).toContain(">Not run</span>");
+    expect(lost).toContain("Execution could not be authorized.");
     // The same words as an execution error, local or in the trail, stay a failure with them.
     for (const note of ["blocked", "lease lost", "result not delivered"]) {
       for (const source of ["hist", "audit"] as const) {

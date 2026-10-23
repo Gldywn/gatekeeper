@@ -12,6 +12,10 @@ export const sensitivityRecord = z.object({
   client: z.boolean(),
 });
 
+// Also parsed on the way in and on the way out: any token holder can write policy_json, and an
+// unknown value must read as not recorded, never as a person.
+export const declinedBy = z.enum(["human", "gate"]);
+
 export function logAudit(
   ctx: StoreContext,
   entry: {
@@ -86,7 +90,8 @@ export function listActivity(
          )
        )
        SELECT r.id, r.created_at, r.decided_at, r.session_id, r.sql, r.intent, r.state, r.result_json, r.policy_json,
-           s.harness, s.project, s.session_label
+           s.harness, s.project, s.session_label,
+           EXISTS (SELECT 1 FROM results k WHERE k.request_id = r.id) AS kept
          FROM recent JOIN requests r ON r.id = recent.id
          LEFT JOIN sessions s ON s.session_id = r.session_id
          ORDER BY r.decided_at DESC, r.id DESC
@@ -109,6 +114,7 @@ export function listActivity(
     harness: string | null;
     project: string | null;
     session_label: string | null;
+    kept: number;
   }[];
   return rows.map((row) => {
     const facts = outcomeFacts(row.state, row.result_json);
@@ -133,6 +139,25 @@ export function listActivity(
       autoHold: policy?.autoHold,
       // A malformed stored record reads as not recorded, never as an all-clear.
       sensitivity: sensitivityRecord.safeParse(policy?.sensitivity).data,
+      kept: row.state === "approved" && row.kept === 1,
+      declinedBy:
+        row.state === "rejected" ? declinedBy.safeParse(policy?.declinedBy).data : undefined,
     };
   });
+}
+
+/** The sealed rows of an approved request, under the same scope as the activity view: the
+ *  connection's own requests plus unscoped ones. Null when none were kept or it is out of scope. */
+export function readArchive(
+  ctx: StoreContext,
+  requestId: string,
+  connection: string | null,
+): Buffer | null {
+  const row = ctx.db
+    .prepare(
+      `SELECT k.payload FROM results k JOIN requests r ON r.id = k.request_id
+         WHERE k.request_id = ? AND r.state = 'approved' AND (r.connection = ? OR r.connection IS NULL)`,
+    )
+    .get(requestId, connection) as { payload: Buffer } | undefined;
+  return row?.payload ?? null;
 }

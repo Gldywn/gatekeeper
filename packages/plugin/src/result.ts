@@ -10,8 +10,6 @@ export interface HistResult {
   /** Rows a write changed. Absent means the host did not report it, never zero. */
   affectedRows?: number;
   truncated: boolean;
-  // Serialized size of the held rows, cached so the history budget never re-stringifies.
-  bytes?: number;
 }
 
 // The column order shared by the grid and every export: the declared field order when
@@ -23,35 +21,33 @@ export function resultColumns(result: HistResult): string[] {
   return Object.keys(result.rows[0] ?? {});
 }
 
-// A hard ceiling on held rows independent of the byte budget, so one pathological
-// result can never make the pager math or a stringify pass run away.
-const HIST_MAX_ROWS = 100_000;
+// What the agent is sent, and so what the history keeps: a bulk read must never flood the
+// agent context, the LLM provider or the broker's body, which also carries the sealed copy.
+export const RESULT_MAX_ROWS = 10_000;
+export const RESULT_MAX_BYTES = 8 * 1024 * 1024;
 
-// Keep at most maxRows, then halve until the serialized payload fits the byte budget;
-// the flag lets the detail view say it truncated. maxRows lets the agent-bound path cap
-// tighter than local history, so a bulk read never floods the agent context.
+const utf8 = new TextEncoder();
+
+// Measured in UTF-8 bytes over the whole result, the size the broker and the kept copy hold.
+// Fields too large on their own leave only the counts; the true row count always survives.
 export function capResult(
   rows: Record<string, unknown>[],
   fields: Field[],
-  budgetBytes = Number.MAX_SAFE_INTEGER,
-  maxRows = HIST_MAX_ROWS,
+  budgetBytes = RESULT_MAX_BYTES,
+  maxRows = RESULT_MAX_ROWS,
   affectedRows?: number,
 ): HistResult {
-  const rowCount = rows.length;
-  let kept = rows.slice(0, maxRows);
-  let truncated = rows.length > kept.length;
-  let bytes = JSON.stringify(kept).length;
-  while (kept.length > 0 && bytes > budgetBytes) {
-    kept = kept.slice(0, Math.floor(kept.length / 2));
-    bytes = JSON.stringify(kept).length;
-    truncated = true;
-  }
-  return {
-    fields,
+  const shape = (kept: Record<string, unknown>[], f: Field[], truncated: boolean): HistResult => ({
+    fields: f,
     rows: kept,
-    rowCount,
+    rowCount: rows.length,
     truncated,
-    bytes,
     ...(affectedRows === undefined ? {} : { affectedRows }),
-  };
+  });
+  const fits = (r: HistResult) => utf8.encode(JSON.stringify(r)).length <= budgetBytes;
+  let result = shape(rows.slice(0, maxRows), fields, rows.length > maxRows);
+  while (result.rows.length > 0 && !fits(result)) {
+    result = shape(result.rows.slice(0, Math.floor(result.rows.length / 2)), fields, true);
+  }
+  return fits(result) ? result : shape([], [], true);
 }

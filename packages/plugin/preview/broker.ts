@@ -1,5 +1,6 @@
 import type { ActivityEntry, Proposal } from "@gatekeeper/shared";
-import { activity, proposals, roster, scenario } from "./fixtures";
+import { ResultArchive } from "../src/archive";
+import { activity, keptResults, proposals, roster, scenario } from "./fixtures";
 
 // The broker the plugin polls, answered in memory. Installed before the app boots; a request to
 // any other origin, or to a route this table does not know, fails loudly and never reaches the
@@ -15,6 +16,11 @@ const PAGE = scenario.page;
 const offered = proposals();
 const feed: ActivityEntry[] = activity();
 const claimed = new Map<string, Proposal>();
+// Sealed rows by request id: what the plugin posted with a decision, or today's seeded rows
+// sealed on first read under the plugin's own key, which the fake host storage shares.
+const sealed = new Map<string, string>();
+const seeded = keptResults();
+const archive = new ResultArchive();
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -54,7 +60,15 @@ async function route(url: URL, init?: RequestInit): Promise<Response> {
           (e) => at(e) < Number(before) || (at(e) === Number(before) && e.id < beforeId),
         )
       : sorted;
-    return json({ activity: older.slice(0, PAGE), more: older.length > PAGE });
+    const size = Math.min(Number(url.searchParams.get("limit") ?? PAGE) || PAGE, PAGE);
+    return json({ activity: older.slice(0, size), more: older.length > size });
+  }
+  const kept = /^\/results\/(req_[0-9a-f]+)$/.exec(path)?.[1];
+  if (method === "GET" && kept) {
+    const rows = seeded.get(kept);
+    if (!sealed.has(kept) && rows) sealed.set(kept, await archive.seal(rows, kept));
+    const payload = sealed.get(kept);
+    return payload ? json({ payload }) : json({ error: "not found" }, 404);
   }
   if (method === "GET" && path === "/pair/status") return json({ ok: true });
   if (method === "POST" && path === "/lease/renew") {
@@ -68,6 +82,7 @@ async function route(url: URL, init?: RequestInit): Promise<Response> {
     claimed.delete(body.id);
     if (p) {
       const state = body.status === "approved" ? (body.error ? "failed" : "approved") : "rejected";
+      if (state === "approved" && typeof body.archive === "string") sealed.set(p.id, body.archive);
       feed.unshift({
         id: p.id,
         createdAt: p.createdAt,
@@ -83,6 +98,9 @@ async function route(url: URL, init?: RequestInit): Promise<Response> {
         error: body.error ?? null,
         rowCount: body.rowCount ?? null,
         affectedRows: body.affectedRows ?? null,
+        sensitivity: body.sensitivity,
+        kept: sealed.has(p.id),
+        ...(state === "rejected" && body.declinedBy ? { declinedBy: body.declinedBy } : {}),
       });
     }
     return json({ ok: true });

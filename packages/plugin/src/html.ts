@@ -29,9 +29,13 @@ export function clock(ms: number): string {
   return `${m}:${r < 10 ? "0" : ""}${r}`;
 }
 
+// Recently resolved now reaches back past this session, so ages run on to hours and days.
 export function relAge(createdAt: number): string {
   const s = Math.max(0, Math.round((Date.now() - createdAt) / 1000));
-  return s < 60 ? `${s}s ago` : `${Math.floor(s / 60)}m ago`;
+  if (s < 60) return `${s}s ago`;
+  if (s < 3_600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86_400) return `${Math.floor(s / 3_600)}h ago`;
+  return `${Math.floor(s / 86_400)}d ago`;
 }
 
 const HIST_SQL_PREVIEW_CHARS = 140;

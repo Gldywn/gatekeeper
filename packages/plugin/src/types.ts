@@ -82,6 +82,9 @@ export interface HistItem {
   outcome?: string;
   // The words a person typed when declining, kept apart so a typed "declined" is still theirs.
   reason?: string;
+  declinedBy?: import("@gatekeeper/shared").DeclinedBy;
+  // The server keeps this request's sealed rows; `result` holds them only once opened.
+  kept?: boolean;
   sql: string;
   resolvedAt: number;
   connection: string | null;

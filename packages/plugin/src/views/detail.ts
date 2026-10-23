@@ -3,10 +3,11 @@ import type { TabulatorFull } from "tabulator-tables";
 import type { SchemaAnnotator } from "../annotate";
 import { dayKey, sessionDisplayName } from "../html";
 import { checkIcon, copyIcon } from "../icons";
-import { detailHtml } from "../render/detail";
+import { detailHtml, detailResultHtml } from "../render/detail";
 import { mountResultGrid } from "../render/grid";
 import { accessMatrix, paintLegend } from "../render/queue";
 import { resultCsv, resultJson, resultMarkdown } from "../render/resultexport";
+import type { HistResult } from "../result";
 import { classifyQuery } from "../sql/classify";
 import { formatSql } from "../sql/format";
 import { highlight } from "../sql/highlight";
@@ -22,6 +23,8 @@ interface DetailViewDeps {
   root: HTMLElement;
   annotator: SchemaAnnotator;
   dialect: () => string;
+  // The kept rows of an approved request, opened; throws when they cannot be shown.
+  loadRows: (id: string) => Promise<HistResult>;
 }
 
 // Owns the decided request shown in the Inbox's right pane (#detail), from Recently
@@ -36,11 +39,15 @@ export class DetailView {
   private readonly root: HTMLElement;
   private readonly annotator: SchemaAnnotator;
   private readonly dialect: () => string;
+  private readonly loadRows: (id: string) => Promise<HistResult>;
+  // The one result held in memory: the open item's rows, so reopening it never fetches again.
+  private opened: { id: string; result: HistResult } | null = null;
 
   constructor(deps: DetailViewDeps) {
     this.root = deps.root;
     this.annotator = deps.annotator;
     this.dialect = deps.dialect;
+    this.loadRows = deps.loadRows;
   }
 
   // The item whose request is open: closed again whenever another item opens.
@@ -50,11 +57,22 @@ export class DetailView {
     return this.detailItem?.id ?? null;
   }
 
-  open(item: HistItem, annotate: "live" | "text" = "live"): void {
+  open(listed: HistItem, annotate: "live" | "text" = "live"): void {
     const panel = this.root.querySelector<HTMLDivElement>("#detail");
     if (!panel) {
       return;
     }
+    const item =
+      !listed.result?.rows.length && this.opened?.id === listed.id
+        ? { ...listed, result: this.opened.result }
+        : listed;
+    this.opened = item.result?.rows.length ? { id: item.id, result: item.result } : null;
+    // A count of zero has no rows to fetch; a failed read is never remembered, so reopening retries.
+    const loading =
+      item.status === "approved" &&
+      item.kept === true &&
+      !item.result?.rows.length &&
+      item.result?.rowCount !== 0;
     this.detailItem = item;
     if (this.requestOpen !== item.id) this.requestOpen = null;
     panel.innerHTML = detailHtml(
@@ -62,10 +80,31 @@ export class DetailView {
       annotate === "text" ? "audit" : "hist",
       this.dialect(),
       this.requestOpen === item.id,
+      loading,
     );
     panel.hidden = false;
     this.mountGrid(panel, item);
     void this.annotateDetail(item, annotate);
+    if (loading) void this.fetchRows(panel, item);
+  }
+
+  // Only the result block is replaced, so the request fold and its annotation stay as they are.
+  private async fetchRows(panel: HTMLElement, item: HistItem): Promise<void> {
+    let result: HistResult | null = null;
+    try {
+      result = await this.loadRows(item.id);
+    } catch (err) {
+      log.error(err instanceof Error ? err : String(err));
+    }
+    if (this.detailItem !== item) {
+      return;
+    }
+    const shown = result ? { ...item, result } : item;
+    this.detailItem = shown;
+    if (result?.rows.length) this.opened = { id: item.id, result };
+    const block = panel.querySelector(".dt-result");
+    if (block) block.outerHTML = detailResultHtml(shown, this.dialect());
+    this.mountGrid(panel, shown);
   }
 
   // Opens or folds the request in place: the grid above keeps its page and sort, the line its focus.
@@ -145,8 +184,7 @@ export class DetailView {
     }
   }
 
-  // Save the held rows through the host's file dialog as CSV or JSON. A no-op once the
-  // result has been purged (retention or the byte budget) after the detail opened.
+  // Save the shown rows through the host's file dialog as CSV or JSON. A no-op while none show.
   async exportResult(fmt: "csv" | "json"): Promise<void> {
     const item = this.detailItem;
     if (!item?.result) {
@@ -169,8 +207,8 @@ export class DetailView {
     }
   }
 
-  // Quick copy of the held rows to the clipboard as Markdown, flashing a check on the
-  // trigger's icon (like copySql). A no-op if the result was purged.
+  // Quick copy of the shown rows to the clipboard as Markdown, flashing a check on the
+  // trigger's icon (like copySql). A no-op while none show.
   async copyResult(_fmt: "md"): Promise<void> {
     const result = this.detailItem?.result;
     if (!result) {
@@ -188,6 +226,7 @@ export class DetailView {
 
   close(): void {
     this.detailItem = null;
+    this.opened = null;
     this.requestOpen = null;
     this.destroyGrid();
     const panel = this.root.querySelector<HTMLDivElement>("#detail");

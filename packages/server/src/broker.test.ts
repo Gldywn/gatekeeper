@@ -760,3 +760,130 @@ describe("the server identity header", () => {
     }
   });
 });
+
+describe("kept results", () => {
+  const sealed = Buffer.alloc(64, 7).toString("base64");
+  const conn = (name: string) => ({
+    connectionName: name,
+    databaseType: "postgresql",
+    databaseName: name,
+    schema: "public",
+    readOnly: false,
+    mode: "read",
+  });
+
+  function claimed(name = "alpha") {
+    store.setConnection(conn(name));
+    store.submit({ sessionId: "s1", sql: "SELECT 1" });
+    return store.claimNext("plug_test", 30000, connectionScopeKey(conn(name)))!;
+  }
+
+  async function approve(archive?: unknown) {
+    const c = claimed();
+    const reply = await call("POST", "/result", {
+      token: TOKEN,
+      body: {
+        id: c.id,
+        leaseId: c.leaseId,
+        status: "approved",
+        rows: [{ a: 1 }],
+        fields: [{ name: "a" }],
+        archive,
+      },
+    });
+    return { id: c.id, reply };
+  }
+
+  it("stores the sealed rows with the decision and serves them back still sealed", async () => {
+    const { id, reply } = await approve(sealed);
+    expect(reply.status).toBe(200);
+    const page = JSON.parse((await call("GET", "/activity", { token: TOKEN })).body);
+    expect(page.activity[0]).toMatchObject({ id, kept: true });
+    const read = await call("GET", `/results/${id}`, { token: TOKEN });
+    expect(read.status).toBe(200);
+    expect(read.headers["cache-control"]).toBe("no-store");
+    expect(JSON.parse(read.body)).toEqual({ payload: sealed });
+  });
+
+  it.each([
+    ["not base64", "not base64!"],
+    ["too short", Buffer.alloc(8).toString("base64")],
+    ["not a string", 42],
+  ])("records the decision without rows when the archive is %s", async (_, archive) => {
+    const { id, reply } = await approve(archive);
+    expect(reply.status).toBe(200);
+    expect(store.get(id)?.state).toBe("approved");
+    expect((await call("GET", `/results/${id}`, { token: TOKEN })).status).toBe(404);
+  });
+
+  it("accepts an archive of exactly 9 MiB and drops one byte more, delivering both", async () => {
+    const limit = 9 * 1024 * 1024;
+    const fits = await approve(Buffer.alloc(limit, 1).toString("base64"));
+    const over = await approve(Buffer.alloc(limit + 1, 1).toString("base64"));
+    expect([fits.reply.status, over.reply.status]).toEqual([200, 200]);
+    expect(store.get(over.id)?.state).toBe("approved");
+    const page = JSON.parse((await call("GET", "/activity", { token: TOKEN })).body);
+    const kept = Object.fromEntries(
+      page.activity.map((e: { id: string; kept: boolean }) => [e.id, e.kept]),
+    );
+    expect(kept).toEqual({ [fits.id]: true, [over.id]: false });
+  });
+
+  it("answers 401 without the token and the same 404 out of scope, unknown or malformed", async () => {
+    const { id } = await approve(sealed);
+    expect((await call("GET", `/results/${id}`)).status).toBe(401);
+    store.setConnection(conn("beta"));
+    expect((await call("GET", `/results/${id}`, { token: TOKEN })).status).toBe(404);
+    expect((await call("GET", "/results/req_000000000000", { token: TOKEN })).status).toBe(404);
+    expect((await call("GET", "/results/req_zz", { token: TOKEN })).status).toBe(404);
+  });
+
+  it("records who declined, and drops an author it does not know", async () => {
+    const human = claimed();
+    await call("POST", "/result", {
+      token: TOKEN,
+      body: {
+        id: human.id,
+        leaseId: human.leaseId,
+        status: "rejected",
+        reason: "no",
+        declinedBy: "human",
+      },
+    });
+    const unknown = claimed();
+    await call("POST", "/result", {
+      token: TOKEN,
+      body: { id: unknown.id, leaseId: unknown.leaseId, status: "rejected", declinedBy: "someone" },
+    });
+    expect(store.get(human.id)?.policy).toMatchObject({ declinedBy: "human" });
+    expect(JSON.stringify(store.get(unknown.id)?.policy ?? null)).not.toContain("declinedBy");
+  });
+});
+
+describe("GET /activity limit", () => {
+  function decide(n: number): void {
+    for (let i = 0; i < n; i++) {
+      store.submit({ sessionId: "s1", sql: `SELECT ${i}` });
+      const claimed = store.claimNext("plug_test", 30000)!;
+      store.resolve(claimed.id, claimed.leaseId!, { status: "rejected", reason: "no" });
+    }
+  }
+
+  it.each([
+    ["3", 3, true],
+    ["0", 1, true],
+    ["500", 5, false],
+  ])("serves ?limit=%s as %i entries", async (limit, length, more) => {
+    decide(5);
+    const page = JSON.parse((await call("GET", `/activity?limit=${limit}`, { token: TOKEN })).body);
+    expect(page.activity).toHaveLength(length);
+    expect(page.more).toBe(more);
+  });
+
+  it.each(["?limit=", "?limit=abc", "?limit=1.5", "?limit=-1", "?limit=1&limit=2"])(
+    "rejects the malformed limit %s",
+    async (query) => {
+      expect((await call("GET", `/activity${query}`, { token: TOKEN })).status).toBe(400);
+    },
+  );
+});
