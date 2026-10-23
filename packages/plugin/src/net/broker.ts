@@ -111,9 +111,17 @@ export class BrokerClient {
     return { ok: false, error: body.error ?? "Pairing failed." };
   }
 
-  // Returns the raw Response so poll() keeps the 401-vs-200 auth-failure policy.
-  pending(connectionName?: string): Promise<Response> {
-    return this.request("/pending", { headers: this.connHeader(connectionName) });
+  // Returns the raw Response so poll() keeps the 401-vs-200 auth-failure policy. `auto` tells
+  // the broker Auto mode is on, so the alert of a read waits for it; `attention` names the
+  // requests left to a human, whose alert rings now.
+  pending(connectionName?: string, auto = false, attention: string[] = []): Promise<Response> {
+    const query = new URLSearchParams();
+    if (auto) query.set("auto", "1");
+    if (attention.length) query.set("attention", attention.join(","));
+    const search = query.toString();
+    return this.request(`/pending${search ? `?${search}` : ""}`, {
+      headers: this.connHeader(connectionName),
+    });
   }
 
   async inflight(connectionName?: string): Promise<Proposal[] | null> {

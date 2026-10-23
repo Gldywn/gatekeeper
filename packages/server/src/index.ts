@@ -24,6 +24,7 @@ import {
 import { createMcpServer } from "./mcp.js";
 import { createNotifier } from "./notify.js";
 import { pairingUrl } from "./pairing.js";
+import { ringDue } from "./service.js";
 import { RequestStore } from "./store.js";
 
 // ~/.gatekeeper holds the capability token and the results DB (with WAL side
@@ -149,10 +150,12 @@ async function main(): Promise<void> {
   };
   scheduleRebind();
 
-  // Only the broker owner sweeps, to avoid redundant cross-process writes.
+  // Only the broker owner sweeps, to avoid redundant cross-process writes. It also raises the
+  // alerts no submission can: Auto mode gone, and the reminder at half a proposal's life.
   const sweep = setInterval(() => {
     if (brokerOwner) {
       store.sweep();
+      ringDue(store, notifier);
     }
   }, SWEEP_INTERVAL_MS);
   sweep.unref();

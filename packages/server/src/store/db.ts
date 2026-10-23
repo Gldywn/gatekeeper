@@ -60,7 +60,8 @@ export function migrate(db: Database.Database): void {
         result_json TEXT,
         policy_json TEXT,
         expires_at INTEGER NOT NULL,
-        connection TEXT
+        connection TEXT,
+        alert_stage INTEGER NOT NULL DEFAULT 1
       );
       CREATE INDEX IF NOT EXISTS idx_requests_state ON requests(state, created_at);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_requests_idem
@@ -102,7 +103,9 @@ export function migrate(db: Database.Database): void {
 
       CREATE TABLE IF NOT EXISTS alerts (
         id INTEGER PRIMARY KEY CHECK (id = 1),
-        last_alert_at INTEGER NOT NULL DEFAULT 0
+        last_alert_at INTEGER NOT NULL DEFAULT 0,
+        auto_seen_at INTEGER NOT NULL DEFAULT 0,
+        auto_scope TEXT
       );
 
       CREATE TABLE IF NOT EXISTS sessions (
@@ -124,6 +127,11 @@ export function migrate(db: Database.Database): void {
     "ALTER TABLE sessions ADD COLUMN last_active INTEGER",
     "ALTER TABLE sessions ADD COLUMN connection TEXT",
     "ALTER TABLE sessions ADD COLUMN left_at INTEGER",
+    // 0: the alert waits for Auto mode, 1: alerted, 2: reminded. Rows inserted by an older
+    // server, which alerts at submission, read as alerted.
+    "ALTER TABLE requests ADD COLUMN alert_stage INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE alerts ADD COLUMN auto_seen_at INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE alerts ADD COLUMN auto_scope TEXT",
     // A fresh DB is already session_label, so this throws and is swallowed;
     // an existing DB still on session_intent is renamed in place.
     "ALTER TABLE sessions RENAME COLUMN session_intent TO session_label",
