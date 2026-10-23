@@ -1,4 +1,5 @@
 import { connectionScopeKey } from "../connection.js";
+import { autoCovers } from "./alerts.js";
 import { logAudit } from "./audit.js";
 import { getConnection } from "./connection.js";
 import { digest, isUniqueViolation, OPEN_STATES, type StoreContext, token } from "./db.js";
@@ -6,10 +7,12 @@ import { knownCount, type RawRow, toRequest } from "./rows.js";
 import { type GatekeeperRequest, type Outcome, type RequestState, StoreError } from "./types.js";
 
 // `created` is false when an idempotency key replayed an existing proposal. The
-// desktop alert keys off it, so a retry never raises a second banner.
+// desktop alert keys off it, so a retry never raises a second banner. `deferred` says the
+// alert of a new proposal waits for Auto mode, which may still approve it.
 export interface SubmitOutcome {
   request: GatekeeperRequest;
   created: boolean;
+  deferred: boolean;
 }
 
 /** Enqueue a proposal, or return the existing one for a repeated idempotency key. */
@@ -21,6 +24,8 @@ export function submit(
     intent?: string;
     idempotencyKey?: string;
     policy?: unknown;
+    // The advisory class is a read: the one kind Auto mode can approve.
+    autoEligible?: boolean;
   },
 ): SubmitOutcome {
   // IMMEDIATE so the idempotency check, the backpressure count, and the insert
@@ -43,7 +48,7 @@ export function submit(
             "This idempotency_key was already used for a different statement.",
           );
         }
-        return { request: toRequest(existing), created: false };
+        return { request: toRequest(existing), created: false, deferred: false };
       }
     }
 
@@ -61,6 +66,8 @@ export function submit(
 
     const now = ctx.now();
     const conn = getConnection(ctx);
+    const connection = conn ? connectionScopeKey(conn) : null;
+    const deferred = input.autoEligible === true && autoCovers(ctx, connection);
     const row: RawRow = {
       id: token("req"),
       created_at: now,
@@ -76,19 +83,19 @@ export function submit(
       result_json: null,
       policy_json: input.policy === undefined ? null : JSON.stringify(input.policy),
       expires_at: now + ctx.ttl,
-      connection: conn ? connectionScopeKey(conn) : null,
+      connection,
     };
     try {
       ctx.db
         .prepare(
           `INSERT INTO requests
               (id, created_at, session_id, sql, intent, idempotency_key, state,
-               lease_id, lease_expires_at, plugin_id, decided_at, result_json, policy_json, expires_at, connection)
+               lease_id, lease_expires_at, plugin_id, decided_at, result_json, policy_json, expires_at, connection, alert_stage)
              VALUES
               (@id, @created_at, @session_id, @sql, @intent, @idempotency_key, @state,
-               @lease_id, @lease_expires_at, @plugin_id, @decided_at, @result_json, @policy_json, @expires_at, @connection)`,
+               @lease_id, @lease_expires_at, @plugin_id, @decided_at, @result_json, @policy_json, @expires_at, @connection, @alert_stage)`,
         )
-        .run(row);
+        .run({ ...row, alert_stage: deferred ? 0 : 1 });
     } catch (err) {
       if (input.idempotencyKey && isUniqueViolation(err)) {
         const existing = ctx.db
@@ -101,7 +108,7 @@ export function submit(
               "This idempotency_key was already used for a different statement.",
             );
           }
-          return { request: toRequest(existing), created: false };
+          return { request: toRequest(existing), created: false, deferred: false };
         }
       }
       throw err;
@@ -113,7 +120,7 @@ export function submit(
       sessionId: row.session_id,
       sqlDigest: digest(row.sql),
     });
-    return { request: toRequest(row), created: true };
+    return { request: toRequest(row), created: true, deferred };
   });
   return run.immediate();
 }

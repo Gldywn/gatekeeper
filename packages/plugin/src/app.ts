@@ -128,6 +128,8 @@ import { DETECTION_TOGGLES, exampleChip, SettingsView } from "./views/settings";
 
 const BROKER_URL = "http://localhost:9999";
 const POLL_MS = 1000;
+// Requests one poll reports as left to a human, the most the broker takes; the rest ride the next.
+const ATTENTION_MAX = 64;
 const RENEW_MS = 15_000;
 const TICK_MS = 1000;
 // A query that started but is not in the database's activity yet gets a few ticks to appear.
@@ -333,6 +335,10 @@ export class Gatekeeper {
   private tab: InboxTab = "queue";
   private readonly selection: Record<InboxTab, Selection | null> = { queue: null, audit: null };
   private polling = false;
+  // One /pending call at a time: an answer overtaken by an older one would leave the broker
+  // with a stale Auto mode report. A poke during a call asks for another right after it.
+  private pollBusy = false;
+  private pollAgain = false;
   private lastTitle = "";
   private lastConnCheck = 0;
   private connCheckInFlight = false;
@@ -2247,6 +2253,8 @@ export class Gatekeeper {
       const fromMarker = toggle.closest("#armed");
       this.resetAuto("Auto mode disabled");
       this.applyMode("read");
+      // The broker hears of it now, so what Auto mode was holding rings without waiting.
+      this.pokePoll();
       if (fromMarker) this.root.querySelector<HTMLElement>("#autoHint .sa-hint")?.focus();
       return;
     }
@@ -2328,6 +2336,8 @@ export class Gatekeeper {
       this.autoDeferred = new Set(this.cards.map((c) => c.id));
       this.autoEnabled = true;
       this.renderAuto();
+      // The broker hears of it now, so a read submitted next waits for Auto mode.
+      this.pokePoll();
       await this.reportConnection();
       void this.evaluateNext();
     } catch {
@@ -2430,9 +2440,21 @@ export class Gatekeeper {
     this.autoCard = card;
     const controller = new AbortController();
     this.autoAbort = controller;
+    // The evaluator is freed at the deadline or when the calls settle, whichever comes first: a
+    // host call that never answers must not hold back, unalerted, every read queued behind it.
+    let freed = false;
+    const free = (): void => {
+      if (freed) return;
+      freed = true;
+      if (this.autoAbort !== controller) return;
+      this.autoBusy = false;
+      this.autoCard = undefined;
+    };
     const timer = window.setTimeout(() => {
       controller.abort();
       if (valid()) this.reviewCard(card, "Evaluation timed out. Approve manually");
+      free();
+      void this.evaluateNext();
     }, 15000);
     let run: Promise<void> | undefined;
     try {
@@ -2477,8 +2499,7 @@ export class Gatekeeper {
       if (valid()) this.reviewCard(card, "Evaluator or metadata unavailable. Approve manually");
     } finally {
       window.clearTimeout(timer);
-      this.autoBusy = false;
-      this.autoCard = undefined;
+      free();
       if (card.state === "ready" && card.autoStatus === "Evaluating with Jev")
         this.reviewCard(card, "Evaluation cancelled or authority changed");
       void this.evaluateNext();
@@ -2659,11 +2680,24 @@ export class Gatekeeper {
     if (!this.polling) {
       return;
     }
+    if (this.pollBusy) {
+      this.pollAgain = true;
+      return;
+    }
+    this.pollBusy = true;
     let claimed = false;
     const connection = this.connGeneration;
     const active = this.activeGen;
+    const attention = this.cards
+      .filter((c) => !c.handedOff && this.waitsForHuman(c))
+      .slice(0, ATTENTION_MAX);
+    const leases = attention.map((c) => c.leaseId);
     try {
-      const res = await this.broker.pending(this.connScopeKey());
+      const res = await this.broker.pending(
+        this.connScopeKey(),
+        this.autoEnabled,
+        attention.map((c) => c.id),
+      );
       if (connection !== this.connGeneration || active !== this.activeGen) return;
       if (res.status === 401) {
         this.polling = false;
@@ -2684,6 +2718,11 @@ export class Gatekeeper {
       // popover's "Last answer" age keeps growing.
       if (res.ok) {
         this.brokerAnsweredAt = Date.now();
+        // Only a card still waiting under the lease it was reported with: one that ran or moved
+        // on meanwhile is reported again if it comes back to a human.
+        attention.forEach((card, i) => {
+          if (card.leaseId === leases[i] && this.waitsForHuman(card)) card.handedOff = true;
+        });
       }
       if (res.status === 200) {
         claimed = true;
@@ -2705,15 +2744,19 @@ export class Gatekeeper {
       }
       log.error(err instanceof Error ? err : String(err));
     } finally {
-      if (this.polling && active === this.activeGen) {
-        this.pollTimer = window.setTimeout(() => void this.poll(), claimed ? 0 : POLL_MS);
+      this.pollBusy = false;
+      const again = this.pollAgain;
+      this.pollAgain = false;
+      // A call a takeover made stale still hands over to the poll the new owner asked for.
+      if (this.polling && (active === this.activeGen || again)) {
+        this.pollTimer = window.setTimeout(() => void this.poll(), claimed || again ? 0 : POLL_MS);
       }
     }
   }
 
   // Re-poll (and refresh the roster) right now instead of waiting out the
   // interval, so pending proposals appear the instant the tab regains focus or
-  // is reopened, without spawning a second poll loop.
+  // is reopened, without spawning a second poll loop (a call in flight runs it after).
   private pokePoll(): void {
     if (!this.polling) {
       return;
@@ -2798,6 +2841,7 @@ export class Gatekeeper {
           existing.autoAttempt = undefined;
           existing.authorityLost = false;
           existing.evaluation = undefined;
+          existing.handedOff = undefined;
         }
         existing.leaseId = proposal.leaseId;
         existing.leaseExpiresAt = proposal.leaseExpiresAt;

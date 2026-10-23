@@ -1,6 +1,12 @@
 import type { ConnectionSnapshot } from "./connection.js";
 import type { SchemaSnapshot } from "./schema.js";
-import { claimAlert, claimAutoAlert } from "./store/alerts.js";
+import {
+  claimAlert,
+  handOffAlerts,
+  releaseAlerts,
+  remindAlerts,
+  stampAuto,
+} from "./store/alerts.js";
 import { type ActivityCursor, listActivity, readAudit } from "./store/audit.js";
 import { getConnection, setConnection } from "./store/connection.js";
 import { createContext, migrate, type StoreContext } from "./store/db.js";
@@ -93,6 +99,7 @@ export class RequestStore {
     intent?: string;
     idempotencyKey?: string;
     policy?: unknown;
+    autoEligible?: boolean;
   }): SubmitOutcome {
     return submit(this.ctx, input);
   }
@@ -102,9 +109,24 @@ export class RequestStore {
     return claimAlert(this.ctx, cooldownMs);
   }
 
-  /** True when an alert rang since the last Auto sound and no proposal is still open. */
-  claimAutoAlert(): boolean {
-    return claimAutoAlert(this.ctx);
+  /** Record that Auto mode is on for this connection scope, or off (`null`). */
+  stampAuto(scope: string | null): void {
+    stampAuto(this.ctx, scope);
+  }
+
+  /** Hand these requests from Auto mode to a human; the session to ring for, if this rings. */
+  handOffAlerts(ids: string[], cooldownMs: number): string | null {
+    return handOffAlerts(this.ctx, ids, cooldownMs);
+  }
+
+  /** Alert the requests Auto mode no longer covers; the session to ring for, if this rings. */
+  releaseAlerts(cooldownMs: number): string | null {
+    return releaseAlerts(this.ctx, cooldownMs);
+  }
+
+  /** True when requests came due for their one reminder and this call claimed the window. */
+  remindAlerts(cooldownMs: number): boolean {
+    return remindAlerts(this.ctx, cooldownMs);
   }
 
   claimNext(

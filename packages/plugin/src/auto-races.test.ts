@@ -896,6 +896,30 @@ describe("Auto mode queue while an approved read executes", () => {
       expect(app.broker.executing).not.toHaveBeenCalled();
       expect(query).not.toHaveBeenCalled();
     });
+
+    // Held by the evaluator, the queued read would never be evaluated nor left to a human, so its
+    // alert would stay owed to Auto mode for good.
+    it("frees the evaluator at the deadline when a host call never answers", async () => {
+      const { app, card } = harness();
+      const queued: Card = { ...card, id: "req_b", leaseId: "lease_b" };
+      app.cards.push(queued);
+      const stuck = deferred<null>();
+      const inspect = vi
+        .spyOn(app.annotator, "inspectRead")
+        .mockReturnValueOnce(stuck.promise)
+        .mockReturnValueOnce(new Promise(() => {}));
+      const first = app.evaluateNext();
+      await vi.waitFor(() => expect(inspect).toHaveBeenCalledOnce());
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(card.autoStatus).toBe("Needs review: Evaluation timed out. Approve manually");
+      await vi.waitFor(() => expect(inspect).toHaveBeenCalledTimes(2));
+      expect(queued.autoStatus).toBe("Evaluating with Jev");
+      // The first evaluation settling late leaves the one now running alone.
+      stuck.resolve(null);
+      await first;
+      expect(app.autoBusy).toBe(true);
+      expect(app.autoCard).toBe(queued);
+    });
   });
 });
 
@@ -1346,5 +1370,102 @@ describe("schema repaint", () => {
     app.renderCardSchema(card);
     expect(nodes["#cs-req"].innerHTML).toBe("");
     expect(nodes["#sqlbody-req"].innerHTML).not.toContain("pii-col");
+  });
+});
+
+describe("the poll's report to the broker", () => {
+  const answer = (status = 204) => ({ status, ok: status < 300, headers: { get: () => null } });
+  function polling(cards: Partial<Card>[]) {
+    const { app, card } = harness();
+    app.cards = cards.map((c, i) => ({ ...card, id: `req_${i}`, leaseId: `lease_${i}`, ...c }));
+    const pending = vi.fn(async (..._args: unknown[]) => answer());
+    Object.assign(app, {
+      polling: true,
+      pollFailures: 0,
+      broker: { ...app.broker, pending },
+      setServerHeader: vi.fn(),
+      setConnectionState: vi.fn(),
+    });
+    const sent = (call = 0) => pending.mock.calls[call]?.slice(1);
+    return { app, pending, sent };
+  }
+
+  it("names what waits for a human, never what Auto mode is evaluating or will evaluate", async () => {
+    const { app, sent } = polling([
+      { autoAttempt: 1, autoStatus: "Needs review: Sensitive source or alias: email" },
+      {},
+      { autoAttempt: 1, autoStatus: "Evaluating with Jev" },
+      { sql: "DELETE FROM public.products" },
+    ]);
+    app.autoCard = app.cards[2];
+    app.autoAbort = new AbortController();
+    await app.poll();
+    expect(sent()).toEqual([true, ["req_0", "req_3"]]);
+    await app.poll();
+    expect(sent(1)).toEqual([true, []]);
+  });
+
+  it("names a card whose evaluation timed out, before its calls settle", async () => {
+    const { app, sent } = polling([{ autoAttempt: 1, autoStatus: "Evaluating with Jev" }]);
+    app.autoCard = app.cards[0];
+    app.autoAbort = new AbortController();
+    app.autoAbort.abort();
+    await app.poll();
+    expect(sent()).toEqual([true, ["req_0"]]);
+  });
+
+  it("still names waiting cards with Auto mode off, the moment it was switched off", async () => {
+    const { app, sent } = polling([{}, {}]);
+    app.autoEnabled = false;
+    await app.poll();
+    expect(sent()).toEqual([false, ["req_0", "req_1"]]);
+  });
+
+  it("names a card again unless the broker answered while it still waited under that lease", async () => {
+    const { app, pending, sent } = polling([
+      { autoAttempt: 1 },
+      { autoAttempt: 1 },
+      { autoAttempt: 1 },
+    ]);
+    pending.mockImplementationOnce(async () => {
+      app.cards[0].leaseId = "lease_new";
+      app.cards[1].state = "approving";
+      return answer();
+    });
+    await app.poll();
+    app.cards[1].state = "ready";
+    await app.poll();
+    expect(sent(1)).toEqual([true, ["req_0", "req_1"]]);
+  });
+
+  it("names a card again after a failed answer", async () => {
+    const { app, pending, sent } = polling([{ autoAttempt: 1 }]);
+    pending.mockResolvedValueOnce(answer(500));
+    await app.poll();
+    await app.poll();
+    expect(sent(1)).toEqual([true, ["req_0"]]);
+  });
+
+  it("names at most 64 cards a poll, the rest on the next", async () => {
+    const { app, sent } = polling(Array.from({ length: 70 }, () => ({ autoAttempt: 1 })));
+    await app.poll();
+    await app.poll();
+    expect(sent(0)).toEqual([true, expect.toSatisfy((ids: string[]) => ids.length === 64)]);
+    expect(sent(1)).toEqual([true, expect.toSatisfy((ids: string[]) => ids.length === 6)]);
+  });
+
+  it("keeps one call in flight, and a poke during it polls right after", async () => {
+    const { app, pending } = polling([{ autoAttempt: 1 }]);
+    const reply = deferred<ReturnType<typeof answer>>();
+    pending.mockImplementationOnce(() => reply.promise);
+    const timer = vi.fn();
+    vi.stubGlobal("window", { setTimeout: timer, clearTimeout });
+    const first = app.poll();
+    await app.poll();
+    expect(pending).toHaveBeenCalledOnce();
+    reply.resolve(answer());
+    await first;
+    expect(timer).toHaveBeenCalledOnce();
+    expect(timer.mock.calls[0][1]).toBe(0);
   });
 });

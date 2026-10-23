@@ -4,6 +4,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { AccessMode, ActivityPage, Proposal, SessionRoster } from "@gatekeeper/shared";
 import { z } from "zod";
 import {
+  AUTO_STAMP_MS,
   BROKER_HOST,
   brokerPort,
   LEASE_MS,
@@ -28,14 +29,9 @@ import {
 } from "./evaluator.js";
 import type { Notifier } from "./notify.js";
 import { pairingPage } from "./pairing-page.js";
+import { ringHandOff } from "./service.js";
 import { sensitivityRecord } from "./store/audit.js";
-import {
-  type ActivityCursor,
-  type GatekeeperRequest,
-  type Outcome,
-  type RequestStore,
-  StoreError,
-} from "./store.js";
+import { type ActivityCursor, type Outcome, type RequestStore, StoreError } from "./store.js";
 import { SERVER_IDENTITY } from "./version.js";
 
 const CORS: Record<string, string> = {
@@ -53,6 +49,8 @@ const IDENTITY_HEADER = encodeURIComponent(JSON.stringify(SERVER_IDENTITY));
 const MAX_BODY_BYTES = 32 * 1024 * 1024;
 const ACTIVITY_PAGE = 200;
 const PAIRING_BODY_BYTES = 1024;
+// Requests the plugin hands to a human in one poll; the rest ride the next ones.
+const MAX_ATTENTION = 64;
 // The plugin polls at 1 Hz; coalesce its presence writes to this cadence.
 const PRESENCE_STAMP_MS = 15_000;
 // Printable ASCII only, the same rule the plugin applies before sending a key.
@@ -72,6 +70,8 @@ interface Broker {
   evaluator: Evaluator;
   keyChecker: KeyChecker;
   notifier?: Notifier;
+  /** The Auto mode report last written to the shared row; `null` until this broker writes one. */
+  autoStamp: { scope: string | null; at: number } | null;
   evaluating: boolean;
   evaluations: Map<
     string,
@@ -102,6 +102,7 @@ export function createBroker(
     evaluator,
     keyChecker,
     notifier,
+    autoStamp: null,
     evaluating: false,
     evaluations: new Map(),
   };
@@ -202,7 +203,14 @@ async function handle(broker: Broker, req: IncomingMessage, res: ServerResponse)
   }
 
   if (req.method === "GET" && url.pathname === "/pending") {
-    const proposal = store.claimNext(pluginId, LEASE_MS, resolveConnection(store, req));
+    const attention = attentionIds(url.searchParams);
+    if (attention === "invalid") {
+      send(res, 400, { error: "Invalid attention list" });
+      return;
+    }
+    const scope = resolveConnection(store, req);
+    reportAuto(broker, url.searchParams.get("auto") === "1" ? scope : null, attention);
+    const proposal = store.claimNext(pluginId, LEASE_MS, scope);
     if (!proposal) {
       res.writeHead(204, baseHeaders());
       res.end();
@@ -412,15 +420,8 @@ async function handle(broker: Broker, req: IncomingMessage, res: ServerResponse)
     // An unreadable record is dropped, never a reason to refuse the decision it rides on.
     const sensitivity = sensitivityRecord.safeParse(body.sensitivity).data;
     guarded(res, () => {
-      const resolved = store.resolve(
-        String(body.id),
-        String(body.leaseId),
-        toOutcome(body),
-        hold.data,
-        sensitivity,
-      );
+      store.resolve(String(body.id), String(body.leaseId), toOutcome(body), hold.data, sensitivity);
       send(res, 200, { ok: true });
-      soundAutoApproval(broker, resolved);
     });
     return;
   }
@@ -575,26 +576,32 @@ function guarded(
   }
 }
 
-// Sounds on the terminal result, not on /executing: the plugin can still withdraw a
-// reservation, and a failed query was not handled for anyone. Skipped while another
-// proposal is still open, where it would read as an all-clear.
-function soundAutoApproval(broker: Broker, request: GatekeeperRequest): void {
-  const approval = (request.policy as { approval?: { source?: unknown } } | null)?.approval;
-  if (
-    !broker.notifier?.autoActive ||
-    request.state !== "approved" ||
-    approval?.source !== "automatic"
-  ) {
-    return;
+// The plugin's poll says whether Auto mode is on (`scope`, else off) and which requests it
+// leaves to a human. A change of state reaches the shared row at once, a steady one every
+// AUTO_STAMP_MS, which is what tells a submitting process that Auto mode is still there.
+function reportAuto(broker: Broker, scope: string | null, attention: string[]): void {
+  const now = Date.now();
+  const last = broker.autoStamp;
+  if (!last || last.scope !== scope || (scope !== null && now - last.at >= AUTO_STAMP_MS)) {
+    broker.store.stampAuto(scope);
+    broker.autoStamp = { scope, at: now };
   }
-  try {
-    if (!broker.store.claimAutoAlert()) {
-      return;
-    }
-    broker.notifier.notifyAuto();
-  } catch {
-    // The result is already accepted and answered; a lost sound must not touch it.
+  if (broker.notifier) ringHandOff(broker.store, broker.notifier, attention);
+}
+
+// Each id once, in the exact shape the store mints, at most MAX_ATTENTION of them, given once:
+// anything else is a plugin bug, refused whole as a 400 before the poll has any effect.
+function attentionIds(params: URLSearchParams): string[] | "invalid" {
+  const given = params.getAll("attention");
+  if (!given.length) {
+    return [];
   }
+  const ids = given.length === 1 ? [...new Set(given[0].split(","))] : [];
+  return ids.length &&
+    ids.length <= MAX_ATTENTION &&
+    ids.every((id) => /^req_[0-9a-f]{12}$/.test(id))
+    ? ids
+    : "invalid";
 }
 
 // The advisory risk class stamped at submit, surfaced on the proposal so the plugin

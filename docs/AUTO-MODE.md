@@ -434,9 +434,10 @@ and shown in details and Audit Trail. They survive result-row purging and remain
 with the decided request. Older records without attribution are
 not retroactively labelled as human approvals.
 
-On macOS, Auto mode does not silence the submission alert. When a query it approved runs
-successfully and no other proposal is still waiting for a decision or being run by Auto mode,
-the server also plays a distinct sound, without a banner. See
+On macOS, a read submitted while Auto mode is on raises no alert until Auto mode leaves it to
+you: a hold, a refusal, a failed or timed-out evaluation, or Auto mode switched off. The plugin
+reports Auto mode and those reads on its `/pending` poll, and the server alerts then; a read
+Auto mode approves stays silent, unless the plugin stopped reporting for 15 seconds first. See
 [Desktop notifications](CONFIGURATION.md#desktop-notifications-macos).
 
 The plugin can attach `autoHold: { sent: boolean, reason: string }` to `POST /result`

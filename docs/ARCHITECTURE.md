@@ -42,6 +42,18 @@ Because submit and read are separate, an agent can keep several proposals in fli
 collect each result as its human decision lands. Approval is **pre-execution**, on the SQL
 text.
 
+## Desktop alerts
+
+On macOS a proposal alerts only when a human is needed ([details](CONFIGURATION.md#desktop-notifications-macos)).
+Each request carries an alert stage in the shared SQLite file: owed to Auto mode, alerted, or
+reminded. While Auto mode is on, the plugin's `/pending` poll says so (`auto=1`), and the
+broker stamps that with the connection scope; a read submitted under a live stamp is stored as
+owed and stays silent. The same poll names the requests the plugin leaves to a human
+(`attention=`), and the broker alerts for those still owed. The broker owner's sweep alerts
+for owed requests the stamp no longer covers (Auto mode off, no report for 15 seconds, another
+connection) and plays the one reminder at half a proposal's life. Every path claims the same
+10-second cooldown, so requests due together ring once.
+
 ## Access modes
 
 Approval is manual by default; Execution mode decides which risk classes may run:
