@@ -51,12 +51,20 @@ available to the connection.
 Two classifiers agree on the read / write / destructive classes:
 
 - The **plugin** classifier is authoritative, because the plugin is the only component
-  that runs SQL. It parses each query in the connection's dialect with `node-sql-parser`,
-  escalates the class on any embedded modifying node (a CTE, a subquery, `SELECT ... INTO`,
+  that runs SQL. A PostgreSQL connection is parsed with PostgreSQL's own grammar
+  (`libpg_query`, compiled to WebAssembly and bundled with the plugin); every other engine
+  with `node-sql-parser` in its dialect, taken as it parses. The classifier escalates the
+  class on any embedded modifying node (a CTE, a subquery, `SELECT ... INTO`,
   `EXPLAIN ANALYZE` of a write, a locking read), and fails closed to **destructive** when a
   parse fails or a statement is unrecognized.
-- **A failed parse raises the class; it does not block the query.** `node-sql-parser` knows
-  no `DROP DATABASE`, `VACUUM`, or `ALTER SYSTEM`, and blocking them outright made the
+- **PostgreSQL strings with one reading only.** With `standard_conforming_strings` off, a
+  backslash escapes a quote in an ordinary string; with it on, it does not. An ordinary
+  string holding a backslash before a quote therefore ends at a different place under each
+  setting, so the plugin blocks such a statement instead of choosing one reading. `E''`
+  strings mean the same under both and parse normally.
+- **A failed parse raises the class; it does not block the query.** A parser can refuse
+  statements the server runs (`node-sql-parser` knows no `DROP DATABASE`, `VACUUM`, or
+  `ALTER SYSTEM`), and blocking them outright made the
   archetypal destructive statement unapprovable in the very mode built to gate it. Such a
   statement is classed destructive, so it still needs Destructive mode armed plus the
   confirmation where the human types the database name, and its card carries a standing
@@ -66,9 +74,11 @@ Two classifiers agree on the read / write / destructive classes:
   cases no mode may approve: empty and multi-statement input.
 
 **MySQL executable comments.** MySQL and MariaDB run the body of a `/*! ... */` comment,
-unlike an ordinary comment. Both classifiers keep that body when scanning, and the plugin
-never lets a modifying keyword hidden inside such a comment ride in under a read verdict;
-it escalates to destructive so a human must arm and confirm it explicitly.
+unlike an ordinary comment. `node-sql-parser` drops that body, so on a MySQL or MariaDB
+connection the plugin does not use its parse of any statement containing `/*!` and applies
+the strict text check instead. Both classifiers keep the body when scanning, and the
+plugin never lets a modifying keyword hidden inside such a comment ride in under a read
+verdict; it escalates to destructive so a human must arm and confirm it explicitly.
 
 **Trojan-source text.** Unicode bidirectional overrides and other invisible formatting
 characters can make submitted SQL render in an order the reviewer never approved. The

@@ -95,11 +95,17 @@ See [`SECURITY.md`](../SECURITY.md).
 
 ## Where the risk gate lives
 
-The plugin is the only component that can call `runQuery`, so the gate lives there:
-`node-sql-parser` parses each query in the connection's dialect, classifies it read / write /
-destructive (escalating on any embedded modify node, with a conservative fallback when
-parsing fails), and only lets the human approve a class the armed mode allows. The server
-also preflights with a regex to block empty and multi-statement input before enqueueing.
+The plugin is the only component that can call `runQuery`, so the gate lives there. It
+parses each query with the connection's own parser, picked per engine in `sql/engine.ts`:
+PostgreSQL's grammar (`libpg_query`, bundled as WebAssembly and loaded before the plugin
+starts) for a PostgreSQL connection, `node-sql-parser` in the matching dialect for every
+other engine. Each engine module (`sql/pg/`, `sql/nsp/`) answers the same questions from its
+own tree: the risk class, the tables and columns for the annotation, the sensitive
+literals, the receipt. The gate classifies each query read / write / destructive
+(escalating on any embedded modify node, with a conservative fallback when parsing fails),
+and only lets the human approve a class the armed mode allows. Auto mode exists only on
+PostgreSQL, so only `sql/pg/` builds evaluator input. The server also preflights with a
+regex to block empty and multi-statement input before enqueueing.
 
 The plugin also runs a local load check on each proposal (`sql/load.ts`, host calls in
 `annotate.ts`). It never runs or explains the proposal. It reads the SQL and, on PostgreSQL,

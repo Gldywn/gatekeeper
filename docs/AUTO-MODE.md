@@ -3,7 +3,7 @@
 The [evaluation bench](../packages/server/evals/README.md) holds synthetic reference
 cases and the retained source-focused prompt. It compares recorded thresholds
 without further inference. Policy `auto-beta-8` pairs the dependency-resolving PostgreSQL
-analysis (`shared-read-2`) with the retained candidate 4 questions and a personal
+analysis (`shared-read-3`) with the retained candidate 4 questions and a personal
 disclosure cutoff of 0.20. It permits commercial amounts without personal or company
 identity when every check passes. Its questions were compared live on authored synthetic
 cases only (see "Verification and limits"), which is not a calibration. It differs from
@@ -69,17 +69,17 @@ SELECT status, count(*) AS n FROM payment_orchestrator.payment_intent GROUP BY s
 
 Reaching Jev is not approval: its four cutoffs still decide.
 
-Schema, table, column and alias names follow PostgreSQL quoting rules. Unquoted ASCII
-names fold to lowercase, while quoted names retain their exact case and may contain
-spaces, accents and escaped double quotes. The shared parser adapter compensates for
-`node-sql-parser` losing quote information and rejecting doubled identifier quotes.
-Only the analysis representation is adapted, never the original SQL executed by Beekeeper.
-Catalog comparisons use exact decoded names, and catalog lookup values use escaped
-PostgreSQL E strings. Names are limited to the standard 63-byte catalog length.
-Non-ASCII unquoted names and Unicode escape notation (`U&`) remain manual. An ordinary
-string containing a backslash can be parsed when its quote boundaries are unambiguous,
-but remains manual in Auto mode because its value depends on `standard_conforming_strings`.
-An ambiguous backslash before a quote remains unparsed. Stars expand from each referenced table's catalog, or from the
+The analysis reads the query with PostgreSQL's own grammar (`libpg_query`, the parser of
+PostgreSQL 18 compiled to WebAssembly), so names, strings, comments and statement
+boundaries split exactly as the server splits them. Unquoted ASCII names fold to
+lowercase, while quoted names retain their exact case and may contain spaces, accents
+and escaped double quotes. Catalog comparisons use exact decoded names, and catalog
+lookup values use escaped PostgreSQL E strings. Names are limited to the standard
+63-byte catalog length. Non-ASCII unquoted names and Unicode escape notation (`U&`)
+remain manual. An ordinary string containing a backslash remains manual because its
+value depends on `standard_conforming_strings`. An ordinary string with a backslash
+before a quote is blocked at the gate: under either setting it ends at a different place,
+so no single reading of the statement exists. Stars expand from each referenced table's catalog, or from the
 columns of a CTE or derived table. `COUNT(*)` reads relation membership without
 projecting unrelated fields. Resolution respects the nearest query scope and alias
 shadowing. The subset is capped at 16 relation occurrences and eight nested levels.
@@ -100,18 +100,17 @@ output stays manual. Grouping, filtering or joining on a whole document is allow
 control dependency. Keys and paths stay visible to the evaluator and pass the shared
 sensitive-key checks. Only ASCII identifier keys and `{a,b}` paths are accepted.
 
-Set operations are supported: UNION, UNION ALL, UNION DISTINCT, INTERSECT and EXCEPT, with
-any number of branches of the same precedence. Each branch is walked in the outer scope, the
-first branch's WITH applies to the whole statement, output names come from the first
-branch, and each output position is resolved pair by pair from left to right, as PostgreSQL
-does, checking the casts at each step (two untyped literals become text before a later typed
-branch, so a custom implicit cast from text is caught). Every form except UNION ALL compares rows, so it requires sortable types. The
-right operand of EXCEPT becomes a control dependency. node-sql-parser attaches the
-statement's trailing ORDER BY and LIMIT to the last branch; they apply to the combined
-result and may only name an output column or ordinal. Mixing INTERSECT with UNION or EXCEPT
-stays manual because the parser's flat chain loses INTERSECT's higher precedence, and a
-parenthesized branch stays manual because the parser turns it into a FROM item.
-INTERSECT ALL and EXCEPT ALL do not parse.
+Set operations are supported: UNION, INTERSECT and EXCEPT, each with or without ALL or
+DISTINCT, mixed and parenthesized as PostgreSQL groups them. Each operation has exactly
+two inputs in PostgreSQL's tree, so INTERSECT binds tighter than UNION and EXCEPT and
+parentheses keep their meaning. Each branch is walked in the outer scope, output names
+come from the first branch, and each output position is resolved pair by pair from the
+innermost operation outwards, as PostgreSQL does, checking the casts at each step (two
+untyped literals become text before a later typed branch, so a custom implicit cast from
+text is caught). Every form except UNION ALL compares rows, so it requires sortable types.
+The right operand of EXCEPT becomes a control dependency. A WITH, ORDER BY or LIMIT
+written around a set operation applies to its combined result, and that ORDER BY may only
+name an output column or ordinal.
 
 A set-operation branch may select constants or catalog-checked functions without a
 FROM clause when another branch supplies an explicit ordinary relation. A standalone
@@ -124,28 +123,30 @@ returned after the shared sensitive-literal screening and are withheld from Jev 
 other literal. They reveal nothing the requester did not write; the filters and joins
 around them still count.
 
-node-sql-parser 5.4 cannot read two ordinary PostgreSQL spellings, so the analysis
-rewrites them in its own parser copy only, outside strings, comments and quoted
-identifiers. A built-in typed literal `type 'value'` becomes `CAST('value' AS type)` for
-`timestamptz`, `timestamp with time zone`, `timestamp without time zone`, `uuid`, `json`,
-`jsonb`, `numeric`, `int8`, `bigint`, `integer`, `text`, `boolean`, `bool` and `inet`
-(`int8` is written `BIGINT`, because the parser reads `INT8` as `INT(8)`). `FETCH FIRST n
-ROWS ONLY` (or `ROW ONLY`) with a literal count becomes `LIMIT n`, under the same LIMIT bound.
-The rewritten type still goes through the catalog cast check. Jev receives the normalized
-SQL, while PostgreSQL executes the submitted SQL unchanged. Other spellings still fail to
-parse and stay manual, including `timetz` and `time with/without time zone` (no faithful
-parser cast), other or schema-qualified type names, typed `E''` strings, `FETCH NEXT`,
-`FETCH` without a count, `WITH TIES` and `OFFSET n ROWS`.
+Spellings that PostgreSQL's grammar maps to one tree node are one shape for the analysis.
+A typed literal `type 'value'` and `value::type` are both casts, checked against the
+catalog with the type name PostgreSQL resolves. `FETCH FIRST|NEXT n ROWS ONLY` is a
+LIMIT and `OFFSET n ROWS` an OFFSET, under the same bound. `IS [NOT] DISTINCT FROM`
+compares through `=` like PostgreSQL, unless one side is a bare NULL, which makes it a
+null test. `DISTINCT ON` keys and `ORDER BY` with `NULLS FIRST|LAST` are supported. A
+join's `USING` key is one merged column, taken once from each input, and an unqualified
+reference to it resolves to that column. `EXTRACT(unit FROM value)` keeps its unit
+visible only when it is one of the units PostgreSQL documents; any other text holds.
+`E''` and dollar-quoted strings are literals like any other.
 
-Still manual: recursive CTEs, LATERAL,
-functions in FROM, VALUES, locking clauses, `SELECT ... INTO`, named windows and window
-frames, `DISTINCT ON`, grouping sets, array constructors and subscripts, `IS DISTINCT
-FROM` (the parser keeps it as unstructured text), `COLLATE`, bind parameters, dollar and
-`E''` strings, quoted type names in casts (the parser misreads `::"int4"` as `INT(4)`),
-schema-qualified calls outside `pg_catalog`, whole-row references and anything the walker
-does not model. Unknown node types and unknown node
-keys hold instead of being skipped, and `parser-contract.test.ts` pins every node shape
-the walker accepts. LIMIT and OFFSET must be nonnegative integers at most 1000000.
+Jev receives SQL rendered from the redacted tree by `pgsql-deparser`, then parsed again
+with PostgreSQL's grammar: the rendering is sent only when it yields the same tree,
+positions aside. The rendering normalizes the spelling (casts become `CAST(... AS ...)`,
+names lose quotes they do not need, a default `ASC` disappears), while PostgreSQL executes
+the submitted SQL unchanged.
+
+Still manual: recursive CTEs, LATERAL, functions in FROM, VALUES, locking clauses,
+`SELECT ... INTO`, named windows and window frames, grouping sets, array constructors,
+subscripts and `= ANY (...)` over an array, row comparisons, `COLLATE`, bind parameters,
+`ORDER BY ... USING`, `FETCH ... WITH TIES`, relation aliases that rename columns, a bare
+star over a `USING` join, schema-qualified calls outside `pg_catalog`, whole-row
+references and anything the walker does not model. Unknown node types and unknown node
+keys hold instead of being skipped. LIMIT and OFFSET must be nonnegative integers at most 1000000.
 Existing source/output-alias/JSON/literal detections run before sharing. IP addresses
 receive stricter treatment than display annotations.
 There is no automatic fallback for parse failures and no function is implicitly trusted.
@@ -202,9 +203,9 @@ inputs yet, and earlier `auto-beta-7` figures say nothing about them.
 
 ### PostgreSQL catalog resolution
 
-The PostgreSQL specifics live in `packages/plugin/src/sql/pg/`: `syntax.ts` adapts
-quoting, `plan.ts` walks the statement, `catalog.ts` builds the metadata query and applies
-the resolution rules. `read-analysis.ts` is the shared entry point and refuses every other
+The PostgreSQL specifics live in `packages/plugin/src/sql/pg/`: `parse.ts` loads
+PostgreSQL's grammar, `plan.ts` walks the statement and renders Jev's SQL, `catalog.ts`
+builds the metadata query and applies the resolution rules. `read-analysis.ts` is the shared entry point and refuses every other
 dialect before any catalog SQL. Before inference, the plugin runs two catalog-only reads
 through Beekeeper's existing connection, never the proposal itself:
 

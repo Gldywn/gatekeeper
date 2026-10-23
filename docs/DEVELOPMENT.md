@@ -144,7 +144,8 @@ packages/
     index.html
     src/
       app.ts         UI, polling, lease renewal, approve / reject, history
-      sql/classify.ts  dialect-aware risk classifier (the execution gate)
+      sql/classify.ts  risk classifier (the execution gate), per engine
+      sql/engine.ts    picks the parser per engine: PostgreSQL's own (sql/pg/), node-sql-parser (sql/nsp/)
       sql/sanitize.ts  surfaces bidi/invisible chars in displayed SQL
       result.ts      result cap (what the agent is sent, and the history keeps)
       archive.ts     seals and opens kept results (key in Beekeeper's encrypted storage)
@@ -164,8 +165,9 @@ SECURITY.md          supply-chain policy + DB boundary
 
 ## Tech stack
 
-- **Plugin:** TypeScript, Vite, `@beekeeperstudio/plugin`, `node-sql-parser`. Requires
-  Beekeeper Studio >= 5.4.
+- **Plugin:** TypeScript, Vite, `@beekeeperstudio/plugin`, `libpg-query` and `pgsql-deparser`
+  (PostgreSQL), `node-sql-parser` (other engines). Requires Beekeeper
+  Studio >= 5.4.
 - **Server:** TypeScript, `@modelcontextprotocol/sdk`, `better-sqlite3`, Node's built-in
   `http`. Published to npm as `@gldywn/gatekeeper-mcp-server`. Requires Node >= 22, the floor
   at which `better-sqlite3` ships a prebuilt binary so `npx` needs no C++ toolchain.
