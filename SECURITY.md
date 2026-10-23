@@ -53,10 +53,13 @@ Two classifiers agree on the read / write / destructive classes:
 - The **plugin** classifier is authoritative, because the plugin is the only component
   that runs SQL. A PostgreSQL connection is parsed with PostgreSQL's own grammar
   (`libpg_query`, compiled to WebAssembly and bundled with the plugin); every other engine
-  with `node-sql-parser` in its dialect, taken as it parses. The classifier escalates the
-  class on any embedded modifying node (a CTE, a subquery, `SELECT ... INTO`,
-  `EXPLAIN ANALYZE` of a write, a locking read), and fails closed to **destructive** when a
-  parse fails or a statement is unrecognized.
+  with `node-sql-parser`, taken as it parses, in the engine's grammar when the library has
+  one and in its PostgreSQL grammar otherwise (Redshift, DuckDB, CockroachDB). The
+  classifier escalates the class on any embedded modifying node (a CTE, a subquery,
+  `SELECT ... INTO`, `EXPLAIN ANALYZE` of a write, a locking read), and classes an
+  unrecognized statement **destructive**. When a parse fails, a text check decides: a
+  plain `SELECT` or `WITH` without a modifying keyword is a read (a write if it locks
+  rows), anything else is destructive, and the card says the class is a guess.
 - **PostgreSQL strings with one reading only.** With `standard_conforming_strings` off, a
   backslash escapes a quote in an ordinary string; with it on, it does not. An ordinary
   string holding a backslash before a quote therefore ends at a different place under each
@@ -75,11 +78,12 @@ Two classifiers agree on the read / write / destructive classes:
 
 **MySQL executable comments.** MySQL and MariaDB run the body of a `/*! ... */` comment,
 unlike an ordinary comment, and MariaDB also runs `/*M! ... */`. `node-sql-parser` drops
-that body, so on a MySQL or MariaDB connection the plugin does not trust its parse of any
-statement containing one of these markers, even inside a string: the statement is classed
-destructive, approvable like any statement Gatekeeper cannot read, and blocked when either
-the parser or the text check sees more than one statement. A human must arm Destructive
-mode and confirm it explicitly, even for a harmless optimizer hint.
+that body, so the plugin does not trust its parse of a statement containing `/*!` on a
+MySQL connection, or `/*!` or `/*M!` on a MariaDB connection, even inside a string: the
+statement is classed destructive, approvable like any statement Gatekeeper cannot read,
+and blocked when either the parser or the text check sees more than one statement. A
+human must arm Destructive mode and confirm it explicitly, even when the comment only
+holds a hint such as `/*!40001 SQL_NO_CACHE */`.
 
 **Trojan-source text.** Unicode bidirectional overrides and other invisible formatting
 characters can make submitted SQL render in an order the reviewer never approved. The

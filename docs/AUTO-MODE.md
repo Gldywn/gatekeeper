@@ -69,9 +69,10 @@ SELECT status, count(*) AS n FROM payment_orchestrator.payment_intent GROUP BY s
 
 Reaching Jev is not approval: its four cutoffs still decide.
 
-The analysis reads the query with PostgreSQL's own grammar (`libpg_query`, the parser of
-PostgreSQL 18 compiled to WebAssembly), so names, strings, comments and statement
-boundaries split exactly as the server splits them. Unquoted ASCII names fold to
+The analysis reads the query with PostgreSQL 18's grammar (`libpg_query`, PostgreSQL's
+parser compiled to WebAssembly), whatever the server's version, so names, strings,
+comments and statement boundaries split as PostgreSQL 18 splits them with
+`standard_conforming_strings` on; the string restrictions below cover the other setting. Unquoted ASCII names fold to
 lowercase, while quoted names retain their exact case and may contain spaces, accents
 and escaped double quotes. Catalog comparisons use exact decoded names, and catalog
 lookup values use escaped PostgreSQL E strings. Names are limited to the standard
@@ -118,9 +119,10 @@ SELECT without a relation remains manual. A sensitive-looking alias on a bare st
 constant does not by itself hold the read; sensitive source columns and nonconstant
 aliases still do.
 
-Bare literal projections (`'transfer_out' AS kind`, numbers, NULL, typed literals) are
-returned after the shared sensitive-literal screening and are withheld from Jev like any
-other literal. They reveal nothing the requester did not write; the filters and joins
+Bare literal projections (`'transfer_out' AS kind`, numbers, NULL, booleans, typed
+literals) are returned after the shared sensitive-literal screening. Strings and numbers,
+typed or not, are withheld from Jev like any other value; NULL and booleans carry no value
+and stay visible. They reveal nothing the requester did not write; the filters and joins
 around them still count.
 
 Spellings that PostgreSQL's grammar maps to one tree node are one shape for the analysis.
@@ -137,8 +139,8 @@ visible only when it is one of the units PostgreSQL documents; any other text ho
 Jev receives SQL rendered from the redacted tree by `pgsql-deparser`, then parsed again
 with PostgreSQL's grammar: the rendering is sent only when it yields the same tree,
 positions aside. The rendering normalizes the spelling (casts become `CAST(... AS ...)`,
-names lose quotes they do not need, a default `ASC` disappears), while PostgreSQL executes
-the submitted SQL unchanged.
+names lose quotes they do not need), while PostgreSQL executes the submitted SQL
+unchanged.
 
 Still manual: recursive CTEs, LATERAL, functions in FROM, VALUES, locking clauses,
 `SELECT ... INTO`, named windows and window frames, grouping sets, array constructors,

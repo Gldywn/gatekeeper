@@ -96,10 +96,12 @@ See [`SECURITY.md`](../SECURITY.md).
 ## Where the risk gate lives
 
 The plugin is the only component that can call `runQuery`, so the gate lives there. It
-parses each query with the connection's own parser, picked per engine in `sql/engine.ts`:
-PostgreSQL's grammar (`libpg_query`, bundled as WebAssembly and loaded before the plugin
-starts) for a PostgreSQL connection, `node-sql-parser` in the matching dialect for every
-other engine. Each engine module (`sql/pg/`, `sql/nsp/`) answers the same questions from its
+parses each query with a parser picked per engine in `sql/engine.ts`: PostgreSQL's grammar
+(`libpg_query`, bundled as WebAssembly, loading attempted before the plugin starts) for a
+PostgreSQL connection, `node-sql-parser` for every other engine, in the engine's grammar
+when the library has one and in its PostgreSQL grammar otherwise. If PostgreSQL's grammar
+fails to load, the failure is logged and every PostgreSQL statement takes the text check
+used for a failed parse. Each engine module (`sql/pg/`, `sql/nsp/`) answers the same questions from its
 own tree: the risk class, the tables and columns for the annotation, the sensitive
 literals, the receipt. The gate classifies each query read / write / destructive
 (escalating on any embedded modify node, with a conservative fallback when parsing fails),
