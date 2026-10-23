@@ -226,7 +226,7 @@ export function activityEntryHtml(e: ActivityEntry, selected: boolean, dialect: 
     "audit",
     `<span class="act-time">${escapeHtml(clockTime(ts))}</span>`,
     dialect,
-    entryFlags(e, textSchema(e.sql, dialect)),
+    entryFlags(e, null) ?? entryFlags(e, textSchema(e.sql, dialect)),
     true,
   );
 }

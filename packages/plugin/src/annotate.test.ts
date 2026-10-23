@@ -153,6 +153,34 @@ describe("SchemaAnnotator.schemaFor", () => {
     });
   });
 
+  it("meets a three-part table name's live columns", async () => {
+    const getColumns = vi.fn(async () => columns("id", "email"));
+    const annotator = new SchemaAnnotator({
+      getColumns,
+      dialect: () => "snowflake",
+      defaultSchema: () => "PUBLIC",
+      generation: () => 0,
+    });
+
+    const schema = await annotator.schemaFor("SELECT * FROM db.sch.people");
+
+    expect(getColumns).toHaveBeenCalledWith("people", "db.sch");
+    expect(schema).toMatchObject({ pii: ["email"], complete: true });
+  });
+
+  it("reads a table the host lists no column for as unknown, not as empty", async () => {
+    const annotator = new SchemaAnnotator({
+      getColumns: async () => [],
+      dialect: () => "postgresql",
+      defaultSchema: () => "public",
+      generation: () => 0,
+    });
+
+    expect(await annotator.schemaFor("SELECT * FROM crm.people")).toMatchObject({
+      complete: false,
+    });
+  });
+
   it("flags aliased name columns across a cross-schema join", async () => {
     // Each table lives in its own schema; the two "name" columns are only sensitive
     // under the output names the query gives them (customer_name, company_name).

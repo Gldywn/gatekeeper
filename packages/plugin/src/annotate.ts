@@ -68,8 +68,12 @@ export class SchemaAnnotator {
     if (gen !== this.deps.generation() || revision !== this.revision) {
       return undefined;
     }
+    // A host that lists no column for a table it cannot see leaves that table's star unknown.
     const live = new Map(
-      parsed.tables.map((t, i) => [refKey(t), perTable[i]?.map((c) => c.name) ?? null]),
+      parsed.tables.map((t, i) => {
+        const columns = perTable[i];
+        return [refKey(t), columns?.length ? columns.map((c) => c.name) : null];
+      }),
     );
     const output = analyzeOutput(sql, dialect, (ref) => live.get(refKey(ref)) ?? null);
     return outputSchema(parsed.tables.map(formatRef), output);

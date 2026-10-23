@@ -97,6 +97,10 @@ const BOOLEAN_OPS = new Set([
 ]);
 // A parenthesized set branch arrives as a FROM item joined by its operator.
 const SET_JOIN = /union|intersect|except|minus/i;
+// Wider than any real table (PostgreSQL stops at 1600 columns).
+const MAX_COLUMNS = 2000;
+// Engines whose double quotes delimit an identifier that node-sql-parser keeps as a string.
+const QUOTED_IDENTIFIERS = new Set(["sqlite", "transactsql", "snowflake"]);
 const NOTHING: Value = { names: new Set(), unknown: false };
 
 const rest = (kind: "pass" | "opaque"): Slot => ({
@@ -118,9 +122,13 @@ class Resolver {
   // other engines compare names without case.
   private readonly exact: boolean;
 
+  // Where a double-quoted name is an identifier but reaches here as a string node.
+  private readonly quotedNames: boolean;
+
   constructor(columns: Columns | undefined, dialect: string) {
     this.columns = columns;
     this.exact = dialect === "postgresql";
+    this.quotedNames = QUOTED_IDENTIFIERS.has(dialect);
   }
 
   private key(name: string): string {
@@ -145,10 +153,55 @@ class Resolver {
       const relations = ["table", "from", "using"].flatMap((key) =>
         Array.isArray(ast[key]) ? this.from(ast[key] as unknown[], inner) : [],
       );
-      return this.projection(returning, { relations, ctes: new Map(), parent: inner });
+      const scope: Scope = { relations, ctes: new Map(), parent: inner };
+      this.assign(ast, relations[0], scope);
+      return this.projection(returning, scope);
     }
     // SHOW, DESCRIBE, CALL and anything unmodeled may return rows we cannot trace.
     return [rest("opaque")];
+  }
+
+  // RETURNING hands back a written column's new value: what SET or the inserted row put there,
+  // as well as what the column held before.
+  private assign(ast: Node, target: Relation | undefined, scope: Scope): void {
+    if (!target) return;
+    const put = (column: string | null, value: Value) => {
+      if (!column) return;
+      const slot = target.slots.find((s) => s.label !== null && this.same(s.label, column));
+      if (slot) {
+        for (const n of value.names) slot.names.add(n);
+        slot.unknown ||= value.unknown;
+      } else {
+        target.slots.unshift({ label: column, ...join(named([column]), value) });
+      }
+    };
+    // Every SET list: UPDATE, MySQL's INSERT ... SET, an upsert's update branch.
+    const sets: unknown[] = [];
+    walk({ ...ast, returning: null }, (n) => {
+      if (Array.isArray(n.set)) sets.push(...n.set);
+    });
+    for (const item of sets) {
+      if (isNode(item)) put(columnLabel(item.column), this.value(item.value, scope));
+    }
+    const columns = (Array.isArray(ast.columns) ? ast.columns : []).map((c) =>
+      columnLabel(isNode(c) && c.type === "column_ref" ? c.column : c),
+    );
+    const at = (i: number) =>
+      columns.length ? (columns[i] ?? null) : (target.slots[i]?.label ?? null);
+    const values = isNode(ast.values) ? ast.values : null;
+    if (values?.type === "values") {
+      for (const row of Array.isArray(values.values) ? values.values : []) {
+        const cells = isNode(row) && Array.isArray(row.value) ? row.value : [];
+        for (const [i, cell] of cells.entries()) put(at(i), this.value(cell, scope));
+      }
+    } else if (values) {
+      const source = this.statement(isNode(values.ast) ? values.ast : values, scope);
+      for (const [i, slot] of source.entries()) put(at(i), slotValue(slot));
+      // Without a column list over unlisted columns, where each value lands is unknown.
+      if (!columns.length && target.slots.some((s) => s.rest)) {
+        target.slots = target.slots.map((s) => (s.rest ? { ...s, rest: "opaque" } : s));
+      }
+    }
   }
 
   private withCtes(ast: Node, scope: Scope): Scope {
@@ -167,9 +220,16 @@ class Resolver {
         .map((c) => columnLabel(isNode(c) && c.type === "column_ref" ? c.column : c))
         .filter((c): c is string => c !== null);
       const slots = rename(this.statement(stmt, inner), renames);
+      // Any of its columns may end up holding any value it ever carried.
+      const all = join(...slots.map(slotValue));
       inner.ctes.set(
         this.key(name),
-        recursive ? [...slots.map((s) => ({ ...s, unknown: true })), rest("opaque")] : slots,
+        recursive
+          ? [
+              ...slots.map((s) => ({ ...s, names: new Set(all.names), unknown: true })),
+              rest("opaque"),
+            ]
+          : slots,
       );
     }
     return inner;
@@ -194,8 +254,20 @@ class Resolver {
     const items = Array.isArray(ast.from) ? ast.from : [];
     const scope: Scope = { relations: this.from(items, outer), ctes: new Map(), parent: outer };
     const slots = this.projection(Array.isArray(ast.columns) ? ast.columns : [], scope);
-    if (items.some((item) => isNode(item) && SET_JOIN.test(String(item.join ?? "")))) {
-      return [...slots.map((s) => ({ ...s, unknown: true })), rest("opaque")];
+    const sets = items.filter((item) => isNode(item) && SET_JOIN.test(String(item.join ?? "")));
+    if (sets.length) {
+      // The parser hangs a parenthesized set branch off FROM: its values may land in any column.
+      const branched = join(
+        ...sets.map((item) =>
+          isNode(item) && isNode(item.expr) && isNode(item.expr.ast)
+            ? join(...this.statement(item.expr.ast, outer).map(slotValue))
+            : NOTHING,
+        ),
+      );
+      return [
+        ...slots.map((s) => ({ ...s, names: join(slotValue(s), branched).names, unknown: true })),
+        rest("opaque"),
+      ];
     }
     return slots;
   }
@@ -221,22 +293,35 @@ class Resolver {
         .map(columnLabel)
         .filter((c): c is string => c !== null);
       const expr = isNode(item.expr) ? item.expr : null;
-      let slots: Slot[] | null = null;
+      const joined = Boolean(item.join);
+      // A parenthesized join keeps its own relations, joined to what precedes it as one item.
+      if (expr?.type === "tables" && Array.isArray(expr.expr)) {
+        const inner = this.from(expr.expr, outer);
+        if (inner[0]) inner[0] = { ...inner[0], joined, using: [...using, ...inner[0].using] };
+        relations.push(...inner);
+        natural = false;
+        continue;
+      }
+      let slots: Slot[];
       if (expr && isNode(expr.ast)) {
         slots = rename(this.statement(expr.ast, scope), renames);
       } else if (expr?.type === "values") {
         slots = rename(this.values(expr, scope), renames);
-      } else if (isFunctionRelation(item)) {
+      } else if (expr?.type === "tablefunc" || isFunctionRelation(item)) {
         // A function in FROM may return one column or a whole record whose content its body
         // decides: only its arguments are known sources, and only a column list names fields.
-        const args = this.value(expr ?? item, scope);
-        slots = renames.length
-          ? renames.map((label) => ({ label, names: new Set(args.names), unknown: true }))
+        const args = this.value(expr?.type === "tablefunc" ? expr.args : (expr ?? item), scope);
+        const fields = renames.length ? renames : columnDefinitions(expr);
+        slots = fields.length
+          ? fields.map((label) => ({ label, names: new Set(args.names), unknown: true }))
           : [{ label: alias, names: new Set(args.names), unknown: true }, rest("opaque")];
       } else if (typeof item.table === "string") {
         slots = rename(this.table(item, outer), renames);
+      } else {
+        // FLATTEN, GENERATOR or any shape this walker does not model: its columns are unknown.
+        slots = [rest("opaque")];
       }
-      if (slots) relations.push({ alias, slots, using, natural, joined: Boolean(item.join) });
+      relations.push({ alias, slots, using, natural, joined });
       natural = naturalAlias;
     }
     return relations;
@@ -244,7 +329,9 @@ class Resolver {
 
   private table(item: Node, scope: Scope): Slot[] {
     const name = item.table as string;
-    const schema = typeof item.db === "string" ? item.db : null;
+    // A three-part name (catalog.schema.table) keys its columns the way analyzeSql does.
+    const db = typeof item.db === "string" ? item.db : null;
+    const schema = db && typeof item.schema === "string" ? `${db}.${item.schema}` : db;
     const cte = schema === null ? this.cte(scope, name) : undefined;
     if (cte) return cte.map(copy);
     const live = this.columns?.({ schema, name });
@@ -301,6 +388,7 @@ class Resolver {
   // engines name an expression by its text, left unnamed here so a lookup stays unknown.
   private implicitLabel(expr: Node): string | null {
     if (expr.type === "column_ref") return columnLabel(expr.column);
+    if (expr.type === "double_quote_string" && this.quotedNames) return String(expr.value);
     if (!this.exact) return null;
     if (expr.type === "cast" && isNode(expr.expr)) return this.implicitLabel(expr.expr);
     if (expr.type === "function" || expr.type === "window_func") return nameOf(expr);
@@ -315,6 +403,9 @@ class Resolver {
       : scope.relations;
     if (relations.length === 0) return [rest("opaque")];
     const slots = qualifier ? relations.flatMap((r) => r.slots.map(copy)) : this.joined(relations);
+    // Stars over stars double at every level (`SELECT * FROM c x, c y`): past any real table's
+    // width, the columns are left unknown rather than expanded further.
+    if (slots.length > MAX_COLUMNS) return [rest("opaque")];
     return slots.filter((s) => s.label === null || !excluded.some((e) => this.same(e, s.label!)));
   }
 
@@ -431,8 +522,9 @@ class Resolver {
         const within = Array.isArray(node.within_group_orderby)
           ? node.within_group_orderby.map((o) => (isNode(o) ? o.expr : null))
           : [];
+        // BigQuery's ARRAY_AGG hands its argument over directly rather than under `expr`.
         return join(
-          this.value(args.expr, scope),
+          this.value("expr" in args ? args.expr : args, scope),
           this.value(args.separator, scope),
           ...within.map((w) => this.value(w, scope)),
         );
@@ -456,6 +548,10 @@ class Resolver {
         return this.value(node.expr, scope);
       case "extract":
         return this.value(isNode(node.args) ? node.args.source : null, scope);
+      case "double_quote_string":
+        return this.quotedNames && typeof node.value === "string"
+          ? this.column({ type: "column_ref", table: null, column: node.value }, scope)
+          : NOTHING;
       case "number":
       case "bool":
       case "null":
@@ -465,7 +561,6 @@ class Resolver {
       case "default":
       case "origin":
       case "single_quote_string":
-      case "double_quote_string":
       case "natural_string":
       case "hex_string":
       case "bit_string":
@@ -561,12 +656,24 @@ function merge(into: Slot[], next: Slot[]): void {
   });
 }
 
-// "f(a, b)" names the relation f; a bare alias or the table's own name otherwise.
+// "f(a, b)" names the relation f; a bare alias or the table's own name otherwise. A typed table
+// function (`jsonb_to_recordset(...) AS x(email text)`) keeps its alias inside the call node.
 function relationAlias(item: Node): string {
   const alias = aliasName(item.as);
   if (alias) return alias.replace(/\(.*$/, "").trim();
   if (typeof item.table === "string") return item.table;
-  return isNode(item.expr) ? nameOf(item.expr) : "";
+  const expr = isNode(item.expr) ? item.expr : null;
+  if (expr?.type === "tablefunc" && isNode(expr.as)) return nameOf(expr.as);
+  return expr ? nameOf(expr) : "";
+}
+
+// The fields a typed table function declares: `AS x(email text, n int)`.
+function columnDefinitions(expr: Node | null): string[] {
+  const as = expr && isNode(expr.as) ? expr.as : null;
+  const list = as && isNode(as.args) && Array.isArray(as.args.value) ? as.args.value : [];
+  return list
+    .map((d) => (isNode(d) && isNode(d.column) ? columnLabel(d.column.column) : null))
+    .filter((c): c is string => c !== null);
 }
 
 // Snowflake hangs `* EXCLUDE (...)` off the star itself.
@@ -587,9 +694,16 @@ export function analyzeOutput(sql: string, dialect: string, columns?: Columns): 
   }
   const resolver = new Resolver(columns, dialect);
   const root: Scope = { relations: [], ctes: new Map() };
-  const slots = (Array.isArray(ast) ? ast : [ast])
-    .filter(isNode)
-    .flatMap((statement) => resolver.statement(statement, root));
+  let slots: Slot[];
+  try {
+    slots = (Array.isArray(ast) ? ast : [ast])
+      .filter(isNode)
+      .flatMap((statement) => resolver.statement(statement, root));
+  } catch {
+    // The agent's SQL is untrusted: a shape that breaks the walker leaves the output untraced
+    // instead of breaking the card, the decision or the trail.
+    return { names: [], complete: false };
+  }
   const names = new Set<string>();
   for (const slot of slots) for (const n of slotValue(slot).names) names.add(n);
   return { names: [...names], complete: !slots.some((s) => s.unknown) };

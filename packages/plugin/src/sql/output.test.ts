@@ -792,7 +792,7 @@ describe("analyzeOutput", () => {
         "postgresql",
         "SELECT id FROM people UNION ALL (SELECT email FROM contacts ORDER BY email LIMIT 1)",
         null,
-        ["id"],
+        ["id", "email"],
         false,
       ],
     ]);
@@ -804,7 +804,7 @@ describe("analyzeOutput", () => {
         "postgresql",
         "WITH RECURSIVE x(a, b, n) AS (SELECT email, id, 1 FROM people UNION ALL SELECT b, a, n + 1 FROM x WHERE n < 2) SELECT b FROM x",
         null,
-        ["b", "id", "a"],
+        ["b", "email", "a", "id", "n"],
         false,
       ],
     ]);
@@ -885,5 +885,107 @@ describe("recordedSensitivity", () => {
       recordedSensitivity(textSchema("SELECT * FROM crm.people", "postgresql")),
     ).toBeUndefined();
     expect(recordedSensitivity(null)).toBeUndefined();
+  });
+});
+
+describe("analyzeOutput, round 1 of the cross-review", () => {
+  const live = {
+    people: ["id", "email", "phone"],
+    orders: ["id", "total"],
+    firms: ["id", "company_name"],
+    "db.sch.people": ["id", "email"],
+  };
+
+  it("follows what SET or the inserted row puts in a column RETURNING hands back", () => {
+    check([
+      [
+        "postgresql",
+        "UPDATE people SET memo = email RETURNING memo",
+        null,
+        ["memo", "email"],
+        true,
+      ],
+      ["sqlite", "UPDATE people SET memo = email RETURNING memo", null, ["memo", "email"], true],
+      [
+        "postgresql",
+        "UPDATE people p SET memo = c.email FROM contacts c WHERE c.id = p.id RETURNING p.memo",
+        null,
+        ["memo", "email"],
+        true,
+      ],
+      [
+        "postgresql",
+        "INSERT INTO archive (memo) VALUES ('x') ON CONFLICT (id) DO UPDATE SET memo = EXCLUDED.memo || archive.phone RETURNING memo",
+        null,
+        ["memo", "phone"],
+        true,
+      ],
+      // A value the agent typed into the row adds nothing it did not know.
+      [
+        "postgresql",
+        "INSERT INTO archive (memo, id) VALUES ('x', 1) RETURNING memo",
+        null,
+        ["memo"],
+        true,
+      ],
+    ]);
+  });
+
+  it("leaves a FROM item it does not model unknown instead of dropping it", () => {
+    check([
+      [
+        "postgresql",
+        "SELECT * FROM firms f JOIN (people p JOIN orders o ON o.id = p.id) ON f.id = p.id",
+        live,
+        ["id", "company_name", "email", "phone", "total"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT p.* FROM firms f JOIN (people p JOIN orders o ON o.id = p.id) ON f.id = p.id",
+        live,
+        ["id", "email", "phone"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT * FROM firms f, jsonb_to_recordset(f.data) AS x(email text)",
+        live,
+        ["id", "company_name", "email", "data"],
+        false,
+      ],
+      [
+        "snowflake",
+        "SELECT * FROM firms f, LATERAL FLATTEN(input => f.data) x",
+        live,
+        ["id", "company_name"],
+        false,
+      ],
+    ]);
+  });
+
+  it("reads BigQuery's ARRAY_AGG argument, three-part names and double-quoted identifiers", () => {
+    check([
+      ["bigquery", "SELECT ARRAY_AGG(email) AS x FROM people", null, ["email", "x"], true],
+      ["snowflake", "SELECT * FROM db.sch.people", live, ["id", "email"], true],
+      ["sqlite", 'SELECT "email" FROM people', null, ["email"], true],
+      ["transactsql", 'SELECT "email" FROM people', null, ["email"], true],
+      ["snowflake", 'SELECT "EMAIL" FROM people', null, ["EMAIL"], true],
+      // MySQL and BigQuery read double quotes as a string, which the agent wrote.
+      ["mysql", 'SELECT "email" FROM people', null, [], true],
+    ]);
+  });
+
+  it("stops expanding stars over stars past any real table's width, and never throws", () => {
+    const ctes = ["c0 AS (SELECT 1 AS a, 2 AS b)"];
+    for (let i = 1; i <= 24; i++) ctes.push(`c${i} AS (SELECT * FROM c${i - 1} x, c${i - 1} y)`);
+    const sql = `WITH ${ctes.join(", ")} SELECT * FROM c24`;
+    expect(analyzeOutput(sql, "postgresql")).toEqual({ names: [], complete: false });
+    expect(
+      analyzeOutput(sql.replace("SELECT * FROM c24", "SELECT 1 FROM c24"), "postgresql"),
+    ).toEqual({
+      names: [],
+      complete: true,
+    });
   });
 });
