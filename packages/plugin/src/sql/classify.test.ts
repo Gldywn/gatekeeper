@@ -54,10 +54,13 @@ describe("classifyQuery", () => {
     }
   });
 
-  it("leaves a benign MySQL optimizer hint as a read", () => {
-    const v = classifyQuery("SELECT /*!40001 SQL_NO_CACHE */ * FROM t", "mysql");
-    expect(v.class).toBe("read");
-    expect(v.blocked).toBe(false);
+  // The parser drops the body MySQL runs, so even a harmless hint leaves the statement unread.
+  it("keeps a MySQL optimizer hint approvable, as an unread statement", () => {
+    expect(classifyQuery("SELECT /*!40001 SQL_NO_CACHE */ * FROM t", "mysql")).toEqual({
+      class: "destructive",
+      parseOk: false,
+      blocked: false,
+    });
   });
 
   it("never reads a locking read (FOR SHARE / LOCK IN SHARE MODE)", () => {
@@ -328,11 +331,32 @@ describe("classifyQuery on node-sql-parser", () => {
   });
 
   // The refusal is textual, so an executable comment marker inside a string is refused too.
-  it("does not trust the parse of a MySQL or MariaDB statement holding /*!", () => {
+  it("does not trust the parse of a statement holding an executable comment", () => {
+    const unread = { class: "destructive", parseOk: false, blocked: false };
     for (const engine of ["mysql", "mariadb"]) {
-      expect(classifyQuery("SELECT '/*!' AS x", engine).parseOk, engine).toBe(false);
+      expect(classifyQuery("SELECT '/*!' AS x", engine), engine).toEqual(unread);
     }
+    expect(classifyQuery("SELECT 1 /*M! INTO OUTFILE '/tmp/x' */", "mariadb")).toEqual(unread);
     expect(classifyQuery("SELECT '/*!' AS x", "sqlite").parseOk).toBe(true);
+  });
+
+  // The text check strips comments without seeing strings: a '/*' in a string must not let it
+  // swallow the clause or the statement that follows.
+  it("never reads an unread statement whose string opens a comment", () => {
+    for (const engine of ["mysql", "mariadb"]) {
+      for (const sql of [
+        "SELECT '/*!', '/*' INTO OUTFILE '/tmp/x' /* end */",
+        "SELECT '/*!', '/*' FROM t FOR UPDATE /* end */",
+      ]) {
+        expect(classifyQuery(sql, engine).class, `${engine}: ${sql}`).toBe("destructive");
+      }
+      for (const sql of [
+        "SELECT '/*!', '/*'; DROP TABLE t; /* end */",
+        "SELECT 1 /*! ; DROP TABLE t */",
+      ]) {
+        expect(classifyQuery(sql, engine).blocked, `${engine}: ${sql}`).toBe(true);
+      }
+    }
   });
 });
 

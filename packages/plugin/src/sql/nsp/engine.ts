@@ -1,4 +1,5 @@
 import type { SqlEngine } from "../engine";
+import { fallback, type RiskVerdict } from "../risk";
 import { classifyNsp } from "./classify";
 import * as inspect from "./inspect";
 
@@ -13,9 +14,21 @@ const GRAMMAR: Record<string, string> = {
   snowflake: "snowflake",
 };
 
-// MySQL and MariaDB run the body of a /*! ... */ comment, which node-sql-parser drops: its tree
-// cannot represent such a statement, so none of these engines' answers is trusted for it.
-const EXECUTABLE_COMMENTS = new Set(["mysql", "mariadb"]);
+// The engine runs the body of these comments, which node-sql-parser drops: its tree cannot
+// represent such a statement, so none of its answers is trusted for it. MariaDB also runs
+// /*M! ... */ (https://mariadb.com/kb/en/comment-syntax/).
+const EXECUTABLE_COMMENTS: Record<string, string[]> = {
+  mysql: ["/*!"],
+  mariadb: ["/*!", "/*M!"],
+};
+
+// Unread, the statement takes the strictest class, approvable like any statement Gatekeeper
+// cannot read. The text check alone would not do: it strips comments without seeing strings,
+// so a '/*' inside a string can hide an INTO OUTFILE from it.
+function unreadVerdict(sql: string, grammar: string): RiskVerdict {
+  const blocked = Boolean(classifyNsp(sql, grammar)?.blocked) || fallback(sql).blocked;
+  return { class: "destructive", parseOk: false, blocked };
+}
 
 const engines = new Map<string, SqlEngine>();
 
@@ -23,10 +36,11 @@ export function nspEngine(databaseType: string): SqlEngine {
   const grammar = GRAMMAR[databaseType] ?? "postgresql";
   let engine = engines.get(grammar);
   if (!engine) {
-    const unread = (sql: string) => EXECUTABLE_COMMENTS.has(grammar) && sql.includes("/*!");
+    const markers = EXECUTABLE_COMMENTS[grammar] ?? [];
+    const unread = (sql: string) => markers.some((marker) => sql.includes(marker));
     engine = {
       dialect: grammar,
-      classify: (sql) => (unread(sql) ? null : classifyNsp(sql, grammar)),
+      classify: (sql) => (unread(sql) ? unreadVerdict(sql, grammar) : classifyNsp(sql, grammar)),
       analyze: (sql) => (unread(sql) ? null : inspect.analyzeSql(sql, grammar)),
       tableOps: (sql) => (unread(sql) ? null : inspect.analyzeTableOps(sql, grammar)),
       sensitiveLiterals: (sql) => (unread(sql) ? [] : inspect.sensitiveLiterals(sql, grammar)),

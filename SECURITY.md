@@ -74,11 +74,12 @@ Two classifiers agree on the read / write / destructive classes:
   cases no mode may approve: empty and multi-statement input.
 
 **MySQL executable comments.** MySQL and MariaDB run the body of a `/*! ... */` comment,
-unlike an ordinary comment. `node-sql-parser` drops that body, so on a MySQL or MariaDB
-connection the plugin does not use its parse of any statement containing `/*!` and applies
-the strict text check instead. Both classifiers keep the body when scanning, and the
-plugin never lets a modifying keyword hidden inside such a comment ride in under a read
-verdict; it escalates to destructive so a human must arm and confirm it explicitly.
+unlike an ordinary comment, and MariaDB also runs `/*M! ... */`. `node-sql-parser` drops
+that body, so on a MySQL or MariaDB connection the plugin does not trust its parse of any
+statement containing one of these markers, even inside a string: the statement is classed
+destructive, approvable like any statement Gatekeeper cannot read, and blocked when either
+the parser or the text check sees more than one statement. A human must arm Destructive
+mode and confirm it explicitly, even for a harmless optimizer hint.
 
 **Trojan-source text.** Unicode bidirectional overrides and other invisible formatting
 characters can make submitted SQL render in an order the reviewer never approved. The

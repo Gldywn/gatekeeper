@@ -528,6 +528,7 @@ describe("shared read analysis", () => {
     "SELECT CURRENT_USER, sku FROM public.products",
     "WITH RECURSIVE r AS (SELECT 1 AS n) SELECT n FROM r",
     "SELECT sku, rank() OVER w FROM public.products WINDOW w AS (ORDER BY price)",
+    "SELECT sku, sum(quantity) OVER (ORDER BY sku ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) FROM public.products",
     "SELECT sku FROM public.products, LATERAL (SELECT 1) l",
     "SELECT ARRAY[quantity] FROM public.products",
     "SELECT sku FROM public.products GROUP BY ROLLUP (sku)",
