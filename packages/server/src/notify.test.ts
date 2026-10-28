@@ -322,17 +322,20 @@ describe("notify", () => {
   });
 });
 
-const COMPLETE =
-  "/System/Library/PrivateFrameworks/ToneLibrary.framework/Versions/A/Resources/AlertTones/Modern/Complete.m4r";
-
-describe("notifyAuto", () => {
-  it("plays the Auto sound alone, with no banner and no registration", async () => {
+describe("remind", () => {
+  it("plays the alert sound alone, with no banner and no registration", async () => {
     for (const mode of ["both", "sound"] as const) {
       const { calls, notifier } = harness({ mode });
-      expect(notifier.autoActive).toBe(true);
-      notifier.notifyAuto();
+      expect(notifier.sounds).toBe(true);
+      notifier.remind();
       await settle();
-      expect(calls).toEqual([{ cmd: "afplay", args: [COMPLETE], timeoutMs: NOTIFY_TIMEOUT_MS }]);
+      expect(calls).toEqual([
+        {
+          cmd: "afplay",
+          args: ["/System/Library/Sounds/Glass.aiff"],
+          timeoutMs: NOTIFY_TIMEOUT_MS,
+        },
+      ]);
     }
   });
 
@@ -343,27 +346,11 @@ describe("notifyAuto", () => {
       { platform: "linux" },
     ]) {
       const { calls, notifier } = harness(overrides);
-      expect(notifier.autoActive).toBe(false);
-      notifier.notifyAuto();
+      expect(notifier.sounds).toBe(false);
+      notifier.remind();
       await settle();
       expect(calls).toEqual([]);
     }
-  });
-
-  it("falls back to a public system sound when the chosen one fails to play", async () => {
-    const calls: Call[] = [];
-    const { notifier } = harness({
-      run: async (cmd, args, timeoutMs) => {
-        calls.push({ cmd, args, timeoutMs });
-        if (args[0] === COMPLETE) {
-          throw new Error("AudioFileOpen failed");
-        }
-        return { stdout: "" };
-      },
-    });
-    notifier.notifyAuto();
-    await settle();
-    expect(calls.map((c) => c.args[0])).toEqual([COMPLETE, "/System/Library/Sounds/Hero.aiff"]);
   });
 });
 

@@ -17,22 +17,35 @@ Set on the MCP server process, so in your agent's MCP client config.
 ## Desktop notifications (macOS)
 
 A pending query nobody notices is a query nobody approves, so on macOS the server raises a
-notification and plays a sound the moment a proposal arrives, wherever you are on your
-desktop. A burst is collapsed into a single alert, and a retried submission raises none.
+notification and plays a sound when a proposal needs you, wherever you are on your desktop. A
+burst is collapsed into a single alert, and a retried submission raises none.
 
-**Auto mode adds a second sound.** Auto mode does not silence the submission alert. When a
-query [Auto mode](AUTO-MODE.md) approved runs successfully, the server also plays a second,
-different sound with no banner, unless another proposal from the last 15 minutes is still
-waiting for a decision or being run by Auto mode. It answers a submission alert: it plays only
-if one rang since it last played, and once it has played, the next proposal raises its own
-alert even inside the burst window. So an agent sending automatically approved queries one at
-a time hears an alert and the second sound for each. An alert with no second sound means Auto
-mode did not handle everything it announced: something may be waiting for you, or a query
-failed or was approved by hand.
-`both` and `sound` play it, `banner` and `off` do not. When agents run Gatekeeper with
-different `GATEKEEPER_NOTIFY` values, this sound follows the setting of the one Gatekeeper
-process that serves the plugin, not the agent's. The sound lives in a macOS folder Apple does
-not document, so if it fails to play the server plays the system sound Hero instead.
+**Only what needs you rings.** With the plugin not running, a proposal alerts the moment it
+arrives. While it runs, a proposal first waits for the plugin's [load check](../SECURITY.md#load-check)
+when Auto-deny heavy queries is on, as it is by default: a heavy query the plugin rejects on
+its own never rings, and any other rings once the check is done, at most about 7 seconds
+after it arrived (the check stops waiting at 5 seconds). With [Auto mode](AUTO-MODE.md) on,
+a read then waits silently for its evaluation: if Auto mode approves it, nothing rings; if Auto
+mode holds it, refuses it, or its evaluation fails or times out, the alert rings then. A write
+or destructive statement, which Auto mode never approves, rings as soon as nothing else can
+decide it. Switching Auto mode or auto-deny off rings for what they had not decided yet. If the
+plugin stops reporting for 15 seconds (Beekeeper closed, the tab unpaired or no longer
+polling), the server stops waiting and rings for them, so a read Auto mode approves after such
+a gap may still have rung.
+
+**A query still waiting rings once more** when half its life has passed, about 7 minutes 30
+seconds after it arrived. The reminder is the sound alone, never a second banner, and comes
+once per query; queries that come due together share one sound, and it never keeps a new
+query from raising its own alert. A read Auto mode still has at that point, for instance
+because long queries hold all its runs, rings then for the first time, and that alert is its
+reminder. `banner` mode has no reminder.
+
+The alerts raised after submission (a read Auto mode leaves to you, the 15-second fallback
+and the reminder) come from the one Gatekeeper process that serves the plugin, and follow its
+`GATEKEEPER_NOTIFY`, not the submitting agent's. They need that process up to date: restart
+the agent sessions still running an older server after an update. Until then, a proposal
+may alert at submission as before, and if an older server takes over the plugin while
+proposals wait on it, their alerts and reminders may never come.
 
 **The first proposal asks for permission.** macOS shows "Gatekeeper would like to send you
 notifications" the first time, in the middle of an agent session. Allow it, and you never see

@@ -117,7 +117,13 @@ header, then the agents strip), the Inbox, the status line. Only the Inbox panes
   however many tabs or sessions made them, not a list kept by this tab. A
   pending row opens its card, a decided row its detail, the same detail in both tabs. The
   Queue never selects by itself; the Audit Trail opens on its newest decision when nothing is
-  selected there, without taking the focus or leaving a narrow list.
+  selected there, without taking the focus or leaving a narrow list. A human approval that
+  completes, or a decline, opens the next request still waiting for a human (below it, else
+  from the top), as a click on it would; with none left, the decided request stays open as
+  its outcome. Failures, expiries, Auto mode approvals and the load check's own rejections
+  never move the selection, and nor does a decision landing after the human went back to a
+  narrow list, or one the server did not acknowledge (its open outcome is the only place it
+  shows until the server's record arrives).
 - **Status line**: the version on the left, star and feedback on the right, docked in the
   layout.
 
@@ -297,8 +303,10 @@ connection.
 
 - A rebuild that removes the focused control (Approve, Stop, a sent reason) hands the focus to
   the open item's row, now its outcome row; to Back in a narrow tab, where the list is hidden;
-  to the open tab when the row is gone or folded away. A decision made in the background never
-  moves the focus. An Escape from the page body still reaches the Inbox.
+  to the open tab when the row is gone or folded away. When a human decision opens the next
+  request, the focus follows to its row (to Back, narrow) if it was on the decided request or
+  nowhere; anywhere else, an overlay or another row, it stays. A decision made in the
+  background never moves the focus. An Escape from the page body still reaches the Inbox.
 - The Queue's open item closes with its X (on the item's first line, never sticky; wide only)
   or Escape, with the same focus fallbacks. The Audit Trail has no close.
 - In a narrow tab, opening an item focuses "Back to the list"; Back returns to the row, or to
