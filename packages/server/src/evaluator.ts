@@ -258,6 +258,7 @@ const holdReasons = new Set([
   "Auto mode disabled",
   "Auto mode disabled while evaluating",
   "Pairing lost",
+  "Heavy query",
   // Reachable from the plugin's PostgreSQL analysis; fixed text, never a source name.
   "String escape semantics require manual review",
   "Mixed set operation precedence needs manual review",

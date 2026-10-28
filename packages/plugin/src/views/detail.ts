@@ -3,7 +3,8 @@ import type { TabulatorFull } from "tabulator-tables";
 import type { SchemaAnnotator } from "../annotate";
 import { dayKey, sessionDisplayName } from "../html";
 import { checkIcon, copyIcon } from "../icons";
-import { detailHtml } from "../render/detail";
+import { takeOver } from "../modal";
+import { detailHtml, resultsDialogHtml } from "../render/detail";
 import { mountResultGrid } from "../render/grid";
 import { accessMatrix, paintLegend } from "../render/queue";
 import { resultCsv, resultJson, resultMarkdown } from "../render/resultexport";
@@ -22,6 +23,17 @@ interface DetailViewDeps {
   root: HTMLElement;
   annotator: SchemaAnnotator;
   dialect: () => string;
+  // The app's Copy and Export menus, closed so none is left open in the place the rows leave.
+  closeMenus: () => void;
+}
+
+// The rows moved into the results dialog, and where they go back.
+interface Enlarged {
+  overlay: HTMLElement;
+  wrapper: HTMLElement;
+  parent: HTMLElement;
+  next: Node | null;
+  release: (restoreFocus?: boolean) => void;
 }
 
 // Owns the decided request shown in the Inbox's right pane (#detail), from Recently
@@ -33,14 +45,19 @@ export class DetailView {
   // Destroyed on close and reopen so its virtual-DOM listeners and detached nodes never
   // outlive the detail.
   private grid: TabulatorFull | null = null;
+  private enlarged: Enlarged | null = null;
+  // Requests waiting for a decision, shown in the dialog while it covers the Queue.
+  private pending = 0;
   private readonly root: HTMLElement;
   private readonly annotator: SchemaAnnotator;
   private readonly dialect: () => string;
+  private readonly closeMenus: () => void;
 
   constructor(deps: DetailViewDeps) {
     this.root = deps.root;
     this.annotator = deps.annotator;
     this.dialect = deps.dialect;
+    this.closeMenus = deps.closeMenus;
   }
 
   // The item whose request is open: closed again whenever another item opens.
@@ -55,6 +72,7 @@ export class DetailView {
     if (!panel) {
       return;
     }
+    this.shrink(false);
     this.detailItem = item;
     if (this.requestOpen !== item.id) this.requestOpen = null;
     panel.innerHTML = detailHtml(
@@ -80,6 +98,63 @@ export class DetailView {
     const label = toggle.querySelector(".rq-label");
     if (label) label.textContent = `${open ? "Hide" : "Show"} request`;
     body.hidden = !open;
+  }
+
+  // The same grid moves, so sort, page and column order carry over. CSS sizes it (.results-card):
+  // a height call would pin Tabulator to a fixed height for good, and its resize observer waits
+  // on a frame and a visibility check, so a plain redraw fits it at once.
+  enlarge(): void {
+    const item = this.detailItem;
+    const overlay = this.root.querySelector<HTMLElement>("#results");
+    const wrapper = this.root.querySelector<HTMLElement>("#detail-grid");
+    const parent = wrapper?.parentElement;
+    if (this.enlarged || !item || !this.grid || !overlay || !wrapper || !parent) return;
+    this.closeMenus();
+    // Taken while the button holds the focus, so closing hands it back there.
+    wrapper.querySelector<HTMLElement>("[data-result-zoom]")?.focus({ preventScroll: true });
+    const release = takeOver(overlay, () =>
+      this.root.querySelector<HTMLElement>("#detail-grid [data-result-zoom]"),
+    );
+    this.enlarged = { overlay, wrapper, parent, next: wrapper.nextSibling, release };
+    overlay.innerHTML = resultsDialogHtml(item, this.pending);
+    overlay.querySelector(".results-card")?.append(wrapper);
+    overlay.hidden = false;
+    this.grid.redraw();
+    wrapper.querySelector<HTMLElement>(".tabulator-tableholder")?.focus({ preventScroll: true });
+  }
+
+  // Back into the pane; false when nothing was enlarged. `restoreFocus` false when the detail
+  // itself goes (another selection, a reset, the database notice), which then places the focus.
+  shrink(restoreFocus = true): boolean {
+    const open = this.enlarged;
+    if (!open) return false;
+    this.enlarged = null;
+    this.closeMenus();
+    open.parent.insertBefore(
+      open.wrapper,
+      open.next?.parentNode === open.parent ? open.next : null,
+    );
+    open.overlay.hidden = true;
+    open.overlay.innerHTML = "";
+    // Released first: whatever the redraw does, the page never stays inert.
+    open.release(restoreFocus);
+    this.grid?.redraw();
+    return true;
+  }
+
+  // The Queue's own count, live in the dialog's head while it hides the Queue.
+  setPendingCount(count: number): void {
+    this.pending = count;
+    const button = this.enlarged?.overlay.querySelector<HTMLElement>("[data-results-queue]");
+    if (!button) return;
+    if (!count && button.contains(document.activeElement)) {
+      this.enlarged?.overlay
+        .querySelector<HTMLElement>("[data-results-close]")
+        ?.focus({ preventScroll: true });
+    }
+    button.hidden = !count;
+    const n = button.querySelector(".n");
+    if (n) n.textContent = String(count);
   }
 
   // Mounted once the markup is laid out: the virtual renderer sizes its viewport from it.
@@ -177,7 +252,8 @@ export class DetailView {
       return;
     }
     await clipboard.writeText(resultMarkdown(result));
-    const ico = this.root.querySelector<HTMLElement>("#detail [data-flyout-ico]");
+    // In the pane or the dialog, wherever the rows are.
+    const ico = this.root.querySelector<HTMLElement>("#detail-grid [data-flyout-ico]");
     if (ico) {
       ico.innerHTML = checkIcon;
       window.setTimeout(() => {
@@ -187,6 +263,7 @@ export class DetailView {
   }
 
   close(): void {
+    this.shrink(false);
     this.detailItem = null;
     this.requestOpen = null;
     this.destroyGrid();

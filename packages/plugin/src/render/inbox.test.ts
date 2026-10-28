@@ -146,6 +146,21 @@ describe("recentRowHtml", () => {
     connection: "app_db",
   };
 
+  it("tells a decline by the load check from yours by its glyph, the fact staying Declined", () => {
+    const auto = recentRowHtml(
+      { ...item, note: "heavy query, auto-denied", autoDenied: true },
+      false,
+    );
+    expect(auto).toContain(
+      '<span class="hstate rejected" title="Declined by the load check" aria-label="Declined by the load check"><svg',
+    );
+    expect(auto).toContain('<path d="m12 14 4-4"/>');
+    expect(auto).toContain('<span class="ix-fact">Declined</span>');
+    const yours = recentRowHtml(item, false);
+    expect(yours).not.toContain("Declined by the load check");
+    expect(yours).not.toContain('<path d="m12 14 4-4"/>');
+  });
+
   it("opens the local history, titled by the SQL when there is no intent", () => {
     const html = recentRowHtml(item, false);
     expect(html).toContain('data-row="q_ef56" data-select="hist" aria-current="false"');

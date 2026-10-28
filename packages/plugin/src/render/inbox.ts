@@ -15,6 +15,7 @@ import {
   checkIcon,
   clockIcon,
   dbCylinderIcon,
+  gaugeIcon,
   harnessIcon,
   helpCircleIcon,
   historyIcon,
@@ -120,6 +121,10 @@ function rowGlyph(item: HistItem): string {
     `<span class="hstate ${cls}" title="${label}" aria-label="${label}">${icon}</span>`;
   if (item.status === "approved" && item.approval?.source === "automatic") {
     return glyph("auto", autoIcon, "Approved automatically");
+  }
+  // The load check declined it, not you: its gauge, as Auto mode's approvals show its bolt.
+  if (item.status === "rejected" && item.autoDenied) {
+    return glyph("rejected", gaugeIcon, "Declined by the load check");
   }
   if (unconfirmed(item)) return glyph("expired", helpCircleIcon, "Unconfirmed");
   if (item.status === "expired" && item.note === CANCELLED_NOTE) {
