@@ -85,6 +85,12 @@ destructive (escalating on any embedded modify node, with a conservative fallbac
 parsing fails), and only lets the human approve a class the armed mode allows. The server
 also preflights with a regex to block empty and multi-statement input before enqueueing.
 
+The plugin also runs a local load check on each proposal (`sql/load.ts`, host calls in
+`annotate.ts`). It never runs or explains the proposal. It reads the SQL and, on PostgreSQL,
+one Gatekeeper-built catalog query for row estimates. Its alert does not gate a manual
+approval. It holds Auto mode, and Auto-deny heavy queries rejects a flagged proposal on
+arrival. See [`SECURITY.md`](../SECURITY.md#load-check).
+
 ## Durability
 
 Proposals live in a SQLite queue with a lease state machine

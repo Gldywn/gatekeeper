@@ -145,6 +145,14 @@ export class SettingsView {
             </div>
             <span class="set-control">${autoStopSelectHtml(s.autoStopMinutes)}</span>
           </div>
+          <div class="set-row">
+            <div class="set-text">
+              <span class="set-name">Auto-deny heavy queries</span>
+              <span class="set-desc">Reject queries flagged as heavy without waiting for manual review.</span>
+              <span class="set-note">Table sizes and indexes are checked on PostgreSQL only.</span>
+            </div>
+            <span class="set-control">${switchInput("autoDenyHeavy", "Auto-deny heavy queries", s.autoDenyHeavy)}</span>
+          </div>
           <div id="autoSettings" data-on="${this.auto()}">${autoSettingsHtml(this.auto(), this.keySaved())}</div>
           <div class="set-row recommend">
             <div class="set-text">

@@ -84,6 +84,16 @@ function outcome(item: HistItem, source: DetailSource): Outcome {
   if (item.status === "rejected") {
     const typed = item.reason ?? "";
     const hist = source === "hist";
+    if (hist && item.autoDenied)
+      return {
+        cls: "no",
+        icon: xCircleIcon,
+        label: "Declined",
+        attr: "Declined by the load check",
+        message: item.sent ? { text: item.sent } : undefined,
+      };
+    // The box shows what the agent received: your words, then any load check hints.
+    const said = (hist && item.sent) || typed;
     return {
       cls: "no",
       icon: xCircleIcon,
@@ -91,8 +101,8 @@ function outcome(item: HistItem, source: DetailSource): Outcome {
       // Only a local decline names its author: an Audit Trail rejection may be the gate's own,
       // with the gate's own sentence as its reason, so only a local one reads as your words.
       attr: hist ? "Declined by you" : "",
-      message: typed
-        ? { text: typed, tone: hist ? "reason" : undefined }
+      message: said
+        ? { text: said, tone: hist && typed ? "reason" : undefined }
         : {
             text: hist
               ? "You declined this proposal without giving a reason."

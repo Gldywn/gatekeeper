@@ -224,6 +224,47 @@ describe("render/detail", () => {
     );
   });
 
+  it("shows the text the agent received, and names the load check when it declined", () => {
+    const hints = "The query reads a table without a WHERE clause.";
+    const auto = detailHtml(
+      {
+        ...item,
+        status: "rejected",
+        note: "heavy query, auto-denied",
+        result: undefined,
+        sent: `Rejected automatically by the load check. ${hints}`,
+        autoDenied: true,
+      },
+      "hist",
+      pg,
+    );
+    expect(auto).toContain('<div class="dt-sub">Declined by the load check &middot; Resolved');
+    expect(auto).toContain(
+      `<div class="dt-msg"><span class="q">Message</span>Rejected automatically by the load check. ${hints}</div>`,
+    );
+    const typed = detailHtml(
+      {
+        ...item,
+        status: "rejected",
+        note: "use a bind param",
+        reason: "use a bind param",
+        sent: `use a bind param. ${hints}`,
+        result: undefined,
+      },
+      "hist",
+      pg,
+    );
+    expect(typed).toContain(
+      `<div class="dt-msg reason"><span class="q">Message</span>use a bind param. ${hints}</div>`,
+    );
+    const hintsOnly = detailHtml(
+      { ...item, status: "rejected", note: "declined", sent: hints, result: undefined },
+      "hist",
+      pg,
+    );
+    expect(hintsOnly).toContain(`<div class="dt-msg"><span class="q">Message</span>${hints}</div>`);
+  });
+
   it("tells an agent cancellation apart from an expiry, and both ran nothing", () => {
     const cancelled = detailHtml(
       { ...item, status: "expired", note: CANCELLED_NOTE, result: undefined },

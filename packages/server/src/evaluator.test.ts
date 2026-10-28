@@ -41,6 +41,7 @@ it.each([
   ["Auto mode disabled while evaluating", "Auto mode disabled while evaluating"],
   ["Needs review: Unsupported automatic SQL clause: where", "Unsupported automatic SQL clause"],
   ["Sensitive source or alias: 'private@example.test'", "Sensitive source or alias"],
+  ["Needs review: Heavy query", "Heavy query"],
   ["Provider error with private@example.test", "Automatic review required"],
   // A family the plugin's analysis reaches today, its dynamic name stripped.
   ["Function effects need manual review: public.audit_user", "Function effects need manual review"],
