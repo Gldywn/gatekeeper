@@ -85,6 +85,12 @@ destructive (escalating on any embedded modify node, with a conservative fallbac
 parsing fails), and only lets the human approve a class the armed mode allows. The server
 also preflights with a regex to block empty and multi-statement input before enqueueing.
 
+The plugin also runs a local load check on each proposal (`sql/load.ts`, host calls in
+`annotate.ts`). It never runs or explains the proposal. It reads the SQL and, on PostgreSQL,
+one Gatekeeper-built catalog query for row estimates. Its alert does not gate a manual
+approval. It holds Auto mode, and Auto-deny heavy queries rejects a flagged proposal on
+arrival. See [`SECURITY.md`](../SECURITY.md#load-check).
+
 ## Durability
 
 Proposals live in a SQLite queue with a lease state machine
@@ -174,8 +180,10 @@ from `policy_json.sensitivity`, three booleans the plugin freezes from its card 
 `/executing` or `/result` records the decision (while the request is executing, a later
 `/result` never overwrites the `/executing` one), or from the SQL text alone when nothing was recorded, so opening the trail
 never queries the connected database. Each entry says whether its sealed rows were kept
-(`kept`) and, for a decline, who declined (`declinedBy`: a person, or the plugin's gate refusing
-to run an approved statement); an unmarked older decline names no one. An entry opens in the same
+(`kept`) and, for a decline, who declined (`declinedBy`: a person, the plugin's gate refusing to run
+an approved statement, or the load check turning down a heavy query) and whether a person's reason
+starts with words they typed (`reasonTyped`), since the reason is what the agent received, load
+check hints included; an unmarked older decline names no one. An entry opens in the same
 detail as Recently resolved, its kept rows fetched and opened on demand. A separate partial index
 covers results awaiting purge.
 

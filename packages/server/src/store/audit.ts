@@ -14,7 +14,7 @@ export const sensitivityRecord = z.object({
 
 // Also parsed on the way in and on the way out: any token holder can write policy_json, and an
 // unknown value must read as not recorded, never as a person.
-export const declinedBy = z.enum(["human", "gate"]);
+export const declinedBy = z.enum(["human", "gate", "load"]);
 
 export function logAudit(
   ctx: StoreContext,
@@ -162,6 +162,9 @@ export function listActivity(
       kept: row.state === "approved" && row.kept === 1,
       declinedBy:
         row.state === "rejected" ? declinedBy.safeParse(policy?.declinedBy).data : undefined,
+      ...(row.state === "rejected" && policy?.declinedBy === "human" && policy?.reasonTyped === true
+        ? { reasonTyped: true }
+        : {}),
     };
   });
 }

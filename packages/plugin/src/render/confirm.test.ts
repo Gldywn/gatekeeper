@@ -228,5 +228,11 @@ describe("takeOver", () => {
     opener.isConnected = false;
     takeOver(overlay as unknown as HTMLElement, () => gear as unknown as HTMLElement)();
     expect(gear.focus).toHaveBeenCalledOnce();
+    // Torn down under a new view: the page comes back, the focus is that view's to place.
+    opener.isConnected = true;
+    takeOver(overlay as unknown as HTMLElement, () => gear as unknown as HTMLElement)(false);
+    expect(inbox.inert).toBe(false);
+    expect(opener.focus).toHaveBeenCalledOnce();
+    expect(gear.focus).toHaveBeenCalledOnce();
   });
 });

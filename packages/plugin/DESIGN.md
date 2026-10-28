@@ -147,7 +147,8 @@ Layering and scrolling hold a few invariants a change can break:
   approved statement), Failed, Unconfirmed (a question-mark glyph), Expired, Cancelled.
 - Marks: a pencil for a write, a trash for a destructive query, the PII, Client and Value
   flags. The class icon and the flags show only where the query ran (Completed, Unconfirmed); a
-  pending row keeps its icon. Auto mode shows as one bolt, never twice.
+  pending row keeps its icon. Auto mode shows as one bolt, never twice; a decline by the load
+  check takes its gauge as the row's glyph.
 - The open row is marked by tone, never by a coloured bar. Rows span the pane's full width.
 - Pending approval carries the count awaiting a decision; Recently resolved has no count.
 - The Audit Trail shows the current month day by day and folds earlier months. Each day is a
@@ -168,6 +169,14 @@ first line, the tables, what the SQL marks, the SQL, then the decision.
   the exact names. No list that repeats what the SQL shows.
 - A limit of the analysis sits just above the SQL it qualifies; the state of Auto mode just
   above the decision it hands back. No catch-all findings table.
+- **Heavy query**: the load check is a second assessment, never the operation's class. Its badge
+  follows Write or Destructive on the intent line (alone on a read), solid amber with its ink
+  and a gauge where the class badges are tinted, so it leads the line without reading as a
+  class. Its reason sits just above the SQL, before the legend, on a faint warm surface drawn
+  from the badge's amber: one sentence, or one point per finding when there are several. There,
+  tables and columns stand out on the faint ground of tool names, unlike plain `code.name`. A
+  table's estimated rows open on hover or focus of its name in the matrix, or in the reason when
+  the card has no matrix. What the check could not establish is not shown: no estimate, no claim.
 - An Auto mode hold says where it happened, on this machine before evaluation or at Jev, then
   "Waiting for your review."; a hold on this machine adds "Nothing was sent to TypeSafe." No
   reason chips.
@@ -205,10 +214,14 @@ The outcome comes first, then what was asked.
   place for the outcome's count; counts that were not recorded add no sentence of their own.
 - **Rows**: only a real table of rows gets a framed surface. Its top bar holds Copy and Export
   on the left, on the data they act on (the rows kept for this request, exactly what the agent
-  was sent), the position in those rows ("1–50 of 2,000", "11 of 11") and the pages on the
-  right; no footer. Values keep their type: a real null is not the string NULL, numbers align
-  right. While kept rows open, the same frame shows with its tools dimmed and inert and three
-  breathing bars, so the grid lands without moving anything.
+  was sent), then Enlarge, the position in those rows ("1–50 of 2,000", "11 of 11") and the pages
+  on the right; no footer. Values keep their type: a real null is not the string NULL, numbers
+  align right. While kept rows open, the same frame shows with its tools (Enlarge included)
+  dimmed and inert and three breathing bars, so the grid lands without moving anything.
+- **Enlarge** is an icon-only square at the height of Copy and Export, with their fill and
+  edge, named on hover and to readers ("Enlarge", "Enlarge the results"). Its icon is the
+  outward arrows, never a magnifier: in a table's bar a magnifier reads as searching the rows.
+  It shows wherever rows show, and opens them in the results dialog (see Overlays).
 - **Rows that cannot show** get one quiet sentence in their place, whatever the cause (decided
   before rows were kept, a key Beekeeper no longer holds, rows not sealed at execution, a read
   that failed): "These rows are not available." No cause-specific wording: the reader can do
@@ -228,17 +241,26 @@ The outcome comes first, then what was asked.
 
 ## Overlays
 
-Every overlay window (Settings, the export, the confirms, the database notice) is a modal
-dialog: `role="dialog"`, `aria-modal`, the visible elements beside it inert while open
-(`takeOver` in `src/modal.ts`), the focus inside, then back on the control that opened it, or
-on a fallback when that control is gone (the gear for Settings opened from its menu, the open
-tab for the notice, which opens on its own, and for the export). Every action in it is a real
+Every overlay window (Settings, the export, the confirms, the database notice, the enlarged
+rows) is a modal dialog: `role="dialog"`, `aria-modal`, the visible elements beside it inert
+while open (`takeOver` in `src/modal.ts`), the focus inside, then back on the control that opened
+it, or on a fallback when that control is gone (the gear for Settings opened from its menu, the
+open tab for the notice, which opens on its own, and for the export). Every action in it is a real
 button, reachable by keyboard. The database notice opens on Continue and stays until one of its
 own buttons: Escape does not dismiss it. Their frame reads solid over the Inbox's veil: a dark
 outer line, a light inner line, a shadow, and an engraved Settings head (`.detail > .detail-card`).
 
 Escape removes one layer per press: an open confirm first, then the export, then an open menu or
-popover, then Settings, then the Queue's open item.
+popover, then the enlarged rows, then Settings, then the Queue's open item.
+
+**Enlarged rows.** Enlarge moves the decided request's own result bar and grid into a dialog
+over the whole tab, past the shell's width cap: the grid keeps its sort, page, page size and
+column order both ways, uses the height left under its bar up to its last row, and refits its
+column widths to the room; its scroll may start again at the top. The head names the request
+as its fold does, then the Queue's own label and amber count while something waits (the tab is
+under the veil; the button closes the dialog onto the Queue tab and selects nothing), then the
+X. It opens with the focus on the rows, so the arrows and Page Down scroll at once, and closes
+back to Enlarge. A new selection, a reset or the database notice puts the rows back first.
 
 **Confirms.** An arm confirm says what the mode lets you approve and opens on its action; a
 typed challenge (Destructive) opens on its input. When arming turns Auto mode off, one plain
@@ -309,8 +331,8 @@ After `pols.dev/slop.md`:
 
 - One solid action (Approve) with quiet text actions beside it; never the filled-plus-outlined
   pair.
-- No gratuitous pills: the risk badge, agent chips and tool chips each carry a meaning; a
-  status needs no chip.
+- No gratuitous pills: the risk and heavy query badges, agent chips and tool chips each carry a
+  meaning; a status needs no chip.
 - No accent bar down a card edge, no coloured rail as the only signal.
 - No middle-dot separators chaining facts; separate them by position and alignment.
 - No new glow and no new colour for emphasis. Terse copy. Buttons do not move on hover.

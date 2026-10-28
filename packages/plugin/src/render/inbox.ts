@@ -15,6 +15,7 @@ import {
   checkIcon,
   clockIcon,
   dbCylinderIcon,
+  gaugeIcon,
   harnessIcon,
   helpCircleIcon,
   historyIcon,
@@ -121,6 +122,10 @@ function rowGlyph(item: HistItem): string {
     `<span class="hstate ${cls}" title="${label}" aria-label="${label}">${icon}</span>`;
   if (item.status === "approved" && item.approval?.source === "automatic") {
     return glyph("auto", autoIcon, "Approved automatically");
+  }
+  // The load check declined it, not you: its gauge, as Auto mode's approvals show its bolt.
+  if (item.status === "rejected" && item.autoDenied) {
+    return glyph("rejected", gaugeIcon, "Declined by the load check");
   }
   if (unconfirmed(item)) return glyph("expired", helpCircleIcon, "Unconfirmed");
   if (item.status === "rejected" && item.declinedBy === "gate") {
@@ -257,8 +262,13 @@ export function auditItem(e: ActivityEntry, connection: string | null): HistItem
           truncated: false,
         }
       : undefined,
-    ...(e.state === "rejected" && e.reason?.trim() ? { reason: e.reason.trim() } : {}),
+    // What the agent received; it reads as typed words only when the record says a person typed it.
+    ...(e.state === "rejected" && e.reason?.trim() ? { sent: e.reason.trim() } : {}),
+    ...(e.state === "rejected" && e.declinedBy === "human" && e.reasonTyped && e.reason?.trim()
+      ? { reason: e.reason.trim() }
+      : {}),
     ...(e.state === "rejected" && e.declinedBy ? { declinedBy: e.declinedBy } : {}),
+    ...(e.state === "rejected" && e.declinedBy === "load" ? { autoDenied: true } : {}),
     ...(e.kept ? { kept: true } : {}),
     approval: e.approval,
     evaluation: e.evaluation,

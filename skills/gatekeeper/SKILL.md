@@ -28,7 +28,7 @@ Rules that follow from the contract:
 - Never conclude a query was refused because it has not resolved yet, and never stop to ask the human to tell you they approved it. The decision reaches you through your next `poll_results` or `get_query_result` the moment they click.
 - `run_query` waits at most 25 seconds too and then returns whatever state it is in, still `pending` included. A pending return from `run_query` is not the result: keep waiting with `get_query_result` or `poll_results`.
 - `expired` means the proposal outlived its window (about 15 minutes waiting unclaimed) before the human got to it. Re-submit it once and resume waiting, rather than dropping the task.
-- `rejected` is an answer: read the reviewer's message, adjust, then either propose again or explain the blocker to your user.
+- `rejected` is an answer, so read the reviewer's message, adjust, then either propose again or explain the blocker to your user. A rejection can come from Gatekeeper's load check rather than a person ("Rejected automatically by the load check."), and a rejection of a query it flagged carries hints about your SQL, such as a missing `WHERE` clause or join condition. Narrow the query (a selective filter, a join condition, a `LIMIT`) instead of resubmitting the same statement.
 - `failed` is an answer too: `terminal.error` says why, usually in the database's own words. Read it before anything else (see "When a query fails").
 - A `failed` whose error starts with `Stop requested` means the human asked to stop the query while it ran, by hand or through an auto-stop limit they set, and the query then failed; the message says who asked, then quotes what the database returned, which may or may not be the cancellation itself. Never resubmit the same statement: propose a cheaper one (narrower filter, `LIMIT`, an indexed column) or ask your user. If it was a write, its effect is unknown, so check the data before anything else. A query that finished despite a stop request comes back `approved` as usual.
 
@@ -45,7 +45,7 @@ Both patterns above work in every harness. Only the fine print differs:
 
 ## Name your session first (required)
 
-Before anything else, call `set_session_label` once with a short, human-readable label for this session, ideally the same title as your own session (a ticket id or the task you are on) so a human can correlate this agent with your session on their side. Name the whole task, not a single query, in a few words, and keep PII, credentials, and connection details out. It shows in the human's connected-agents roster. **This is required: Gatekeeper rejects `submit_query` until a session label is set.** Update it if the task changes.
+Before anything else, call `set_session_label` once with a short, human-readable label for this session, ideally the same title as your own session (a ticket id or the task you are on) so a human can correlate this agent with your session on their side. Name the whole task, not a single query, in a few words, and keep PII, credentials, and connection details out. Put any ticket, incident or PR id here, once, rather than in every query's intent. It shows in the human's connected-agents roster. **This is required: Gatekeeper rejects `submit_query` until a session label is set.** Update it if the task changes.
 
 Examples: `Weekly active users by plan`, `Verify migration 0142 backfilled order_totals`, `Orders stuck in pending since 09:00`, `SUP-1042 login check for a locked-out customer`.
 
@@ -70,25 +70,31 @@ The human's plugin is not connected to Gatekeeper yet. Reply with the 6-digit co
 
 ## Write the intent for a human, not a parser
 
-The `intent` is the one line a reviewer approves on. Say what you're trying to accomplish and why (the task or business goal), in plain language someone who doesn't know the schema can judge. Anchor it to a ticket or incident id when you have one. For a write or destructive query, state what changes and whether it's scoped or irreversible, that is what the human is gating. Keep it to one or two sentences. Don't restate the SQL, don't lean on table or column names, never paste raw PII, secrets, or values (reference a ticket or an id instead), and don't invent context you haven't verified (row counts, approvals).
+The `intent` is the line a reviewer approves on, and the name the query keeps in the Queue, Recently resolved and the Audit Trail, whose rows cut it to one line. Write one short plain sentence, starting with a verb, that says what you want to accomplish in words someone who doesn't know the schema can judge. Aim for fewer than ten words when that stays clear, and use more only when needed. Add a reason only when it helps the reviewer judge the query.
+
+The plugin already shows the agent and session context, so don't repeat it. Put ticket, incident and PR ids in the session label, not in the intent. For a write or destructive query, state what changes, its scope and any irreversible effect, that is what the human is gating. Don't restate the SQL or lean on table or column names. Never paste raw PII, secrets or record values; describe the record instead (`this customer`, `the two duplicate invoices`). Don't invent context you haven't verified, such as row counts or approvals.
 
 Avoid the `Label: detail` shape (`Analytics: …`, `Note: …`) in the intent, the session label and your replies about queries. Write a plain sentence instead, or a plain title for the label.
 
 - Bad: `Select count(*) from sessions group by plan`
-  Good: `Count weekly active users by plan tier for the Q3 growth review.`
+  Good: `Count weekly active users by plan`
+- Bad: `#5336 / #5761 end-of-day cross-check (wider time window)`
+  Good: `Cross-check end-of-day totals over a wider time window`
+- Bad: `#5761: prepare the list of the 6 refunds`
+  Good: `List the six refunds to prepare`
 - Bad: `Select * from orders where total is null`
-  Good: `Check that migration 0142 backfilled order_totals by looking for any order still without a total.`
+  Good: `Find orders still without a total after the backfill`
 - Bad: `Select status, last_login_at from users where email='jane@acme.io'`
-  Good: `SUP-1042 reports a locked-out customer, so check whether their account is active and when they last signed in.`
+  Good: `Check this locked-out customer's account status and last sign-in`
 - Bad: `Update accounts set status active where id 4821`
-  Good: `Re-activate account 4821 (OPS-1500), suspended by a false fraud flag; only flips it back from suspended.`
+  Good: `Reactivate only this account suspended by a false fraud flag`
 - Bad: `Delete from events where user_id 10237`
-  Good: `Permanently delete this former user's events for GDPR erasure request DSR-1042. Irreversible, and limited to their records.`
+  Good: `Permanently delete only this former user's events for their erasure request`
 
 ## The tools
 
 - `set_session_label({ label })`: name this session. Required, and it must be your first call; queries are rejected until it is set.
-- `submit_query({ sql, intent })`: propose one statement. Non-blocking: returns a `request_id` at once and nothing runs until a human approves it. You can keep several in flight (up to 32; past that a submission is rejected until one resolves). `intent` is the one-line reason the human approves on (see "Write the intent for a human").
+- `submit_query({ sql, intent })`: propose one statement. Non-blocking: returns a `request_id` at once and nothing runs until a human approves it. You can keep several in flight (up to 32; past that a submission is rejected until one resolves). `intent` is the short sentence the human approves on (see "Write the intent for a human").
 - `poll_results({ wait_ms? })`: one call returning the state of every query you proposed, plus a `pending` count. With `wait_ms` (25000 max) it returns the instant any pending one resolves, or at the cap; when it returns with `pending` above 0, call it again. States only, not rows.
 - `get_query_result({ request_id, wait_ms? })`: read one query's outcome (rows if approved). With `wait_ms` (25000 max) it waits, bounded, for a decision. If it comes back `pending`, `leased`, or `executing`, call it again. Never treat a non-terminal return as an answer.
 - `cancel_query({ request_id })`: withdraw a proposal you no longer need.
@@ -122,7 +128,7 @@ A query that fails on first run, or that a reviewer cannot follow, wastes a huma
 - Ask for the columns you need rather than `SELECT *`, and prefer a count or an aggregate when it answers the question just as well. Everything you pull back lands in your context and in front of the human who reads it before approving, and a wide read is also the one that trips the row cap.
 - Write SQL a reviewer can follow top to bottom at a glance. Default to standard SQL and basic functions (`count`, `sum`, `coalesce`, `case`, `cast`), split a multi-step query into named CTEs that each do one thing, and prefer a join to a correlated subquery in the select list when it returns the same rows. Readable does not mean dumbed down, so keep the query as short as the question allows.
 - Give each output column an alias that says what it holds (`verified_accounts`, `plan_code`), and keep words that read as personal or customer data (`email`, `phone`, `address`) out of an alias whose value holds none, since a reviewer reads such an alias as personal data.
-- Keep constructs that not every engine supports (JSON operators, `FILTER`, `LATERAL`, array functions) for when no plain equivalent can answer the question or the construct is clearly more efficient on a large table, and say why in one sentence of the intent.
+- Keep constructs that not every engine supports (JSON operators, `FILTER`, `LATERAL`, array functions) for when no plain equivalent can answer the question or the construct is clearly more efficient on a large table, and say why in a few words of the intent.
 - Give a clear `intent` (see "Write the intent for a human") so the human can approve at a glance.
 
 ## When a query fails

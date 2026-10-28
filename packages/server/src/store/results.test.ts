@@ -145,7 +145,7 @@ describe("kept results", () => {
 });
 
 describe("who declined", () => {
-  it.each(["human", "gate"] as const)("records a %s decline and serves it back", (by) => {
+  it.each(["human", "gate", "load"] as const)("records a %s decline and serves it back", (by) => {
     const { id, leaseId } = claim();
     resolve(ctx, id, leaseId, { status: "rejected", reason: "no", declinedBy: by });
     expect(listActivity(ctx, null)[0]).toMatchObject({ id, reason: "no", declinedBy: by });
@@ -158,5 +158,32 @@ describe("who declined", () => {
       .prepare(`UPDATE requests SET policy_json = '{"declinedBy":"someone"}' WHERE id = ?`)
       .run(id);
     expect(listActivity(ctx, null)[0].declinedBy).toBeUndefined();
+  });
+
+  it("says a person's reason holds words they typed, and only for a person's decline", () => {
+    const typed = claim();
+    resolve(ctx, typed.id, typed.leaseId, {
+      status: "rejected",
+      reason: "Narrow it. The query reads a table without a WHERE clause.",
+      declinedBy: "human",
+      reasonTyped: true,
+    });
+    const listed = (id: string) => listActivity(ctx, null).find((e) => e.id === id);
+    expect(listed(typed.id)).toMatchObject({ declinedBy: "human", reasonTyped: true });
+    const hintsOnly = claim();
+    resolve(ctx, hintsOnly.id, hintsOnly.leaseId, {
+      status: "rejected",
+      reason: "The query reads a table without a WHERE clause.",
+      declinedBy: "human",
+    });
+    expect(listed(hintsOnly.id)?.reasonTyped).toBeUndefined();
+    const load = claim();
+    resolve(ctx, load.id, load.leaseId, {
+      status: "rejected",
+      reason: "Rejected automatically by the load check.",
+      declinedBy: "load",
+      reasonTyped: true,
+    });
+    expect(listed(load.id)?.reasonTyped).toBeUndefined();
   });
 });

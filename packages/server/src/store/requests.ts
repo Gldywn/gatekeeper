@@ -285,6 +285,7 @@ export function resolve(
   // replace it. From leased (a rejection, or after a withdrawn attempt) this result's applies.
   const replace = row.state !== "executing" && Boolean(sensitivity || prior?.sensitivity);
   const declinedBy = outcome.status === "rejected" ? outcome.declinedBy : undefined;
+  const reasonTyped = outcome.status === "rejected" && outcome.reasonTyped === true;
   const policy =
     autoHold || replace || declinedBy
       ? {
@@ -292,6 +293,7 @@ export function resolve(
           ...(autoHold ? { autoHold } : {}),
           ...(replace ? { sensitivity } : {}),
           ...(declinedBy ? { declinedBy } : {}),
+          ...(reasonTyped ? { reasonTyped } : {}),
         }
       : row.policy;
   const state: RequestState =

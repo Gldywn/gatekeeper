@@ -101,6 +101,7 @@ async function route(url: URL, init?: RequestInit): Promise<Response> {
         sensitivity: body.sensitivity,
         kept: sealed.has(p.id),
         ...(state === "rejected" && body.declinedBy ? { declinedBy: body.declinedBy } : {}),
+        ...(state === "rejected" && body.reasonTyped === true ? { reasonTyped: true } : {}),
       });
     }
     return json({ ok: true });

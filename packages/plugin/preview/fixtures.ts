@@ -15,7 +15,7 @@ const num = (key: string, fallback: number) => {
 export const scenario = {
   agents: num("agents", 2),
   queue: num("queue", 3),
-  history: num("history", 11),
+  history: num("history", 12),
   // Activity entries per page; a large one shows past months without scrolling to load them.
   page: num("page", 40),
   // How long an approved query runs, to see the running row, Stop and the auto-stop.
@@ -142,6 +142,17 @@ FROM customers
 WHERE created_at >= '2026-08-01'
 GROUP BY cohort`,
   status: `SELECT status, COUNT(*) AS invoices FROM invoices GROUP BY status`,
+  orders: `SELECT o.id AS order_id, o.order_number, o.customer_id, c.name AS customer_name,
+  c.email AS customer_email, c.phone AS customer_phone, o.billing_country, o.billing_city,
+  o.shipping_method, s.tracking_number, o.status, o.currency, o.subtotal_eur, o.tax_eur,
+  o.shipping_eur, o.discount_eur, o.total_eur, o.items, o.is_gift, o.coupon_code,
+  o.created_at, o.paid_at, s.shipped_at, o.metadata
+FROM orders o
+JOIN customers c ON c.id = o.customer_id
+LEFT JOIN shipments s ON s.order_id = o.id
+WHERE o.created_at >= '2026-10-01'
+ORDER BY o.id
+LIMIT 2000`,
 };
 
 export const COLUMNS: Record<string, { name: string; type: string }[]> = {
@@ -182,7 +193,7 @@ export const COLUMNS: Record<string, { name: string; type: string }[]> = {
   ],
 };
 
-// 18 duplicated invoice numbers and one triplicate: 37 rows, wide enough to exercise the grid.
+// 18 duplicated invoice numbers and one triplicate: 39 rows, wide enough to exercise the grid.
 export function duplicateRows(): Record<string, unknown>[] {
   const names = [
     "a.moreau",
@@ -275,6 +286,7 @@ export function seededHistory(): HistItem[] {
   const base = { connection: CONNECTION.connectionName };
   const dup = duplicateRows();
   const weeks = weekRows();
+  const orders = orderRows();
   const items: HistItem[] = [
     {
       ...base,
@@ -403,6 +415,20 @@ export function seededHistory(): HistItem[] {
       intent: "count the archived invoices",
       result: { fields: [], rows: [], rowCount: 0, truncated: false },
     },
+    {
+      // More columns than any tab fits side by side, to enlarge.
+      ...base,
+      id: "req_8b1e4c7a2f60",
+      status: "approved",
+      note: `${orders.length} rows returned`,
+      sql: SQL.orders,
+      resolvedAt: NOW - 58 * MIN,
+      session: session(0),
+      intent: "orders this month with customer, billing and delivery details",
+      result: capResult(orders, fieldsOf(orders)),
+      sensitivity: { pii: true, value: false, client: true },
+      approval: { source: "human" },
+    },
   ];
   return items.slice(0, scenario.history);
 }
@@ -498,6 +524,59 @@ export function activity(): ActivityEntry[] {
     }
   }
   return out;
+}
+
+// 24 columns of every value type over 2,000 rows: more columns than any tab fits side by side.
+export function orderRows(): Record<string, unknown>[] {
+  const first = ["Camille", "Louis", "Chloe", "Mathis", "Sarah", "Jules", "Emma", "Nathan"];
+  const last = ["Moreau", "Bernard", "Petit", "Durand", "Leroy", "Roux", "Fontaine", "Garnier"];
+  const places = [
+    ["FR", "Lyon"],
+    ["FR", "Nantes"],
+    ["BE", "Liege"],
+    ["DE", "Koln"],
+    ["ES", "Valencia"],
+    ["IT", "Torino"],
+  ];
+  const states = ["paid", "shipped", "delivered", "refunded", "pending"];
+  const at = (day: number, hour: number) =>
+    new Date(Date.UTC(2026, 9, day, hour, (day * 7) % 60)).toISOString().slice(0, 19);
+  return Array.from({ length: 2000 }, (_, i) => {
+    const [country, city] = places[i % places.length];
+    const status = states[i % states.length];
+    const name = [first[i % first.length], last[(i * 3) % last.length]];
+    const subtotal = 40 + ((i * 173) % 900);
+    const tax = Math.round(subtotal * 20) / 100;
+    const shipping = [0, 4.9, 9.9, 14.9][i % 4];
+    const discount = i % 6 === 0 ? 10 : 0;
+    const day = 1 + (i % 21);
+    return {
+      order_id: 480_000 + i,
+      order_number: `ORD-2610-${String(30_000 + i).padStart(6, "0")}`,
+      customer_id: 10_200 + ((i * 37) % 4000),
+      customer_name: name.join(" "),
+      customer_email: `${name.join(".").toLowerCase()}@example.com`,
+      customer_phone: `+33 6 00 ${String(i % 100).padStart(2, "0")} ${String((i * 7) % 100).padStart(2, "0")} ${String((i * 13) % 100).padStart(2, "0")}`,
+      billing_country: country,
+      billing_city: city,
+      shipping_method: ["standard", "express", "pickup point", "next day"][i % 4],
+      tracking_number: status === "pending" ? null : `TRK${String(900_000_000 + i * 7919)}`,
+      status,
+      currency: "EUR",
+      subtotal_eur: subtotal,
+      tax_eur: tax,
+      shipping_eur: shipping,
+      discount_eur: discount,
+      total_eur: Math.round((subtotal + tax + shipping - discount) * 100) / 100,
+      items: 1 + (i % 7),
+      is_gift: i % 9 === 0,
+      coupon_code: discount ? "AUTUMN10" : null,
+      created_at: at(day, 8 + (i % 11)),
+      paid_at: status === "pending" ? null : at(day, 9 + (i % 11)),
+      shipped_at: status === "paid" || status === "pending" ? null : at(Math.min(day + 1, 22), 14),
+      metadata: { channel: ["web", "ios", "android"][i % 3], utm: i % 4 ? null : "newsletter-oct" },
+    };
+  });
 }
 
 // A result past one page of the grid, so its pager and position show in the result bar.

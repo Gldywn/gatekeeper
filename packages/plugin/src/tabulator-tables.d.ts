@@ -62,6 +62,7 @@ declare module "tabulator-tables" {
     destroy(): void;
     getPage(): number | false;
     getPageSize(): number | boolean;
+    redraw(force?: boolean): void;
     on(event: "tableBuilt" | "pageLoaded", callback: () => void): void;
   }
 

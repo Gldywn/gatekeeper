@@ -68,6 +68,25 @@ describe("auditItem", () => {
     expect(item.result).toBeUndefined();
   });
 
+  it("reads a decline's author and typed words off the record, so both lists show it alike", () => {
+    const said = "Narrow it. The query reads a table without a WHERE clause.";
+    const typed = auditItem(
+      entry({ state: "rejected", reason: said, declinedBy: "human", reasonTyped: true }),
+      null,
+    );
+    expect(typed).toMatchObject({ declinedBy: "human", reason: said, sent: said });
+    // Hints sent alone are what the agent received, never words the person typed.
+    const hints = auditItem(entry({ state: "rejected", reason: said, declinedBy: "human" }), null);
+    expect(hints.reason).toBeUndefined();
+    expect(hints.sent).toBe(said);
+    const load = auditItem(entry({ state: "rejected", reason: said, declinedBy: "load" }), null);
+    expect(load).toMatchObject({ autoDenied: true, declinedBy: "load" });
+    // A decline from before the author was recorded keeps its words as neutral text.
+    const legacy = auditItem(entry({ state: "rejected", reason: said }), null);
+    expect(legacy).toMatchObject({ sent: said });
+    expect(legacy.declinedBy).toBeUndefined();
+  });
+
   it("carries the reason, the error, or the cancellation as the row's fact", () => {
     expect(auditItem(entry({ state: "rejected", reason: " too wide " }), null)).toMatchObject({
       status: "rejected",
@@ -145,6 +164,21 @@ describe("recentRowHtml", () => {
     resolvedAt: T,
     connection: "app_db",
   };
+
+  it("tells a decline by the load check from yours by its glyph, the fact staying Declined", () => {
+    const auto = recentRowHtml(
+      { ...item, note: "heavy query, auto-denied", autoDenied: true },
+      false,
+    );
+    expect(auto).toContain(
+      '<span class="hstate rejected" title="Declined by the load check" aria-label="Declined by the load check"><svg',
+    );
+    expect(auto).toContain('<path d="m12 14 4-4"/>');
+    expect(auto).toContain('<span class="ix-fact">Declined</span>');
+    const yours = recentRowHtml(item, false);
+    expect(yours).not.toContain("Declined by the load check");
+    expect(yours).not.toContain('<path d="m12 14 4-4"/>');
+  });
 
   it("opens the local history, titled by the SQL when there is no intent", () => {
     const html = recentRowHtml(item, false);

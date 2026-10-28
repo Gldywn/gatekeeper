@@ -8,8 +8,10 @@ import {
   downloadIcon,
   jsonIcon,
   markdownIcon,
+  maximizeIcon,
   tableIcon,
   xCircleIcon,
+  xIcon,
 } from "../icons";
 import { classifyQuery, type RiskClass } from "../sql/classify";
 import { formatSql } from "../sql/format";
@@ -86,21 +88,33 @@ function outcome(item: HistItem): Outcome {
       icon: xCircleIcon,
       label: "Not run",
       attr: "",
-      message: { text: item.reason ?? "Execution was blocked." },
+      message: { text: item.sent ?? item.reason ?? "Execution was blocked." },
+    };
+  }
+  if (item.status === "rejected" && item.autoDenied) {
+    return {
+      cls: "no",
+      icon: xCircleIcon,
+      label: "Declined",
+      attr: "Declined by the load check",
+      message: item.sent ? { text: item.sent } : undefined,
     };
   }
   if (item.status === "rejected") {
+    // The words the person typed, when the record says there were some.
     const typed = item.reason ?? "";
-    // Only a decline recorded as a person's names its author and reads as your words: an
+    // Only a decline recorded as a person's names its author and can read as your words: an
     // unmarked one may be the gate's own, with the gate's own sentence as its reason.
     const yours = item.declinedBy === "human";
+    // The box shows what the agent received: the words typed, then any load check hints.
+    const said = item.sent || typed;
     return {
       cls: "no",
       icon: xCircleIcon,
       label: "Declined",
       attr: yours ? "Declined by you" : "",
-      message: typed
-        ? { text: typed, tone: yours ? "reason" : undefined }
+      message: said
+        ? { text: said, tone: yours && typed ? "reason" : undefined }
         : {
             text: yours
               ? "You declined this proposal without giving a reason."
@@ -222,7 +236,7 @@ function resultHtml(item: HistItem, dialect: string, cls: RiskClass, loading: bo
   return `<div class="dt-result">${line}${body}${cap}</div>`;
 }
 
-// The rows: Copy and Export left, Tabulator's pager mounted right (views/detail.ts), the
+// The rows: Copy, Export and Enlarge left, Tabulator's pager mounted right (views/detail.ts), the
 // position written beside it; no footer under the grid. While they load, the same frame with its
 // tools inert and a few breathing bars, so nothing moves when the grid arrives.
 function resultGrid(loading = false): string {
@@ -237,10 +251,18 @@ function resultGrid(loading = false): string {
     { fmt: "csv", icon: tableIcon, name: "CSV" },
     { fmt: "json", icon: jsonIcon, name: "JSON" },
   ]);
+  const enlarge = `<button class="flyout res-zoom" type="button" data-result-zoom aria-label="Enlarge the results" title="Enlarge">${maximizeIcon}</button>`;
   if (loading) {
-    return `<div class="res loading" id="detail-grid" aria-busy="true"><div class="res-bar"><span class="res-tools" inert>${copy}${exportMenu}</span></div><div class="res-skel" role="status" aria-label="Loading rows"><i></i><i></i><i></i></div></div>`;
+    return `<div class="res loading" id="detail-grid" aria-busy="true"><div class="res-bar"><span class="res-tools" inert>${copy}${exportMenu}${enlarge}</span></div><div class="res-skel" role="status" aria-label="Loading rows"><i></i><i></i><i></i></div></div>`;
   }
-  return `<div class="res" id="detail-grid"><div class="res-bar"><span class="res-tools">${copy}${exportMenu}</span><span class="res-pg"><span class="res-count" data-grid-count></span><span class="res-pager" data-grid-pager></span></span></div><div class="gk-grid" data-result-grid></div></div>`;
+  return `<div class="res" id="detail-grid"><div class="res-bar"><span class="res-tools">${copy}${exportMenu}${enlarge}</span><span class="res-pg"><span class="res-count" data-grid-count></span><span class="res-pager" data-grid-pager></span></span></div><div class="gk-grid" data-result-grid></div></div>`;
+}
+
+// The held rows over the whole tab: the request named as in its fold, the Queue's own count while
+// its tab is out of sight, then the result bar and grid moved in below (views/detail.ts).
+export function resultsDialogHtml(item: HistItem, pending: number): string {
+  const what = escapeHtml(item.intent ? capitalize(item.intent) : previewSql(item.sql));
+  return `<div class="detail-card results-card" role="dialog" aria-modal="true" aria-labelledby="resultsTitle"><div class="panel-head"><span class="panel-head-ico">${tableIcon}</span><span class="panel-title" id="resultsTitle">${what}</span><button class="results-queue" type="button" data-results-queue${pending ? "" : " hidden"}>Queue<span class="n">${pending}</span></button><button class="detail-close" type="button" data-results-close aria-label="Close" title="Close">${xIcon}</button></div></div>`;
 }
 
 function requestHtml(item: HistItem, dialect: string, cls: RiskClass): string {

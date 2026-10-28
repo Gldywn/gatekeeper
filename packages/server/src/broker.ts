@@ -661,6 +661,7 @@ function toOutcome(body: Record<string, unknown>): Outcome {
     status: "rejected",
     reason: typeof body.reason === "string" ? body.reason : undefined,
     ...(by ? { declinedBy: by } : {}),
+    ...(by === "human" && body.reasonTyped === true ? { reasonTyped: true } : {}),
   };
 }
 

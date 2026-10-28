@@ -227,7 +227,7 @@ export function createMcpServer(
           .max(2000)
           .optional()
           .describe(
-            "The plain-language reason a human reviewer can judge at a glance. Say the goal behind this query and why you're running it, with a ticket or incident id if there is one, as a plain sentence rather than 'Topic: detail'. Don't restate the SQL or use table/column jargon; keep raw PII, secrets, and record values out.",
+            "One short plain sentence, starting with a verb, that states the goal in as few words as stay clear (e.g. 'Find duplicate invoice numbers this month'). Aim for under ten words; use more only when needed. List rows cut it to one line. The plugin already shows the agent and session, so don't repeat them, and put ticket, incident or PR ids in the session label instead. Add a reason only if the reviewer needs it. For a write or destructive query, state what changes, its scope and any irreversible effect. Don't restate the SQL, use table/column jargon or write 'Topic: detail'. Keep raw PII, secrets and record values out, and don't invent context such as row counts or approvals.",
           ),
         idempotency_key: z
           .string()
@@ -418,7 +418,7 @@ export function createMcpServer(
           .max(2000)
           .optional()
           .describe(
-            "The plain-language reason a human reviewer can judge at a glance. Say the goal behind this query and why you're running it, with a ticket or incident id if there is one, as a plain sentence rather than 'Topic: detail'. Don't restate the SQL or use table/column jargon; keep raw PII, secrets, and record values out.",
+            "One short plain sentence, starting with a verb, that states the goal in as few words as stay clear (e.g. 'Find duplicate invoice numbers this month'). Aim for under ten words; use more only when needed. List rows cut it to one line. The plugin already shows the agent and session, so don't repeat them, and put ticket, incident or PR ids in the session label instead. Add a reason only if the reviewer needs it. For a write or destructive query, state what changes, its scope and any irreversible effect. Don't restate the SQL, use table/column jargon or write 'Topic: detail'. Keep raw PII, secrets and record values out, and don't invent context such as row counts or approvals.",
           ),
       },
     },
@@ -447,7 +447,7 @@ export function createMcpServer(
           .string()
           .max(200)
           .describe(
-            "The whole session or task you're on (a ticket or incident id works well), not a single query, so the human can match this agent to your session. A few words, no PII, credentials, or connection details. E.g. 'SUP-1042 login check for a locked-out customer'.",
+            "The whole session or task you're on (put any ticket or incident id here, not in each intent), not a single query, so the human can match this agent to your session. A few words, no PII, credentials, or connection details. E.g. 'SUP-1042 login check for a locked-out customer'.",
           ),
       },
     },
