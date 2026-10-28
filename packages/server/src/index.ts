@@ -154,7 +154,15 @@ async function main(): Promise<void> {
   // alerts no submission can: Auto mode gone, and the reminder at half a proposal's life.
   const sweep = setInterval(() => {
     if (brokerOwner) {
-      store.sweep();
+      // A throw here would exit the process, taking this agent's MCP session down, and the
+      // next owner would hit the same failure. submit and claim still report it.
+      try {
+        store.sweep();
+      } catch (err) {
+        console.error(
+          `[gatekeeper] sweep failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
       ringDue(store, notifier);
     }
   }, SWEEP_INTERVAL_MS);

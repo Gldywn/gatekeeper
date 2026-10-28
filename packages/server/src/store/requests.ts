@@ -490,12 +490,15 @@ export function sweep(ctx: StoreContext): void {
   // Read scalar metadata only. Purging data must not erase the decision's counts,
   // and a transaction prevents another broker from recording the same purge twice.
   ctx.db.transaction(() => {
+    // Rows nested past SQLite's 1000-level JSON cap would fail this whole SELECT on every
+    // sweep; such a result is still purged, with unknown counts.
     const expiredResults = ctx.db
       .prepare(`
-      SELECT id, json_extract(result_json, '$.rowCount') AS row_count,
-        json_extract(result_json, '$.affectedRows') AS affected_rows,
-        CASE WHEN json_type(result_json, '$.rows') = 'array'
-          THEN json_array_length(result_json, '$.rows') END AS returned_count
+      SELECT id,
+        CASE WHEN json_valid(result_json) THEN json_extract(result_json, '$.rowCount') END AS row_count,
+        CASE WHEN json_valid(result_json) THEN json_extract(result_json, '$.affectedRows') END AS affected_rows,
+        CASE WHEN json_valid(result_json) THEN CASE WHEN json_type(result_json, '$.rows') = 'array'
+          THEN json_array_length(result_json, '$.rows') END END AS returned_count
       FROM requests WHERE state = 'approved' AND decided_at IS NOT NULL AND decided_at < ?
         AND result_json GLOB '{"rows":*'
     `)
