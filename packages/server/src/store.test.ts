@@ -370,6 +370,35 @@ describe("result retention", () => {
     // a rejected outcome carries no rows to strip and logs no purge
     expect(store.readAudit(claimed.id).filter((e) => e.event === "result_purged")).toHaveLength(0);
   });
+
+  it("purges a result SQLite cannot parse without failing the sweep or the queue", () => {
+    const { store, clock } = makeStore({ resultTtlMs: 1_000 });
+    let deep: unknown = 0;
+    for (let i = 0; i < 1_001; i++) deep = [deep];
+    store.submit({ sessionId: "s1", sql: "SELECT deep" });
+    const bad = store.claimNext("p", LEASE)!;
+    store.resolve(bad.id, bad.leaseId!, { status: "approved", rows: [{ v: deep }], fields: [] });
+    store.submit({ sessionId: "s1", sql: "SELECT 1" });
+    const good = store.claimNext("p", LEASE)!;
+    store.resolve(good.id, good.leaseId!, {
+      status: "approved",
+      rows: [{ ok: 1 }],
+      fields: [],
+      rowCount: 50,
+      affectedRows: 0,
+    });
+
+    clock.t += 1_001;
+    store.sweep();
+    store.submit({ sessionId: "s1", sql: "SELECT 2" });
+    expect(store.claimNext("p", LEASE)).not.toBeNull();
+
+    expect(store.get(bad.id)?.result).toEqual({ purged: true });
+    expect(store.get(good.id)?.result).toEqual({ purged: true, rowCount: 50, affectedRows: 0 });
+    for (const id of [bad.id, good.id]) {
+      expect(store.readAudit(id).filter((e) => e.event === "result_purged")).toHaveLength(1);
+    }
+  });
 });
 
 describe("multi-process (two connections, one file)", () => {
