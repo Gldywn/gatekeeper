@@ -639,14 +639,28 @@ describe("narrow Back and audit rows", () => {
     vi.unstubAllGlobals();
   });
 
-  it("attaches the rows this tab still holds to an audit record, and drops them once evicted", () => {
+  it("opens kept rows under the connection that asked, and drops them after a switch", async () => {
     const app = harness();
-    const record = { id: "q1", status: "approved", note: "", sql: "SELECT 1" };
     const held = { fields: [{ name: "a" }], rows: [{ a: 1 }], rowCount: 1, truncated: false };
-    const local = { ...record, result: held };
-    app.history = [local];
-    expect(app.withLocalRows(record).result).toBe(held);
-    local.result = { ...held, rows: [] };
-    expect(app.withLocalRows(record)).toBe(record);
+    let release: (sealed: string) => void = () => {};
+    const read = vi.fn(
+      (_id: string, _scope: string) =>
+        new Promise<string | null>((resolve) => {
+          release = resolve;
+        }),
+    );
+    app.broker = { resultArchive: read };
+    app.archive = { open: vi.fn(async () => held) };
+    const first = app.loadRows("q1");
+    release("sealed");
+    await expect(first).resolves.toBe(held);
+    expect(read.mock.calls[0][1]).toBe(app.connScopeKey());
+    expect(app.archive.open).toHaveBeenCalledWith("sealed", "q1");
+    const late = app.loadRows("q1");
+    app.connGeneration++;
+    release("sealed");
+    await expect(late).rejects.toThrow("Connection changed");
+    app.broker = { resultArchive: async () => null };
+    await expect(app.loadRows("q1")).rejects.toThrow("No kept rows");
   });
 });

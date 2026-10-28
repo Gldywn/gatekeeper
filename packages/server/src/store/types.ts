@@ -64,8 +64,16 @@ export type Outcome =
       // How many rows the statement changed, on a write only. Absent means the plugin had
       // no count to give, which is not the same as zero.
       affectedRows?: number;
+      // The same result sealed by the plugin, opaque here; absent when it could not seal it.
+      archive?: Buffer;
     }
-  | { status: "rejected"; reason?: string }
+  | {
+      status: "rejected";
+      reason?: string;
+      declinedBy?: import("@gatekeeper/shared").DeclinedBy;
+      // The reason starts with words a person typed (recorded for a person's decline only).
+      reasonTyped?: boolean;
+    }
   | { status: "failed"; error: string };
 
 export interface SessionMeta {
@@ -106,6 +114,9 @@ export interface ActivityEntry {
   evaluation?: import("@gatekeeper/shared").AutoEvaluation;
   autoHold?: import("@gatekeeper/shared").AutoHold;
   sensitivity?: import("@gatekeeper/shared").SensitivityRecord;
+  kept: boolean;
+  declinedBy?: import("@gatekeeper/shared").DeclinedBy;
+  reasonTyped?: boolean;
 }
 
 export interface StoreOptions {

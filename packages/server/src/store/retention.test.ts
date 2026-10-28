@@ -3,7 +3,22 @@ import { toTicket } from "../service.js";
 import { listActivity } from "./audit.js";
 import { createContext, migrate } from "./db.js";
 import { get, sweep } from "./requests.js";
-import { outcomeFacts } from "./rows.js";
+
+// One decided request with this raw result_json, read back through the activity view.
+function factsOf(state: string, resultJson: string | null) {
+  const ctx = createContext();
+  try {
+    migrate(ctx.db);
+    ctx.db
+      .prepare(`INSERT INTO requests (id, created_at, session_id, sql, state, decided_at, result_json, expires_at)
+        VALUES ('r', 1, 's1', 'SELECT 1', ?, 2, ?, 3)`)
+      .run(state, resultJson);
+    const [e] = listActivity(ctx, null);
+    return { reason: e.reason, error: e.error, rowCount: e.rowCount, affectedRows: e.affectedRows };
+  } finally {
+    ctx.db.close();
+  }
+}
 
 describe("durable audit counts", () => {
   it.each([
@@ -24,13 +39,58 @@ describe("durable audit counts", () => {
       rowCount: null,
       affectedRows: null,
     },
+    { result: { rows: [{ a: 1 }, { a: 2 }] }, rowCount: 2, affectedRows: null },
+    { result: { rows: "two" }, rowCount: null, affectedRows: null },
   ])("extracts only known scalar counts from $result", ({ result, rowCount, affectedRows }) => {
-    expect(outcomeFacts("approved", JSON.stringify(result))).toEqual({
+    expect(factsOf("approved", JSON.stringify(result))).toEqual({
       reason: null,
       error: null,
       rowCount,
       affectedRows,
     });
+  });
+
+  it("keeps a decline's reason and a failure's error, and reads a malformed record as unknown", () => {
+    expect(factsOf("rejected", JSON.stringify({ reason: "use the replica" })).reason).toBe(
+      "use the replica",
+    );
+    expect(factsOf("rejected", JSON.stringify({ reason: 7 })).reason).toBeNull();
+    expect(factsOf("failed", JSON.stringify({ error: "boom" })).error).toBe("boom");
+    expect(factsOf("approved", "{not json")).toEqual({
+      reason: null,
+      error: null,
+      rowCount: null,
+      affectedRows: null,
+    });
+    expect(factsOf("approved", null).rowCount).toBeNull();
+  });
+
+  it("never brings a result's rows into JavaScript to count them", () => {
+    const ctx = createContext();
+    const parse = vi.spyOn(JSON, "parse");
+    try {
+      migrate(ctx.db);
+      const insert = ctx.db.prepare(`INSERT INTO requests
+        (id, created_at, session_id, sql, state, decided_at, result_json, expires_at)
+        VALUES (?, 1, 's1', 'SELECT 1', 'approved', ?, ?, 3)`);
+      // Results still inside their agent window, 1 MiB of rows each.
+      const rows = Array.from({ length: 4_096 }, (_, i) => ({ i, pad: "x".repeat(240) }));
+      const big = JSON.stringify({
+        rows,
+        fields: [{ name: "i" }],
+        truncated: true,
+        rowCount: 9_000,
+      });
+      for (let i = 0; i < 20; i++) insert.run(`r${i}`, i + 2, big);
+      parse.mockClear();
+      const activity = listActivity(ctx, null, 20);
+      expect(activity.map((e) => e.rowCount)).toEqual(Array(20).fill(9_000));
+      const largest = Math.max(0, ...parse.mock.calls.map(([text]) => String(text).length));
+      expect(largest).toBeLessThan(1_024);
+    } finally {
+      parse.mockRestore();
+      ctx.db.close();
+    }
   });
 
   it("keeps old purged entries unknown after migration and through the agent response", () => {
@@ -98,6 +158,11 @@ describe("durable audit counts", () => {
             [null, "alpha", "beta"][i % 3],
           );
         }
+        // Every tenth decision kept its sealed rows, so the kept flag has both answers to find.
+        const keep = ctx.db.prepare("INSERT INTO results VALUES (?, ?, 1)");
+        for (let i = 0; i < 100_000; i += 10) {
+          keep.run(String(i).padStart(6, "0"), Buffer.alloc(256, 1));
+        }
       })();
       const afterBytes =
         Number(ctx.db.pragma("page_count", { simple: true })) *
@@ -119,6 +184,7 @@ describe("durable audit counts", () => {
         affectedRows: 0,
         evaluation,
       });
+      expect(activity.every((entry) => entry.kept === (Number(entry.id) % 10 === 0))).toBe(true);
       expect(listActivity(ctx, null)).toHaveLength(200);
       expect(listActivity(ctx, null).every((entry) => Number(entry.id) % 3 === 0)).toBe(true);
       sweep(ctx);
@@ -131,6 +197,10 @@ describe("durable audit counts", () => {
       expect(
         JSON.stringify(activityPlan).match(/USING COVERING INDEX idx_requests_activity/g),
       ).toHaveLength(2);
+      // The kept flag is one primary-key probe per served entry, never a scan of the payloads.
+      expect(JSON.stringify(activityPlan)).toContain(
+        "SEARCH k USING COVERING INDEX sqlite_autoindex_results_1 (request_id=?)",
+      );
       const purgeSql = statements.find((sql) => sql.includes("AS row_count"))!;
       expect(
         JSON.stringify(ctx.db.prepare(`EXPLAIN QUERY PLAN ${purgeSql}`).all(10 ** 12)),

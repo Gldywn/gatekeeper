@@ -129,9 +129,10 @@ residual case are in [`SECURITY.md`](../SECURITY.md#stopping-a-running-query).
 
 ## Result caps
 
-The plugin caps the rows it forwards to the agent (by count and bytes) so a bulk read never
-floods the agent context or the LLM provider. The agent still learns the true size:
-`terminal.truncated` says it capped and `terminal.rowCount` is the true pre-cap total.
+The plugin caps the rows it forwards to the agent (10,000 rows, 8 MiB counted in UTF-8 bytes over
+the whole result) so a bulk read never floods the agent context or the LLM provider. The agent
+still learns the true size: `terminal.truncated` says it capped and `terminal.rowCount` is the
+true pre-cap total. The kept copy (see Retention) is this same capped result.
 
 ## Versions
 
@@ -157,10 +158,32 @@ metadata and Auto mode records; the store itself refuses to delete a request
 (`requests_keep`) once a current server has opened it, so a server from before 0.3.0 cannot
 purge them. Referenced sessions survive cleanup.
 
-Approved result rows and fields are stripped 10 minutes after the decision. The remaining
-result contains `purged: true` and any known `rowCount` (returned rows) and `affectedRows`
-(changed rows). Late agent reads still receive those scalars. Missing counts remain unknown,
-including for results purged by older versions. A known zero remains zero.
+Every approved result is kept twice, for two readers.
+
+- **The agent's copy**, in `requests.result_json`, in clear, is what `get_query_result` reads.
+  Its rows and fields are stripped 10 minutes after the decision. The remaining result contains
+  `purged: true` and any known `rowCount` (returned rows) and `affectedRows` (changed rows).
+  Late agent reads still receive those scalars. Missing counts remain unknown, including for
+  results purged by older versions. A known zero remains zero. This window is the agent's whole
+  access: no MCP tool reads the kept copy below.
+- **The kept copy**, in the `results` table, is the same result sealed by the plugin and kept
+  for good. The plugin gzips it and encrypts it with AES-256-GCM under a key that lives only in
+  Beekeeper's encrypted plugin storage, bound to the request id, and posts it with the decision
+  (`/result` field `archive`). A sealed copy the server accepts is stored in the same transaction
+  as the decision, so an accepted copy never goes missing; one it refuses (malformed, or over
+  9 MiB) is dropped and the decision still lands. If sealing fails, the agent still gets its rows
+  and only the kept copy is missing. The server cannot read it; the plugin
+  fetches it with `GET /results/:id` (same scope as `/activity`, approved requests only) and
+  opens it. It holds exactly what the agent was sent: at most 10,000 rows and 8 MiB, counted in
+  UTF-8 bytes over the whole result, so the history never shows a row the agent did not get.
+  Decisions from before this copy existed have none, and rows already stripped cannot be
+  recovered. A server from before this copy ignores it, so results decided while such a server
+  holds the broker port keep none: update the server with the plugin, or before it.
+
+Keys are written once each under their own id (`gatekeeper.history.key.<id>`) and a pointer names
+the one to use, so two tabs creating a key at once leave two valid keys, never a lost one. Every
+envelope carries the id of its key. What this protects, and what it does not, is in
+[`SECURITY.md`](../SECURITY.md#data-at-rest-and-in-flight).
 
 The host-side Audit Trail reads the retained history in pages of 200 entries, scoped to the
 current connection plus unscoped requests. `GET /activity` answers `{ activity, more }`, and
@@ -172,8 +195,19 @@ header only; its rows are built the first time it opens. The PII, Value and Clie
 from `policy_json.sensitivity`, three booleans the plugin freezes from its card analysis when
 `/executing` or `/result` records the decision (while the request is executing, a later
 `/result` never overwrites the `/executing` one), or from the SQL text alone when nothing was recorded, so opening the trail
-never queries the connected database. An entry opens in the same detail as Recently
-resolved; it shows rows only while this tab still holds them for that request, since
-`/activity` serves only the counts. A separate partial index covers results awaiting purge.
-See
-[`SECURITY.md`](../SECURITY.md) for local data handling.
+never queries the connected database. Each entry says whether its sealed rows were kept
+(`kept`) and, for a decline, who declined (`declinedBy`: a person, the plugin's gate refusing to run
+an approved statement, or the load check turning down a heavy query) and whether a person's reason
+starts with words they typed (`reasonTyped`), since the reason is what the agent received, load
+check hints included; an unmarked older decline names no one. An entry opens in the same
+detail as Recently resolved, its kept rows fetched and opened on demand. A separate partial index
+covers results awaiting purge.
+
+Recently resolved is the newest end of the same history: `GET /activity?limit=<count>` (clamped
+to 1..200), read on load, after each decision, on return to the Queue and every 5 seconds while it
+shows. A decision this tab just made is listed at once, without its rows, from the moment the
+server acknowledges it until the server's page lists it; an ending the server did not acknowledge
+(a lost lease, a result whose delivery is unconfirmed) stays in the open pane only, until the
+server's own record of that request replaces it. The plugin holds rows only for what is open:
+the selected entry of each list and a result being opened. See [`SECURITY.md`](../SECURITY.md)
+for local data handling.

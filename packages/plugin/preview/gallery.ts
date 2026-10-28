@@ -59,8 +59,8 @@ interface DoneState {
   entry: ActivityEntry;
 }
 
-// One decided request seen from both lists: the local item (Recently resolved) and the
-// server's record of it (Audit Trail).
+// One decided request seen from both lists: as this tab decided it, the way the open pane shows
+// it, and as the server records it, the way both lists show it.
 function done(
   label: string,
   sql: string,
@@ -181,9 +181,9 @@ const DONE: DoneState[] = [
     { rowCount: 12_400, intent: "events since October 1" },
   ),
   done(
-    "Read · approved · rows no longer held",
+    "Read · approved · rows not available",
     SQL.dup,
-    { note: "39 rows returned", result: { ...dupResult, rows: [], truncated: true, bytes: 0 } },
+    { note: "39 rows returned", result: { ...dupResult, rows: [], truncated: false } },
     { rowCount: 39 },
   ),
   done("Read · approved · no count recorded", SQL.status, { note: "" }, {}),
@@ -220,8 +220,13 @@ const DONE: DoneState[] = [
   done(
     "Read · declined",
     SQL.plans,
-    { status: "rejected", note: "declined", intent: "revenue per plan last quarter" },
-    { state: "rejected", intent: "revenue per plan last quarter" },
+    {
+      status: "rejected",
+      note: "declined",
+      declinedBy: "human",
+      intent: "revenue per plan last quarter",
+    },
+    { state: "rejected", declinedBy: "human", intent: "revenue per plan last quarter" },
     session(1),
   ),
   done(
@@ -231,13 +236,48 @@ const DONE: DoneState[] = [
       status: "rejected",
       note: "Only void the newer copy of each pair",
       reason: "Only void the newer copy of each pair",
+      declinedBy: "human",
       intent: "void the duplicate invoices",
     },
     {
       state: "rejected",
       reason: "Only void the newer copy of each pair",
+      declinedBy: "human",
       intent: "void the duplicate invoices",
     },
+  ),
+  done(
+    "Write · not run, blocked at execution",
+    SQL.voidDup,
+    {
+      status: "rejected",
+      note: "Write mode is required to approve this query.",
+      reason: "Write mode is required to approve this query.",
+      declinedBy: "gate",
+      intent: "void the duplicate invoices",
+    },
+    {
+      state: "rejected",
+      reason: "Write mode is required to approve this query.",
+      declinedBy: "gate",
+      intent: "void the duplicate invoices",
+    },
+  ),
+  done(
+    "Read · declined before who declined was recorded",
+    SQL.plans,
+    {
+      status: "rejected",
+      note: "Use the reporting replica for this.",
+      reason: "Use the reporting replica for this.",
+      intent: "revenue per plan last quarter",
+    },
+    {
+      state: "rejected",
+      reason: "Use the reporting replica for this.",
+      intent: "revenue per plan last quarter",
+    },
+    session(1),
   ),
   done(
     "Destructive · declined with a long reason",
@@ -247,9 +287,11 @@ const DONE: DoneState[] = [
       note: "Not on production during the billing run. Ask again after 18:00 and scope it to sessions of deleted accounts only.",
       reason:
         "Not on production during the billing run. Ask again after 18:00 and scope it to sessions of deleted accounts only.",
+      declinedBy: "human",
       intent: "purge sessions idle for 90 days",
     },
     {
+      declinedBy: "human",
       state: "rejected",
       reason:
         "Not on production during the billing run. Ask again after 18:00 and scope it to sessions of deleted accounts only.",
@@ -515,7 +557,7 @@ function rowsSection(): string {
       <section class="pane pane-list g-pane"><div class="pane-body">${activityEntryHtml(s.entry, i === 0, DIALECT)}</div></section>
     </div>`,
   ).join("");
-  return `<h2 id="rows">Rows</h2><p class="g-note">Left, Recently resolved (this tab's decisions). Right, the Audit Trail (the server's record). The first row is selected.</p>
+  return `<h2 id="rows">Rows</h2><p class="g-note">Left, Recently resolved. Right, the Audit Trail. Both list the server's record; the first row is selected.</p>
     <div class="g-row g-head"><span></span><span>Recently resolved</span><span>Audit Trail</span></div>${lines}`;
 }
 
@@ -531,20 +573,21 @@ function cardsSection(): string {
 function detailsSection(): string {
   return `<h2 id="decided">Decided detail</h2>${DETAILS.map(
     (s, i) => `<div class="g-detail">${label(s.label)}
-      <section class="pane pane-detail g-pane-detail"><div class="pane-body"><div class="detail-host" data-i="${i}">${detailHtml(s.item, "hist", "postgresql")}</div></div></section>
+      <section class="pane pane-detail g-pane-detail"><div class="pane-body"><div class="detail-host" data-i="${i}">${detailHtml(s.item, "hist", "postgresql", false, s.loading)}</div></div></section>
     </div>`,
   ).join("")}`;
 }
 
-// Recently resolved items, then two Audit Trail mappings: the server keeps counts, and rows
-// show only while this tab still holds them.
-const DETAILS: { label: string; item: HistItem }[] = [
+// Recently resolved items, then two Audit Trail mappings: kept rows while they open, and a write
+// whose record holds counts only.
+const DETAILS: { label: string; item: HistItem; loading?: boolean }[] = [
   ...DONE.filter(
     (s) => !s.label.includes("no intent") && !s.label.includes("without a project"),
   ).map((s) => ({ label: s.label, item: s.hist })),
   {
-    label: "Audit Trail · approved read, rows not held by this tab",
-    item: { ...DONE[0].hist, result: { ...dupResult, rows: [] } },
+    label: "Audit Trail · approved read, kept rows opening",
+    item: { ...DONE[0].hist, kept: true, result: { ...dupResult, rows: [] } },
+    loading: true,
   },
   {
     label: "Audit Trail · approved write, counts only",

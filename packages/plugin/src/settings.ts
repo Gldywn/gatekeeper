@@ -2,7 +2,7 @@ import { appStorage } from "@beekeeperstudio/plugin";
 import type { SchemaContext } from "./sql/schema";
 
 // Per-connection host-side preferences. Every field defaults on; recentlyResolved is
-// how many resolved items the history panel keeps. None of this ever reaches the broker.
+// how many of the latest decisions the Queue shows. None of this ever reaches the broker.
 export interface Settings {
   piiFlagging: boolean;
   clientFlagging: boolean;
@@ -16,9 +16,6 @@ export interface Settings {
   // through the get_schema tool. Off by default; the human opts in per connection.
   schemaAccess: boolean;
   recentlyResolved: number;
-  // Approximate RAM ceiling (MB) for held result rows across history; a bigger value
-  // keeps more of a large result reviewable before the "held" cap kicks in.
-  resultCacheMb: number;
   // Ask the database to cancel an approved query after this many minutes; 0 is never.
   autoStopMinutes: number;
 }
@@ -26,17 +23,7 @@ export interface Settings {
 export const RECENTLY_RESOLVED_OPTIONS = [10, 20, 50] as const;
 const RECENTLY_RESOLVED_DEFAULT = 20;
 
-export const RESULT_CACHE_OPTIONS = [128, 512, 1024] as const;
-const RESULT_CACHE_DEFAULT = 512;
-
 export const AUTO_STOP_OPTIONS = [0, 1, 5, 15, 30] as const;
-// Held rows are measured as serialized JSON; the browser heap runs ~3x larger (UTF-16
-// strings + object overhead), so convert the RAM ceiling down to a byte budget.
-const RESULT_HEAP_FACTOR = 3;
-
-export function resultBudgetBytes(s: Settings): number {
-  return Math.floor((s.resultCacheMb * 1024 * 1024) / RESULT_HEAP_FACTOR);
-}
 
 export function defaultSettings(): Settings {
   return {
@@ -47,7 +34,6 @@ export function defaultSettings(): Settings {
     autoDenyHeavy: true,
     schemaAccess: false,
     recentlyResolved: RECENTLY_RESOLVED_DEFAULT,
-    resultCacheMb: RESULT_CACHE_DEFAULT,
     autoStopMinutes: 0,
   };
 }
@@ -61,7 +47,6 @@ function asBool(value: unknown, fallback: boolean): boolean {
 export function normalizeSettings(raw: unknown): Settings {
   const r = (raw ?? {}) as Partial<Record<keyof Settings, unknown>>;
   const resolved = Number(r.recentlyResolved);
-  const cacheMb = Number(r.resultCacheMb);
   const autoStop = Number(r.autoStopMinutes);
   return {
     piiFlagging: asBool(r.piiFlagging, true),
@@ -73,9 +58,6 @@ export function normalizeSettings(raw: unknown): Settings {
     recentlyResolved: (RECENTLY_RESOLVED_OPTIONS as readonly number[]).includes(resolved)
       ? resolved
       : RECENTLY_RESOLVED_DEFAULT,
-    resultCacheMb: (RESULT_CACHE_OPTIONS as readonly number[]).includes(cacheMb)
-      ? cacheMb
-      : RESULT_CACHE_DEFAULT,
     autoStopMinutes: (AUTO_STOP_OPTIONS as readonly number[]).includes(autoStop) ? autoStop : 0,
   };
 }

@@ -4918,6 +4918,44 @@ p.auto-message[data-tone="busy"] {
 .res .gk-grid {
   border-radius: 0 0 var(--r) var(--r);
 }
+/* Opening the kept rows: the grid's own frame with its tools dimmed and three breathing bars,
+   so the grid lands in place without moving anything around it. */
+.res.loading .res-tools {
+  opacity: 0.45;
+}
+.res-skel {
+  display: grid;
+  gap: 10px;
+  padding: 14px 12px 16px;
+  border: 1px solid var(--edge);
+  border-radius: 0 0 var(--r) var(--r);
+  background: var(--sunken);
+}
+.res-skel i {
+  height: 8px;
+  border-radius: 3px;
+  background: color-mix(in oklch, var(--text) 9%, transparent);
+}
+.res-skel i:nth-child(1) {
+  width: 92%;
+}
+.res-skel i:nth-child(2) {
+  width: 78%;
+}
+.res-skel i:nth-child(3) {
+  width: 85%;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .res-skel i {
+    animation: act-skel-breathe 1.6s var(--ease-in-out) infinite;
+  }
+  .res-skel i:nth-child(2) {
+    animation-delay: 0.15s;
+  }
+  .res-skel i:nth-child(3) {
+    animation-delay: 0.3s;
+  }
+}
 /* Enlarge: an icon-only twin of Copy and Export at their painted height, their 13px icon in it.
    Whole pixels on purpose: an icon offset by a fraction rounds apart from its box, a pixel off. */
 .res-zoom {

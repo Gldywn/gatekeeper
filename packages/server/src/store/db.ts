@@ -25,6 +25,9 @@ export interface StoreContext {
 export function createContext(options: StoreOptions = {}): StoreContext {
   const db = new Database(options.path ?? ":memory:");
   db.pragma("foreign_keys = ON");
+  // The sweep strips delivered rows; overwrite what it frees instead of leaving it readable in
+  // the file. Best effort: WAL frames, snapshots and backups keep what they already hold.
+  db.pragma("secure_delete = ON");
   // WAL is only meaningful for on-disk databases.
   if (options.path && options.path !== ":memory:") {
     db.pragma("journal_mode = WAL");
@@ -61,7 +64,9 @@ export function migrate(db: Database.Database): void {
         policy_json TEXT,
         expires_at INTEGER NOT NULL,
         connection TEXT,
-        alert_stage INTEGER NOT NULL DEFAULT 1
+        alert_stage INTEGER NOT NULL DEFAULT 1,
+        row_count INTEGER,
+        affected_rows INTEGER
       );
       CREATE INDEX IF NOT EXISTS idx_requests_state ON requests(state, created_at);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_requests_idem
@@ -122,10 +127,21 @@ export function migrate(db: Database.Database): void {
         left_at INTEGER,
         session_label TEXT
       );
+
+      -- The rows of an approved result, sealed by the plugin with a key the server never holds.
+      -- Written with the decision, read only by the plugin, never by an MCP tool or the sweep.
+      CREATE TABLE IF NOT EXISTS results (
+        request_id TEXT PRIMARY KEY REFERENCES requests(id),
+        payload BLOB NOT NULL,
+        created_at INTEGER NOT NULL
+      );
     `);
   // Add columns introduced after the first release to pre-existing databases.
   for (const alter of [
     "ALTER TABLE requests ADD COLUMN connection TEXT",
+    // An approved result's counts beside it, so the activity view never parses its rows.
+    "ALTER TABLE requests ADD COLUMN row_count INTEGER",
+    "ALTER TABLE requests ADD COLUMN affected_rows INTEGER",
     "ALTER TABLE sessions ADD COLUMN last_active INTEGER",
     "ALTER TABLE sessions ADD COLUMN connection TEXT",
     "ALTER TABLE sessions ADD COLUMN left_at INTEGER",

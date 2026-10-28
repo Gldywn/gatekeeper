@@ -73,7 +73,17 @@ export interface ActivityEntry {
   evaluation?: AutoEvaluation;
   autoHold?: AutoHold;
   sensitivity?: SensitivityRecord;
+  // The plugin's sealed rows are kept for this approved request (GET /results/:id). Absent from
+  // a broker that predates kept results, which keeps none.
+  kept?: boolean;
+  declinedBy?: DeclinedBy;
+  // A person's decline whose reason starts with words they typed, not only load check hints.
+  reasonTyped?: boolean;
 }
+
+// Who declined: a person, the plugin's own gate refusing to run an approved statement, or the
+// load check turning down a heavy query. Absent when not recorded, as on every older decision.
+export type DeclinedBy = "human" | "gate" | "load";
 
 // Frozen when the decision is recorded, so the trail never re-queries a schema that has
 // since changed. Presence only; absent means not recorded, never "nothing sensitive".

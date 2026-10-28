@@ -292,9 +292,17 @@ export function resolve(
   // While executing, the /executing record describes this approval and later analysis must not
   // replace it. From leased (a rejection, or after a withdrawn attempt) this result's applies.
   const replace = row.state !== "executing" && Boolean(sensitivity || prior?.sensitivity);
+  const declinedBy = outcome.status === "rejected" ? outcome.declinedBy : undefined;
+  const reasonTyped = outcome.status === "rejected" && outcome.reasonTyped === true;
   const policy =
-    autoHold || replace
-      ? { ...(prior ?? {}), ...(autoHold ? { autoHold } : {}), ...(replace ? { sensitivity } : {}) }
+    autoHold || replace || declinedBy
+      ? {
+          ...(prior ?? {}),
+          ...(autoHold ? { autoHold } : {}),
+          ...(replace ? { sensitivity } : {}),
+          ...(declinedBy ? { declinedBy } : {}),
+          ...(reasonTyped ? { reasonTyped } : {}),
+        }
       : row.policy;
   const state: RequestState =
     outcome.status === "approved"
@@ -318,7 +326,8 @@ export function resolve(
   ctx.db.transaction(() => {
     const info = ctx.db
       .prepare(
-        `UPDATE requests SET state = ?, result_json = ?, policy_json = ?, decided_at = ?, lease_id = NULL, lease_expires_at = NULL
+        `UPDATE requests SET state = ?, result_json = ?, policy_json = ?, decided_at = ?, lease_id = NULL, lease_expires_at = NULL,
+               row_count = ?, affected_rows = ?
              WHERE id = ? AND lease_id = ? AND state IN ('leased', 'executing') AND lease_expires_at >= ?`,
       )
       .run(
@@ -326,12 +335,20 @@ export function resolve(
         JSON.stringify(result),
         policy == null ? null : JSON.stringify(policy),
         now,
+        "rowCount" in result ? result.rowCount : null,
+        "affectedRows" in result ? result.affectedRows : null,
         id,
         leaseId,
         now,
       );
     if (info.changes !== 1) {
       throw new StoreError("LEASE_CONFLICT", `Request ${id} changed concurrently`);
+    }
+    // In the decision's own transaction, so a decided request never loses rows it was sent with.
+    if (outcome.status === "approved" && outcome.archive) {
+      ctx.db
+        .prepare("INSERT INTO results (request_id, payload, created_at) VALUES (?, ?, ?)")
+        .run(id, outcome.archive, now);
     }
     logAudit(ctx, {
       requestId: id,

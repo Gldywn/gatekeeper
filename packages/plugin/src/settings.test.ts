@@ -10,13 +10,7 @@ vi.mock("@beekeeperstudio/plugin", () => ({
   },
 }));
 
-import {
-  defaultSettings,
-  filterSchema,
-  normalizeSettings,
-  resultBudgetBytes,
-  SettingsStore,
-} from "./settings";
+import { defaultSettings, filterSchema, normalizeSettings, SettingsStore } from "./settings";
 import type { SchemaContext } from "./sql/schema";
 
 const full: SchemaContext = {
@@ -50,10 +44,11 @@ describe("settings/normalizeSettings", () => {
     expect(normalizeSettings({ recentlyResolved: "nope" }).recentlyResolved).toBe(20);
   });
 
-  it("keeps a valid resultCacheMb option and defaults an invalid one to 512", () => {
-    expect(normalizeSettings({ resultCacheMb: 1024 }).resultCacheMb).toBe(1024);
-    expect(normalizeSettings({ resultCacheMb: 300 }).resultCacheMb).toBe(512);
-    expect(normalizeSettings({ resultCacheMb: "nope" }).resultCacheMb).toBe(512);
+  it("drops the Result memory budget an older blob still stores", () => {
+    expect(normalizeSettings({ resultCacheMb: 1024, recentlyResolved: 50 })).toEqual({
+      ...defaultSettings(),
+      recentlyResolved: 50,
+    });
   });
 
   it("keeps a valid auto-stop option and turns anything else off", () => {
@@ -62,10 +57,6 @@ describe("settings/normalizeSettings", () => {
     expect(normalizeSettings({ autoStopMinutes: 7 }).autoStopMinutes).toBe(0);
     expect(normalizeSettings({ autoStopMinutes: "5" }).autoStopMinutes).toBe(5);
     expect(normalizeSettings({ autoStopMinutes: -1 }).autoStopMinutes).toBe(0);
-  });
-
-  it("derives the serialized byte budget from the RAM ceiling (heap factor 3)", () => {
-    expect(resultBudgetBytes(defaultSettings())).toBe(Math.floor((512 * 1024 * 1024) / 3));
   });
 });
 

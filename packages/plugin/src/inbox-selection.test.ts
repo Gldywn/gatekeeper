@@ -35,7 +35,10 @@ function harness() {
   const app = Object.create(Gatekeeper.prototype);
   Object.assign(app, {
     cards: [card("a"), card("b")],
-    history: [],
+    recent: [],
+    decided: [],
+    unrecorded: new WeakSet(),
+    refreshRecent: vi.fn(),
     denyDrafts: new Map(),
     connGeneration: 0,
     connectionName: "test",
@@ -45,7 +48,7 @@ function harness() {
     autoEnabled: false,
     autoDeferred: new Set(),
     root: { querySelector: () => null, querySelectorAll: () => [] },
-    settingsStore: { get: () => ({ recentlyResolved: 20, resultCacheMb: 4 }) },
+    settingsStore: { get: () => ({ recentlyResolved: 20 }) },
     confirmModal: { dismissFor: vi.fn() },
     detailView: { setPendingCount: vi.fn(), shrink: vi.fn(() => false), close: vi.fn() },
     renderQueueList: vi.fn(),
@@ -107,13 +110,16 @@ describe("Inbox selection", () => {
     expect(app.renderSelection).toHaveBeenCalledOnce();
   });
 
-  it("keeps a decided card open as its outcome", () => {
+  it("keeps a decided card open as its outcome, its rows held by the open pane only", () => {
     const app = harness();
     app.selection.queue = { kind: "card", id: "a" };
-    app.finish("a", "approved", "1 row returned");
-    expect(app.selection.queue).toEqual({ kind: "hist", id: "a", item: app.history[0] });
-    expect(app.history[0]).toMatchObject({ id: "a", status: "approved" });
+    const result = { fields: [{ name: "a" }], rows: [{ a: 1 }], rowCount: 1, truncated: false };
+    app.finish("a", "approved", "1 row returned", { result, recorded: true, kept: true });
+    expect(app.selection.queue).toMatchObject({ kind: "hist", id: "a", item: { result } });
+    expect(app.decided[0]).toMatchObject({ id: "a", status: "approved", kept: true });
+    expect(app.decided[0].result).toEqual({ ...result, fields: [], rows: [] });
     expect(app.renderSelection).toHaveBeenCalledWith(true);
+    expect(app.refreshRecent).toHaveBeenCalledOnce();
   });
 
   it("leaves the Audit Trail's open entry alone when the queue's card is decided", () => {
@@ -130,23 +136,43 @@ describe("Inbox selection", () => {
     expect(app.renderSelection).not.toHaveBeenCalled();
   });
 
-  it("lets the open detail go of rows Result memory sheds, and leaves other details alone", () => {
+  it("lists only the endings the server acknowledged, the gate's refusal included", () => {
     const app = harness();
-    const rows = () => ({ fields: [{ name: "a" }], rows: [{ a: 1 }], rowCount: 1, bytes: 10 });
-    const record = { id: "x", status: "approved", note: "", sql: "SELECT 1" };
-    app.tab = "audit";
-    app.selection.audit = { kind: "audit", id: "x", item: record };
-    app.history = [{ ...record, result: rows() }];
-    let shown = "y";
-    app.detailView = { showing: () => shown };
-    app.settingsStore = { get: () => ({ recentlyResolved: 20, resultCacheMb: 0 }) };
-    app.enforceHistoryBudget();
-    expect(app.renderSelection).not.toHaveBeenCalled();
-    app.history[0].result = rows();
-    shown = "x";
-    app.enforceHistoryBudget();
-    expect(app.renderSelection).toHaveBeenCalledWith(true);
-    expect(app.withLocalRows(record)).toBe(record);
+    app.selection.queue = { kind: "card", id: "a" };
+    app.finish("a", "rejected", "declined", { declinedBy: "human", recorded: false });
+    app.finish("b", "failed", "lease lost");
+    // Both stay in the open pane only: the server acknowledged neither.
+    expect(app.decided).toEqual([]);
+    expect(app.selection.queue).toMatchObject({
+      kind: "hist",
+      item: { status: "rejected", declinedBy: "human" },
+    });
+    expect(app.unrecorded.has(app.selection.queue.item)).toBe(true);
+    const gate = harness();
+    gate.finish("a", "rejected", "blocked", {
+      reason: "Write mode is required.",
+      declinedBy: "gate",
+      recorded: true,
+    });
+    expect(gate.decided[0]).toMatchObject({
+      status: "rejected",
+      reason: "Write mode is required.",
+      declinedBy: "gate",
+    });
+  });
+
+  it("holds no rows in the provisional list and no more entries than Recently resolved shows", () => {
+    const app = harness();
+    const result = { fields: [{ name: "a" }], rows: [{ a: 1 }], rowCount: 1, truncated: false };
+    // Deliveries keep succeeding while no server page arrives to reconcile them.
+    for (let i = 0; i < 30; i++) {
+      app.cards.push(card(`c${i}`));
+      app.finish(`c${i}`, "approved", "1 row returned", { result, recorded: true, kept: true });
+    }
+    expect(app.decided).toHaveLength(20);
+    expect(app.decided.every((i: { result: { rows: unknown[] } }) => !i.result.rows.length)).toBe(
+      true,
+    );
   });
 
   it("drops another card without touching the open one", () => {
@@ -158,7 +184,173 @@ describe("Inbox selection", () => {
   });
 });
 
+describe("Recently resolved from the server", () => {
+  const entry = (id: string, decidedAt: number, patch: Record<string, unknown> = {}) => ({
+    id,
+    createdAt: decidedAt - 1_000,
+    decidedAt,
+    sessionId: "s1",
+    harness: null,
+    project: null,
+    sessionLabel: null,
+    sql: "SELECT 1",
+    intent: null,
+    state: "approved",
+    reason: null,
+    error: null,
+    rowCount: 1,
+    affectedRows: null,
+    ...patch,
+  });
+
+  function served(pages: unknown[][]) {
+    const app = harness();
+    delete app.refreshRecent;
+    let resolveNext: (() => void) | undefined;
+    const activity = vi.fn(
+      (_scope: unknown, _before: unknown, _limit: number) =>
+        new Promise((resolve) => {
+          const page = { activity: pages.shift() ?? [], more: false };
+          resolveNext = () => resolve(page);
+        }),
+    );
+    Object.assign(app, {
+      polling: true,
+      dialect: "postgresql",
+      conn: null,
+      broker: { activity },
+      recentLoading: false,
+      recentAgain: false,
+      recentAt: 0,
+    });
+    const answer = async () => {
+      resolveNext?.();
+      await new Promise((r) => setTimeout(r, 0));
+    };
+    return { app, activity, answer };
+  }
+
+  it("lists the server's newest decisions at its count, this tab's own until the page has them", async () => {
+    const now = Date.now();
+    const { app, activity, answer } = served([[entry("srv", now - 5_000)]]);
+    const mine = { id: "mine", status: "approved", note: "", sql: "SELECT 1", resolvedAt: now };
+    app.decided = [mine];
+    const refresh = app.refreshRecent();
+    await answer();
+    await refresh;
+    expect(activity.mock.calls[0][2]).toBe(20);
+    expect(app.recentItems().map((i: { id: string }) => i.id)).toEqual(["mine", "srv"]);
+    expect(app.renderQueueList).toHaveBeenCalled();
+    // Once the server lists it, the server's record is what shows.
+    const { app: next, answer: again } = served([[entry("mine", now), entry("srv", now - 5_000)]]);
+    next.decided = [mine];
+    const second = next.refreshRecent();
+    await again();
+    await second;
+    expect(next.decided).toEqual([]);
+    expect(next.recentItems()[0]).toMatchObject({ id: "mine", note: "1 row returned" });
+  });
+
+  it("drops a page that lands after a connection switch", async () => {
+    const { app, answer } = served([[entry("old", Date.now())]]);
+    const refresh = app.refreshRecent();
+    app.connGeneration++;
+    await answer();
+    await refresh;
+    expect(app.recent).toEqual([]);
+    expect(app.renderQueueList).not.toHaveBeenCalled();
+  });
+
+  it("folds overlapping refreshes into one more read", async () => {
+    const { app, activity, answer } = served([[], [], []]);
+    const first = app.refreshRecent();
+    void app.refreshRecent();
+    void app.refreshRecent();
+    expect(activity).toHaveBeenCalledOnce();
+    await answer();
+    await first;
+    expect(activity).toHaveBeenCalledTimes(2);
+  });
+
+  it("replaces an unconfirmed open outcome once the server records how it ended", async () => {
+    // The result did land: only its acknowledgement was lost.
+    const { app, answer } = served([[entry("a", Date.now())]]);
+    const local = {
+      id: "a",
+      status: "failed",
+      note: "result not delivered",
+      outcome: "result not delivered",
+    };
+    app.unrecorded.add(local);
+    app.selection.queue = { kind: "hist", id: "a", item: local };
+    const refresh = app.refreshRecent();
+    await answer();
+    await refresh;
+    expect(app.selection.queue.item).toMatchObject({ status: "approved" });
+    expect(app.renderSelection).toHaveBeenCalledWith(true);
+  });
+
+  it("keeps what this tab saw when the server can only say the outcome is unknown", async () => {
+    const { app, answer } = served([
+      [entry("a", Date.now(), { state: "failed", error: "execution_unknown" })],
+    ]);
+    app.cards = [card("a")];
+    app.selection.queue = { kind: "card", id: "a" };
+    app.finish("a", "failed", "result not delivered");
+    const local = app.selection.queue.item;
+    expect(app.recentItems()[0]).toMatchObject({ id: "a", outcome: "result not delivered" });
+    // finish() asked the server for its page; it answers with its own record of the request.
+    await answer();
+    expect(app.recent).toHaveLength(1);
+    // The database returned successfully: that stays the fact, in the list and the open pane.
+    expect(app.recentItems()).toHaveLength(1);
+    expect(app.recentItems()[0]).toMatchObject({ id: "a", outcome: "result not delivered" });
+    expect(app.selection.queue.item).toBe(local);
+  });
+
+  it("cuts an older broker's full page to the count, and draws an unchanged page once", async () => {
+    const now = Date.now();
+    const page = Array.from({ length: 30 }, (_, i) => entry(`srv${i}`, now - i * 1_000));
+    const { app, answer } = served([page, page]);
+    const first = app.refreshRecent();
+    await answer();
+    await first;
+    expect(app.recent).toHaveLength(20);
+    const second = app.refreshRecent();
+    await answer();
+    await second;
+    expect(app.renderQueueList).toHaveBeenCalledOnce();
+  });
+
+  it("leaves an acknowledged open outcome, rows and all, when the server lists it", async () => {
+    const { app, answer } = served([[entry("a", Date.now())]]);
+    const result = { fields: [{ name: "a" }], rows: [{ a: 1 }], rowCount: 1, truncated: false };
+    const mine = { id: "a", status: "approved", note: "1 row returned", result };
+    app.selection.queue = { kind: "hist", id: "a", item: mine };
+    const refresh = app.refreshRecent();
+    await answer();
+    await refresh;
+    expect(app.selection.queue.item).toBe(mine);
+    expect(app.renderSelection).not.toHaveBeenCalled();
+  });
+
+  it("lets a provisional decision go once a full page reaches past it", async () => {
+    const now = Date.now();
+    const page = Array.from({ length: 20 }, (_, i) => entry(`srv${i}`, now - i * 1_000));
+    const { app, answer } = served([page]);
+    app.decided = [
+      { id: "old", status: "approved", note: "", sql: "SELECT 1", resolvedAt: now - 60_000 },
+    ];
+    const refresh = app.refreshRecent();
+    await answer();
+    await refresh;
+    expect(app.decided).toEqual([]);
+  });
+});
+
 describe("after a human decision", () => {
+  // The server acknowledged each decision unless a test says otherwise.
+  const ack = { recorded: true };
   function queue(...ids: string[]) {
     const app = harness();
     app.cards = ids.map(card);
@@ -172,9 +364,9 @@ describe("after a human decision", () => {
   it("opens the next request waiting below, as a click on it would", () => {
     const app = queue("a", "b", "c");
     decide(app, "b");
-    app.finish("b", "approved", "1 row returned");
+    app.finish("b", "approved", "1 row returned", ack);
     expect(app.selection.queue).toEqual({ kind: "card", id: "c" });
-    expect(app.history[0]).toMatchObject({ id: "b", status: "approved" });
+    expect(app.decided[0]).toMatchObject({ id: "b", status: "approved" });
     expect(app.renderSelection).toHaveBeenCalledWith(true);
   });
 
@@ -183,29 +375,36 @@ describe("after a human decision", () => {
     app.cards[1].expiresAt = Date.now() - 1;
     app.cards[2].leaseExpiresAt = Date.now() - 1;
     decide(app, "a");
-    app.finish("a", "approved", "1 row returned");
+    app.finish("a", "approved", "1 row returned", ack);
     expect(app.selection.queue).toEqual({ kind: "card", id: "d" });
   });
 
   it("goes back to the top from the last row", () => {
     const app = queue("a", "b", "c");
     decide(app, "c");
-    app.finish("c", "approved", "1 row returned");
+    app.finish("c", "approved", "1 row returned", ack);
     expect(app.selection.queue).toEqual({ kind: "card", id: "a" });
   });
 
   it("moves on after a decline too", () => {
     const app = queue("a", "b");
     app.selection.queue = { kind: "card", id: "a" };
-    app.finish("a", "rejected", "declined");
+    app.finish("a", "rejected", "declined", ack);
     expect(app.selection.queue).toEqual({ kind: "card", id: "b" });
+  });
+
+  it("stays on a decline the server never acknowledged, the only place it shows", () => {
+    const app = queue("a", "b");
+    app.selection.queue = { kind: "card", id: "a" };
+    app.finish("a", "rejected", "declined", { recorded: false });
+    expect(app.selection.queue).toMatchObject({ kind: "hist", id: "a" });
   });
 
   it("keeps the outcome open when nothing else waits for a human", () => {
     const app = queue("a", "b");
     app.cards[1].state = "executing";
     decide(app, "a");
-    app.finish("a", "approved", "1 row returned");
+    app.finish("a", "approved", "1 row returned", ack);
     expect(app.selection.queue).toMatchObject({ kind: "hist", id: "a" });
   });
 
@@ -217,7 +416,7 @@ describe("after a human decision", () => {
     ] as const) {
       const app = queue("a", "b");
       decide(app, "a", source);
-      app.finish("a", status, status);
+      app.finish("a", status, status, ack);
       expect(app.selection.queue).toMatchObject({ kind: "hist", id: "a" });
     }
   });
@@ -225,9 +424,7 @@ describe("after a human decision", () => {
   it("stays on the outcome of a rejection the load check made on its own", () => {
     const app = queue("a", "b");
     app.selection.queue = { kind: "card", id: "a" };
-    app.finish("a", "rejected", "heavy query, auto-denied", undefined, undefined, {
-      autoDenied: true,
-    });
+    app.finish("a", "rejected", "heavy query, auto-denied", { ...ack, autoDenied: true });
     expect(app.selection.queue).toMatchObject({ kind: "hist", id: "a" });
   });
 
@@ -237,7 +434,7 @@ describe("after a human decision", () => {
     app.cards[1].autoAttempt = 1;
     app.cards[3].autoAttempt = 1;
     decide(app, "a");
-    app.finish("a", "approved", "1 row returned");
+    app.finish("a", "approved", "1 row returned", ack);
     expect(app.selection.queue).toEqual({ kind: "card", id: "d" });
   });
 
@@ -249,7 +446,7 @@ describe("after a human decision", () => {
     app.cards[1].autoAttempt = 1;
     abort.abort();
     decide(app, "a");
-    app.finish("a", "approved", "1 row returned");
+    app.finish("a", "approved", "1 row returned", ack);
     expect(app.selection.queue).toEqual({ kind: "card", id: "b" });
   });
 
@@ -258,10 +455,10 @@ describe("after a human decision", () => {
     Object.assign(app, { autoEnabled: true, autoGeneration: 1, autoDeferred: new Set(["c"]) });
     app.cards[1].sql = "DELETE FROM t";
     decide(app, "a");
-    app.finish("a", "approved", "1 row returned");
+    app.finish("a", "approved", "1 row returned", ack);
     expect(app.selection.queue).toEqual({ kind: "card", id: "b" });
     decide(app, "b");
-    app.finish("b", "rejected", "declined");
+    app.finish("b", "rejected", "declined", ack);
     expect(app.selection.queue).toEqual({ kind: "card", id: "c" });
   });
 
@@ -288,7 +485,7 @@ describe("after a human decision", () => {
     const app = queue("a", "b");
     const back = narrow(app, "detail", { dataset: {} });
     decide(app, "a");
-    app.finish("a", "approved", "1 row returned");
+    app.finish("a", "approved", "1 row returned", ack);
     expect(app.selection.queue).toEqual({ kind: "card", id: "b" });
     expect(back.focus).not.toHaveBeenCalled();
   });
@@ -297,7 +494,7 @@ describe("after a human decision", () => {
     const app = queue("a", "b");
     const back = narrow(app, "detail", undefined);
     decide(app, "a");
-    app.finish("a", "approved", "1 row returned");
+    app.finish("a", "approved", "1 row returned", ack);
     expect(back.focus).toHaveBeenCalled();
   });
 
@@ -305,7 +502,7 @@ describe("after a human decision", () => {
     const app = queue("a", "b");
     const back = narrow(app, "list", { dataset: {} });
     decide(app, "a");
-    app.finish("a", "approved", "1 row returned");
+    app.finish("a", "approved", "1 row returned", ack);
     expect(app.selection.queue).toMatchObject({ kind: "hist", id: "a" });
     expect(back.focus).not.toHaveBeenCalled();
   });
@@ -314,12 +511,12 @@ describe("after a human decision", () => {
     const moved = queue("a", "b", "c");
     decide(moved, "a");
     moved.selection.queue = { kind: "card", id: "c" };
-    moved.finish("a", "approved", "1 row returned");
+    moved.finish("a", "approved", "1 row returned", ack);
     expect(moved.selection.queue).toEqual({ kind: "card", id: "c" });
     const audit = queue("a", "b");
     decide(audit, "a");
     audit.tab = "audit";
-    audit.finish("a", "approved", "1 row returned");
+    audit.finish("a", "approved", "1 row returned", ack);
     expect(audit.selection.queue).toMatchObject({ kind: "hist", id: "a" });
   });
 });

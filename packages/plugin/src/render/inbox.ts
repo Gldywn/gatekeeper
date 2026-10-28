@@ -23,6 +23,7 @@ import {
   pencilIcon,
   terminalIcon,
   trashIcon,
+  xCircleIcon,
 } from "../icons";
 import { classifyQuery, type RiskClass } from "../sql/classify";
 import { countsRows } from "../sql/schema";
@@ -99,7 +100,7 @@ function unconfirmed(item: HistItem): boolean {
 // The one fact a decided row states, from a closed vocabulary: the outcome before any count,
 // the affected count before the returned one. The note stays whole for the detail.
 export function rowFact(item: HistItem, dialect: string): string {
-  if (item.status === "rejected") return "Declined";
+  if (item.status === "rejected") return item.declinedBy === "gate" ? "Not run" : "Declined";
   if (item.status === "failed") return unconfirmed(item) ? "Unconfirmed" : "Failed";
   if (item.status === "expired") return item.note === CANCELLED_NOTE ? "Cancelled" : "Expired";
   const r = item.result;
@@ -127,6 +128,9 @@ function rowGlyph(item: HistItem): string {
     return glyph("rejected", gaugeIcon, "Declined by the load check");
   }
   if (unconfirmed(item)) return glyph("expired", helpCircleIcon, "Unconfirmed");
+  if (item.status === "rejected" && item.declinedBy === "gate") {
+    return glyph("expired", xCircleIcon, "Not run");
+  }
   if (item.status === "expired" && item.note === CANCELLED_NOTE) {
     return glyph("expired", clockIcon, "Cancelled");
   }
@@ -212,8 +216,8 @@ export function groupHeadHtml(label: string, count: number, hot = false): string
   return `<div class="ix-group${hot ? " hot" : ""}">${label}<span class="n">${count || ""}</span></div>`;
 }
 
-// The Audit Trail keeps the request's server facts; this shapes them for the shared detail. No
-// rows: /activity serves only the counts, so the detail says the rows are not held.
+// The server's record of a decision, shaped for Recently resolved, the Audit Trail and the shared
+// detail. No rows: /activity serves only the counts and whether the sealed rows were kept.
 export function auditItem(e: ActivityEntry, connection: string | null): HistItem {
   const status =
     e.state === "approved" || e.state === "rejected" || e.state === "failed" ? e.state : "expired";
@@ -258,7 +262,14 @@ export function auditItem(e: ActivityEntry, connection: string | null): HistItem
           truncated: false,
         }
       : undefined,
-    ...(e.state === "rejected" && e.reason?.trim() ? { reason: e.reason.trim() } : {}),
+    // What the agent received; it reads as typed words only when the record says a person typed it.
+    ...(e.state === "rejected" && e.reason?.trim() ? { sent: e.reason.trim() } : {}),
+    ...(e.state === "rejected" && e.declinedBy === "human" && e.reasonTyped && e.reason?.trim()
+      ? { reason: e.reason.trim() }
+      : {}),
+    ...(e.state === "rejected" && e.declinedBy ? { declinedBy: e.declinedBy } : {}),
+    ...(e.state === "rejected" && e.declinedBy === "load" ? { autoDenied: true } : {}),
+    ...(e.kept ? { kept: true } : {}),
     approval: e.approval,
     evaluation: e.evaluation,
     autoHold: e.autoHold,
@@ -363,7 +374,7 @@ export function paneEmptyHtml(
           [
             historyIcon,
             "How it ended",
-            "completed, declined, failed, cancelled or expired, with the results.",
+            "completed, declined, failed, cancelled or expired, with the rows it returned.",
           ],
         ])
       : `<div class="pane-empty"><span class="pe-title">Select an entry</span><span class="pe-sub">Its query, its outcome and who asked appear here.</span></div>`;

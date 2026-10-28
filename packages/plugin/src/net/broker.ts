@@ -150,17 +150,40 @@ export class BrokerClient {
   async activity(
     connectionName?: string,
     before?: Pick<ActivityEntry, "decidedAt" | "id">,
+    limit?: number,
   ): Promise<ActivityPage | null> {
-    const query = before
-      ? `?before=${before.decidedAt}&beforeId=${encodeURIComponent(before.id)}`
-      : "";
-    const res = await this.request(`/activity${query}`, {
+    const params = new URLSearchParams();
+    if (before) {
+      params.set("before", String(before.decidedAt));
+      params.set("beforeId", before.id);
+    }
+    if (limit !== undefined) params.set("limit", String(limit));
+    const query = params.toString();
+    const res = await this.request(`/activity${query ? `?${query}` : ""}`, {
       headers: this.connHeader(connectionName),
     });
     if (res.status !== 200) {
       return null;
     }
     return (await res.json()) as ActivityPage;
+  }
+
+  // The kept rows of one approved request, still sealed; null when none were kept.
+  async resultArchive(id: string, connectionName?: string): Promise<string | null> {
+    const res = await this.request(`/results/${encodeURIComponent(id)}`, {
+      headers: this.connHeader(connectionName),
+    });
+    if (res.status === 404) {
+      return null;
+    }
+    if (res.status !== 200) {
+      throw new Error(`Kept rows unavailable (${res.status})`);
+    }
+    const { payload } = (await res.json()) as { payload?: unknown };
+    if (typeof payload !== "string") {
+      throw new Error("Kept rows unavailable");
+    }
+    return payload;
   }
 
   async renew(id: string, leaseId: string): Promise<RenewResult> {

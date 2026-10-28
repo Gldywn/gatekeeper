@@ -31,22 +31,23 @@ export const CANCELLED_NOTE = "cancelled by the agent";
 export const NOT_DELIVERED_NOTE = "result not delivered";
 export const EXECUTION_UNKNOWN = "execution_unknown";
 
-// Where a decided request comes from: the local history (Recently resolved) knows its own notes
-// and who declined; an Audit Trail entry knows only what the server recorded.
+// Which list a decided request was opened from: the Queue's Recently resolved says when it was
+// resolved, the Audit Trail when it was recorded.
 export type DetailSource = "hist" | "audit";
 
 // The decided request, result first: what happened and who decided, what the query did (and
-// its rows, if held), then what was asked, folded, as the pending card showed it.
+// its rows, once opened), then what was asked, folded, as the pending card showed it.
 export function detailHtml(
   item: HistItem,
   source: DetailSource,
   dialect: string,
   requestOpen = false,
+  loadingRows = false,
 ): string {
   const cls = classifyQuery(item.sql, dialect).class;
   return `
       <div class="detail-flat ${cls === "read" ? "" : cls}">
-        ${statusHtml(item, source)}${resultHtml(item, dialect, cls)}
+        ${statusHtml(item, source)}${resultHtml(item, dialect, cls, loadingRows)}
         ${requestFoldHtml(item, requestOpen)}
         <div class="rq-body" id="detail-rq"${requestOpen ? "" : " hidden"}>${requestHtml(item, dialect, cls)}</div>
       </div>`;
@@ -71,7 +72,7 @@ interface Outcome {
   message?: { text: string; tone?: "err" | "reason" };
 }
 
-function outcome(item: HistItem, source: DetailSource): Outcome {
+function outcome(item: HistItem): Outcome {
   const approver =
     item.approval?.source === "automatic"
       ? "Approved automatically"
@@ -81,30 +82,41 @@ function outcome(item: HistItem, source: DetailSource): Outcome {
   if (item.status === "approved") {
     return { cls: "ok", icon: checkIcon, label: "Completed", attr: approver };
   }
-  if (item.status === "rejected") {
-    const typed = item.reason ?? "";
-    const hist = source === "hist";
-    if (hist && item.autoDenied)
-      return {
-        cls: "no",
-        icon: xCircleIcon,
-        label: "Declined",
-        attr: "Declined by the load check",
-        message: item.sent ? { text: item.sent } : undefined,
-      };
-    // The box shows what the agent received: your words, then any load check hints.
-    const said = (hist && item.sent) || typed;
+  if (item.status === "rejected" && item.declinedBy === "gate") {
+    return {
+      cls: "mut",
+      icon: xCircleIcon,
+      label: "Not run",
+      attr: "",
+      message: { text: item.sent ?? item.reason ?? "Execution was blocked." },
+    };
+  }
+  if (item.status === "rejected" && item.autoDenied) {
     return {
       cls: "no",
       icon: xCircleIcon,
       label: "Declined",
-      // Only a local decline names its author: an Audit Trail rejection may be the gate's own,
-      // with the gate's own sentence as its reason, so only a local one reads as your words.
-      attr: hist ? "Declined by you" : "",
+      attr: "Declined by the load check",
+      message: item.sent ? { text: item.sent } : undefined,
+    };
+  }
+  if (item.status === "rejected") {
+    // The words the person typed, when the record says there were some.
+    const typed = item.reason ?? "";
+    // Only a decline recorded as a person's names its author and can read as your words: an
+    // unmarked one may be the gate's own, with the gate's own sentence as its reason.
+    const yours = item.declinedBy === "human";
+    // The box shows what the agent received: the words typed, then any load check hints.
+    const said = item.sent || typed;
+    return {
+      cls: "no",
+      icon: xCircleIcon,
+      label: "Declined",
+      attr: yours ? "Declined by you" : "",
       message: said
-        ? { text: said, tone: hist && typed ? "reason" : undefined }
+        ? { text: said, tone: yours && typed ? "reason" : undefined }
         : {
-            text: hist
+            text: yours
               ? "You declined this proposal without giving a reason."
               : "The proposal was declined.",
           },
@@ -122,18 +134,13 @@ function outcome(item: HistItem, source: DetailSource): Outcome {
         text: "The database returned successfully. Delivery to the server could not be confirmed.",
       });
     }
-    if (item.outcome === "blocked" || item.outcome === "lease lost") {
+    if (item.outcome === "lease lost") {
       return {
         cls: "mut",
         icon: xCircleIcon,
         label: "Not run",
         attr: approver,
-        message: {
-          text:
-            item.outcome === "blocked"
-              ? "Execution was blocked."
-              : "Execution could not be authorized.",
-        },
+        message: { text: "Execution could not be authorized." },
       };
     }
     // A stop request is one more fact, never the claimed cause of the error after it.
@@ -166,7 +173,7 @@ function failed(label: string, attr: string, message: Outcome["message"]): Outco
 }
 
 function statusHtml(item: HistItem, source: DetailSource): string {
-  const o = outcome(item, source);
+  const o = outcome(item);
   const when = `${source === "audit" ? "Recorded" : "Resolved"} ${escapeHtml(
     new Date(item.resolvedAt).toLocaleString(undefined, {
       month: "short",
@@ -184,9 +191,14 @@ function statusHtml(item: HistItem, source: DetailSource): string {
 
 const rowsHtml = (n: number) => `<b>${formatCount(n)}</b> ${n === 1 ? "row" : "rows"}`;
 
+// The result block alone, for rows that arrive after the detail is on screen.
+export function detailResultHtml(item: HistItem, dialect: string): string {
+  return resultHtml(item, dialect, classifyQuery(item.sql, dialect).class, false);
+}
+
 // One receipt for reads and writes alike. DDL reports a conventional zero that measures
 // nothing, and a write's empty result set says nothing either: neither is counted.
-function resultHtml(item: HistItem, dialect: string, cls: RiskClass): string {
+function resultHtml(item: HistItem, dialect: string, cls: RiskClass, loading: boolean): string {
   if (item.status !== "approved") {
     return "";
   }
@@ -203,18 +215,31 @@ function resultHtml(item: HistItem, dialect: string, cls: RiskClass): string {
     parts.push(`<b>returning</b> ${rowsHtml(r.rowCount)}`);
   }
   const line = `<p class="dt-fact">${head}${parts.length ? `, ${parts.join(" and ")}` : ""}.</p>`;
-  const grid = r?.rows.length ? resultGrid() : "";
-  // The local note records how many rows the agent was sent when its cap cut them.
-  const sent = /\(agent received (\d+)\)$/.exec(item.note ?? "");
-  const cap = sent
-    ? `<p class="dt-fact dt-quiet">Only the first ${formatCount(Number(sent[1]))} rows were sent to the agent to avoid context pollution.</p>`
-    : "";
-  return `<div class="dt-result">${line}${grid}${cap}</div>`;
+  const rows = r?.rows.length ?? 0;
+  // Rows that should be there: a count above zero, or a read whose count was never recorded. A
+  // known zero and a write's empty result have nothing missing.
+  const owed = Boolean(r?.rowCount) || (r?.rowCount == null && cls === "read");
+  // Whatever kept them from showing (decided before rows were kept, a key this Beekeeper no
+  // longer has, a failed read), one sentence: the reader can do nothing different about any.
+  const body = rows
+    ? resultGrid()
+    : loading
+      ? resultGrid(true)
+      : owed
+        ? `<p class="dt-fact dt-quiet">These rows are not available.</p>`
+        : "";
+  // The kept result is what the agent was sent, so a cut says how many rows that was.
+  const cap =
+    rows && r?.truncated
+      ? `<p class="dt-fact dt-quiet">Only the first ${formatCount(rows)} rows were sent to the agent to avoid context pollution.</p>`
+      : "";
+  return `<div class="dt-result">${line}${body}${cap}</div>`;
 }
 
-// The held rows: Copy, Export and Enlarge left, Tabulator's pager mounted right
-// (views/detail.ts), the position written beside it; no footer under the grid.
-function resultGrid(): string {
+// The rows: Copy, Export and Enlarge left, Tabulator's pager mounted right (views/detail.ts), the
+// position written beside it; no footer under the grid. While they load, the same frame with its
+// tools inert and a few breathing bars, so nothing moves when the grid arrives.
+function resultGrid(loading = false): string {
   const copy = flyoutMenu(
     "copy",
     "result",
@@ -227,6 +252,9 @@ function resultGrid(): string {
     { fmt: "json", icon: jsonIcon, name: "JSON" },
   ]);
   const enlarge = `<button class="flyout res-zoom" type="button" data-result-zoom aria-label="Enlarge the results" title="Enlarge">${maximizeIcon}</button>`;
+  if (loading) {
+    return `<div class="res loading" id="detail-grid" aria-busy="true"><div class="res-bar"><span class="res-tools" inert>${copy}${exportMenu}${enlarge}</span></div><div class="res-skel" role="status" aria-label="Loading rows"><i></i><i></i><i></i></div></div>`;
+  }
   return `<div class="res" id="detail-grid"><div class="res-bar"><span class="res-tools">${copy}${exportMenu}${enlarge}</span><span class="res-pg"><span class="res-count" data-grid-count></span><span class="res-pager" data-grid-pager></span></span></div><div class="gk-grid" data-result-grid></div></div>`;
 }
 

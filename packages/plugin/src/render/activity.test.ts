@@ -152,6 +152,20 @@ describe("render/activity", () => {
     ]);
   });
 
+  it("exports a statement the gate refused to run as not run, a person's decline as declined", () => {
+    const gate: ActivityEntry = { ...rejected, id: "q_gate", declinedBy: "gate" };
+    const human: ActivityEntry = { ...rejected, id: "q_human", declinedBy: "human" };
+    expect(
+      JSON.parse(activityJson([gate, human])).map((r: { status: string }) => r.status),
+    ).toEqual(["declined", "not run"]);
+    expect(activityCsv([gate])).toContain(",not run,");
+    expect(activityMarkdownDays([gate], "prod", new Map())).toContain("· Not run ·");
+    // The summary above the entries counts them the same way.
+    expect(activityMarkdownDays([gate, human], "prod", new Map())).toContain(
+      "- Queries: 2 (1 Not run · 1 Declined)",
+    );
+  });
+
   it("uses a Markdown fence longer than any backtick run in the SQL", () => {
     const withBackticks: ActivityEntry = {
       ...approved,

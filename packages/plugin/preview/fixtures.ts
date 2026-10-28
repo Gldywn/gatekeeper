@@ -1,6 +1,6 @@
 import type { ConnectionInfo } from "@beekeeperstudio/plugin";
 import type { ActivityEntry, Proposal, SessionMeta, SessionRoster } from "@gatekeeper/shared";
-import { capResult } from "../src/result";
+import { capResult, type HistResult } from "../src/result";
 import type { HistItem } from "../src/types";
 
 // Synthetic data for the preview only: invented projects, tables and addresses on
@@ -280,8 +280,8 @@ export function proposals(): Proposal[] {
 const fieldsOf = (rows: Record<string, unknown>[]) =>
   Object.keys(rows[0] ?? {}).map((name) => ({ name }));
 
-// Recently resolved only ever fills from decisions taken in this tab, so the preview seeds it.
-// The same requests open the Audit Trail, so an entry still held here shows its rows there.
+// Today's decisions as this tab made them; the broker serves them as the newest Audit Trail
+// entries, so Recently resolved lists them and their rows open from the kept copy.
 export function seededHistory(): HistItem[] {
   const base = { connection: CONNECTION.connectionName };
   const dup = duplicateRows();
@@ -316,7 +316,7 @@ export function seededHistory(): HistItem[] {
       ...base,
       id: "req_2c8a6e1f9b04",
       status: "approved",
-      note: "12,400 rows returned (agent received 10000)",
+      note: "12,400 rows returned",
       sql: SQL.cohort,
       resolvedAt: NOW - 3.5 * MIN,
       session: session(1),
@@ -324,6 +324,7 @@ export function seededHistory(): HistItem[] {
       result: {
         ...capResult(eventRows(), [{ name: "id" }, { name: "kind" }, { name: "created_at" }]),
         rowCount: 12_400,
+        truncated: true,
       },
       approval: { source: "human" },
     },
@@ -331,8 +332,7 @@ export function seededHistory(): HistItem[] {
       ...base,
       id: "req_6f3d0a9c2e71",
       status: "failed",
-      note: "result not delivered",
-      outcome: "result not delivered",
+      note: "execution_unknown",
       sql: SQL.status,
       resolvedAt: NOW - 4 * MIN,
       session: session(1),
@@ -354,7 +354,9 @@ export function seededHistory(): HistItem[] {
       ...base,
       id: "req_0b7d3e5f1a29",
       status: "rejected",
-      note: "declined",
+      note: "Only void the newer copy of each pair",
+      reason: "Only void the newer copy of each pair",
+      declinedBy: "human",
       sql: SQL.voidDup,
       resolvedAt: NOW - 8 * MIN,
       session: session(0),
@@ -379,7 +381,7 @@ export function seededHistory(): HistItem[] {
       resolvedAt: NOW - 24 * MIN,
       session: session(1),
       intent: "cohort sizes since August",
-      result: { fields: [], rows: [], rowCount: 3, truncated: true, bytes: 0 },
+      result: { fields: [], rows: [], rowCount: 3, truncated: false },
     },
     {
       ...base,
@@ -400,7 +402,7 @@ export function seededHistory(): HistItem[] {
       resolvedAt: NOW - 43 * MIN,
       session: session(0),
       intent: "check the invoices.status values",
-      result: { fields: [], rows: [], rowCount: 4, truncated: true, bytes: 0 },
+      result: { fields: [], rows: [], rowCount: 4, truncated: false },
     },
     {
       ...base,
@@ -453,11 +455,14 @@ export function activity(): ActivityEntry[] {
     sql: h.sql,
     intent: h.intent ?? null,
     state: STATE[h.status],
-    reason: null,
+    reason: h.reason ?? null,
     error: h.status === "failed" ? h.note : null,
     rowCount: h.result?.rowCount ?? null,
-    affectedRows: null,
+    affectedRows: h.result?.affectedRows ?? null,
     approval: h.approval,
+    sensitivity: h.sensitivity,
+    kept: Boolean(h.result?.rows.length),
+    ...(h.declinedBy ? { declinedBy: h.declinedBy } : {}),
   }));
   const s0 = session(0);
   const extra = (id: string, at: number, patch: Partial<ActivityEntry>): ActivityEntry => ({
@@ -581,4 +586,14 @@ export function eventRows(): Record<string, unknown>[] {
     kind: ["view", "click", "signup"][i % 3],
     created_at: new Date(Date.UTC(2026, 9, 1 + (i % 19), 10 + (i % 9))).toISOString().slice(0, 19),
   }));
+}
+
+// The rows the server keeps for today's seeded decisions, by request id; the preview broker
+// seals them on request, the way the plugin did when it posted each decision.
+export function keptResults(): Map<string, HistResult> {
+  return new Map(
+    seededHistory()
+      .filter((h) => h.result?.rows.length)
+      .map((h) => [h.id, h.result as HistResult]),
+  );
 }

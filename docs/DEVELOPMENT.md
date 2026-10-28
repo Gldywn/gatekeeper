@@ -106,7 +106,8 @@ The repo ships its dev wiring, so a clone is ready without hand-editing config:
   plugin at `http://127.0.0.1:5199/preview/index.html` over a fake Beekeeper host and an
   in-memory broker (`packages/plugin/preview/`), so an agent can screenshot a layout without
   Beekeeper, a database or the broker. URL parameters set the scenario (`agents`, `queue`,
-  `history`, `delay`, `engine=sqlite` for the untested-engine notice), and
+  `history` for how many of today's seeded decisions the broker serves, `delay`,
+  `engine=sqlite` for the untested-engine notice), and
   `preview/frame.html?w=440&h=800` renders it at a fixed size. Port 5199 is held strictly, so
   a second worktree adds `--port <free port>`. Agents judge UI work there (`AGENTS.md`); the
   human checks the real plugin in Beekeeper before merging.
@@ -145,7 +146,8 @@ packages/
       app.ts         UI, polling, lease renewal, approve / reject, history
       sql/classify.ts  dialect-aware risk classifier (the execution gate)
       sql/sanitize.ts  surfaces bidi/invisible chars in displayed SQL
-      result.ts      result caps (local history + agent-bound)
+      result.ts      result cap (what the agent is sent, and the history keeps)
+      archive.ts     seals and opens kept results (key in Beekeeper's encrypted storage)
       style.css
     DESIGN.md        plugin design system
   shared/
