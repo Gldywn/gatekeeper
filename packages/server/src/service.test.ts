@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { MAX_WAIT_MS } from "./config.js";
-import { cancelQuery, getQueryResult, pollResults, submitQuery } from "./service.js";
+import {
+  cancelQuery,
+  getQueryResult,
+  pollResults,
+  ringDue,
+  ringHandOff,
+  submitQuery,
+} from "./service.js";
 import { RequestStore } from "./store.js";
 
 // A wait driven by a fake clock: every sleep jumps the deadline clock forward, so a
@@ -255,10 +262,10 @@ describe("submitQuery desktop alert", () => {
     return {
       notifier: {
         active,
+        sounds: active,
         probe: () => {},
         notify: (l: string | null | undefined) => labels.push(l),
-        autoActive: false,
-        notifyAuto: () => {},
+        remind: () => {},
       },
       labels,
     };
@@ -309,14 +316,82 @@ describe("submitQuery desktop alert", () => {
     const exploding = {
       active: true,
       probe: () => {},
+      sounds: true,
       notify: () => {
         throw new Error("boom");
       },
-      autoActive: false,
-      notifyAuto: () => {},
+      remind: () => {},
     };
     const ticket = submitQuery(store, { sessionId: "s1", sql: "SELECT 1" }, exploding);
     expect(ticket.state).toBe("pending");
     expect(ticket.requestId).toMatch(/^req_/);
+  });
+});
+
+describe("alerts once Auto mode is in play", () => {
+  function recorder(sounds = true, active = true) {
+    const calls: string[] = [];
+    return {
+      notifier: {
+        active,
+        sounds,
+        probe: () => {},
+        notify: (l: string | null | undefined) => calls.push(`notify:${l}`),
+        remind: () => calls.push("remind"),
+      },
+      calls,
+    };
+  }
+
+  it("leaves a read to Auto mode, and alerts a write at once", () => {
+    const store = fresh();
+    const { notifier, calls } = recorder();
+    store.stampAuto("scope");
+    submitQuery(store, { sessionId: "s1", sql: "SELECT 1" }, notifier);
+    expect(calls).toEqual([]);
+    submitQuery(store, { sessionId: "s1", sql: "DELETE FROM t" }, notifier);
+    expect(calls).toEqual(["notify:audit"]);
+  });
+
+  it("rings with the session label for a hand-off, and for what Auto mode stopped covering", () => {
+    const store = fresh();
+    const { notifier, calls } = recorder();
+    store.stampAuto("scope");
+    const held = submitQuery(store, { sessionId: "s1", sql: "SELECT 1" }, notifier);
+    ringHandOff(store, notifier, [held.requestId]);
+    expect(calls).toEqual(["notify:audit"]);
+    const other = fresh();
+    other.stampAuto("scope");
+    submitQuery(other, { sessionId: "s1", sql: "SELECT 2" }, notifier);
+    other.stampAuto(null);
+    ringDue(other, notifier);
+    expect(calls).toEqual(["notify:audit", "notify:audit"]);
+  });
+
+  it("reminds with the sound alone, and not at all when no sound is played", () => {
+    let now = 0;
+    const store = new RequestStore({ proposalTtlMs: 10_000, now: () => now });
+    store.upsertSession({ sessionId: "s1" });
+    store.setSessionLabel("s1", "audit");
+    store.submit({ sessionId: "s1", sql: "SELECT 1" });
+    now = 5_000;
+    const banner = recorder(false);
+    ringDue(store, banner.notifier);
+    expect(banner.calls).toEqual([]);
+    const both = recorder();
+    ringDue(store, both.notifier);
+    expect(both.calls).toEqual(["remind"]);
+  });
+
+  it("never throws out of the sweep, and leaves the window alone when switched off", () => {
+    const store = fresh();
+    const off = recorder(false, false);
+    store.stampAuto("scope");
+    submitQuery(store, { sessionId: "s1", sql: "SELECT 1" }, off.notifier);
+    store.stampAuto(null);
+    ringDue(store, off.notifier);
+    expect(store.claimAlert(10_000)).toBe(true);
+    store.close();
+    expect(() => ringDue(store, recorder().notifier)).not.toThrow();
   });
 });

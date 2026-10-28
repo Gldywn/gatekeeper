@@ -132,6 +132,8 @@ import { DETECTION_TOGGLES, exampleChip, SettingsView } from "./views/settings";
 
 const BROKER_URL = "http://localhost:9999";
 const POLL_MS = 1000;
+// Requests one poll reports as left to a human; the rest ride the next. The broker takes more.
+const ATTENTION_MAX = 64;
 const RENEW_MS = 15_000;
 const TICK_MS = 1000;
 // A query that started but is not in the database's activity yet gets a few ticks to appear.
@@ -338,11 +340,16 @@ export class Gatekeeper {
   private liveAgents = 0;
   private agentsActive = false;
   // The Inbox: which list the left pane shows, and what each list has open on the right. Each
-  // list keeps its own selection, so coming back to a tab finds what was open there. Nothing
-  // is ever selected for the human: a new or next proposal never lands under the pointer.
+  // list keeps its own selection, so coming back to a tab finds what was open there. Only the
+  // human's own decision moves it, to the next request waiting for them: a new proposal or a
+  // live update never lands under the pointer.
   private tab: InboxTab = "queue";
   private readonly selection: Record<InboxTab, Selection | null> = { queue: null, audit: null };
   private polling = false;
+  // One /pending call at a time: an answer overtaken by an older one would leave the broker
+  // with a stale Auto mode report. A poke during a call asks for another right after it.
+  private pollBusy = false;
+  private pollAgain = false;
   private lastTitle = "";
   private lastConnCheck = 0;
   private connCheckInFlight = false;
@@ -1762,7 +1769,8 @@ export class Gatekeeper {
     this.renderSelection(true);
   }
 
-  private select(next: Selection): void {
+  // `moveFocus` false: a selection the human did not make by hand leaves their focus where it is.
+  private select(next: Selection, moveFocus = true): void {
     if (next.kind === "audit") {
       const entry = this.activityView.entry(next.id);
       if (!entry) return;
@@ -1778,7 +1786,7 @@ export class Gatekeeper {
     this.root.querySelector("#inbox")?.setAttribute("data-show", "detail");
     this.renderSelection(true);
     // Narrow: the list just hid under the focused row, so Back takes the focus.
-    if (this.root.querySelector<HTMLElement>(".pane-list")?.offsetParent === null) {
+    if (moveFocus && this.root.querySelector<HTMLElement>(".pane-list")?.offsetParent === null) {
       this.root.querySelector<HTMLElement>("[data-back]")?.focus({ preventScroll: true });
     }
   }
@@ -2299,6 +2307,8 @@ export class Gatekeeper {
       const fromMarker = toggle.closest("#armed");
       this.resetAuto("Auto mode disabled");
       this.applyMode("read");
+      // The broker hears of it now, so what Auto mode was holding rings without waiting.
+      this.pokePoll();
       if (fromMarker) this.root.querySelector<HTMLElement>("#autoHint .sa-hint")?.focus();
       return;
     }
@@ -2380,6 +2390,8 @@ export class Gatekeeper {
       this.autoDeferred = new Set(this.cards.map((c) => c.id));
       this.autoEnabled = true;
       this.renderAuto();
+      // The broker hears of it now, so a read submitted next waits for Auto mode.
+      this.pokePoll();
       await this.reportConnection();
       void this.evaluateNext();
     } catch {
@@ -2429,16 +2441,46 @@ export class Gatekeeper {
     this.renderQueue();
   }
 
+  // A ready read this activation has not tried yet: Auto mode evaluates it once the evaluator
+  // and the run budget free up, however long that takes.
+  private autoWillTake(card: Card): boolean {
+    return (
+      card.state === "ready" &&
+      card.autoAttempt !== this.autoGeneration &&
+      !card.authorityLost &&
+      !this.autoDeferred.has(card.id) &&
+      classifyQuery(card.sql, this.dialect).class === "read"
+    );
+  }
+
+  // Ready, still within the deadlines approve() enforces, its load check done when it may still
+  // auto-deny it, and Auto mode neither evaluating it nor going to: only a human can decide it.
+  // A timed-out evaluation hands its card back at once, before its awaited calls ever settle.
+  private waitsForHuman(card: Card): boolean {
+    const evaluating = card === this.autoCard && !this.autoAbort?.signal.aborted;
+    const now = Date.now();
+    return (
+      card.state === "ready" &&
+      !card.authorityLost &&
+      card.expiresAt > now &&
+      card.leaseExpiresAt > now &&
+      !(this.autoDenying() && !card.loadChecked) &&
+      !(this.autoEnabled && (evaluating || this.autoWillTake(card)))
+    );
+  }
+
+  // Auto-deny heavy queries, read from the current connection's preferences only: right after a
+  // switch get() can still hold the previous connection's.
+  private autoDenying(): boolean {
+    return (
+      this.settingsStore.get().autoDenyHeavy &&
+      this.settingsStore.loadedForConnection(this.connectionName)
+    );
+  }
+
   private async evaluateNext(): Promise<void> {
     if (!this.autoEnabled || this.autoBusy || this.autoRuns >= AUTO_RUNS_MAX) return;
-    const card = this.cards.find(
-      (c) =>
-        c.state === "ready" &&
-        c.autoAttempt !== this.autoGeneration &&
-        !c.authorityLost &&
-        !this.autoDeferred.has(c.id) &&
-        classifyQuery(c.sql, this.dialect).class === "read",
-    );
+    const card = this.cards.find((c) => this.autoWillTake(c));
     if (!card) return;
     const generation = this.autoGeneration;
     const conn = this.connGeneration;
@@ -2462,9 +2504,21 @@ export class Gatekeeper {
     this.autoCard = card;
     const controller = new AbortController();
     this.autoAbort = controller;
+    // The evaluator is freed at the deadline or when the calls settle, whichever comes first: a
+    // host call that never answers must not hold back, unalerted, every read queued behind it.
+    let freed = false;
+    const free = (): void => {
+      if (freed) return;
+      freed = true;
+      if (this.autoAbort !== controller) return;
+      this.autoBusy = false;
+      this.autoCard = undefined;
+    };
     const timer = window.setTimeout(() => {
       controller.abort();
       if (valid()) this.reviewCard(card, "Evaluation timed out. Approve manually");
+      free();
+      void this.evaluateNext();
     }, 15000);
     let run: Promise<void> | undefined;
     try {
@@ -2518,8 +2572,7 @@ export class Gatekeeper {
       if (valid()) this.reviewCard(card, "Evaluator or metadata unavailable. Approve manually");
     } finally {
       window.clearTimeout(timer);
-      this.autoBusy = false;
-      this.autoCard = undefined;
+      free();
       if (card.state === "ready" && card.autoStatus === "Evaluating with Jev")
         this.reviewCard(card, "Evaluation cancelled or authority changed");
       void this.evaluateNext();
@@ -2700,11 +2753,24 @@ export class Gatekeeper {
     if (!this.polling) {
       return;
     }
+    if (this.pollBusy) {
+      this.pollAgain = true;
+      return;
+    }
+    this.pollBusy = true;
     let claimed = false;
     const connection = this.connGeneration;
     const active = this.activeGen;
+    const attention = this.cards
+      .filter((c) => !c.handedOff && this.waitsForHuman(c))
+      .slice(0, ATTENTION_MAX);
+    const leases = attention.map((c) => c.leaseId);
     try {
-      const res = await this.broker.pending(this.connScopeKey());
+      const res = await this.broker.pending(this.connScopeKey(), {
+        auto: this.autoEnabled,
+        heavy: this.autoDenying(),
+        attention: attention.map((c) => c.id),
+      });
       if (connection !== this.connGeneration || active !== this.activeGen) return;
       if (res.status === 401) {
         this.polling = false;
@@ -2725,6 +2791,11 @@ export class Gatekeeper {
       // popover's "Last answer" age keeps growing.
       if (res.ok) {
         this.brokerAnsweredAt = Date.now();
+        // Only a card still waiting under the lease it was reported with: one that ran or moved
+        // on meanwhile is reported again if it comes back to a human.
+        attention.forEach((card, i) => {
+          if (card.leaseId === leases[i] && this.waitsForHuman(card)) card.handedOff = true;
+        });
       }
       if (res.status === 200) {
         claimed = true;
@@ -2746,15 +2817,19 @@ export class Gatekeeper {
       }
       log.error(err instanceof Error ? err : String(err));
     } finally {
-      if (this.polling && active === this.activeGen) {
-        this.pollTimer = window.setTimeout(() => void this.poll(), claimed ? 0 : POLL_MS);
+      this.pollBusy = false;
+      const again = this.pollAgain;
+      this.pollAgain = false;
+      // A call a takeover made stale still hands over to the poll the new owner asked for.
+      if (this.polling && (active === this.activeGen || again)) {
+        this.pollTimer = window.setTimeout(() => void this.poll(), claimed || again ? 0 : POLL_MS);
       }
     }
   }
 
   // Re-poll (and refresh the roster) right now instead of waiting out the
   // interval, so pending proposals appear the instant the tab regains focus or
-  // is reopened, without spawning a second poll loop.
+  // is reopened, without spawning a second poll loop (a call in flight runs it after).
   private pokePoll(): void {
     if (!this.polling) {
       return;
@@ -2839,6 +2914,7 @@ export class Gatekeeper {
           existing.autoAttempt = undefined;
           existing.authorityLost = false;
           existing.evaluation = undefined;
+          existing.handedOff = undefined;
         }
         existing.leaseId = proposal.leaseId;
         existing.leaseExpiresAt = proposal.leaseExpiresAt;
@@ -2927,6 +3003,8 @@ export class Gatekeeper {
       )
         return;
       card.loadResult = result;
+      // Set in the same tick as auto-deny reserves a heavy card, so no poll sees it in between.
+      card.loadChecked = true;
       this.renderCardLoad(card);
       if (arrival) void this.autoDeny(card, load, bound);
     });
@@ -2983,9 +3061,7 @@ export class Gatekeeper {
       card.state !== "ready" ||
       card.authorityLost ||
       !same() ||
-      // Right after a switch get() can still hold the previous connection's preferences.
-      !this.settingsStore.loadedForConnection(this.connectionName) ||
-      !this.settingsStore.get().autoDenyHeavy
+      !this.autoDenying()
     )
       return;
     if (this.autoCard === card) this.autoAbort?.abort();
@@ -3647,6 +3723,14 @@ export class Gatekeeper {
     }
   }
 
+  // The first request below this one in the list that waits for a human, else from the top.
+  private nextWaiting(card: Card): Card | undefined {
+    const i = this.cards.indexOf(card);
+    return [...this.cards.slice(i + 1), ...this.cards.slice(0, i)].find((c) =>
+      this.waitsForHuman(c),
+    );
+  }
+
   private finish(
     id: string,
     status: "approved" | "rejected" | "failed" | "expired",
@@ -3693,6 +3777,27 @@ export class Gatekeeper {
       // An open card stays open as its outcome: same request, now decided. The selection holds
       // the item itself, so it outlives the Recently resolved cap while another tab shows.
       const open = this.selection.queue?.kind === "card" && this.selection.queue.id === id;
+      const inbox = this.root.querySelector<HTMLElement>("#inbox");
+      // A human decision moves on to the next request waiting for one, as a click on it would,
+      // so the queue reads one request after the other; not from a narrow list the human went
+      // back to meanwhile. A failure stays open to be seen.
+      const next =
+        open &&
+        this.tab === "queue" &&
+        inbox?.getAttribute("data-show") !== "list" &&
+        ((status === "rejected" && !sent.autoDenied) ||
+          (status === "approved" && card.approval?.source === "human"))
+          ? this.nextWaiting(card)
+          : undefined;
+      // The focus follows from the decided request (its row, its detail) or from nowhere, as a
+      // click would take it; anywhere else, an overlay or another row, it stays put.
+      const focused = inbox ? document.activeElement : null;
+      const follow =
+        inbox !== null &&
+        (!focused ||
+          focused === document.body ||
+          (focused as HTMLElement).dataset?.row === id ||
+          Boolean(inbox.querySelector("#detailBody")?.contains(focused)));
       if (open) this.selection.queue = { kind: "hist", id, item };
       this.history.unshift(item);
       if (this.history.length > this.settingsStore.get().recentlyResolved) {
@@ -3701,8 +3806,13 @@ export class Gatekeeper {
       this.enforceHistoryBudget();
       // Dropped once its outcome row exists, so the rebuild hands a focused row to that row.
       this.drop(id);
-      // The Audit Trail's open entry, if that tab shows, keeps its grid's sort and page.
-      if (open && this.tab === "queue") this.renderSelection(true);
+      if (next) {
+        this.select({ kind: "card", id: next.id }, follow);
+        if (follow) this.focusSelectedRow();
+      } else if (open && this.tab === "queue") {
+        // The Audit Trail's open entry, if that tab shows, keeps its grid's sort and page.
+        this.renderSelection(true);
+      }
     };
     if (el && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       el.classList.add("leaving");

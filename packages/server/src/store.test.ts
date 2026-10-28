@@ -2,8 +2,11 @@ import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { AUTO_LIVE_MS } from "./config.js";
 import { connectionScopeKey } from "./connection.js";
 import { pollResults } from "./service.js";
+import { releaseAlerts, remindAlerts } from "./store/alerts.js";
+import { createContext, migrate } from "./store/db.js";
 import { RequestStore, StoreError } from "./store.js";
 
 // The composite scope key the store now stamps for a connection, matching the
@@ -895,49 +898,219 @@ describe("alert cooldown", () => {
   });
 });
 
-describe("claimAutoAlert", () => {
-  it("refuses while no submission alert has ever rung", () => {
-    const { store } = makeStore();
-    expect(store.claimAutoAlert()).toBe(false);
+describe("alerts owed to Auto mode", () => {
+  const CD = 10_000;
+  function onAuto(name = "app") {
+    const made = makeStore({ proposalTtlMs: 60_000 });
+    made.store.setConnection({
+      connectionName: name,
+      databaseType: "postgresql",
+      databaseName: name,
+      readOnly: false,
+    });
+    made.store.stampAuto(scopeOf(name));
+    const read = (sql = "SELECT 1") =>
+      made.store.submitNew({ sessionId: "s1", sql, autoEligible: true });
+    return { ...made, read };
+  }
+
+  it("defers a write too while the load check may still reject it", () => {
+    const { store } = onAuto();
+    const write = (sql: string) => store.submitNew({ sessionId: "s1", sql }).deferred;
+    expect(write("DELETE FROM a")).toBe(false);
+    store.stampAuto(scopeOf("app"), "all");
+    expect(write("DELETE FROM b")).toBe(true);
+    // Released like any owed request once the plugin stops deciding.
+    store.stampAuto(null);
+    expect(store.releaseAlerts(10_000)).toBe("s1");
   });
 
-  it("answers one submission alert, then reopens its window", () => {
-    const { store } = makeStore();
-    expect(store.claimAlert(10_000)).toBe(true);
-    expect(store.claimAutoAlert()).toBe(true);
-    expect(store.claimAutoAlert()).toBe(false);
-    expect(store.claimAlert(10_000)).toBe(true);
+  it("defers a read only while Auto mode reports in for its connection", () => {
+    const { store, clock, read } = onAuto();
+    expect(read().deferred).toBe(true);
+    expect(store.submitNew({ sessionId: "s2", sql: "DELETE FROM t" }).deferred).toBe(false);
+    store.stampAuto(scopeOf("other"));
+    expect(read("SELECT 2").deferred).toBe(false);
+    store.stampAuto(scopeOf("app"));
+    clock.t += AUTO_LIVE_MS;
+    expect(read("SELECT 3").deferred).toBe(false);
   });
 
-  it("refuses while a proposal is pending, leased or executing automatically", () => {
+  // claimNext offers a request with no connection to any plugin, so Auto mode covers it too.
+  it("defers a read submitted before any connection was reported", () => {
     const { store } = makeStore();
-    store.claimAlert(10_000);
-    store.submit({ sessionId: "s1", sql: "SELECT 1" });
-    expect(store.claimAutoAlert()).toBe(false);
-    const lease = store.claimNext("plugin", LEASE)!;
-    expect(store.claimAutoAlert()).toBe(false);
-    store.markExecuting(lease.id, lease.leaseId!, { source: "automatic" });
-    expect(store.claimAutoAlert()).toBe(false);
-    store.resolve(lease.id, lease.leaseId!, { status: "approved", rows: [], fields: [] });
-    expect(store.claimAutoAlert()).toBe(true);
+    store.stampAuto(scopeOf("app"));
+    expect(store.submitNew({ sessionId: "s1", sql: "SELECT 1", autoEligible: true }).deferred).toBe(
+      true,
+    );
   });
 
-  it("does not wait for a query a human approved, however long it runs", () => {
-    const { store } = makeStore();
-    store.claimAlert(10_000);
-    store.submit({ sessionId: "s1", sql: "SELECT 1" });
-    const lease = store.claimNext("plugin", LEASE)!;
-    store.markExecuting(lease.id, lease.leaseId!, { source: "human" });
-    expect(store.claimAutoAlert()).toBe(true);
+  it("keeps the first submission's stage on an idempotent replay", () => {
+    const { store, read } = onAuto();
+    const input = { sessionId: "s1", sql: "SELECT 1", idempotencyKey: "k", autoEligible: true };
+    expect(store.submitNew(input).deferred).toBe(true);
+    store.stampAuto(null);
+    expect(store.submitNew(input)).toMatchObject({ created: false, deferred: false });
+    expect(read("SELECT 2").deferred).toBe(false);
+    expect(store.releaseAlerts(CD)).toBe("s1");
   });
 
-  // Reads do not sweep, so the row still says pending once its TTL has passed.
-  it("ignores an expired proposal still marked pending", () => {
-    const { store, clock } = makeStore();
-    store.claimAlert(10_000);
-    store.submit({ sessionId: "s1", sql: "SELECT 1" });
-    clock.t += 10_000;
-    expect(store.claimAutoAlert()).toBe(true);
+  it("hands a request to a human once, while it still waits for one", () => {
+    const { store, read } = onAuto();
+    const leased = read().request;
+    store.claimNext("p", LEASE, scopeOf("app"));
+    expect(store.get(leased.id)?.state).toBe("leased");
+    expect(store.handOffAlerts([leased.id], CD)).toBe("s1");
+    expect(store.handOffAlerts([leased.id], CD)).toBeNull();
+
+    // Running, or past its deadline, a request no longer waits for anyone.
+    const other = onAuto();
+    const running = other.read().request;
+    const lease = other.store.claimNext("p", LEASE, scopeOf("app"))!;
+    other.store.markExecuting(running.id, lease.leaseId!, { source: "automatic" });
+    const late = other.read("SELECT 2").request;
+    other.clock.t = late.expiresAt;
+    expect(other.store.handOffAlerts([running.id, late.id], CD)).toBeNull();
+  });
+
+  it("rings once for requests due together, and an alert that just rang serves them", () => {
+    const { store, clock, read } = onAuto();
+    const a = read().request;
+    const b = read("SELECT 2").request;
+    expect(store.handOffAlerts([a.id, b.id], CD)).toBe("s1");
+    const c = read("SELECT 3").request;
+    expect(store.claimAlert(CD)).toBe(false);
+    expect(store.handOffAlerts([c.id], CD)).toBeNull();
+    clock.t += CD;
+    expect(store.handOffAlerts([c.id], CD)).toBeNull();
+  });
+
+  it("releases what Auto mode stops covering: switched off, gone quiet, elsewhere", () => {
+    const { store, clock, read } = onAuto();
+    read();
+    expect(store.releaseAlerts(CD)).toBeNull();
+    store.stampAuto(null);
+    expect(store.releaseAlerts(CD)).toBe("s1");
+    expect(store.releaseAlerts(CD)).toBeNull();
+
+    clock.t += CD;
+    store.stampAuto(scopeOf("app"));
+    read("SELECT 2");
+    clock.t += AUTO_LIVE_MS - 1;
+    expect(store.releaseAlerts(CD)).toBeNull();
+    clock.t += 1;
+    expect(store.releaseAlerts(CD)).toBe("s1");
+
+    clock.t += CD;
+    store.stampAuto(scopeOf("app"));
+    read("SELECT 3");
+    store.stampAuto(scopeOf("other"));
+    expect(store.releaseAlerts(CD)).toBe("s1");
+  });
+
+  it("reminds once at half life, only a request a human was alerted to", () => {
+    const { store, clock, read } = onAuto();
+    store.stampAuto(null);
+    store.submitNew({ sessionId: "s1", sql: "SELECT 1" });
+    clock.t += 29_999;
+    expect(store.remindAlerts(CD)).toBe(false);
+    clock.t += 1;
+    expect(store.remindAlerts(CD)).toBe(true);
+    clock.t += CD;
+    expect(store.remindAlerts(CD)).toBe(false);
+
+    // Still Auto mode's: queued behind other evaluations, never reminded.
+    store.stampAuto(scopeOf("app"));
+    read("SELECT 2");
+    clock.t += 30_000;
+    store.stampAuto(scopeOf("app"));
+    expect(store.remindAlerts(CD)).toBe(false);
+  });
+
+  // Every Auto mode run taken by long queries: a read still owed at half its life rings anyway,
+  // once, and that first alert stands for its reminder.
+  it("rings at half life for a read Auto mode still has, then never reminds it", () => {
+    const { store, clock, read } = onAuto();
+    read();
+    clock.t += 29_999;
+    store.stampAuto(scopeOf("app"));
+    expect(store.releaseAlerts(CD)).toBeNull();
+    clock.t += 1;
+    expect(store.releaseAlerts(CD)).toBe("s1");
+    clock.t += CD;
+    expect(store.remindAlerts(CD)).toBe(false);
+  });
+
+  it("never lets a reminder swallow the alert of a request arriving right after it", () => {
+    const { store, clock } = onAuto();
+    store.stampAuto(null);
+    store.submitNew({ sessionId: "s1", sql: "SELECT 1" });
+    clock.t += 30_000;
+    expect(store.remindAlerts(CD)).toBe(true);
+    clock.t += 3_000;
+    expect(store.claimAlert(CD)).toBe(true);
+    // Next to a sound that just rang, a reminder stays quiet.
+    store.submitNew({ sessionId: "s1", sql: "SELECT 2" });
+    clock.t += 30_000;
+    expect(store.claimAlert(CD)).toBe(true);
+    expect(store.remindAlerts(CD)).toBe(false);
+  });
+
+  it("fails at startup when a column cannot be added, instead of running without it", () => {
+    const ctx = createContext();
+    try {
+      ctx.db.exec("CREATE VIEW alerts AS SELECT 1 AS id, 0 AS last_alert_at");
+      expect(() => migrate(ctx.db)).toThrow(/view/i);
+    } finally {
+      ctx.db.close();
+    }
+  });
+
+  it("lets only one of two processes ring for the same request", () => {
+    const path = join(tmpdir(), `gk-owed-${Date.now()}-${Math.random()}.db`);
+    const a = new RequestStore({ path });
+    const b = new RequestStore({ path });
+    try {
+      a.stampAuto(null);
+      b.stampAuto(scopeOf("app"));
+      const { request, deferred } = a.submitNew({
+        sessionId: "s1",
+        sql: "SELECT 1",
+        autoEligible: true,
+      });
+      expect(deferred).toBe(true);
+      expect(b.handOffAlerts([request.id], CD)).toBe("s1");
+      b.stampAuto(null);
+      expect(a.releaseAlerts(CD)).toBeNull();
+    } finally {
+      a.close();
+      b.close();
+      rmSync(path, { force: true });
+      rmSync(`${path}-wal`, { force: true });
+      rmSync(`${path}-shm`, { force: true });
+    }
+  });
+
+  it("reads a request an older server inserted as alerted, and reminds it", () => {
+    const ctx = createContext({ now: () => 6_000 });
+    try {
+      ctx.db.exec(`
+        CREATE TABLE requests (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL,
+          session_id TEXT NOT NULL, sql TEXT NOT NULL, intent TEXT, idempotency_key TEXT,
+          state TEXT NOT NULL, lease_id TEXT, lease_expires_at INTEGER, plugin_id TEXT,
+          decided_at INTEGER, result_json TEXT, policy_json TEXT, expires_at INTEGER NOT NULL,
+          connection TEXT);
+        CREATE TABLE alerts (id INTEGER PRIMARY KEY CHECK (id = 1),
+          last_alert_at INTEGER NOT NULL DEFAULT 0);
+        INSERT INTO requests (id, created_at, session_id, sql, state, expires_at)
+          VALUES ('old', 1000, 's1', 'SELECT 1', 'pending', 11000);
+      `);
+      migrate(ctx.db);
+      expect(releaseAlerts(ctx, CD)).toBeNull();
+      expect(remindAlerts(ctx, CD)).toBe(true);
+    } finally {
+      ctx.db.close();
+    }
   });
 });
 
