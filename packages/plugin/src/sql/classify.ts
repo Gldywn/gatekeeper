@@ -61,6 +61,13 @@ const MODIFY_KEYWORDS =
 const LEADING_COMMENTS =
   /^(?:\s+|--(?=[ \t\r\n]|$)[^\r\n]*(?:\r?\n|$)|\/\*(?!M?!)(?:(?!\/\*)[\s\S])*?\*\/)*/;
 
+// Stopgap until these engines are read by their own grammar: node-sql-parser ends a -- or #
+// comment at a lone CR where MySQL and SQLite run on to the LF, and takes MySQL's --1 for a
+// comment where MySQL reads minus minus one. Its tree is then not the statement that runs.
+const LONE_CR = /\r(?!\n)/;
+// `--` then any character above space: MySQL wants whitespace or a control character there.
+const MYSQL_DASHES = /--(?=[!-\u{10FFFF}])/u;
+
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
 }
@@ -123,6 +130,11 @@ export function stripExplain(sql: string): { inner: string; analyze: boolean } |
 // The plugin is the only component that runs SQL, so the risk gate lives here: a
 // dialect-aware parse, escalated on any embedded modify node; unparseable is blocked.
 export function classifyQuery(sql: string, dialect = "postgresql"): RiskVerdict {
+  // Before the EXPLAIN peel, so a plain EXPLAIN cannot turn this verdict back into a read.
+  const mysqlFamily = dialect === "mysql" || dialect === "mariadb";
+  if (LONE_CR.test(sql) || (mysqlFamily && MYSQL_DASHES.test(sql))) {
+    return { class: "destructive", parseOk: false, blocked: fallback(sql).blocked };
+  }
   const explain = stripExplain(sql);
   if (explain && explain.inner.length > 0) {
     // Nested EXPLAIN is invalid in every supported dialect; fail it closed rather than let

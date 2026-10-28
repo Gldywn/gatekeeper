@@ -299,6 +299,35 @@ describe("classifyQuery", () => {
       expect(classifyQuery(sql, dialect).class, sql).toBe("destructive");
     }
   });
+
+  // SECURITY: node-sql-parser ends a -- comment at a lone CR, MySQL and SQLite at the LF: it
+  // reads a string where the engine runs DROP TABLE. It also reads MySQL's --1 as a comment.
+  it("never trusts a parse where a lone CR or MySQL's --x moves a comment's end", () => {
+    const unread = { class: "destructive", parseOk: false, blocked: false };
+    for (const [sql, dialect] of [
+      ["-- x\rSELECT 'a\nDROP TABLE t -- '", "mysql"],
+      ["-- x\rSELECT 'a\nDROP TABLE t -- '", "mariadb"],
+      ["-- x\rSELECT 'a\nDROP TABLE t -- '", "sqlite"],
+      ["-- x\rSELECT 'a\nDROP TABLE t -- '", "redshift"],
+      ["# x\rSELECT 'a\nDROP TABLE t -- '", "mysql"],
+      ["SELECT 1 -- x\r, 'a\nINTO OUTFILE '/tmp/x' -- '", "mysql"],
+      ["EXPLAIN -- x\rSELECT 'a\nDROP TABLE t -- '", "sqlite"],
+      ["SELECT 1--1 INTO OUTFILE '/tmp/x'", "mysql"],
+      ["SELECT 1--1 INTO OUTFILE '/tmp/x'", "mariadb"],
+      ["SELECT 1--\u00a0INTO OUTFILE '/tmp/x'", "mysql"],
+    ] as const) {
+      expect(classifyQuery(sql, dialect), sql).toEqual(unread);
+    }
+    for (const [sql, dialect] of [
+      ["-- x\rSELECT 'a\n; DROP TABLE t -- '", "sqlite"],
+      ["SELECT 1--1; DROP TABLE t", "mysql"],
+    ] as const) {
+      expect(classifyQuery(sql, dialect), sql).toEqual({ ...unread, blocked: true });
+    }
+    // A CRLF ends the comment in every engine, and --x is a comment outside MySQL.
+    expect(classifyQuery("-- x\r\nSELECT 'a\nDROP TABLE t -- '", "sqlite").class).toBe("read");
+    expect(classifyQuery("SELECT 1 --x", "sqlite").class).toBe("read");
+  });
 });
 
 describe("rank", () => {

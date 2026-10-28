@@ -74,6 +74,15 @@ comment. Removing comments any further let a `--` or `/*` inside a string hide a
 statement. The server preflight applies the same rule to every statement: past the leading
 comments it can delimit, a `;` inside a string or a comment is refused too.
 
+**Where the parser and the engine end a comment differently.** `node-sql-parser` ends a
+`--` or `#` comment at a lone carriage return, where MySQL and SQLite run on to the line
+feed, and reads MySQL's `--1` as a comment where MySQL reads minus minus one. Its tree is
+then not the statement the engine runs. A carriage return not followed by a line feed, or on
+MySQL and MariaDB a `--` followed by any character above U+0020, therefore makes the
+statement unread and destructive wherever it appears, strings and comments included (on
+MySQL, `SELECT '--'` needs Destructive mode). The text check still decides whether it is
+blocked. This is a stopgap until these engines are read by their own grammar.
+
 **MySQL executable comments.** MySQL and MariaDB run the body of a `/*! ... */` comment,
 and MariaDB also runs `/*M! ... */`, unlike an ordinary comment. Both classifiers keep that
 body when scanning, and the plugin never lets a modifying keyword hidden inside such a
