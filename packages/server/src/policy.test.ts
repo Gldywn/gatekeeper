@@ -46,12 +46,41 @@ describe("classifyRisk", () => {
   });
 
   it("refuses only empty and multi-statement input", () => {
-    for (const sql of ["", "   ", "SELECT 1; DROP TABLE t", "SELECT 1; SELECT 2"]) {
+    for (const sql of ["", "   ", ";", "SELECT 1; DROP TABLE t", "SELECT 1; SELECT 2"]) {
       expect(classifyRisk(sql).ok, sql).toBe(false);
     }
   });
 
   it("fails closed on a semicolon inside a string literal (known limitation)", () => {
     expect(classifyRisk("SELECT 'a;b'").ok).toBe(false);
+  });
+
+  // Strings are not delimited here, so a semicolon inside a comment fails closed too: removing
+  // comments let a '--' or '/*' inside a string hide a second statement.
+  it("fails closed on a semicolon anywhere but at the end, even inside a comment", () => {
+    for (const sql of [
+      "SELECT '--'; FLUSH TABLES",
+      "SELECT '/*'; DROP TABLE t; SELECT '*/'",
+      "SELECT 1 -- x\r; DROP TABLE t",
+      "SELECT 1--1; DROP TABLE t",
+      "SELECT 1 -- a; b",
+      "SELECT 1; -- end",
+    ]) {
+      expect(classifyRisk(sql).ok, sql).toBe(false);
+    }
+    for (const sql of ["SELECT 1;", "/* ; UPDATE */ -- note;\nSELECT 1"]) {
+      expect(classifyRisk(sql), sql).toEqual({ class: "read", ok: true });
+    }
+  });
+
+  it("stamps what a string-opened or nested comment hid as destructive", () => {
+    for (const sql of [
+      "SELECT '/*' FROM t INTO OUTFILE '/tmp/x' -- */",
+      "/* /* */ SELECT 1 */ CHECKPOINT",
+      "-- x\rSELECT 1\nREINDEX",
+      "WITH x AS (DELETE/**/FROM t RETURNING *) SELECT * FROM x",
+    ]) {
+      expect(classifyRisk(sql), sql).toEqual({ class: "destructive", ok: true });
+    }
   });
 });

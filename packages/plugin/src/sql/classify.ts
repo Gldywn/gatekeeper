@@ -56,6 +56,11 @@ const LOCKING_READ =
 const MODIFY_KEYWORDS =
   /\b(insert|update|delete|drop|truncate|alter|create|replace|merge|grant|revoke|call|vacuum|pragma|attach|copy|into|lock)\b/i;
 
+// The comments every engine closes at the same place: `--` plus whitespace, up to LF, CRLF or
+// the end (SQLite runs past a lone CR), and a non-executable /* */ with no nested opener.
+const LEADING_COMMENTS =
+  /^(?:\s+|--(?=[ \t\r\n]|$)[^\r\n]*(?:\r?\n|$)|\/\*(?!M?!)(?:(?!\/\*)[\s\S])*?\*\/)*/;
+
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
 }
@@ -166,33 +171,34 @@ export function classifyQuery(sql: string, dialect = "postgresql"): RiskVerdict 
   return { class: cls, parseOk: true, blocked: false };
 }
 
-// True when the SQL carries a MySQL executable comment whose body (kept, unlike ordinary
-// comments) contains a data-modifying keyword.
+// True when the SQL carries a MySQL or MariaDB executable comment (/*! or /*M!) and a
+// data-modifying keyword. Tested as written: stripping comments without seeing strings let
+// a '/*' inside a string swallow the executable body.
 function executableCommentModifies(sql: string): boolean {
-  if (!/\/\*!/.test(sql)) {
-    return false;
-  }
-  const bare = sql.replace(/\/\*(?!!)[\s\S]*?\*\//g, " ").replace(/--[^\n]*/g, " ");
-  return MODIFY_KEYWORDS.test(bare);
+  return /\/\*M?!/.test(sql) && MODIFY_KEYWORDS.test(sql);
+}
+
+// Blanking comments can only add an escalation match (FOR/**/SHARE), never clear one.
+function matches(re: RegExp, sql: string): boolean {
+  return re.test(sql) || re.test(sql.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/--[^\r\n]*/g, " "));
 }
 
 // Parser gaps fall back to text: reject empty/multi, a leading SELECT/WITH with no
 // modifying keyword reads, everything else is destructive (fail safe).
 function fallback(sql: string): RiskVerdict {
-  const stripped = sql
-    // Keep MySQL executable comments (/*! ... */): their body runs, so stripping it would
-    // let a hidden write pass as a read; MODIFY_KEYWORDS then catches it below.
-    .replace(/\/\*(?!!)[\s\S]*?\*\//g, " ")
-    .replace(/--[^\n]*/g, " ")
-    .trim();
-  const single = stripped.replace(/;\s*$/, "");
+  // No parser found the strings, so nothing past the leading comments is removed: a '--'
+  // or '/*' inside a string would otherwise swallow the SQL after it.
+  const single = sql
+    .slice(LEADING_COMMENTS.exec(sql)?.[0].length ?? 0)
+    .trim()
+    .replace(/;\s*$/, "");
   if (single.length === 0 || single.includes(";")) {
     return { class: "destructive", parseOk: false, blocked: true };
   }
-  if (/^(select|with)\b/i.test(single) && !MODIFY_KEYWORDS.test(single)) {
+  if (/^(select|with)\b/i.test(single) && !matches(MODIFY_KEYWORDS, single)) {
     // A locking read (FOR SHARE / FOR KEY SHARE fail to parse and land here) takes
     // row locks, so it carries write intent even though it changes no data.
-    if (LOCKING_READ.test(single)) {
+    if (matches(LOCKING_READ, single)) {
       return { class: "write", parseOk: false, blocked: false };
     }
     return { class: "read", parseOk: false, blocked: false };

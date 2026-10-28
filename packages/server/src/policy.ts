@@ -34,20 +34,29 @@ const EMBED_DESTRUCTIVE =
 // advisory stamp (a string-literal "into" is harmless here, the plugin is precise).
 const EMBED_INTO = /\binto\b/i;
 
+// Same leading-comment rule as the plugin's text check (packages/plugin/src/sql/classify.ts):
+// only the comments every engine closes at the same place.
+const LEADING_COMMENTS =
+  /^(?:\s+|--(?=[ \t\r\n]|$)[^\r\n]*(?:\r?\n|$)|\/\*(?!M?!)(?:(?!\/\*)[\s\S])*?\*\/)*/;
+
+// Blanking comments can only add an escalation match (DELETE/**/FROM), never clear one.
+function matches(re: RegExp, sql: string): boolean {
+  return re.test(sql) || re.test(sql.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/--[^\r\n]*/g, " "));
+}
+
 // Advisory, regex-only risk classifier mirroring the plugin's classes. The plugin
 // (with a real parser) stays authoritative; this only stamps the audit and blocks the
 // two cases no mode may approve: empty and multi-statement.
 export function classifyRisk(sql: string): RiskAssessment {
-  const stripped = sql
-    // Strip ordinary block comments, but keep MySQL executable comments (/*! ... */):
-    // MySQL runs their body, so stripping it would hide a write from this stamp.
-    .replace(/\/\*(?!!)[\s\S]*?\*\//g, " ")
-    .replace(/--[^\n]*/g, " ")
-    .trim();
-  if (stripped.length === 0) {
+  // Strings are not delimited here, so nothing past the leading comments is removed: a
+  // '--' or '/*' inside a string would otherwise hide a second statement.
+  const single = sql
+    .slice(LEADING_COMMENTS.exec(sql)?.[0].length ?? 0)
+    .trim()
+    .replace(/;\s*$/, "");
+  if (single.length === 0) {
     return { class: "destructive", ok: false, reason: "Empty statement" };
   }
-  const single = stripped.replace(/;\s*$/, "");
   if (single.includes(";")) {
     return { class: "destructive", ok: false, reason: "Only a single statement is allowed" };
   }
@@ -57,13 +66,13 @@ export function classifyRisk(sql: string): RiskAssessment {
 function riskClass(single: string): RiskClass {
   const lead = (single.match(/^[a-z]+/i)?.[0] ?? "").toLowerCase();
   if (WRITE_LEAD.has(lead)) {
-    return EMBED_DESTRUCTIVE.test(single) ? "destructive" : "write";
+    return matches(EMBED_DESTRUCTIVE, single) ? "destructive" : "write";
   }
   if (READ_LEAD.has(lead)) {
-    if (EMBED_DESTRUCTIVE.test(single) || EMBED_INTO.test(single)) {
+    if (matches(EMBED_DESTRUCTIVE, single) || matches(EMBED_INTO, single)) {
       return "destructive";
     }
-    if (EMBED_WRITE.test(single)) {
+    if (matches(EMBED_WRITE, single)) {
       return "write";
     }
     return "read";

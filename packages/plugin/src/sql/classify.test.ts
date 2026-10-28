@@ -212,6 +212,93 @@ describe("classifyQuery", () => {
       expect(classifyQuery(sql, pg).blocked, sql).toBe(true);
     }
   });
+
+  const approvableRead = (sql: string, dialect: string) => {
+    const v = classifyQuery(sql, dialect);
+    return v.class === "read" && !v.blocked;
+  };
+
+  // SECURITY: the text check cannot see strings, so a '--' or '/*' inside one used to delete
+  // the second statement and return a read. node-sql-parser rejects every input below.
+  it("never lets a string hide a second statement from the text check", () => {
+    for (const [sql, dialect] of [
+      ["SELECT '--'; FLUSH TABLES", "mysql"],
+      ["SELECT '--'; FLUSH TABLES", "mariadb"],
+      ["SELECT '/*'; FLUSH TABLES; SELECT '*/'", "mysql"],
+      ["SELECT '--'; DROP DATABASE x", pg],
+      ["SELECT '--'; COPY t TO PROGRAM 'id'", pg],
+      ["SELECT '/*'; DROP DATABASE x; SELECT '*/'", pg],
+    ] as const) {
+      expect(classifyQuery(sql, dialect).blocked, sql).toBe(true);
+    }
+  });
+
+  it("never reads an INTO OUTFILE or a locking clause a string hid from the text check", () => {
+    for (const [sql, dialect] of [
+      ["SELECT '/*', a FROM t PARTITION (p0) INTO OUTFILE '/tmp/x' -- */", "mysql"],
+      ["SELECT '/*' FROM t FOR NO KEY UPDATE -- */", pg],
+      ["SELECT '--' FROM t\nFOR SHARE", pg],
+    ] as const) {
+      expect(approvableRead(sql, dialect), sql).toBe(false);
+    }
+  });
+
+  // Only comments every engine closes at the same place are skipped to find the first keyword;
+  // PostgreSQL nests /* */, so a first-close strip would expose the SELECT inside one.
+  it("skips only the leading comments every engine delimits alike", () => {
+    for (const [sql, dialect] of [
+      ["/* /* */ SELECT 1 */ CHECKPOINT", pg],
+      ["/* ok */ /*! SET @a = 1 */ SELECT a FROM t PARTITION (p0)", "mysql"],
+    ] as const) {
+      expect(approvableRead(sql, dialect), sql).toBe(false);
+    }
+    for (const sql of [
+      "/* ; UPDATE */ -- note; see\nSELECT a FROM t PARTITION (p0)",
+      "-- note\r\nSELECT a FROM t PARTITION (p0)",
+    ]) {
+      const v = classifyQuery(sql, "mysql");
+      expect(v, sql).toEqual({ class: "read", parseOk: false, blocked: false });
+    }
+  });
+
+  it("keeps a locking clause split by comments a locking read", () => {
+    for (const sql of [
+      "SELECT * FROM t FOR/**/SHARE",
+      "SELECT * FROM t FOR /* a */ /* b */ KEY -- c\n SHARE",
+    ]) {
+      expect(approvableRead(sql, pg), sql).toBe(false);
+    }
+  });
+
+  // Accepted cost, on statements no parser read: a ';' or a keyword is taken as written,
+  // even inside a comment or a string.
+  it("over-blocks unparsed text rather than guess where its strings and comments end", () => {
+    const unparsed = "SELECT a FROM t PARTITION (p0)";
+    for (const [sql, expected] of [
+      [`${unparsed} -- see a; b`, { class: "destructive", parseOk: false, blocked: true }],
+      [`${unparsed}; -- end`, { class: "destructive", parseOk: false, blocked: true }],
+      [`${unparsed};;`, { class: "destructive", parseOk: false, blocked: true }],
+      [`${unparsed} -- update later`, { class: "destructive", parseOk: false, blocked: false }],
+      [
+        "SELECT '-- update later' FROM t PARTITION (p0)",
+        { class: "destructive", parseOk: false, blocked: false },
+      ],
+      [`${unparsed} -- end`, { class: "read", parseOk: false, blocked: false }],
+      [`${unparsed};`, { class: "read", parseOk: false, blocked: false }],
+    ] as const) {
+      expect(classifyQuery(sql, "mysql"), sql).toEqual(expected);
+    }
+  });
+
+  it("never lets a string swallow a MySQL or MariaDB executable comment", () => {
+    for (const [sql, dialect] of [
+      ["SELECT '/*', 1 /*! INTO OUTFILE '/tmp/x' */", "mysql"],
+      ["SELECT '--' /*!40000 INTO OUTFILE '/tmp/x' */", "mysql"],
+      ["SELECT * FROM t /*M! INTO OUTFILE '/tmp/x' */", "mariadb"],
+    ] as const) {
+      expect(classifyQuery(sql, dialect).class, sql).toBe("destructive");
+    }
+  });
 });
 
 describe("rank", () => {

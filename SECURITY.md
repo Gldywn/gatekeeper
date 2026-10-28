@@ -65,10 +65,20 @@ Two classifiers agree on the read / write / destructive classes:
 - The **server** classifier is advisory. It stamps the audit trail and refuses the two
   cases no mode may approve: empty and multi-statement input.
 
+**Text the classifiers cannot delimit.** When no parser reads a statement, the plugin falls
+back to a text check that does not know where strings end. It removes only the comments that
+open the statement, and only those every engine closes at the same place, then takes the rest
+as written, strings and comments included: a `;` anywhere but at the end blocks the
+statement, and a modifying or locking keyword raises its class even inside a string or a
+comment. Removing comments any further let a `--` or `/*` inside a string hide a second
+statement. The server preflight applies the same rule to every statement: past the leading
+comments it can delimit, a `;` inside a string or a comment is refused too.
+
 **MySQL executable comments.** MySQL and MariaDB run the body of a `/*! ... */` comment,
-unlike an ordinary comment. Both classifiers keep that body when scanning, and the plugin
-never lets a modifying keyword hidden inside such a comment ride in under a read verdict;
-it escalates to destructive so a human must arm and confirm it explicitly.
+and MariaDB also runs `/*M! ... */`, unlike an ordinary comment. Both classifiers keep that
+body when scanning, and the plugin never lets a modifying keyword hidden inside such a
+comment ride in under a read verdict; it escalates to destructive so a human must arm and
+confirm it explicitly.
 
 **Trojan-source text.** Unicode bidirectional overrides and other invisible formatting
 characters can make submitted SQL render in an order the reviewer never approved. The
