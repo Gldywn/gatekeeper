@@ -914,6 +914,17 @@ describe("alerts owed to Auto mode", () => {
     return { ...made, read };
   }
 
+  it("defers a write too while the load check may still reject it", () => {
+    const { store } = onAuto();
+    const write = (sql: string) => store.submitNew({ sessionId: "s1", sql }).deferred;
+    expect(write("DELETE FROM a")).toBe(false);
+    store.stampAuto(scopeOf("app"), "all");
+    expect(write("DELETE FROM b")).toBe(true);
+    // Released like any owed request once the plugin stops deciding.
+    store.stampAuto(null);
+    expect(store.releaseAlerts(10_000)).toBe("s1");
+  });
+
   it("defers a read only while Auto mode reports in for its connection", () => {
     const { store, clock, read } = onAuto();
     expect(read().deferred).toBe(true);

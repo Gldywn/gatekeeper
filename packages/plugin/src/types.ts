@@ -35,6 +35,8 @@ export interface Card extends Proposal {
   // Reported to the broker as waiting for a human under its current lease, so a deferred
   // alert rang; a new lease reports it again.
   handedOff?: boolean;
+  // A load check settled for this card, so auto-deny has had its say on it.
+  loadChecked?: boolean;
   // Host-side only: which tables/PII the query touches, for the human's eyes.
   // Never posted to the broker, so the agent never learns the schema.
   schema?: SchemaContext | null;

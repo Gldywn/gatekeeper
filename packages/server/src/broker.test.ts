@@ -360,6 +360,16 @@ describe("the poll's Auto mode report", () => {
     store.setConnection(conn);
   });
 
+  it("lets any query wait while heavy ones are auto-denied, and only reads for Auto mode", async () => {
+    const write = () =>
+      store.submitNew({ sessionId: "s1", sql: "DELETE FROM t", autoEligible: false }).deferred;
+    await poll("?heavy=1");
+    expect(write()).toBe(true);
+    await poll("?auto=1");
+    expect(write()).toBe(false);
+    expect(read()).toBe(true);
+  });
+
   it("lets a read submitted while Auto mode is on wait for it, until it is switched off", async () => {
     expect(read()).toBe(false);
     expect((await poll("?auto=1")).status).toBe(200);

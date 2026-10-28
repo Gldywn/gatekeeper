@@ -4,7 +4,7 @@ import type { StoreContext } from "./db.js";
 // Nobody decided yet and the proposal is still alive. A leased row can outlive its TTL, since
 // a sweep only expires pending rows, so the deadline is checked here too.
 const WAITING = "state IN ('pending', 'leased') AND expires_at > @now";
-// Auto mode covers a request while its plugin reports in for the request's connection, or for
+// The plugin covers a request while it reports in for the request's connection, or for
 // a request with none, which that plugin can claim too (see claimNext).
 const COVERED = `EXISTS (SELECT 1 FROM alerts WHERE id = 1 AND auto_seen_at > @now - ${AUTO_LIVE_MS}
   AND (requests.connection IS NULL OR requests.connection = auto_scope))`;
@@ -72,29 +72,38 @@ function alerted(ctx: StoreContext, where: string, params: Record<string, unknow
   );
 }
 
-/** Whether a read submitted now for this connection can wait for Auto mode to decide. */
-export function autoCovers(ctx: StoreContext, connection: string | null): boolean {
-  const row = ctx.db.prepare("SELECT auto_seen_at, auto_scope FROM alerts WHERE id = 1").get() as
-    | { auto_seen_at: number; auto_scope: string | null }
-    | undefined;
+// What the plugin may still decide on its own, so a human is not needed yet: the reads, while
+// Auto mode is on, or every query, while its load check rejects heavy ones on arrival.
+export type AutoCovers = "read" | "all";
+
+/** Whether a request submitted now for this connection can wait for the plugin to decide. */
+export function autoCovers(ctx: StoreContext, connection: string | null, read: boolean): boolean {
+  const row = ctx.db
+    .prepare("SELECT auto_seen_at, auto_scope, auto_covers FROM alerts WHERE id = 1")
+    .get() as { auto_seen_at: number; auto_scope: string | null; auto_covers: string } | undefined;
   return (
     row !== undefined &&
     row.auto_seen_at > ctx.now() - AUTO_LIVE_MS &&
-    (connection === null || connection === row.auto_scope)
+    (connection === null || connection === row.auto_scope) &&
+    (row.auto_covers === "all" || (read && row.auto_covers === "read"))
   );
 }
 
-/** Auto mode on for this connection scope, or off (`null`). */
-export function stampAuto(ctx: StoreContext, scope: string | null): void {
+/** The plugin deciding `covers` for this connection scope, or nothing (`null`). */
+export function stampAuto(
+  ctx: StoreContext,
+  scope: string | null,
+  covers: AutoCovers = "read",
+): void {
   ctx.db
     .prepare(
-      `INSERT INTO alerts (id, auto_seen_at, auto_scope) VALUES (1, @at, @scope)
-         ON CONFLICT (id) DO UPDATE SET auto_seen_at = @at, auto_scope = @scope`,
+      `INSERT INTO alerts (id, auto_seen_at, auto_scope, auto_covers) VALUES (1, @at, @scope, @covers)
+         ON CONFLICT (id) DO UPDATE SET auto_seen_at = @at, auto_scope = @scope, auto_covers = @covers`,
     )
-    .run({ at: scope === null ? 0 : ctx.now(), scope });
+    .run({ at: scope === null ? 0 : ctx.now(), scope, covers });
 }
 
-/** Requests the plugin leaves to a human, out of Auto mode's hands. */
+/** Requests the plugin leaves to a human, once nothing else will decide them. */
 export function handOffAlerts(ctx: StoreContext, ids: string[], cooldownMs: number): string | null {
   if (!ids.length) return null;
   const params = Object.fromEntries(ids.map((id, i) => [`id${i}`, id]));
@@ -103,9 +112,9 @@ export function handOffAlerts(ctx: StoreContext, ids: string[], cooldownMs: numb
 }
 
 /**
- * Requests Auto mode no longer covers (switched off, its plugin gone quiet, or elsewhere), and
- * any it still has at half their life: with every run taken by long queries, it may never get
- * to them.
+ * Requests the plugin no longer covers (deciding nothing, gone quiet, or elsewhere), and any
+ * still owed at half their life: with every Auto mode run taken by long queries, it may never
+ * get to them.
  */
 export function releaseAlerts(ctx: StoreContext, cooldownMs: number): string | null {
   return alerted(

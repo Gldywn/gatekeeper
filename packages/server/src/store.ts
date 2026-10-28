@@ -1,6 +1,7 @@
 import type { ConnectionSnapshot } from "./connection.js";
 import type { SchemaSnapshot } from "./schema.js";
 import {
+  type AutoCovers,
   claimAlert,
   handOffAlerts,
   releaseAlerts,
@@ -109,12 +110,12 @@ export class RequestStore {
     return claimAlert(this.ctx, cooldownMs);
   }
 
-  /** Record that Auto mode is on for this connection scope, or off (`null`). */
-  stampAuto(scope: string | null): void {
-    stampAuto(this.ctx, scope);
+  /** Record what the plugin decides for this connection scope, or that it decides nothing. */
+  stampAuto(scope: string | null, covers: AutoCovers = "read"): void {
+    stampAuto(this.ctx, scope, covers);
   }
 
-  /** Hand these requests from Auto mode to a human; the session to ring for, if this rings. */
+  /** Hand these requests from the plugin to a human; the session to ring for, if this rings. */
   handOffAlerts(ids: string[], cooldownMs: number): string | null {
     return handOffAlerts(this.ctx, ids, cooldownMs);
   }

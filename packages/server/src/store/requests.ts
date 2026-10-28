@@ -24,7 +24,8 @@ export function submit(
     intent?: string;
     idempotencyKey?: string;
     policy?: unknown;
-    // The advisory class is a read: the one kind Auto mode can approve.
+    // The advisory class is a read: the one kind Auto mode can approve. Any query can still
+    // wait for the plugin while its load check may reject it on arrival.
     autoEligible?: boolean;
   },
 ): SubmitOutcome {
@@ -67,7 +68,7 @@ export function submit(
     const now = ctx.now();
     const conn = getConnection(ctx);
     const connection = conn ? connectionScopeKey(conn) : null;
-    const deferred = input.autoEligible === true && autoCovers(ctx, connection);
+    const deferred = autoCovers(ctx, connection, input.autoEligible === true);
     const row: RawRow = {
       id: token("req"),
       created_at: now,

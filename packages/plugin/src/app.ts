@@ -2453,9 +2453,9 @@ export class Gatekeeper {
     );
   }
 
-  // Ready, still within the deadlines approve() enforces, and Auto mode is neither evaluating
-  // it nor going to: only a human can decide it. A timed-out evaluation hands its card back at
-  // once, before its awaited calls ever settle.
+  // Ready, still within the deadlines approve() enforces, its load check done when it may still
+  // auto-deny it, and Auto mode neither evaluating it nor going to: only a human can decide it.
+  // A timed-out evaluation hands its card back at once, before its awaited calls ever settle.
   private waitsForHuman(card: Card): boolean {
     const evaluating = card === this.autoCard && !this.autoAbort?.signal.aborted;
     const now = Date.now();
@@ -2464,7 +2464,17 @@ export class Gatekeeper {
       !card.authorityLost &&
       card.expiresAt > now &&
       card.leaseExpiresAt > now &&
+      !(this.autoDenying() && !card.loadChecked) &&
       !(this.autoEnabled && (evaluating || this.autoWillTake(card)))
+    );
+  }
+
+  // Auto-deny heavy queries, read from the current connection's preferences only: right after a
+  // switch get() can still hold the previous connection's.
+  private autoDenying(): boolean {
+    return (
+      this.settingsStore.get().autoDenyHeavy &&
+      this.settingsStore.loadedForConnection(this.connectionName)
     );
   }
 
@@ -2756,11 +2766,11 @@ export class Gatekeeper {
       .slice(0, ATTENTION_MAX);
     const leases = attention.map((c) => c.leaseId);
     try {
-      const res = await this.broker.pending(
-        this.connScopeKey(),
-        this.autoEnabled,
-        attention.map((c) => c.id),
-      );
+      const res = await this.broker.pending(this.connScopeKey(), {
+        auto: this.autoEnabled,
+        heavy: this.autoDenying(),
+        attention: attention.map((c) => c.id),
+      });
       if (connection !== this.connGeneration || active !== this.activeGen) return;
       if (res.status === 401) {
         this.polling = false;
@@ -2993,6 +3003,8 @@ export class Gatekeeper {
       )
         return;
       card.loadResult = result;
+      // Set in the same tick as auto-deny reserves a heavy card, so no poll sees it in between.
+      card.loadChecked = true;
       this.renderCardLoad(card);
       if (arrival) void this.autoDeny(card, load, bound);
     });
@@ -3049,9 +3061,7 @@ export class Gatekeeper {
       card.state !== "ready" ||
       card.authorityLost ||
       !same() ||
-      // Right after a switch get() can still hold the previous connection's preferences.
-      !this.settingsStore.loadedForConnection(this.connectionName) ||
-      !this.settingsStore.get().autoDenyHeavy
+      !this.autoDenying()
     )
       return;
     if (this.autoCard === card) this.autoAbort?.abort();

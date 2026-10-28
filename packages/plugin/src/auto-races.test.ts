@@ -1746,15 +1746,17 @@ describe("the poll's report to the broker", () => {
     const { app, card } = harness();
     app.cards = cards.map((c, i) => ({ ...card, id: `req_${i}`, leaseId: `lease_${i}`, ...c }));
     const pending = vi.fn(async (..._args: unknown[]) => answer());
+    const settings = { confirmWrites: true, resultCacheMb: 4, autoDenyHeavy: false };
     Object.assign(app, {
       polling: true,
       pollFailures: 0,
       broker: { ...app.broker, pending },
       setServerHeader: vi.fn(),
       setConnectionState: vi.fn(),
+      settingsStore: { get: () => settings, loadedForConnection: () => true },
     });
-    const sent = (call = 0) => pending.mock.calls[call]?.slice(1);
-    return { app, pending, sent };
+    const sent = (call = 0) => pending.mock.calls[call]?.[1];
+    return { app, pending, sent, settings };
   }
 
   it("names what waits for a human, never what Auto mode is evaluating or will evaluate", async () => {
@@ -1767,9 +1769,9 @@ describe("the poll's report to the broker", () => {
     app.autoCard = app.cards[2];
     app.autoAbort = new AbortController();
     await app.poll();
-    expect(sent()).toEqual([true, ["req_0", "req_3"]]);
+    expect(sent()).toEqual({ auto: true, heavy: false, attention: ["req_0", "req_3"] });
     await app.poll();
-    expect(sent(1)).toEqual([true, []]);
+    expect(sent(1)).toEqual({ auto: true, heavy: false, attention: [] });
   });
 
   it("names a card whose evaluation timed out, before its calls settle", async () => {
@@ -1778,14 +1780,14 @@ describe("the poll's report to the broker", () => {
     app.autoAbort = new AbortController();
     app.autoAbort.abort();
     await app.poll();
-    expect(sent()).toEqual([true, ["req_0"]]);
+    expect(sent()).toEqual({ auto: true, heavy: false, attention: ["req_0"] });
   });
 
   it("still names waiting cards with Auto mode off, the moment it was switched off", async () => {
     const { app, sent } = polling([{}, {}]);
     app.autoEnabled = false;
     await app.poll();
-    expect(sent()).toEqual([false, ["req_0", "req_1"]]);
+    expect(sent()).toEqual({ auto: false, heavy: false, attention: ["req_0", "req_1"] });
   });
 
   it("names a card again unless the broker answered while it still waited under that lease", async () => {
@@ -1802,7 +1804,7 @@ describe("the poll's report to the broker", () => {
     await app.poll();
     app.cards[1].state = "ready";
     await app.poll();
-    expect(sent(1)).toEqual([true, ["req_0", "req_1"]]);
+    expect(sent(1)).toEqual({ auto: true, heavy: false, attention: ["req_0", "req_1"] });
   });
 
   it("names a card again after a failed answer", async () => {
@@ -1810,15 +1812,53 @@ describe("the poll's report to the broker", () => {
     pending.mockResolvedValueOnce(answer(500));
     await app.poll();
     await app.poll();
-    expect(sent(1)).toEqual([true, ["req_0"]]);
+    expect(sent(1)).toEqual({ auto: true, heavy: false, attention: ["req_0"] });
   });
 
   it("names at most 64 cards a poll, the rest on the next", async () => {
     const { app, sent } = polling(Array.from({ length: 70 }, () => ({ autoAttempt: 1 })));
     await app.poll();
     await app.poll();
-    expect(sent(0)).toEqual([true, expect.toSatisfy((ids: string[]) => ids.length === 64)]);
-    expect(sent(1)).toEqual([true, expect.toSatisfy((ids: string[]) => ids.length === 6)]);
+    expect(sent(0)).toEqual({
+      auto: true,
+      heavy: false,
+      attention: expect.toSatisfy((ids: string[]) => ids.length === 64),
+    });
+    expect(sent(1)).toEqual({
+      auto: true,
+      heavy: false,
+      attention: expect.toSatisfy((ids: string[]) => ids.length === 6),
+    });
+  });
+
+  // Auto-deny may still reject a card nobody needs to see: it is named once its check settled.
+  it("names a card only after its load check, while heavy queries are auto-denied", async () => {
+    const { app, sent, settings } = polling([{ sql: "DELETE FROM public.products" }]);
+    app.autoEnabled = false;
+    settings.autoDenyHeavy = true;
+    await app.poll();
+    expect(sent()).toEqual({ auto: false, heavy: true, attention: [] });
+    app.cards[0].loadChecked = true;
+    await app.poll();
+    expect(sent(1)).toEqual({ auto: false, heavy: true, attention: ["req_0"] });
+  });
+
+  it("marks the card checked in the tick auto-deny reserves a heavy one", async () => {
+    const { app } = polling([{ sql: "SELECT count(*) FROM public.big" }]);
+    app.autoEnabled = false;
+    vi.stubGlobal("CSS", { escape: (s: string) => s });
+    Object.assign(app, { renderCardLoad: vi.fn(), setCardState: vi.fn() });
+    app.settingsStore = {
+      get: () => ({ confirmWrites: true, resultCacheMb: 4, autoDenyHeavy: true }),
+      loadedForConnection: () => true,
+    };
+    const card = app.cards[0];
+    const settled = deferred<undefined>();
+    vi.spyOn(app.annotator, "inspectLoad").mockReturnValue(settled.promise);
+    app.startLoad(card, true);
+    expect(card.loadChecked).toBeUndefined();
+    settled.resolve(undefined);
+    await vi.waitFor(() => expect(card.loadChecked).toBe(true));
   });
 
   it("keeps one call in flight, and a poke during it polls right after", async () => {

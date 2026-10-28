@@ -33,9 +33,10 @@ export const PAIRING_IDLE_MS = 2 * 60_000;
 // One desktop alert per window, claimed atomically in the shared database. A burst
 // of proposals, from one agent or several processes, is one banner, not N.
 export const NOTIFY_COOLDOWN_MS = 10_000;
-// The plugin reports Auto mode on each 1 s poll, and a read submitted while it does stays
-// silent until Auto mode hands it to a human. A report older than this covers nothing: the
-// plugin closed, lost its pairing or stopped polling, and the owed alerts ring.
+// The plugin reports on each 1 s poll what it still decides on its own (Auto mode, auto-deny of
+// heavy queries), and a request submitted meanwhile stays silent until it is left to a human. A
+// report older than this covers nothing: the plugin closed, lost its pairing or stopped
+// polling, and the owed alerts ring.
 export const AUTO_LIVE_MS = 15_000;
 // A steady report is written to the shared database this often; a change is written at once.
 export const AUTO_STAMP_MS = 5_000;

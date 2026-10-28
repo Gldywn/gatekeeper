@@ -30,6 +30,7 @@ import {
 import type { Notifier } from "./notify.js";
 import { pairingPage } from "./pairing-page.js";
 import { ringHandOff } from "./service.js";
+import type { AutoCovers } from "./store/alerts.js";
 import { sensitivityRecord } from "./store/audit.js";
 import { type ActivityCursor, type Outcome, type RequestStore, StoreError } from "./store.js";
 import { SERVER_IDENTITY } from "./version.js";
@@ -72,7 +73,7 @@ interface Broker {
   keyChecker: KeyChecker;
   notifier?: Notifier;
   /** The Auto mode report last written to the shared row; `null` until this broker writes one. */
-  autoStamp: { scope: string | null; at: number } | null;
+  autoStamp: { scope: string | null; covers: AutoCovers; at: number } | null;
   evaluating: boolean;
   evaluations: Map<
     string,
@@ -206,7 +207,13 @@ async function handle(broker: Broker, req: IncomingMessage, res: ServerResponse)
   if (req.method === "GET" && url.pathname === "/pending") {
     const attention = attentionIds(url.searchParams);
     const scope = resolveConnection(store, req);
-    reportAuto(broker, url.searchParams.get("auto") === "1" ? scope : null, attention);
+    const covers: AutoCovers | null =
+      url.searchParams.get("heavy") === "1"
+        ? "all"
+        : url.searchParams.get("auto") === "1"
+          ? "read"
+          : null;
+    reportAuto(broker, covers ? scope : null, covers ?? "read", attention);
     const proposal = store.claimNext(pluginId, LEASE_MS, scope);
     if (!proposal) {
       res.writeHead(204, baseHeaders());
@@ -573,15 +580,26 @@ function guarded(
   }
 }
 
-// The plugin's poll says whether Auto mode is on (`scope`, else off) and which requests it
-// leaves to a human. A change of state reaches the shared row at once, a steady one every
-// AUTO_STAMP_MS, which is what tells a submitting process that Auto mode is still there.
-function reportAuto(broker: Broker, scope: string | null, attention: string[]): void {
+// The plugin's poll says what it still decides on its own (`scope`, else nothing): the reads while
+// Auto mode is on (auto=1), every query while its load check rejects heavy ones (heavy=1), and
+// which requests it leaves to a human. A change reaches the shared row at once, a steady state
+// every AUTO_STAMP_MS, which is what tells a submitting process the plugin is still there.
+function reportAuto(
+  broker: Broker,
+  scope: string | null,
+  covers: AutoCovers,
+  attention: string[],
+): void {
   const now = Date.now();
   const last = broker.autoStamp;
-  if (!last || last.scope !== scope || (scope !== null && now - last.at >= AUTO_STAMP_MS)) {
-    broker.store.stampAuto(scope);
-    broker.autoStamp = { scope, at: now };
+  if (
+    !last ||
+    last.scope !== scope ||
+    last.covers !== covers ||
+    (scope !== null && now - last.at >= AUTO_STAMP_MS)
+  ) {
+    broker.store.stampAuto(scope, covers);
+    broker.autoStamp = { scope, covers, at: now };
   }
   if (broker.notifier) ringHandOff(broker.store, broker.notifier, attention);
 }

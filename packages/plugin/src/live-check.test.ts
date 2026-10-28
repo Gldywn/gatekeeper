@@ -347,6 +347,7 @@ describe("server link", () => {
       Object.assign(app, {
         broker: { pending },
         setServerHeader: vi.fn(),
+        settingsStore: { get: () => ({ autoDenyHeavy: false }), loadedForConnection: () => true },
         connectionState: "connecting",
         brokerAnsweredAt: 0,
         pollFailures: 0,
