@@ -51,10 +51,11 @@ const MODIFY_NODE: Record<string, RiskClass> = {
   unlock: "destructive",
 };
 
+// The left edge is no word boundary: a number ends at a letter (SELECT 1e1INTO OUTFILE ...).
 const LOCKING_READ =
-  /\bfor\s+(update|share|no\s+key\s+update|key\s+share)\b|\block\s+in\s+share\s+mode\b/i;
+  /(?<![A-Za-z_$])(?:for\s+(update|share|no\s+key\s+update|key\s+share)\b|lock\s+in\s+share\s+mode\b)/i;
 const MODIFY_KEYWORDS =
-  /\b(insert|update|delete|drop|truncate|alter|create|replace|merge|grant|revoke|call|vacuum|pragma|attach|copy|into|lock)\b/i;
+  /(?<![A-Za-z_$])(insert|update|delete|drop|truncate|alter|create|replace|merge|grant|revoke|call|vacuum|pragma|attach|copy|into|lock)\b/i;
 
 // The comments every engine closes at the same place: `--` plus whitespace, up to LF, CRLF or
 // the end (SQLite runs past a lone CR), and a non-executable /* */ with no nested opener.
@@ -71,6 +72,9 @@ const MYSQL_DASHES = /--(?=[!-\u{10FFFF}])/u;
 // takes a one-word statement for an alias: SQL Server runs SELECT 1 SHUTDOWN as two. No left
 // edge: the word can be glued to a number (1SHUTDOWN, 0xABSHUTDOWN).
 const TSQL_BACKSLASH = /\\/;
+// And U+0080 to U+00A0 for identifier characters, which T-SQL's rules exclude: it read
+// u<NBSP>DELETE<NBSP>FROM<NBSP>users as one alias.
+const TSQL_C1_NBSP = /[\u0080-\u00a0]/;
 const TSQL_ONE_WORD = /(?:shutdown|reconfigure|checkpoint|commit|rollback|revert|setuser)\b/i;
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -146,7 +150,8 @@ export function classifyQuery(sql: string, dialect = "postgresql"): RiskVerdict 
   if (
     LONE_CR.test(sql) ||
     (mysqlFamily && MYSQL_DASHES.test(sql)) ||
-    (dialect === "transactsql" && (TSQL_BACKSLASH.test(sql) || TSQL_ONE_WORD.test(sql)))
+    (dialect === "transactsql" &&
+      (TSQL_BACKSLASH.test(sql) || TSQL_ONE_WORD.test(sql) || TSQL_C1_NBSP.test(sql)))
   ) {
     return { class: "destructive", parseOk: false, blocked: fallback(sql).blocked };
   }
@@ -213,16 +218,25 @@ function executableCommentModifies(sql: string): boolean {
   return /\/\*M?!/.test(sql) && matches(MODIFY_KEYWORDS, sql);
 }
 
-// A match in any view escalates: markers spaced out (/*!50000INTO), deleting nothing; executable
-// bodies kept as MySQL runs them; every comment dropped, as an engine skips /*M! or a gated
-// version. Comments become spaces (FOR/**/SHARE); one left open ends at the end, so it is linear.
+// Blanks each closed comment `comment` opens. Past the last `*/` none can close, so that tail is
+// left as written: linear on many unclosed `/*`, and a `/*` in a string deletes nothing.
+function blankClosed(sql: string, comment: RegExp): string {
+  const end = sql.lastIndexOf("*/") + 2;
+  return end < 2 ? sql : `${sql.slice(0, end).replace(comment, " ")}${sql.slice(end)}`;
+}
+
+// A match in any view escalates: markers spaced out (/*!50000INTO), deleting nothing; MySQL's
+// reading (/*! bodies run, /*M! is a comment); MariaDB's (both run); every comment dropped, as
+// an engine skips a newer version's body. Comments become spaces, so FOR/**/SHARE meets.
 function matches(re: RegExp, sql: string): boolean {
-  const marked = sql.replace(/\/\*M?!\d*/g, " ");
-  const kept = sql
-    .replace(/\/\*(?!M?!)[\s\S]*?(?:\*\/|$)/g, " ")
-    .replace(/--[^\r\n]*|\/\*M?!\d*|\*\//g, " ");
-  const dropped = sql.replace(/\/\*[\s\S]*?(?:\*\/|$)/g, " ").replace(/--[^\r\n]*/g, " ");
-  return [marked, kept, dropped].some((view) => re.test(view));
+  const spaced = (text: string) => text.replace(/--[^\r\n]*|\/\*M?!\d*|\*\//g, " ");
+  const views = [
+    sql.replace(/\/\*M?!\d*/g, " "),
+    spaced(blankClosed(sql, /\/\*(?!!)[\s\S]*?\*\//g)),
+    spaced(blankClosed(sql, /\/\*(?!M?!)[\s\S]*?\*\//g)),
+    blankClosed(sql, /\/\*[\s\S]*?\*\//g).replace(/--[^\r\n]*/g, " "),
+  ];
+  return views.some((view) => re.test(view));
 }
 
 // Parser gaps fall back to text: reject empty/multi, a leading SELECT/WITH with no

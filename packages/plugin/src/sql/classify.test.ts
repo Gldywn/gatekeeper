@@ -252,6 +252,9 @@ describe("classifyQuery", () => {
   it("never reads an INTO OUTFILE or a locking clause a string hid from the text check", () => {
     for (const [sql, dialect] of [
       ["SELECT '/*', a FROM t PARTITION (p0) INTO OUTFILE '/tmp/x' -- */", "mysql"],
+      // A number ends at a letter, so no word boundary precedes INTO.
+      ["SELECT 1e1INTO OUTFILE '/tmp/x'", "mysql"],
+      ["SELECT .5INTO OUTFILE '/tmp/x'", "mariadb"],
       ["SELECT '/*' FROM t FOR NO KEY UPDATE -- */", pg],
       ["SELECT '--' FROM t\nFOR SHARE", pg],
     ] as const) {
@@ -288,6 +291,13 @@ describe("classifyQuery", () => {
       ["SELECT * FROM t FOR/*M! x */SHARE", "mysql"],
       ["SELECT * FROM t FOR/*!99999 x*/SHARE", "mysql"],
       ["SELECT * FROM t FOR/*!x*/SHARE", pg],
+      ["SELECT * FROM t /*!FOR/*M!x*/SHARE*/", "mysql"],
+      // A '/*' that never closes, in a string or a line comment, must not swallow the rest.
+      ["SELECT '/*' FROM t FOR-- x\nSHARE", pg],
+      ["SELECT '/*' FROM t FOR-- x\nSHARE", "mysql"],
+      ["SELECT * FROM t FOR -- see /* below\nSHARE", pg],
+      // A number ends at a letter, so no word boundary precedes the keyword.
+      ["SELECT * FROM t WHERE a = 1FOR SHARE", pg],
     ] as const) {
       expect(approvableRead(sql, dialect), sql).toBe(false);
     }
@@ -323,6 +333,7 @@ describe("classifyQuery", () => {
       // A '--' or '/*' in the string must not blank the body the version is glued to.
       ["SELECT '-- ' /*!50000INTO OUTFILE '/tmp/x'*/", "mysql"],
       ["SELECT '/*' /*M!100000INTO OUTFILE '/tmp/x'*/", "mariadb"],
+      ["SELECT 1 /*!50000,1.5INTO OUTFILE '/tmp/x'*/", "mysql"],
     ] as const) {
       expect(classifyQuery(sql, dialect), sql).toEqual({
         class: "destructive",
@@ -412,6 +423,8 @@ describe("classifyQuery", () => {
       "SELECT * FROM t RECONFIGURE",
       "SELECT * FROM t CHECKPOINT",
       "SELECT 1 SETUSER",
+      // It also takes NBSP and the C1 controls for identifier characters.
+      "SELECT name FROM users u\u00a0DELETE\u00a0FROM\u00a0users",
     ]) {
       expect(classifyQuery(sql, "transactsql"), sql).toEqual({
         class: "destructive",

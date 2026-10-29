@@ -79,6 +79,7 @@ describe("classifyRisk", () => {
       "/* /* */ SELECT 1 */ CHECKPOINT",
       "--x\nSELECT 1",
       "WITH x AS (DELETE/**/FROM t RETURNING *) SELECT * FROM x",
+      "WITH d AS (DELETE -- /*\nFROM t RETURNING *) SELECT * FROM d",
     ]) {
       expect(classifyRisk(sql), sql).toEqual({ class: "destructive", ok: true });
     }

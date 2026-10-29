@@ -92,9 +92,10 @@ so a SQL Server statement holding a backslash is unread and destructive too. The
 takes a one-word statement for an alias (`SELECT 1 SHUTDOWN`, `SELECT 1SHUTDOWN`), so a SQL
 Server statement naming `SHUTDOWN`, `RECONFIGURE`, `CHECKPOINT`, `COMMIT`, `ROLLBACK`,
 `REVERT` or `SETUSER` anywhere, a string, a column name or the end of a longer name included,
-is unread too. SQL Server has no `EXPLAIN` either: it calls a procedure of that name and runs
-what follows, so a SQL Server `EXPLAIN` is never taken for a plan. SQL Server is not an
-officially tested engine.
+is unread too, as is one holding a character from U+0080 to U+00A0, which the grammar takes
+for part of a name where T-SQL does not. SQL Server has no `EXPLAIN` either: it calls a
+procedure of that name and runs what follows, so a SQL Server `EXPLAIN` is never taken for a
+plan. SQL Server is not an officially tested engine.
 
 **MySQL executable comments.** MySQL and MariaDB run the body of a `/*! ... */` comment,
 and MariaDB also runs `/*M! ... */`, unlike an ordinary comment. Both classifiers keep that

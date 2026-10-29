@@ -39,15 +39,22 @@ const EMBED_INTO = /\binto\b/i;
 const LEADING_COMMENTS =
   /^(?:\s+|--(?=[ \t\r\n]|$)[^\r\n]*(?:\r?\n|$)|\/\*(?!M?!)(?:(?!\/\*)[\s\S])*?\*\/)*/;
 
-// Same three views as the plugin's matches() (packages/plugin/src/sql/classify.ts): markers
-// spaced out, executable bodies kept, every comment dropped (DELETE/**/FROM); all linear.
+// Same as the plugin's blankClosed() and matches() (packages/plugin/src/sql/classify.ts): the
+// tail past the last `*/` stays as written; four views, any match escalates (DELETE/**/FROM).
+function blankClosed(sql: string, comment: RegExp): string {
+  const end = sql.lastIndexOf("*/") + 2;
+  return end < 2 ? sql : `${sql.slice(0, end).replace(comment, " ")}${sql.slice(end)}`;
+}
+
 function matches(re: RegExp, sql: string): boolean {
-  const marked = sql.replace(/\/\*M?!\d*/g, " ");
-  const kept = sql
-    .replace(/\/\*(?!M?!)[\s\S]*?(?:\*\/|$)/g, " ")
-    .replace(/--[^\r\n]*|\/\*M?!\d*|\*\//g, " ");
-  const dropped = sql.replace(/\/\*[\s\S]*?(?:\*\/|$)/g, " ").replace(/--[^\r\n]*/g, " ");
-  return [marked, kept, dropped].some((view) => re.test(view));
+  const spaced = (text: string) => text.replace(/--[^\r\n]*|\/\*M?!\d*|\*\//g, " ");
+  const views = [
+    sql.replace(/\/\*M?!\d*/g, " "),
+    spaced(blankClosed(sql, /\/\*(?!!)[\s\S]*?\*\//g)),
+    spaced(blankClosed(sql, /\/\*(?!M?!)[\s\S]*?\*\//g)),
+    blankClosed(sql, /\/\*[\s\S]*?\*\//g).replace(/--[^\r\n]*/g, " "),
+  ];
+  return views.some((view) => re.test(view));
 }
 
 // Advisory, regex-only risk classifier mirroring the plugin's classes. The plugin
