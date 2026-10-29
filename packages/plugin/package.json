@@ -14,7 +14,7 @@
   "dependencies": {
     "@beekeeperstudio/plugin": "1.7.1",
     "@thesvg/icons": "3.2.8",
-    "libpg-query": "18.1.5",
+    "libpg-query": "18.2.1",
     "motion": "12.42.2",
     "node-sql-parser": "5.4.0",
     "pgsql-deparser": "18.3.8",
