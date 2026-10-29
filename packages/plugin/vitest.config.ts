@@ -3,6 +3,8 @@ import { defineConfig } from "vitest/config";
 // A standalone test config so vitest does not load the Beekeeper build plugin;
 // the unit tests cover pure modules and run in a plain node environment.
 export default defineConfig({
+  // The grammar's WASM is inlined as bytes (src/sql/pg/wasm.ts): Beekeeper cannot fetch it.
+  assetsInclude: ["**/*.wasm"],
   define: {
     __GK_BUILD__: JSON.stringify({ version: "0.0.0" }),
   },

@@ -1,6 +1,5 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
-import { libpgQueryWasm } from "./vite.libpg-query";
 
 // A dev-only preview of the real plugin fed by fixtures (preview/). It deliberately loads
 // neither vite.config.ts nor the Beekeeper Vite plugin, which installs itself into
@@ -9,13 +8,14 @@ import { libpgQueryWasm } from "./vite.libpg-query";
 const here = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 
 export default defineConfig({
+  // The grammar's WASM is inlined as bytes (src/sql/pg/wasm.ts): Beekeeper cannot fetch it.
+  assetsInclude: ["**/*.wasm"],
   root: here("."),
   envDir: false,
   cacheDir: here("node_modules/.vite-preview"),
   define: {
     __GK_BUILD__: JSON.stringify({ version: "0.3.1", dev: { branch: "preview" } }),
   },
-  plugins: [libpgQueryWasm()],
   resolve: {
     alias: [{ find: /^@beekeeperstudio\/plugin$/, replacement: here("preview/host.ts") }],
   },

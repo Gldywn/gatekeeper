@@ -3,12 +3,13 @@ import { fileURLToPath } from "node:url";
 import bks from "@beekeeperstudio/vite-plugin";
 import { defineConfig } from "vite";
 import { buildIdentity } from "../../scripts/build-identity.mjs";
-import { libpgQueryWasm } from "./vite.libpg-query";
 
 const pluginDir = fileURLToPath(new URL(".", import.meta.url));
 const { version } = JSON.parse(readFileSync(new URL("./manifest.json", import.meta.url), "utf8"));
 
 export default defineConfig({
+  // The grammar's WASM is inlined as bytes (src/sql/pg/wasm.ts): Beekeeper cannot fetch it.
+  assetsInclude: ["**/*.wasm"],
   define: {
     __GK_BUILD__: JSON.stringify(
       buildIdentity(pluginDir, version, process.env.GATEKEEPER_RELEASE_TAG),
@@ -24,6 +25,5 @@ export default defineConfig({
         },
       ],
     }),
-    libpgQueryWasm(),
   ],
 });
