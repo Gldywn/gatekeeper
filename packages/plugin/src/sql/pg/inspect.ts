@@ -64,8 +64,8 @@ function byLocation(a: RangeVar, b: RangeVar): number {
   return (a.location ?? 0) - (b.location ?? 0);
 }
 
-// A CTE is named like a table but is not one: an unqualified reference to a CTE visible where it
-// sits reads no relation, while the same name outside that WITH is a real table.
+// A CTE is named like a table but is not one, only where PostgreSQL makes it visible: the whole
+// statement, and in a CTE body only the earlier ones (all of them under RECURSIVE).
 function cteReferences(read: PgText): Set<Node> {
   const refs = new Set<Node>();
   const visit = (node: unknown, ctes: ReadonlySet<string>): void => {
@@ -74,20 +74,19 @@ function cteReferences(read: PgText): Set<Node> {
       return;
     }
     if (!isNode(node)) return;
-    const defined = isNode(node.withClause) ? node.withClause.ctes : null;
-    const scope = Array.isArray(defined)
-      ? new Set([
-          ...ctes,
-          ...defined.flatMap((c) => {
-            const name = isNode(c) && isNode(c.CommonTableExpr) ? c.CommonTableExpr.ctename : null;
-            return typeof name === "string" ? [name] : [];
-          }),
-        ])
-      : ctes;
     const rv = node.RangeVar;
-    if (isNode(rv) && !rv.schemaname && typeof rv.relname === "string" && scope.has(rv.relname))
+    if (isNode(rv) && !rv.schemaname && typeof rv.relname === "string" && ctes.has(rv.relname))
       refs.add(rv);
-    for (const value of Object.values(node)) visit(value, scope);
+    const clause = isNode(node.withClause) ? node.withClause : null;
+    const defined = clause && Array.isArray(clause.ctes) ? clause.ctes : [];
+    const names = defined.map((c) => {
+      const name = isNode(c) && isNode(c.CommonTableExpr) ? c.CommonTableExpr.ctename : null;
+      return typeof name === "string" ? name : "";
+    });
+    const all = new Set([...ctes, ...names]);
+    for (const [i, cte] of defined.entries())
+      visit(cte, clause?.recursive === true ? all : new Set([...ctes, ...names.slice(0, i)]));
+    for (const [key, value] of Object.entries(node)) if (key !== "withClause") visit(value, all);
   };
   visit(read.tree, new Set());
   return refs;

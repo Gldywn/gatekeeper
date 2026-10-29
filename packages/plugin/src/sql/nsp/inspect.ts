@@ -54,6 +54,25 @@ function aliasName(as: unknown): string | null {
   return null;
 }
 
+// The table list, without the references to a CTE, which it names like tables.
+// ponytail: the list carries no position, so a CTE name also hides an unqualified table of the
+// same name elsewhere in the statement; a scoped walk of the AST's FROM items would lift that.
+function tableEntries(tableList: string[], ast: unknown): { op: string; ref: TableRef }[] {
+  const ctes = new Set<string>();
+  walk(ast, (n) => {
+    if (!Array.isArray(n.with)) return;
+    for (const cte of n.with) {
+      const name = isNode(cte) ? aliasName(cte.name) : null;
+      if (name) ctes.add(name);
+    }
+  });
+  return tableList.flatMap((entry) => {
+    const ref = parseTableRef(entry);
+    if (!ref || (ref.schema === null && ctes.has(ref.name))) return [];
+    return [{ op: entry.split("::")[0]?.toLowerCase() ?? "", ref }];
+  });
+}
+
 // A table function has no relation to rename, so its alias names the single output column
 // it returns ("FROM unnest(tags) AS contact_email") instead of standing for a table.
 function isFunctionRelation(item: Record<string, unknown>): boolean {
@@ -134,7 +153,7 @@ function jsonKeys(ast: unknown): string[] {
 export function analyzeSql(sql: string, grammar: string): ParsedQuery | null {
   try {
     const { tableList, columnList, ast } = parser.parse(sql, { database: grammar });
-    const refs = tableList.map(parseTableRef).filter((ref): ref is TableRef => ref !== null);
+    const refs = tableEntries(tableList, ast).map((entry) => entry.ref);
     let star = false;
     const columns: string[] = [];
     for (const entry of columnList) {
@@ -223,12 +242,7 @@ export function analyzeTableOps(sql: string, grammar: string): TableOps | null {
   const writes: TableRef[] = [];
   const reads: TableRef[] = [];
   let writeOp: string | null = null;
-  for (const entry of tableList) {
-    const op = entry.split("::")[0]?.toLowerCase() ?? "";
-    const ref = parseTableRef(entry);
-    if (!ref) {
-      continue;
-    }
+  for (const { op, ref } of tableEntries(tableList, ast)) {
     if (op === "select") {
       reads.push(ref);
     } else {

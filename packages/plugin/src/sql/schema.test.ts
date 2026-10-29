@@ -17,6 +17,16 @@ import {
 describe("analyzeTableOps", () => {
   const pg = "postgresql";
 
+  it.each(["mysql", "redshift"])("lists no CTE among the tables on node-sql-parser: %s", (db) => {
+    const sql =
+      "WITH pay AS (SELECT id FROM po.attempt) SELECT e.id FROM po.event e JOIN pay ON pay.id = e.id";
+    expect(analyzeSql(sql, db)?.tables).toEqual([
+      { schema: "po", name: "attempt" },
+      { schema: "po", name: "event" },
+    ]);
+    expect(analyzeTableOps(sql, db)?.reads).toEqual(["po.attempt", "po.event"]);
+  });
+
   it("returns no write targets for a plain read", () => {
     expect(analyzeTableOps("SELECT * FROM audit.users", pg)).toEqual({
       writes: [],
@@ -994,6 +1004,31 @@ describe("PostgreSQL's own parse tree", () => {
     const sql =
       "SELECT * FROM real_table WHERE EXISTS (WITH real_table AS (SELECT 1) SELECT 1 FROM real_table)";
     expect(analyzeSql(sql, pg)?.tables).toEqual([{ schema: null, name: "real_table" }]);
+  });
+
+  it("lists no CTE among the tables a statement reads", () => {
+    const sql =
+      "WITH pay AS (SELECT id FROM po.attempt) SELECT e.id FROM po.event e JOIN pay ON pay.id = e.id";
+    expect(analyzeSql(sql, pg)?.tables).toEqual([
+      { schema: "po", name: "attempt" },
+      { schema: "po", name: "event" },
+    ]);
+    expect(
+      analyzeTableOps(
+        "WITH stuck AS (SELECT id FROM po.orders) UPDATE po.orders SET s = 1 WHERE id IN (SELECT id FROM stuck)",
+        pg,
+      ),
+    ).toEqual({ writes: ["po.orders"], reads: ["po.orders"], writeOp: "update" });
+  });
+
+  it("sees a CTE only where PostgreSQL does: after it, or anywhere under RECURSIVE", () => {
+    expect(
+      analyzeSql("WITH a AS (SELECT * FROM b), b AS (SELECT 1 AS x) SELECT * FROM a", pg)?.tables,
+    ).toEqual([{ schema: null, name: "b" }]);
+    expect(
+      analyzeSql("WITH RECURSIVE a AS (SELECT * FROM b), b AS (SELECT 1 AS x) SELECT * FROM a", pg)
+        ?.tables,
+    ).toEqual([]);
   });
 
   it("screens the columns and values a MERGE updates or inserts", () => {
