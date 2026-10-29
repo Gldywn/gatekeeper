@@ -83,7 +83,8 @@ The plugin is the only component that can call `runQuery`, so the gate lives the
 `node-sql-parser` parses each query in the connection's dialect, classifies it read / write /
 destructive (escalating on any embedded modify node, with a conservative fallback when
 parsing fails), and only lets the human approve a class the armed mode allows. The server
-also preflights with a regex to block empty and multi-statement input before enqueueing.
+also preflights with a regex to block empty and multi-statement input, and a lone carriage
+return, before enqueueing.
 
 The plugin also runs a local load check on each proposal (`sql/load.ts`, host calls in
 `annotate.ts`). It never runs or explains the proposal. It reads the SQL and, on PostgreSQL,

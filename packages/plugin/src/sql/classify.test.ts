@@ -380,6 +380,36 @@ describe("classifyQuery", () => {
     expect(classifyQuery("-- x\r\nSELECT 'a\nDROP TABLE t -- '", "sqlite").class).toBe("read");
     expect(classifyQuery("SELECT 1 --x", "sqlite").class).toBe("read");
   });
+
+  // SECURITY: a SQL Server batch needs no `;` between statements, and T-SQL has no backslash
+  // escape, which node-sql-parser's grammar assumes: it read a string where DROP TABLE runs.
+  it("never reads a SQL Server batch the text check cannot split", () => {
+    for (const sql of [
+      "SELECT 1 SELECT 2",
+      "SELECT * FROM t EXEC xp_cmdshell 'whoami'",
+      "SELECT 1 KILL 52",
+    ]) {
+      expect(classifyQuery(sql, "transactsql"), sql).toEqual({
+        class: "destructive",
+        parseOk: false,
+        blocked: false,
+      });
+    }
+    // node-sql-parser parses these as reads, taking the second word for an alias.
+    for (const sql of [
+      "SELECT '\\' DROP TABLE t -- '",
+      "SELECT 1 SHUTDOWN",
+      "SELECT * FROM t RECONFIGURE",
+      "SELECT * FROM t CHECKPOINT",
+    ]) {
+      expect(classifyQuery(sql, "transactsql"), sql).toEqual({
+        class: "destructive",
+        parseOk: false,
+        blocked: false,
+      });
+    }
+    expect(classifyQuery("SELECT name FROM t WHERE id = 1", "transactsql").class).toBe("read");
+  });
 });
 
 describe("rank", () => {

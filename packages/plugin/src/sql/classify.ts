@@ -67,6 +67,10 @@ const LEADING_COMMENTS =
 const LONE_CR = /\r(?!\n)/;
 // `--` then any character above space: MySQL wants whitespace or a control character there.
 const MYSQL_DASHES = /--(?=[!-\u{10FFFF}])/u;
+// Its T-SQL grammar also takes \' for an escaped quote, where SQL Server ends the string, and
+// takes a one-word statement for an alias: SQL Server runs SELECT 1 SHUTDOWN as two.
+const TSQL_BACKSLASH = /\\/;
+const TSQL_ONE_WORD = /\b(?:shutdown|reconfigure|checkpoint|commit|rollback|revert)\b/i;
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
@@ -138,7 +142,11 @@ export function stripExplain(sql: string): { inner: string; analyze: boolean } |
 export function classifyQuery(sql: string, dialect = "postgresql"): RiskVerdict {
   // Before the EXPLAIN peel, so a plain EXPLAIN cannot turn this verdict back into a read.
   const mysqlFamily = dialect === "mysql" || dialect === "mariadb";
-  if (LONE_CR.test(sql) || (mysqlFamily && MYSQL_DASHES.test(sql))) {
+  if (
+    LONE_CR.test(sql) ||
+    (mysqlFamily && MYSQL_DASHES.test(sql)) ||
+    (dialect === "transactsql" && (TSQL_BACKSLASH.test(sql) || TSQL_ONE_WORD.test(sql)))
+  ) {
     return { class: "destructive", parseOk: false, blocked: fallback(sql).blocked };
   }
   const explain = stripExplain(sql);
@@ -164,7 +172,10 @@ export function classifyQuery(sql: string, dialect = "postgresql"): RiskVerdict 
   try {
     ast = parser.astify(prepareSql(sql, dialect).sql, { database: dialect });
   } catch {
-    return fallback(sql);
+    const text = fallback(sql);
+    // SQL Server runs a batch whose statements need no `;` between them, so the text check
+    // cannot count them: it never reads there.
+    return dialect === "transactsql" ? { ...text, class: "destructive" } : text;
   }
   const statements = Array.isArray(ast) ? ast : [ast];
   if (statements.length !== 1) {

@@ -63,8 +63,9 @@ Two classifiers agree on the read / write / destructive classes:
   confirmation where the human types the database name, and its card carries a standing
   warning that Gatekeeper could not read it and the judgement is theirs. What no mode can
   approve is unchanged: empty input, and anything holding more than one statement.
-- The **server** classifier is advisory. It stamps the audit trail and refuses the two
-  cases no mode may approve: empty and multi-statement input.
+- The **server** classifier is advisory. It stamps the audit trail and refuses the cases
+  no mode may approve: empty and multi-statement input, and a carriage return not followed
+  by a line feed (see below), so a server updated before the plugin still covers it.
 
 **Text the classifiers cannot delimit.** When no parser reads a statement, the plugin falls
 back to a text check that does not know where strings end. It removes only the comments that
@@ -83,6 +84,15 @@ MySQL and MariaDB a `--` followed by any character above U+0020, therefore makes
 statement unread and destructive wherever it appears, strings and comments included (on
 MySQL, `SELECT '--'` needs Destructive mode). The text check still decides whether it is
 blocked. This is a stopgap until these engines are read by their own grammar.
+
+**SQL Server batches.** SQL Server runs a batch whose statements need no `;` between them,
+so the text check cannot count them: a SQL Server statement no parser read is never classed
+a read. T-SQL strings have no backslash escape, which `node-sql-parser`'s grammar assumes,
+so a SQL Server statement holding a backslash is unread and destructive too. The grammar also
+takes a one-word statement for an alias (`SELECT 1 SHUTDOWN`), so a SQL Server statement
+naming `SHUTDOWN`, `RECONFIGURE`, `CHECKPOINT`, `COMMIT`, `ROLLBACK` or `REVERT` anywhere, a
+string or a column name included, is unread too. SQL Server is not an officially tested
+engine.
 
 **MySQL executable comments.** MySQL and MariaDB run the body of a `/*! ... */` comment,
 and MariaDB also runs `/*M! ... */`, unlike an ordinary comment. Both classifiers keep that

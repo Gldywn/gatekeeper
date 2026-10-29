@@ -78,11 +78,20 @@ describe("classifyRisk", () => {
     for (const sql of [
       "SELECT '/*' FROM t INTO OUTFILE '/tmp/x' -- */",
       "/* /* */ SELECT 1 */ CHECKPOINT",
-      "-- x\rSELECT 1\nREINDEX",
+      "--x\nSELECT 1",
       "WITH x AS (DELETE/**/FROM t RETURNING *) SELECT * FROM x",
     ]) {
       expect(classifyRisk(sql), sql).toEqual({ class: "destructive", ok: true });
     }
+  });
+
+  // SECURITY: an older plugin parses a string where MySQL and SQLite run SQL after a lone CR;
+  // refusing it here covers a server updated before the plugin.
+  it("refuses a carriage return not followed by a line feed", () => {
+    for (const sql of ["-- x\rSELECT 'a\nDROP TABLE t -- '", "-- x\rSELECT 1\nREINDEX", "\r"]) {
+      expect(classifyRisk(sql).ok, sql).toBe(false);
+    }
+    expect(classifyRisk("-- x\r\nSELECT 1").ok).toBe(true);
   });
 
   // Each submission runs this; a comment-blanking scan that restarted at each unclosed `/*`

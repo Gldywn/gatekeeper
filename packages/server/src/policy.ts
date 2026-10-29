@@ -50,8 +50,17 @@ function matches(re: RegExp, sql: string): boolean {
 
 // Advisory, regex-only risk classifier mirroring the plugin's classes. The plugin
 // (with a real parser) stays authoritative; this only stamps the audit and blocks the
-// two cases no mode may approve: empty and multi-statement.
+// cases no mode may approve: empty, multi-statement, and a lone carriage return.
 export function classifyRisk(sql: string): RiskAssessment {
+  // The plugin's parser ends a comment at a lone CR where MySQL and SQLite run on, so an
+  // older plugin reads a string where the engine runs SQL. Legit SQL never holds one.
+  if (/\r(?!\n)/.test(sql)) {
+    return {
+      class: "destructive",
+      ok: false,
+      reason: "A carriage return not followed by a line feed is not allowed; use LF or CRLF",
+    };
+  }
   // Strings are not delimited here, so nothing past the leading comments is removed: a
   // '--' or '/*' inside a string would otherwise hide a second statement.
   const single = sql
