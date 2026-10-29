@@ -928,6 +928,22 @@ describe("analyzeOutput, round 1 of the cross-review", () => {
         ["memo"],
         true,
       ],
+      // EXCLUDED is the row the upsert tried to insert, here an email.
+      [
+        "postgresql",
+        "INSERT INTO archive (memo) SELECT email FROM people ON CONFLICT (id) DO UPDATE SET other = EXCLUDED.memo RETURNING other",
+        { archive: ["id", "memo", "other"] },
+        ["other", "memo", "email"],
+        true,
+      ],
+      // Every SET reads the row as it was: other gets the old memo, never the new email.
+      [
+        "postgresql",
+        "UPDATE people SET memo = email, other = memo RETURNING other",
+        { people: ["id", "email", "memo", "other"] },
+        ["other", "memo"],
+        true,
+      ],
     ]);
   });
 

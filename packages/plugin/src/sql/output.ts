@@ -175,32 +175,53 @@ class Resolver {
         target.slots.unshift({ label: column, ...join(named([column]), value) });
       }
     };
-    // Every SET list: UPDATE, MySQL's INSERT ... SET, an upsert's update branch.
-    const sets: unknown[] = [];
-    walk({ ...ast, returning: null }, (n) => {
-      if (Array.isArray(n.set)) sets.push(...n.set);
-    });
-    for (const item of sets) {
-      if (isNode(item)) put(columnLabel(item.column), this.value(item.value, scope));
-    }
+    // What the inserted row puts in each column, read before anything is written.
     const columns = (Array.isArray(ast.columns) ? ast.columns : []).map((c) =>
       columnLabel(isNode(c) && c.type === "column_ref" ? c.column : c),
     );
     const at = (i: number) =>
       columns.length ? (columns[i] ?? null) : (target.slots[i]?.label ?? null);
+    const inserted: [string | null, Value][] = [];
     const values = isNode(ast.values) ? ast.values : null;
+    let positionsUnknown = false;
     if (values?.type === "values") {
       for (const row of Array.isArray(values.values) ? values.values : []) {
         const cells = isNode(row) && Array.isArray(row.value) ? row.value : [];
-        for (const [i, cell] of cells.entries()) put(at(i), this.value(cell, scope));
+        for (const [i, cell] of cells.entries()) inserted.push([at(i), this.value(cell, scope)]);
       }
     } else if (values) {
       const source = this.statement(isNode(values.ast) ? values.ast : values, scope);
-      for (const [i, slot] of source.entries()) put(at(i), slotValue(slot));
+      for (const [i, slot] of source.entries()) inserted.push([at(i), slotValue(slot)]);
       // Without a column list over unlisted columns, where each value lands is unknown.
-      if (!columns.length && target.slots.some((s) => s.rest)) {
-        target.slots = target.slots.map((s) => (s.rest ? { ...s, rest: "opaque" } : s));
+      positionsUnknown = !columns.length && target.slots.some((s) => s.rest);
+    }
+    // An upsert's EXCLUDED is the row it tried to insert.
+    const excluded: Relation = {
+      alias: "excluded",
+      slots: inserted
+        .filter((e): e is [string, Value] => e[0] !== null)
+        .map(([label, value]) => ({ label, ...join(named([label]), value) })),
+      using: [],
+      natural: false,
+      joined: false,
+    };
+    const setScope: Scope = {
+      relations: [...scope.relations, excluded],
+      ctes: new Map(),
+      parent: scope,
+    };
+    // Every SET list (UPDATE, MySQL's INSERT ... SET, an upsert's update branch) reads the row as
+    // it was, so all of them are evaluated before any is applied.
+    const sets: [string | null, Value][] = [];
+    walk({ ...ast, returning: null }, (n) => {
+      if (!Array.isArray(n.set)) return;
+      for (const item of n.set) {
+        if (isNode(item)) sets.push([columnLabel(item.column), this.value(item.value, setScope)]);
       }
+    });
+    for (const [column, value] of [...inserted, ...sets]) put(column, value);
+    if (positionsUnknown) {
+      target.slots = target.slots.map((s) => (s.rest ? { ...s, rest: "opaque" } : s));
     }
   }
 
