@@ -51,6 +51,9 @@ interface Relation {
   natural: boolean;
   // Joined to the item before it, rather than listed after a comma.
   joined: boolean;
+  // Reachable by name (`b.*`, `new.memo`) but not a column group of its own in an unqualified
+  // star: the relations inside a parenthesized join, RETURNING's `old` and `new`.
+  hidden?: true;
 }
 interface Scope {
   relations: Relation[];
@@ -154,7 +157,21 @@ class Resolver {
         Array.isArray(ast[key]) ? this.from(ast[key] as unknown[], inner) : [],
       );
       const scope: Scope = { relations, ctes: new Map(), parent: inner };
-      this.assign(ast, relations[0], scope);
+      const target = relations[0];
+      const before = target?.slots.map(copy) ?? [];
+      this.assign(ast, target, scope);
+      // PostgreSQL 18 names the row before and after the write.
+      if (target) {
+        const row = (alias: string, slots: Slot[]): Relation => ({
+          alias,
+          slots,
+          using: [],
+          natural: false,
+          joined: false,
+          hidden: true,
+        });
+        relations.push(row("old", before), row("new", target.slots.map(copy)));
+      }
       return this.projection(returning, scope);
     }
     // SHOW, DESCRIBE, CALL and anything unmodeled may return rows we cannot trace.
@@ -179,22 +196,34 @@ class Resolver {
     const columns = (Array.isArray(ast.columns) ? ast.columns : []).map((c) =>
       columnLabel(isNode(c) && c.type === "column_ref" ? c.column : c),
     );
-    const at = (i: number) =>
-      columns.length ? (columns[i] ?? null) : (target.slots[i]?.label ?? null);
+    const destinations = columns.length ? columns : target.slots.map((s) => s.label);
     const inserted: [string | null, Value][] = [];
     const values = isNode(ast.values) ? ast.values : null;
-    let positionsUnknown = false;
     if (values?.type === "values") {
       for (const row of Array.isArray(values.values) ? values.values : []) {
         const cells = isNode(row) && Array.isArray(row.value) ? row.value : [];
-        for (const [i, cell] of cells.entries()) inserted.push([at(i), this.value(cell, scope)]);
+        for (const [i, cell] of cells.entries()) {
+          inserted.push([destinations[i] ?? null, this.value(cell, scope)]);
+        }
       }
     } else if (values) {
       const source = this.statement(isNode(values.ast) ? values.ast : values, scope);
-      for (const [i, slot] of source.entries()) inserted.push([at(i), slotValue(slot)]);
-      // Without a column list over unlisted columns, where each value lands is unknown.
-      positionsUnknown = !columns.length && target.slots.some((s) => s.rest);
+      for (const [i, slot] of source.entries()) {
+        // A star nobody could list holds any number of columns: from there on, any destination
+        // may receive any of them.
+        if (slot.rest) {
+          const any = { ...join(...source.slice(i).map(slotValue)), unknown: true };
+          for (const d of destinations.slice(i)) inserted.push([d, any]);
+          if (destinations.length <= i) inserted.push([null, any]);
+          break;
+        }
+        inserted.push([destinations[i] ?? null, slotValue(slot)]);
+      }
     }
+    // A value whose column nobody could list may land in any unlisted column.
+    const dropped = inserted.filter(([column]) => column === null).map(([, value]) => value);
+    const positionsUnknown =
+      target.slots.some((s) => s.rest) && dropped.some((v) => v.names.size > 0 || v.unknown);
     // An upsert's EXCLUDED is the row it tried to insert.
     const excluded: Relation = {
       alias: "excluded",
@@ -221,7 +250,10 @@ class Resolver {
     });
     for (const [column, value] of [...inserted, ...sets]) put(column, value);
     if (positionsUnknown) {
-      target.slots = target.slots.map((s) => (s.rest ? { ...s, rest: "opaque" } : s));
+      const carried = join(...dropped);
+      target.slots = target.slots.map((s) =>
+        s.rest ? { ...s, rest: "opaque", names: join(slotValue(s), carried).names } : s,
+      );
     }
   }
 
@@ -316,10 +348,13 @@ class Resolver {
       const expr = isNode(item.expr) ? item.expr : null;
       const joined = Boolean(item.join);
       // A parenthesized join keeps its own relations, joined to what precedes it as one item.
+      // A parenthesized join yields one joined table, joined as a whole to what precedes it; its
+      // relations stay reachable by name.
       if (expr?.type === "tables" && Array.isArray(expr.expr)) {
         const inner = this.from(expr.expr, outer);
-        if (inner[0]) inner[0] = { ...inner[0], joined, using: [...using, ...inner[0].using] };
-        relations.push(...inner);
+        const slots = this.joined(inner);
+        relations.push({ alias: aliasName(item.as) ?? "", slots, using, natural, joined });
+        relations.push(...inner.map((r): Relation => ({ ...r, hidden: true })));
         natural = false;
         continue;
       }
@@ -394,6 +429,25 @@ class Resolver {
         out.push(...this.star(expr, scope, excluded));
         continue;
       }
+      // BigQuery's `* REPLACE (b.email AS note)`: the star's `note` holds the replacement.
+      if (item.type === "replace" && expr) {
+        const slots = this.star(expr, scope, []);
+        for (const e of Array.isArray(item.expr_list) ? item.expr_list : []) {
+          const label = isNode(e) ? aliasName(e.as) : null;
+          if (!label || !isNode(e)) continue;
+          const value = join(named([label]), this.value(e.expr, scope));
+          const slot = slots.find((s) => s.label !== null && this.same(s.label, label));
+          if (slot) {
+            slot.names = value.names;
+            slot.unknown = value.unknown;
+          } else if (slots.some((s) => s.rest)) {
+            // The star's columns are unknown: keep what replaces one of them, untraced.
+            slots.push({ label, names: value.names, unknown: true });
+          }
+        }
+        out.push(...slots);
+        continue;
+      }
       if (expr?.type === "column_ref" && expr.column === "*") {
         out.push(...this.star(expr, scope, excludedBy(expr)));
         continue;
@@ -408,6 +462,9 @@ class Resolver {
   // The name PostgreSQL gives an unaliased output: the column, or the function called. Other
   // engines name an expression by its text, left unnamed here so a lookup stays unknown.
   private implicitLabel(expr: Node): string | null {
+    // BigQuery names `t.user.email` after its last field.
+    const fields = subFields(expr);
+    if (expr.type === "column_ref" && fields.length) return fields[fields.length - 1];
     if (expr.type === "column_ref") return columnLabel(expr.column);
     if (expr.type === "double_quote_string" && this.quotedNames) return String(expr.value);
     if (!this.exact) return null;
@@ -436,6 +493,7 @@ class Resolver {
   private joined(relations: Relation[]): Slot[] {
     const groups: Slot[][] = [];
     for (const r of relations) {
+      if (r.hidden) continue;
       const slots = r.slots.map(copy);
       const prior = r.joined ? groups.pop() : undefined;
       let out = prior ?? [];
@@ -478,9 +536,11 @@ class Resolver {
     const qualifier = columnLabel(expr.table);
     const own = named([name]);
     for (let s: Scope | undefined = scope; s; s = s.parent) {
+      // RETURNING's `old` and `new`, and the relations inside a parenthesized join, answer only to
+      // their own name; the joined group answers an unqualified one.
       const relations = qualifier
         ? s.relations.filter((r) => this.same(r.alias, qualifier))
-        : s.relations;
+        : s.relations.filter((r) => !r.hidden);
       const matches = relations.flatMap((r) =>
         r.slots.filter((x) => x.label !== null && this.same(x.label, name)),
       );
@@ -489,29 +549,54 @@ class Resolver {
       if (matches.length) return join(own, ...matches.map(slotValue));
       // A table read without its column list passes the name through; a function or recursion
       // could have put anything under it, and so could an output this walker left unnamed.
-      const unnamed = relations.flatMap((r) =>
-        r.slots.filter((x) => x.label === null && !x.rest && x.names.size > 0),
+      const unknowns = relations.flatMap((r) =>
+        r.slots.filter(
+          (x) => (x.label === null && !x.rest && x.names.size > 0) || x.rest === "opaque",
+        ),
       );
-      if (unnamed.length || relations.some((r) => r.slots.some((x) => x.rest === "opaque"))) {
-        return { ...join(own, ...unnamed.map(slotValue)), unknown: true };
-      }
-      if (qualifier ? relations.length : relations.some((r) => r.slots.some((x) => x.rest))) {
-        return own;
+      if (unknowns.length) return { ...join(own, ...unknowns.map(slotValue)), unknown: true };
+      if (qualifier && relations.length) return own;
+      // An unqualified name may still belong to an outer query when this table's columns are
+      // unknown: keep what an outer column of that name holds, as a possibility only.
+      if (!qualifier && relations.some((r) => r.slots.some((x) => x.rest))) {
+        const outer = this.outerMatches(name, s.parent);
+        return outer.length ? { ...join(own, ...outer.map(slotValue)), unknown: true } : own;
       }
     }
-    return own;
+    // A qualifier that names no relation (a misspelling, an engine's own row alias) tells nothing.
+    return qualifier ? { ...own, unknown: true } : own;
+  }
+
+  private outerMatches(name: string, scope: Scope | undefined): Slot[] {
+    for (let s = scope; s; s = s.parent) {
+      const matches = s.relations
+        .filter((r) => !r.hidden)
+        .flatMap((r) => r.slots.filter((x) => x.label !== null && this.same(x.label, name)));
+      if (matches.length) return matches;
+    }
+    return [];
   }
 
   value(node: unknown, scope: Scope): Value {
     if (!isNode(node)) return NOTHING;
     if (Array.isArray(node)) return join(...node.map((n) => this.value(n, scope)));
     switch (String(node.type ?? "")) {
-      case "column_ref":
-        // A subscript (`profile['email']`) reads a key out of the column it hangs on.
+      case "column_ref": {
+        // BigQuery nests a subscripted column (`p.profile['email']`) inside the reference.
+        const inner = isNode(node.column) && isNode(node.column.expr) ? node.column.expr : null;
+        if (inner?.type === "column_ref" && isNode(node.column)) {
+          return join(
+            this.value({ ...inner, table: inner.table ?? node.table }, scope),
+            named(offsetKeys(node.column.offset)),
+          );
+        }
+        // A subscript (`profile['email']`) or a struct path (`t.user.email`) reads a key out of
+        // the column it hangs on.
         return join(
           this.wholeRow(node, scope) ?? this.column(node, scope),
-          named(accessorKeys(node)),
+          named([...accessorKeys(node), ...subFields(node)]),
         );
+      }
       case "binary_expr": {
         const op = String(node.operator).toUpperCase();
         if (JSON_OPERATORS.has(op)) {
@@ -695,6 +780,20 @@ function columnDefinitions(expr: Node | null): string[] {
   return list
     .map((d) => (isNode(d) && isNode(d.column) ? columnLabel(d.column.column) : null))
     .filter((c): c is string => c !== null);
+}
+
+// The fields BigQuery reads past a column (`t.user.email`), kept by the parser as `subFields`.
+function subFields(node: Node): string[] {
+  return Array.isArray(node.subFields)
+    ? node.subFields.filter((f): f is string => typeof f === "string")
+    : [];
+}
+
+// The string keys of a BigQuery subscript (`profile['email']`).
+function offsetKeys(offset: unknown): string[] {
+  return (Array.isArray(offset) ? offset : [])
+    .map((o) => (isNode(o) && isNode(o.value) ? o.value.value : null))
+    .filter((v): v is string => typeof v === "string");
 }
 
 // Snowflake hangs `* EXCLUDE (...)` off the star itself.

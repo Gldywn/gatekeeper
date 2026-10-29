@@ -1008,3 +1008,132 @@ describe("analyzeOutput, round 1 of the cross-review", () => {
     });
   });
 });
+
+describe("analyzeOutput, round 2 of the cross-review", () => {
+  it("joins a parenthesized join as one table, keeping its own column order", () => {
+    check([
+      [
+        "postgresql",
+        "SELECT s.x FROM (SELECT * FROM a JOIN (b JOIN c USING (id)) ON a.id = b.id) s(x, y, z, w)",
+        { a: ["email", "id"], b: ["id", "code"], c: ["id"] },
+        ["x", "email"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT s.c FROM (SELECT * FROM p JOIN (q JOIN r USING (email)) USING (id)) s(a, b, c, d)",
+        { p: ["id", "code"], q: ["id", "email"], r: ["email", "n"] },
+        ["c", "email"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT q.* FROM p JOIN (q JOIN r USING (email)) USING (id)",
+        { p: ["id", "code"], q: ["id", "email"], r: ["email", "n"] },
+        ["id", "email"],
+        true,
+      ],
+    ]);
+  });
+
+  it("spreads what an unlisted star or an unplaced value may put across the columns it may reach", () => {
+    check([
+      [
+        "postgresql",
+        "INSERT INTO archive (a, b) SELECT *, email FROM people ON CONFLICT (id) DO UPDATE SET a = EXCLUDED.b RETURNING a",
+        { archive: ["id", "a", "b"] },
+        ["a", "b", "email"],
+        false,
+      ],
+      [
+        "sqlite",
+        "INSERT INTO archive VALUES (1, (SELECT email FROM people LIMIT 1)) RETURNING memo",
+        null,
+        ["memo", "email"],
+        false,
+      ],
+      // A row of values the agent typed carries nothing it did not know.
+      ["sqlite", "INSERT INTO archive VALUES (1, 'x') RETURNING memo", null, ["memo"], true],
+    ]);
+  });
+
+  it("keeps an outer column a name may belong to, as a possibility only", () => {
+    check([
+      [
+        "postgresql",
+        "SELECT (SELECT x FROM t2 LIMIT 1) AS y FROM (SELECT email AS x FROM people) s",
+        null,
+        ["x", "email", "y"],
+        false,
+      ],
+      [
+        "postgresql",
+        "SELECT (SELECT x FROM t2 LIMIT 1) AS y FROM (SELECT email AS x FROM people) s",
+        { t2: ["x"] },
+        ["x", "y"],
+        true,
+      ],
+    ]);
+  });
+
+  it("reads BigQuery struct fields and subscripts", () => {
+    check([
+      ["bigquery", "SELECT t.user.email FROM events t", null, ["user", "email"], true],
+      [
+        "bigquery",
+        "SELECT s.email FROM (SELECT t.user.email FROM events t) s",
+        null,
+        ["user", "email"],
+        true,
+      ],
+      [
+        "bigquery",
+        "SELECT p.profile['email'] AS v FROM people p",
+        null,
+        ["profile", "email", "v"],
+        true,
+      ],
+    ]);
+  });
+
+  it("tells RETURNING's old row from its new one, and a qualifier that names nothing from a column", () => {
+    const live = { people: ["id", "email", "memo"] };
+    check([
+      [
+        "postgresql",
+        "UPDATE people SET memo = email RETURNING new.memo",
+        live,
+        ["memo", "email"],
+        true,
+      ],
+      ["postgresql", "UPDATE people SET memo = email RETURNING old.memo", live, ["memo"], true],
+      [
+        "postgresql",
+        "UPDATE people SET memo = email RETURNING *",
+        live,
+        ["id", "email", "memo"],
+        true,
+      ],
+      ["postgresql", "SELECT zz.email FROM people p", null, ["email"], false],
+    ]);
+  });
+
+  it("puts BigQuery's REPLACE value in the column it replaces, and only it", () => {
+    check([
+      [
+        "bigquery",
+        "SELECT aa.* REPLACE (bb.email AS note) FROM aa, bb",
+        { aa: ["id", "note"], bb: ["id", "email"] },
+        ["id", "note", "email"],
+        true,
+      ],
+      [
+        "bigquery",
+        "SELECT s.* REPLACE (1 AS note) FROM (SELECT id, email AS note FROM people) s",
+        null,
+        ["id", "note"],
+        true,
+      ],
+    ]);
+  });
+});
