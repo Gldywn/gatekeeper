@@ -442,7 +442,14 @@ describe("classifyQuery", () => {
     }
     // The parser still splits a batch the guard distrusts; its count keeps the block.
     const nbspBatch = "DELETE t\nDELETE u /*\u00a0*/";
-    for (const sql of ["BEGIN TRAN DELETE FROM t COMMIT", nbspBatch]) {
+    for (const sql of [
+      "BEGIN TRAN DELETE FROM t COMMIT",
+      nbspBatch,
+      // Behind an EXPLAIN, which SQL Server does not have, the batch still splits.
+      "EXPLAIN DELETE t DELETE u",
+      "EXPLAIN KILL 51 KILL 52",
+      "EXPLAIN BEGIN TRAN DELETE FROM t COMMIT",
+    ]) {
       expect(classifyQuery(sql, "transactsql").blocked, sql).toBe(true);
     }
     expect(classifyQuery("SELECT name FROM t WHERE id = 1", "transactsql").class).toBe("read");

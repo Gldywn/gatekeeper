@@ -145,13 +145,17 @@ export function stripExplain(sql: string): { inner: string; analyze: boolean } |
 
 // The parser's statement count can only add a block, so it is safe to take on text whose tree
 // is not trusted: a SQL Server batch (DELETE t DELETE u) needs no `;` the text check would see.
+// Counted behind a leading EXPLAIN too, where the whole text no longer parses.
 function parsesAsSeveral(sql: string, dialect: string): boolean {
-  try {
-    const ast = parser.astify(prepareSql(sql, dialect).sql, { database: dialect });
-    return Array.isArray(ast) && ast.length > 1;
-  } catch {
-    return false;
-  }
+  return [sql, stripExplain(sql)?.inner].some((text) => {
+    if (!text) return false;
+    try {
+      const ast = parser.astify(prepareSql(text, dialect).sql, { database: dialect });
+      return Array.isArray(ast) && ast.length > 1;
+    } catch {
+      return false;
+    }
+  });
 }
 
 // The plugin is the only component that runs SQL, so the risk gate lives here: a
@@ -197,8 +201,13 @@ export function classifyQuery(sql: string, dialect = "postgresql"): RiskVerdict 
   } catch {
     const text = fallback(sql);
     // SQL Server runs a batch whose statements need no `;` between them, so the text check
-    // cannot count them: it never reads there.
-    return dialect === "transactsql" ? { ...text, class: "destructive" } : text;
+    // cannot count them: it never reads there, and the parser's count still blocks.
+    if (dialect !== "transactsql") return text;
+    return {
+      ...text,
+      class: "destructive",
+      blocked: text.blocked || parsesAsSeveral(sql, dialect),
+    };
   }
   const statements = Array.isArray(ast) ? ast : [ast];
   if (statements.length !== 1) {
