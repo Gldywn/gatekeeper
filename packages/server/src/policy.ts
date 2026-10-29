@@ -39,9 +39,13 @@ const EMBED_INTO = /\binto\b/i;
 const LEADING_COMMENTS =
   /^(?:\s+|--(?=[ \t\r\n]|$)[^\r\n]*(?:\r?\n|$)|\/\*(?!M?!)(?:(?!\/\*)[\s\S])*?\*\/)*/;
 
-// Blanking comments can only add an escalation match (DELETE/**/FROM), never clear one.
+// Same two views as the plugin's matches(): as written, or with ordinary comments and
+// executable markers blanked (DELETE/**/FROM), an open comment ending at the end of the text.
 function matches(re: RegExp, sql: string): boolean {
-  return re.test(sql) || re.test(sql.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/--[^\r\n]*/g, " "));
+  const blanked = sql
+    .replace(/\/\*(?!M?!)[\s\S]*?(?:\*\/|$)/g, " ")
+    .replace(/--[^\r\n]*|\/\*M?!\d*|\*\//g, " ");
+  return re.test(sql) || re.test(blanked);
 }
 
 // Advisory, regex-only risk classifier mirroring the plugin's classes. The plugin

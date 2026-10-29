@@ -141,6 +141,22 @@ describe("classifyQuery", () => {
     }
   });
 
+  // SECURITY: the engine reads a comment as a space, so EXPLAIN /**/ ANALYZE runs the DELETE;
+  // the option regexes saw no ANALYZE and downgraded it to a plan.
+  it("never lets a comment or an escaped option name hide EXPLAIN ANALYZE", () => {
+    for (const [sql, dialect] of [
+      ["EXPLAIN /**/ ANALYZE DELETE FROM users", pg],
+      ["EXPLAIN VERBOSE /**/ ANALYZE DELETE FROM users", pg],
+      ["EXPLAIN -- x\nANALYZE DELETE FROM users", pg],
+      ['EXPLAIN (FORMAT JSON, U&"\\0061nalyze" true) DELETE FROM users', pg],
+      ["EXPLAIN /*!ANALYZE*/ DELETE t FROM t JOIN u ON t.a = u.a", "mysql"],
+    ] as const) {
+      const v = classifyQuery(sql, dialect);
+      expect(v.class === "read" && !v.blocked, sql).toBe(false);
+    }
+    expect(classifyQuery("EXPLAIN /* note */ SELECT 1", pg).class).toBe("read");
+  });
+
   it("still blocks a multi-statement EXPLAIN", () => {
     expect(classifyQuery("EXPLAIN SELECT 1; DROP TABLE users", pg).blocked).toBe(true);
   });
@@ -262,11 +278,14 @@ describe("classifyQuery", () => {
   });
 
   it("keeps a locking clause split by comments a locking read", () => {
-    for (const sql of [
-      "SELECT * FROM t FOR/**/SHARE",
-      "SELECT * FROM t FOR /* a */ /* b */ KEY -- c\n SHARE",
-    ]) {
-      expect(approvableRead(sql, pg), sql).toBe(false);
+    for (const [sql, dialect] of [
+      ["SELECT * FROM t FOR/**/SHARE", pg],
+      ["SELECT * FROM t FOR /* a */ /* b */ KEY -- c\n SHARE", pg],
+      // MySQL runs the executable body, comments inside it included.
+      ["SELECT * FROM t /*!FOR/**/SHARE*/", "mysql"],
+      ["SELECT * FROM t PARTITION (p0) /*! FOR -- x\n SHARE */", "mysql"],
+    ] as const) {
+      expect(approvableRead(sql, dialect), sql).toBe(false);
     }
   });
 
@@ -290,13 +309,46 @@ describe("classifyQuery", () => {
     }
   });
 
-  it("never lets a string swallow a MySQL or MariaDB executable comment", () => {
+  it("never lets a string or a version number hide a write in an executable comment", () => {
     for (const [sql, dialect] of [
       ["SELECT '/*', 1 /*! INTO OUTFILE '/tmp/x' */", "mysql"],
-      ["SELECT '--' /*!40000 INTO OUTFILE '/tmp/x' */", "mysql"],
+      ["SELECT '-- ' /*!40000 INTO OUTFILE '/tmp/x' */", "mysql"],
       ["SELECT * FROM t /*M! INTO OUTFILE '/tmp/x' */", "mariadb"],
+      ["SELECT 1 /*!50000INTO OUTFILE '/tmp/x'*/", "mysql"],
+      ["SELECT 1 /*M!100000INTO OUTFILE '/tmp/x'*/", "mariadb"],
     ] as const) {
-      expect(classifyQuery(sql, dialect).class, sql).toBe("destructive");
+      expect(classifyQuery(sql, dialect), sql).toEqual({
+        class: "destructive",
+        parseOk: true,
+        blocked: false,
+      });
+    }
+  });
+
+  // The parser drops the executable body, so its `;` went unseen: SET, PREPARE and EXECUTE are
+  // no modifying keyword, and the hex below is DROP TABLE t.
+  it("blocks a second statement inside a MySQL or MariaDB executable comment", () => {
+    const body = "; SET @q = 0x44524F50205441424C452074; PREPARE s FROM @q; EXECUTE s -- ";
+    for (const [sql, dialect] of [
+      [`SELECT 1 /*!${body}*/`, "mysql"],
+      [`SELECT 1 /*M!${body}*/`, "mariadb"],
+    ] as const) {
+      expect(classifyQuery(sql, dialect).blocked, sql).toBe(true);
+    }
+    const hint = classifyQuery("SELECT /*!40001 SQL_NO_CACHE */ * FROM t;", "mysql");
+    expect(hint).toEqual({ class: "read", parseOk: true, blocked: false });
+  });
+
+  // Every render of the queue classifies each row; a comment-blanking scan that restarted at
+  // each unclosed `/*` took about a second on 100k characters, the submission cap.
+  it("classifies adversarial comment openers in linear time", () => {
+    for (const [sql, dialect] of [
+      [`SELECT '--${"/*a".repeat(33_000)}'`, "mysql"],
+      [`SELECT 1 FROM t PARTITION (p0) ${"/* ".repeat(33_000)}`, "mysql"],
+    ] as const) {
+      const start = performance.now();
+      classifyQuery(sql, dialect);
+      expect(performance.now() - start, `${sql.length} chars`).toBeLessThan(300);
     }
   });
 

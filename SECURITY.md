@@ -54,7 +54,8 @@ Two classifiers agree on the read / write / destructive classes:
   that runs SQL. It parses each query in the connection's dialect with `node-sql-parser`,
   escalates the class on any embedded modifying node (a CTE, a subquery, `SELECT ... INTO`,
   `EXPLAIN ANALYZE` of a write, a locking read), and fails closed to **destructive** when a
-  parse fails or a statement is unrecognized.
+  parse fails or a statement is unrecognized. An `EXPLAIN` whose options hold a comment, a
+  quoted or an escaped name is taken as `EXPLAIN ANALYZE`, since either can hide one.
 - **A failed parse raises the class; it does not block the query.** `node-sql-parser` knows
   no `DROP DATABASE`, `VACUUM`, or `ALTER SYSTEM`, and blocking them outright made the
   archetypal destructive statement unapprovable in the very mode built to gate it. Such a
@@ -75,8 +76,8 @@ statement. The server preflight applies the same rule to every statement: past t
 comments it can delimit, a `;` inside a string or a comment is refused too.
 
 **Where the parser and the engine end a comment differently.** `node-sql-parser` ends a
-`--` or `#` comment at a lone carriage return, where MySQL and SQLite run on to the line
-feed, and reads MySQL's `--1` as a comment where MySQL reads minus minus one. Its tree is
+`--` comment, and MySQL's `#` one, at a lone carriage return, where MySQL and SQLite run on
+to the line feed, and reads MySQL's `--1` as a comment where MySQL reads minus minus one. Its tree is
 then not the statement the engine runs. A carriage return not followed by a line feed, or on
 MySQL and MariaDB a `--` followed by any character above U+0020, therefore makes the
 statement unread and destructive wherever it appears, strings and comments included (on
@@ -87,7 +88,7 @@ blocked. This is a stopgap until these engines are read by their own grammar.
 and MariaDB also runs `/*M! ... */`, unlike an ordinary comment. Both classifiers keep that
 body when scanning, and the plugin never lets a modifying keyword hidden inside such a
 comment ride in under a read verdict; it escalates to destructive so a human must arm and
-confirm it explicitly.
+confirm it explicitly. A `;` inside one starts a second statement, so it blocks.
 
 **Trojan-source text.** Unicode bidirectional overrides and other invisible formatting
 characters can make submitted SQL render in an order the reviewer never approved. The

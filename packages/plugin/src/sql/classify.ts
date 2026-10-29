@@ -110,9 +110,15 @@ export function stripExplain(sql: string): { inner: string; analyze: boolean } |
   let rest = sql.slice(lead[0].length);
   // Postgres accepts ANALYSE as well as ANALYZE; miss it and an EXPLAIN that actually
   // runs a DELETE would read as a harmless plan. Match both, always fail toward "runs".
+  // A comment after the options, or a quoted or escaped option name (U&"\0061nalyze"), can
+  // spell ANALYZE out of these regexes' sight: count it as one.
+  const hidden = (options: string, after: string) =>
+    /[^\w\s,]/.test(options) || /^\s*(?:\/\*|--|#)/.test(after);
   const paren = /^\s*\(([^)]*)\)/.exec(rest);
   if (paren) {
-    return { inner: rest.slice(paren[0].length).trim(), analyze: /\banaly[sz]e\b/i.test(paren[1]) };
+    const after = rest.slice(paren[0].length);
+    const analyze = /\banaly[sz]e\b/i.test(paren[1]) || hidden(paren[1], after);
+    return { inner: after.trim(), analyze };
   }
   let analyze = false;
   const opt = /^\s*(analy[sz]e|verbose)\b/i;
@@ -124,7 +130,7 @@ export function stripExplain(sql: string): { inner: string; analyze: boolean } |
     rest = rest.slice(m[0].length);
     m = opt.exec(rest);
   }
-  return { inner: rest.trim(), analyze };
+  return { inner: rest.trim(), analyze: analyze || hidden("", rest) };
 }
 
 // The plugin is the only component that runs SQL, so the risk gate lives here: a
@@ -180,19 +186,28 @@ export function classifyQuery(sql: string, dialect = "postgresql"): RiskVerdict 
   if (rank(cls) < rank("destructive") && executableCommentModifies(sql)) {
     cls = "destructive";
   }
+  // Nor a `;` in that dropped body: it starts a second statement.
+  if (/\/\*M?!/.test(sql) && fallback(sql).blocked) {
+    return { class: "destructive", parseOk: true, blocked: true };
+  }
   return { class: cls, parseOk: true, blocked: false };
 }
 
 // True when the SQL carries a MySQL or MariaDB executable comment (/*! or /*M!) and a
-// data-modifying keyword. Tested as written: stripping comments without seeing strings let
-// a '/*' inside a string swallow the executable body.
+// data-modifying keyword. Not stripped: stripping comments without seeing strings let a '/*'
+// inside a string swallow the body. The blanked view splits /*!50000INTO at the version.
 function executableCommentModifies(sql: string): boolean {
-  return /\/\*M?!/.test(sql) && MODIFY_KEYWORDS.test(sql);
+  return /\/\*M?!/.test(sql) && matches(MODIFY_KEYWORDS, sql);
 }
 
-// Blanking comments can only add an escalation match (FOR/**/SHARE), never clear one.
+// The text as written, or with ordinary comments and executable markers blanked so the tokens
+// they separate meet (FOR/**/SHARE); an executable body stays, the engine runs it. A comment
+// left open ends at the end of the text, which keeps the scan linear on many unclosed `/*`.
 function matches(re: RegExp, sql: string): boolean {
-  return re.test(sql) || re.test(sql.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/--[^\r\n]*/g, " "));
+  const blanked = sql
+    .replace(/\/\*(?!M?!)[\s\S]*?(?:\*\/|$)/g, " ")
+    .replace(/--[^\r\n]*|\/\*M?!\d*|\*\//g, " ");
+  return re.test(sql) || re.test(blanked);
 }
 
 // Parser gaps fall back to text: reject empty/multi, a leading SELECT/WITH with no

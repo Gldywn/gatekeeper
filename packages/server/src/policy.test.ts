@@ -65,6 +65,7 @@ describe("classifyRisk", () => {
       "SELECT 1--1; DROP TABLE t",
       "SELECT 1 -- a; b",
       "SELECT 1; -- end",
+      "SELECT 1 /*M!; SET @q = 1 */",
     ]) {
       expect(classifyRisk(sql).ok, sql).toBe(false);
     }
@@ -82,5 +83,14 @@ describe("classifyRisk", () => {
     ]) {
       expect(classifyRisk(sql), sql).toEqual({ class: "destructive", ok: true });
     }
+  });
+
+  // Each submission runs this; a comment-blanking scan that restarted at each unclosed `/*`
+  // took over a second on 100k characters, the submission cap.
+  it("classifies adversarial comment openers in linear time", () => {
+    const sql = `SELECT 1 ${"/* ".repeat(33_000)}`;
+    const start = performance.now();
+    classifyRisk(sql);
+    expect(performance.now() - start).toBeLessThan(300);
   });
 });
