@@ -1157,11 +1157,6 @@ label.qs-row {
   height: 15px;
 }
 
-.queue {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s4);
-}
 .card {
   border-radius: var(--r);
   background: var(--surface);
@@ -5147,8 +5142,10 @@ p.auto-message[data-tone="busy"] {
   background: none;
   box-shadow: none;
 }
+/* #queue stays a plain block: as a flex or grid box it would sit beside the floated close for its
+   whole height, and every block of the card would lose the close's width. */
 #queue .pd-who {
-  margin: 0 0 8px;
+  margin: 0 0 24px;
 }
 #queue .pd-who .harness-badge {
   width: 15px;
