@@ -763,6 +763,13 @@ describe("no false alert on bounded queries", () => {
         indexed,
       ).lines,
     ).toEqual(["Reads every row of `t` without a `WHERE` clause"]);
+    // A small LIMIT stops a join of streaming inputs early, cross products included.
+    expect(
+      check(
+        "SELECT * FROM (SELECT * FROM (SELECT * FROM public.a) aa CROSS JOIN (SELECT * FROM public.b) bb) y LIMIT 10",
+        big,
+      ).lines,
+    ).toEqual([]);
     // A write runs in full whatever reads its rows.
     expect(
       check("WITH d AS (DELETE FROM public.t RETURNING id) SELECT * FROM d WHERE false").lines,

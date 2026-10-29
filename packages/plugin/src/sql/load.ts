@@ -153,6 +153,8 @@ function boundedBlocks(plan: LoadPlan): Set<Block> {
   const writes = new Set(plan.writes.map((w) => w.block));
   const reached = new Map<Block, Set<Bound>>();
   const work: [Block, Bound][] = [];
+  // ponytail: no index order is followed below the block that sorts, and a CTE used twice stays
+  // read when every use is empty; both alert where PostgreSQL may read little.
   const reach = (inner: Block, bound: Bound) => {
     if (writes.has(inner) || (bound === "filter" && !inner.filterable)) return;
     if (bound === "limit" && !inner.streams) {
@@ -176,10 +178,11 @@ function boundedBlocks(plan: LoadPlan): Set<Block> {
       }
     }
   }
-  // A filter or LIMIT reaches every source only when they form one joined group.
+  // A filter reaches every source only when they form one joined group; a LIMIT stops early
+  // through any join, as the preview rule already holds.
   for (let next = work.pop(); next; next = work.pop()) {
     const [b, bound] = next;
-    if (bound !== "empty" && usage(b, null).groups.length !== 1) continue;
+    if (bound === "filter" && usage(b, null).groups.length !== 1) continue;
     for (const s of b.sources) for (const inner of s.inner ?? []) reach(inner, bound);
   }
   return new Set(reached.keys());
