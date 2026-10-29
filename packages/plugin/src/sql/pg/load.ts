@@ -270,6 +270,14 @@ function limitParts(select: Node): { count?: number; offset: boolean; skip: numb
   return { count, offset, skip: offset ? (integer(select.limitOffset) ?? Number.NaN) : 0 };
 }
 
+// The first ORDER BY key, when it is a plain column.
+function orderColumn(select: Node): Block["ordered"] {
+  const orders = list(select.sortClause);
+  const sort = node(orders[0]) && node(orders[0].SortBy) ? orders[0].SortBy : null;
+  const refs = sort && node(sort.node) && node(sort.node.ColumnRef) ? columnRefs(sort.node) : [];
+  return refs.length === 1 ? { table: refs[0].table, columns: [refs[0].column] } : undefined;
+}
+
 function indexOrder(
   select: Node,
   b: Block,
@@ -284,13 +292,10 @@ function indexOrder(
   )
     return undefined;
   const orders = list(select.sortClause);
-  const sort = node(orders[0]) && node(orders[0].SortBy) ? orders[0].SortBy : null;
-  const first = sort && node(sort.node) && node(sort.node.ColumnRef) ? columnRefs(sort.node) : [];
-  if (first.length === 1) {
+  const first = orderColumn(select);
+  if (first) {
     const small = count !== undefined && Number.isInteger(count) && count + skip <= PREVIEW_LIMIT;
-    return small && !aggregates(select.targetList)
-      ? { table: first[0].table, columns: [first[0].column] }
-      : undefined;
+    return small && !aggregates(select.targetList) ? first : undefined;
   }
   const targets = list(select.targetList);
   if (orders.length || b.sources.length !== 1 || skip || !targets.length) return undefined;
@@ -438,6 +443,7 @@ class Walker {
       const tops = this.statement(query, scope, depth + 1);
       // An outer filter reaches the body only when PostgreSQL inlines the CTE; otherwise the
       // body runs in full, so the reference exposes none of its blocks.
+      // ponytail: a volatile function also stops the inlining; telling one needs the catalog.
       const inlined =
         !recursive &&
         (materialized === "CTEMaterializeNever" ||
@@ -549,7 +555,8 @@ class Walker {
       empty: conjuncts(where).some(contradiction),
       limited: false,
       preview: false,
-      passes: true,
+      filterable: true,
+      streams: true,
       ...extra,
     };
     this.blocks.push(block);
@@ -583,8 +590,16 @@ class Walker {
           : [],
       );
       this.nested([s.sortClause, s.limitCount, s.limitOffset], ctes, depth);
-      // A filter reaches each side, unless the operation's own LIMIT stands in between.
-      return s.limitCount == null && s.limitOffset == null ? sides : [];
+      // The operation's own LIMIT stops a filter on its rows, and removing duplicates, sorting or
+      // skipping rows needs every side in full before an enclosing LIMIT can stop.
+      const { count, offset } = limitParts(s);
+      const dedups = s.op !== "SETOP_UNION" || s.all !== true;
+      for (const side of sides) {
+        if (count !== undefined || offset) side.filterable = false;
+        if (dedups || offset || list(s.sortClause).length) side.streams = false;
+        side.ordered = undefined;
+      }
+      return sides;
     }
     // A VALUES list reads no table, only the statements its rows may hold.
     if (list(s.valuesLists).length) {
@@ -593,15 +608,18 @@ class Walker {
     }
     const from = list(s.fromClause);
     const { count, offset, skip } = limitParts(s);
+    const grouped =
+      list(s.groupClause).length > 0 ||
+      s.havingClause != null ||
+      list(s.distinctClause).length > 0 ||
+      aggregates(s.targetList);
+    const sorted = list(s.sortClause).length > 0;
     // A small LIMIT with no WHERE, order or aggregate lets PostgreSQL stop early, joins included.
     const preview =
       from.length > 0 &&
       (s.whereClause == null || tautology(s.whereClause)) &&
-      !list(s.groupClause).length &&
-      s.havingClause == null &&
-      !list(s.sortClause).length &&
-      !list(s.distinctClause).length &&
-      !aggregates(s.targetList) &&
+      !grouped &&
+      !sorted &&
       !offset &&
       count !== undefined &&
       Number.isInteger(count) &&
@@ -610,15 +628,11 @@ class Walker {
     const block = this.block(from, s.whereClause, ctes, depth, {
       limited: count !== undefined,
       preview,
-      passes:
-        !list(s.groupClause).length &&
-        s.havingClause == null &&
-        !list(s.distinctClause).length &&
-        !aggregates(s.targetList) &&
-        !offset &&
-        count === undefined,
+      filterable: !grouped && !offset && count === undefined,
+      streams: !grouped && !offset && !sorted,
     });
     block.indexOrder = indexOrder(s, block, count, skip);
+    if (!grouped && !offset && sorted && block.noWhere) block.ordered = orderColumn(s);
     this.nested(
       [s.targetList, s.groupClause, s.havingClause, s.sortClause, s.limitCount, s.limitOffset],
       ctes,
@@ -630,7 +644,8 @@ class Walker {
   private write(op: Write["op"], s: Node, ctes: Ctes, depth: number): Block {
     const others = list(op === "update" ? s.fromClause : s.usingClause);
     const block = this.block([{ RangeVar: s.relation }, ...others], s.whereClause, ctes, depth, {
-      passes: false,
+      filterable: false,
+      streams: false,
     });
     this.nested([s.targetList, s.returningList], ctes, depth);
     this.writes.push({ op, target: 0, block });

@@ -744,6 +744,31 @@ describe("no false alert on bounded queries", () => {
     ).toEqual([]);
   });
 
+  it("lets each bound through only where PostgreSQL carries it", () => {
+    const indexed = facts({
+      "public.t": { rows: BIG_ROWS, leading: new Set(["id", "created_at"]) },
+    });
+    // An enclosing LIMIT stops at a plain inner LIMIT; WHERE FALSE runs nothing below it.
+    for (const sql of [
+      "SELECT * FROM (SELECT * FROM public.t LIMIT 10000) y LIMIT 10",
+      "SELECT * FROM (SELECT count(*) AS n FROM public.t) y WHERE false",
+      "SELECT * FROM (SELECT * FROM public.t LIMIT 10000) y WHERE false",
+      "WITH r AS (SELECT * FROM public.t ORDER BY created_at) SELECT * FROM (SELECT * FROM r) y LIMIT 10",
+    ])
+      expect(check(sql, indexed).lines, sql).toEqual([]);
+    // Without an index on the order, the first rows need the whole input sorted.
+    expect(
+      check(
+        "WITH r AS (SELECT * FROM public.t ORDER BY x) SELECT * FROM (SELECT * FROM r) y LIMIT 10",
+        indexed,
+      ).lines,
+    ).toEqual(["Reads every row of `t` without a `WHERE` clause"]);
+    // A write runs in full whatever reads its rows.
+    expect(
+      check("WITH d AS (DELETE FROM public.t RETURNING id) SELECT * FROM d WHERE false").lines,
+    ).toEqual(["DELETE without WHERE removes every row of `t`"]);
+  });
+
   it("bounds each side of a set operation by its own LIMIT only", () => {
     expect(
       check(

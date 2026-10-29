@@ -306,7 +306,8 @@ class Walker {
       empty: conjuncts(where).some(contradiction),
       limited: false,
       preview: false,
-      passes: true,
+      filterable: true,
+      streams: true,
       ...extra,
     };
     this.blocks.push(block);
@@ -331,6 +332,11 @@ class Walker {
     const branch = ast._next != null || ast.set_op != null;
     const from = Array.isArray(ast.from) ? ast.from : [];
     const { count, offset, skip } = limitParts(ast.limit);
+    const grouped =
+      ast.groupby != null ||
+      ast.having != null ||
+      distinct(ast.distinct) ||
+      aggregates(ast.columns);
     // A small LIMIT with no WHERE, order or aggregate lets PostgreSQL stop early, joins included.
     const preview =
       !branch &&
@@ -349,13 +355,8 @@ class Walker {
     const block = this.block(from, ast.where, ctes, depth, {
       limited: count !== undefined,
       preview,
-      passes:
-        ast.groupby == null &&
-        ast.having == null &&
-        !distinct(ast.distinct) &&
-        !aggregates(ast.columns) &&
-        !offset &&
-        count === undefined,
+      filterable: !grouped && !offset && count === undefined,
+      streams: !grouped && !offset && ast.orderby == null,
     });
     if (!branch) block.indexOrder = indexOrder(ast, block, count, skip);
     this.nested([ast.columns, ast.having, ast.orderby], ctes, depth);
@@ -379,7 +380,10 @@ class Walker {
       );
     }
     if (!items.length || target < 0) throw new Incomplete();
-    const block = this.block(items, ast.where, ctes, depth, { passes: false });
+    const block = this.block(items, ast.where, ctes, depth, {
+      filterable: false,
+      streams: false,
+    });
     this.nested([ast.set, ast.returning], ctes, depth);
     this.writes.push({ op, target, block });
   }

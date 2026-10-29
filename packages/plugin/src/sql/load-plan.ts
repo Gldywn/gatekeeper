@@ -48,10 +48,14 @@ export interface Block {
   empty: boolean;
   limited: boolean;
   preview: boolean;
-  // A filter or LIMIT on this block's rows bounds what it reads. False when it must consume its
-  // whole input first (an aggregate, a window, GROUP BY, DISTINCT, its own LIMIT) or always
-  // runs in full (a write).
-  passes: boolean;
+  // A filter on this block's rows reaches what it reads: not past an aggregate, a window,
+  // GROUP BY, DISTINCT or its own LIMIT. A write runs in full whatever reads its rows.
+  filterable: boolean;
+  // An enclosing small LIMIT stops it early: not past those either, nor an ORDER BY or OFFSET.
+  streams: boolean;
+  // The column it is ordered by, when only that order keeps it from streaming: an index leading
+  // on it lets the enclosing LIMIT stop early, which only the catalog facts can tell.
+  ordered?: { table: string | null; columns: string[] };
   // A source whose columns, if each leads an index, let PostgreSQL answer from a few index
   // entries: the ORDER BY of a small LIMIT, or every min/max argument.
   indexOrder?: { table: string | null; columns: string[] };

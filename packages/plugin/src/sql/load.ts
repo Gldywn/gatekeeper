@@ -145,6 +145,46 @@ function usage(block: Block, facts: Facts | null): Usage {
   return { filtered, columns, ambiguous, groups: [...groups.values()] };
 }
 
+type Bound = "empty" | "filter" | "limit";
+
+// PostgreSQL runs nothing under an empty query, pushes a filter down, or stops early at a small
+// LIMIT, so a block one of these reaches is no full read. A write runs in full regardless.
+function boundedBlocks(plan: LoadPlan): Set<Block> {
+  const writes = new Set(plan.writes.map((w) => w.block));
+  const reached = new Map<Block, Set<Bound>>();
+  const work: [Block, Bound][] = [];
+  const reach = (inner: Block, bound: Bound) => {
+    if (writes.has(inner) || (bound === "filter" && !inner.filterable)) return;
+    if (bound === "limit" && !inner.streams) {
+      // Judged on the catalog facts, as a read in index order under that LIMIT.
+      if (inner.ordered) inner.indexOrder ??= inner.ordered;
+      return;
+    }
+    const bounds = reached.get(inner) ?? new Set<Bound>();
+    if (bounds.has(bound)) return;
+    reached.set(inner, bounds.add(bound));
+    work.push([inner, bound]);
+  };
+  for (const b of plan.blocks) {
+    const u = usage(b, null);
+    for (const [i, s] of b.sources.entries()) {
+      const group = u.groups.find((g) => g.includes(i)) ?? [i];
+      for (const inner of s.inner ?? []) {
+        if (b.empty) reach(inner, "empty");
+        if (group.some((j) => u.filtered[j])) reach(inner, "filter");
+        if (b.preview) reach(inner, "limit");
+      }
+    }
+  }
+  // A filter or LIMIT reaches every source only when they form one joined group.
+  for (let next = work.pop(); next; next = work.pop()) {
+    const [b, bound] = next;
+    if (bound !== "empty" && usage(b, null).groups.length !== 1) continue;
+    for (const s of b.sources) for (const inner of s.inner ?? []) reach(inner, bound);
+  }
+  return new Set(reached.keys());
+}
+
 // Reads the SQL text only, through the connection's own parser. Never throws: what it cannot
 // read leaves covered false.
 export function planLoad(sql: string, databaseType: string): LoadPlan {
@@ -160,24 +200,7 @@ export function planLoad(sql: string, databaseType: string): LoadPlan {
   for (const l of plan.locks) if (l.rel) seen.set(relKey(l.rel), l.rel);
   plan.relations = [...seen.values()];
   if (plan.relations.length > MAX_RELATIONS) plan.covered = false;
-  // An inner block the enclosing query filters, previews or empties is not read in full:
-  // PostgreSQL pushes the filter down or stops early.
-  for (const b of plan.blocks) {
-    const u = usage(b, null);
-    for (const [i, s] of b.sources.entries()) {
-      const group = u.groups.find((g) => g.includes(i)) ?? [i];
-      const bounded = b.empty || group.some((j) => u.filtered[j]);
-      for (const inner of s.inner ?? [])
-        if ((bounded || b.preview) && inner.passes) plan.dependent.add(inner);
-    }
-  }
-  // A bound goes on into what a bounded block reads when its sources form one joined group, so
-  // the bound reaches all of them, and only into a block that lets it through.
-  for (const b of plan.dependent) {
-    if (usage(b, null).groups.length !== 1) continue;
-    for (const s of b.sources)
-      for (const inner of s.inner ?? []) if (inner.passes) plan.dependent.add(inner);
-  }
+  plan.dependent = boundedBlocks(plan);
   // Computed before any catalog fact exists, so a hint never tells the agent about the data.
   plan.hints = hintsFor(plan);
   return plan;
