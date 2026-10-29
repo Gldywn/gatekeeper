@@ -93,30 +93,63 @@ function constant(expr: unknown): Node | null {
   return node(expr) && node(expr.A_Const) ? expr.A_Const : null;
 }
 
-function equality(expr: unknown): [Node | null, Node | null] | null {
-  const e = node(expr) ? expr.A_Expr : null;
-  if (!node(e) || e.kind !== "AEXPR_OP" || strings(e.name).join(".") !== "=") return null;
-  return [constant(e.lexpr), constant(e.rexpr)];
+// A constant other than NULL, bare or cast: it names no column and calls no function.
+function constantExpr(expr: unknown): Node | null {
+  if (!node(expr)) return null;
+  if (node(expr.A_Const)) return expr.A_Const.isnull === true ? null : expr;
+  return node(expr.TypeCast) && constantExpr(expr.TypeCast.arg) ? expr : null;
 }
 
-// WHERE TRUE, or one constant compared with itself: restricts nothing.
+function constantSides(expr: unknown): [Node, Node] | null {
+  const e = node(expr) ? expr.A_Expr : null;
+  if (!node(e) || e.kind !== "AEXPR_OP" || strings(e.name).join(".") !== "=") return null;
+  const [a, b] = [constantExpr(e.lexpr), constantExpr(e.rexpr)];
+  return a && b ? [a, b] : null;
+}
+
+const spelled = (n: Node) =>
+  JSON.stringify(n, (key, value) => (key === "location" ? undefined : value));
+
+// An untyped number's exact value in one spelling, so 1.0 and 1.00 read alike. protobuf drops a
+// zero integer's value; an exponent stays unknown.
+function numeric(n: Node): string | null {
+  const c = constant(n);
+  const text = node(c?.ival) ? String(c.ival.ival ?? 0) : node(c?.fval) ? String(c.fval.fval) : "";
+  const m = /^(-?)(\d*)(?:\.(\d*))?$/.exec(text);
+  if (!text || !m) return null;
+  const whole = m[2].replace(/^0+/, "");
+  const fraction = (m[3] ?? "").replace(/0+$/, "");
+  if (!whole && !fraction) return "0";
+  return `${m[1]}${whole || "0"}${fraction ? `.${fraction}` : ""}`;
+}
+
+// An untyped string or boolean constant's value, typed so 't' and TRUE never compare.
+function plain(n: Node): string | null {
+  const c = constant(n);
+  if (c && node(c.sval)) return `s:${String(c.sval.sval ?? "")}`;
+  return c && node(c.boolval) ? `b:${c.boolval.boolval === true}` : null;
+}
+
+// WHERE TRUE, or a constant compared with itself (1 = 1, 1.0 = 1.00): restricts nothing.
 function tautology(expr: unknown): boolean {
   const c = constant(expr);
   if (c) return node(c.boolval) && c.boolval.boolval === true;
-  const [a, b] = equality(expr) ?? [];
-  const bare = (k: Node) => JSON.stringify({ ...k, location: undefined });
-  return !!a && !!b && a.isnull !== true && bare(a) === bare(b);
+  const sides = constantSides(expr);
+  if (!sides) return false;
+  const [a, b] = sides;
+  return spelled(a) === spelled(b) || (numeric(a) !== null && numeric(a) === numeric(b));
 }
 
-// WHERE FALSE, or two different integers compared: reads nothing. Other constants that print
-// differently can still be equal (1.0 and 1.00), so they prove nothing.
+// WHERE FALSE, or two untyped constants of one kind with different values: reads nothing. A
+// cast or two kinds ('1' = 1) can still be equal, so it proves nothing.
 function contradiction(expr: unknown): boolean {
   const c = constant(expr);
   if (c) return node(c.boolval) && c.boolval.boolval !== true;
-  const [a, b] = equality(expr) ?? [];
-  // protobuf drops a zero integer's value.
-  const int = (k: Node | null | undefined) => (node(k?.ival) ? Number(k.ival.ival ?? 0) : null);
-  return int(a) !== null && int(b) !== null && int(a) !== int(b);
+  const sides = constantSides(expr);
+  if (!sides) return false;
+  const [a, b] = sides;
+  const differ = (x: string | null, y: string | null) => x !== null && y !== null && x !== y;
+  return differ(numeric(a), numeric(b)) || differ(plain(a), plain(b));
 }
 
 function integer(expr: unknown): number | undefined {
@@ -126,7 +159,7 @@ function integer(expr: unknown): number | undefined {
 
 // ponytail: built-in aggregates by name (PostgreSQL 18, tables 9.62 to 9.65), so a custom
 // aggregate called like a plain function is missed; resolving the call in the catalog would not.
-// It only shapes the load check, never Auto eligibility.
+// It decides only the load check's preview rule, whose alert can hold Auto, never what Auto reads.
 const AGGREGATES = new Set([
   "any_value",
   "array_agg",
@@ -224,10 +257,17 @@ function minMaxColumn(target: unknown): string | null {
   return refs.length === 1 ? refs[0].column : null;
 }
 
+// LIMIT ALL is no limit; FETCH ... WITH TIES returns every row tied with the last, so its count
+// caps nothing.
 function limitParts(select: Node): { count?: number; offset: boolean; skip: number } {
   const all = constant(select.limitCount)?.isnull === true;
+  const ties = select.limitOption === "LIMIT_OPTION_WITH_TIES";
   const count =
-    select.limitCount == null || all ? undefined : (integer(select.limitCount) ?? Number.NaN);
+    select.limitCount == null || all
+      ? undefined
+      : ties
+        ? Number.NaN
+        : (integer(select.limitCount) ?? Number.NaN);
   const offset = select.limitOffset != null;
   return { count, offset, skip: offset ? (integer(select.limitOffset) ?? Number.NaN) : 0 };
 }
@@ -276,14 +316,18 @@ class Walker {
   readonly locks: Lock[] = [];
   covered = true;
 
-  statement(wrapped: unknown, ctes: Ctes, depth: number): void {
+  private guard(depth: number): void {
     if (depth > MAX_DEPTH || this.blocks.length > MAX_BLOCKS) throw new Incomplete();
+  }
+
+  statement(wrapped: unknown, ctes: Ctes, depth: number): void {
+    this.guard(depth);
     const [kind, s] = only(wrapped) ?? ["", null];
     if (!s) return;
     const scope = this.ctes(s.withClause, ctes, depth);
     switch (kind) {
       case "SelectStmt":
-        this.select(s, scope, depth, false);
+        this.select(s, scope, depth);
         return;
       case "UpdateStmt":
       case "DeleteStmt":
@@ -398,9 +442,16 @@ class Walker {
         sources.push(this.source(kind, body, sources.length, joinedBy, using, ctes, depth));
         return;
       }
-      // A join's own alias renames what it exposes, and a join on the right nests one group
-      // inside another: neither maps onto the flat list of sources.
-      if (body.alias != null || only(body.rarg)?.[0] === "JoinExpr") this.covered = false;
+      // An aliased join hides the names inside it, as a derived table does, so it is read as one:
+      // a block of its own the enclosing query filters or not through the alias.
+      if (node(body.alias)) {
+        const inner = this.block([{ JoinExpr: { ...body, alias: undefined } }], null, ctes, depth);
+        const alias = aliasOf(body) ?? `#${sources.length}`;
+        sources.push({ alias, joinedBy, using, inner: [inner] });
+        return;
+      }
+      // A join on the right nests one group inside another, which the flat list only approaches.
+      if (only(body.rarg)?.[0] === "JoinExpr") this.covered = false;
       add(body.larg, joinedBy, using);
       if (body.quals != null) ons.push(body.quals);
       if (body.isNatural === true) add(body.rarg, "using", []);
@@ -501,12 +552,13 @@ class Walker {
     for (const value of Object.values(expr)) this.nested(value, ctes, depth);
   }
 
-  // Each side of a set operation is read on its own: neither stops early or reads in index
-  // order for the operation's LIMIT.
-  private select(s: Node, ctes: Ctes, depth: number, branch: boolean): void {
+  // Each side of a set operation is read under its own ORDER BY and LIMIT, never the
+  // operation's, which apply to the combined rows.
+  private select(s: Node, ctes: Ctes, depth: number): void {
+    this.guard(depth);
     if (s.op !== "SETOP_NONE") {
       for (const side of [s.larg, s.rarg])
-        if (node(side)) this.select(side, this.ctes(side.withClause, ctes, depth), depth + 1, true);
+        if (node(side)) this.select(side, this.ctes(side.withClause, ctes, depth), depth + 1);
       this.nested([s.sortClause, s.limitCount, s.limitOffset], ctes, depth);
       return;
     }
@@ -519,7 +571,6 @@ class Walker {
     const { count, offset, skip } = limitParts(s);
     // A small LIMIT with no WHERE, order or aggregate lets PostgreSQL stop early, joins included.
     const preview =
-      !branch &&
       from.length > 0 &&
       (s.whereClause == null || tautology(s.whereClause)) &&
       !list(s.groupClause).length &&
@@ -536,7 +587,7 @@ class Walker {
       limited: count !== undefined,
       preview,
     });
-    if (!branch) block.indexOrder = indexOrder(s, block, count, skip);
+    block.indexOrder = indexOrder(s, block, count, skip);
     this.nested(
       [s.targetList, s.groupClause, s.havingClause, s.sortClause, s.limitCount, s.limitOffset],
       ctes,

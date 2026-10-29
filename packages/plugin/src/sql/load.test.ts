@@ -691,6 +691,48 @@ describe("no false alert on bounded queries", () => {
       expect(check(sql, big).lines).toEqual([]);
   });
 
+  it("reads two different constants of one kind as reading nothing, never a cast or two kinds", () => {
+    for (const sql of [
+      "SELECT * FROM public.t WHERE 1.5 = 2.5",
+      "SELECT * FROM public.t WHERE 'a' = 'b'",
+    ])
+      expect(check(sql, big).lines, sql).toEqual([]);
+    // PostgreSQL casts '1' to an integer: equal, so the table is read.
+    expect(check("SELECT * FROM public.t WHERE '1' = 1", big).lines).toHaveLength(1);
+  });
+
+  it("reads an aliased join as one source the enclosing query filters", () => {
+    expect(
+      check(
+        "SELECT * FROM (public.a JOIN public.b USING (id)) j, public.c WHERE j.id = c.id AND c.id = 1",
+        big,
+      ).lines,
+    ).toEqual([]);
+    expect(check("SELECT * FROM (public.a JOIN public.b USING (id)) j", big).lines).toEqual([
+      "Reads every row of `a` since no condition filters it",
+      "Reads every row of `b` since no condition filters it",
+    ]);
+  });
+
+  it("bounds each side of a set operation by its own LIMIT only", () => {
+    expect(
+      check(
+        "(SELECT id FROM public.a WHERE id = 1) UNION ALL (SELECT id FROM public.b LIMIT 10)",
+        big,
+      ).lines,
+    ).toEqual([]);
+    expect(
+      check("SELECT * FROM public.a UNION ALL (SELECT * FROM public.b LIMIT 10)", big).lines,
+    ).toEqual(["Reads every row of `a` without a `WHERE` clause"]);
+  });
+
+  it("stops at the traversal bounds, set operations included", () => {
+    const sql = Array.from({ length: 70 }, () => "SELECT id FROM public.t").join(" UNION ALL ");
+    const plan = planLoad(sql, "postgresql");
+    expect(plan.covered).toBe(false);
+    expect(plan.blocks.length).toBeLessThanOrEqual(65);
+  });
+
   it("reads TABLESAMPLE SYSTEM as a fraction of the pages, BERNOULLI as all of them", () => {
     expect(check("SELECT * FROM public.t TABLESAMPLE SYSTEM (1)", big).lines).toEqual([]);
     expect(check("SELECT * FROM public.t TABLESAMPLE BERNOULLI (1)", big).lines).toHaveLength(1);
@@ -851,6 +893,10 @@ describe("index-served reads", () => {
       "SELECT * FROM public.t ORDER BY id DESC LIMIT 20",
       "SELECT * FROM public.t ORDER BY id DESC LIMIT 20 OFFSET 20",
       "SELECT * FROM public.t WHERE TRUE ORDER BY id DESC LIMIT 20",
+      "SELECT * FROM public.t ORDER BY id DESC FETCH FIRST 20 ROWS ONLY",
+      "SELECT max(id) FROM public.t WHERE 1::integer = 1::integer",
+      "SELECT * FROM public.t WHERE 1::integer = 1::integer LIMIT 10",
+      "SELECT * FROM public.t WHERE 1.0 = 1.00 LIMIT 10",
       "SELECT max(id) FROM public.t",
       "SELECT max(id) FROM public.t WHERE 1 = 1",
       "SELECT min(id), max(id) FROM public.t",
@@ -873,6 +919,8 @@ describe("index-served reads", () => {
       "SELECT * FROM public.t ORDER BY id DESC LIMIT 20 OFFSET 5000",
       "SELECT max(id) OVER () FROM public.t",
       "SELECT max(id) FILTER (WHERE status = 'paid') FROM public.t",
+      // Ties with the tenth row come back too: ten caps nothing.
+      "SELECT * FROM public.t ORDER BY id FETCH FIRST 10 ROWS WITH TIES",
     ])
       expect(check(sql, g).lines).toHaveLength(1);
     const rls = facts({ "public.t": { rows: 41_000_000, rls: true } });
