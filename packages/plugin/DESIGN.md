@@ -174,7 +174,9 @@ first line, the tables, what the SQL marks, the SQL, then the decision.
 - **Tables**: an access matrix, one row per table, Read, Write and Delete columns. Delete is
   only for what removes data (DELETE, DROP, TRUNCATE); any other change is Write.
 - **Sensitive data**: a legend just above the SQL flagging only what the statement returns to
-  the agent, never a column it filters, joins or sorts on, nor a value it carries. Each category
+  the agent, never a column it filters, joins or sorts on, nor a value it carries. A JSON key
+  read in a filter counts when the same table column's document is returned unchanged, since
+  the key reaches the agent inside it (operator decision, 2026-10-29). Each category
   is written as it is marked in the query, with its count (Possible PII, Client data), then the
   outline help mark (`helpCircleIcon`, 12px, faint, its category's colour on hover and focus,
   centred one pixel below the line box, between the cap and lowercase middles). Hover or focus

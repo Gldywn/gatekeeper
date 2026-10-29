@@ -1137,3 +1137,115 @@ describe("analyzeOutput, round 2 of the cross-review", () => {
     ]);
   });
 });
+
+describe("analyzeOutput, keys read from a document returned whole", () => {
+  const users = { users: ["id", "profile"] };
+
+  it("adds them when the document is returned, never when only another column is", () => {
+    const sql = "SELECT profile FROM users WHERE profile->>'email' IS NOT NULL";
+    check([
+      ["postgresql", sql, null, ["profile", "email"], true],
+      ["postgresql", sql, users, ["profile", "email"], true],
+      [
+        "postgresql",
+        "SELECT id FROM users WHERE profile->>'email' IS NOT NULL",
+        users,
+        ["id"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT * FROM users WHERE profile->>'email' IS NOT NULL",
+        users,
+        ["id", "profile", "email"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT * FROM users WHERE profile->>'email' IS NOT NULL",
+        null,
+        ["email"],
+        false,
+      ],
+      [
+        "postgresql",
+        "SELECT u FROM users u WHERE u.profile->>'email' IS NOT NULL",
+        users,
+        ["u", "id", "profile", "email"],
+        true,
+      ],
+      [
+        "mysql",
+        "SELECT profile FROM users WHERE JSON_EXTRACT(profile, '$.email') IS NOT NULL",
+        null,
+        ["profile", "email"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT u.profile FROM users u JOIN contacts c ON c.mail = u.profile->>'email'",
+        null,
+        ["profile", "email"],
+        true,
+      ],
+    ]);
+  });
+
+  it("adds them only from the same table's column, never another table's of the same name", () => {
+    const live = { a: ["id", "profile"], b: ["id", "profile"] };
+    const other =
+      "SELECT a.profile FROM a JOIN b ON a.id = b.id WHERE b.profile->>'email' IS NOT NULL";
+    check([
+      ["postgresql", other, live, ["profile"], true],
+      ["postgresql", other, null, ["profile"], true],
+      [
+        "postgresql",
+        "SELECT a.profile FROM a JOIN b ON a.id = b.id WHERE a.profile->>'email' IS NOT NULL",
+        live,
+        ["profile", "email"],
+        true,
+      ],
+      // Two rows of one table hold documents of one column.
+      [
+        "postgresql",
+        "SELECT m.profile FROM users m JOIN users e ON e.manager_id = m.id WHERE e.profile->>'email' IS NOT NULL",
+        null,
+        ["profile", "email"],
+        true,
+      ],
+    ]);
+  });
+
+  it("follows the document through an unchanged alias, never through one that rebuilds it", () => {
+    check([
+      [
+        "postgresql",
+        "SELECT x.p FROM (SELECT profile AS p FROM users) x WHERE x.p->>'email' IS NOT NULL",
+        null,
+        ["p", "profile", "email"],
+        true,
+      ],
+      [
+        "postgresql",
+        "WITH c AS (SELECT profile FROM users WHERE profile->>'email' IS NOT NULL) SELECT profile FROM c",
+        users,
+        ["profile", "email"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT profile FROM a UNION ALL SELECT profile FROM b WHERE b.profile->>'email' IS NOT NULL",
+        null,
+        ["profile", "email"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT profile - 'email' AS p FROM users WHERE profile->>'email' IS NOT NULL",
+        users,
+        ["p", "profile"],
+        true,
+      ],
+    ]);
+  });
+});

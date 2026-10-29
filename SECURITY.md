@@ -278,7 +278,8 @@ itself is in neither the URL nor the prompt.
   trojan-source guards applied, and never include result rows.
 - Its PII and Client flags never query the connected database. Flags computed now describe
   what the statement returns to the agent, never a column it only filters on or a value it
-  carries. The plugin posts them with the decision as three booleans
+  carries. A JSON key read anywhere in the statement counts when the statement returns that
+  same table column's document unchanged, since the key reaches the agent inside it. The plugin posts them with the decision as three booleans
   (`policy_json.sensitivity`), never a table, column or value. When the output could not be
   fully traced, it records the flags it did find and records nothing if it found none, so the
   trail never stores an all-clear it could not vouch for. The third boolean, Value, is always false since literals
