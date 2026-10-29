@@ -284,6 +284,10 @@ describe("classifyQuery", () => {
       // MySQL runs the executable body, comments inside it included.
       ["SELECT * FROM t /*!FOR/**/SHARE*/", "mysql"],
       ["SELECT * FROM t PARTITION (p0) /*! FOR -- x\n SHARE */", "mysql"],
+      // And skips a MariaDB body or a newer version's; elsewhere /*! is an ordinary comment.
+      ["SELECT * FROM t FOR/*M! x */SHARE", "mysql"],
+      ["SELECT * FROM t FOR/*!99999 x*/SHARE", "mysql"],
+      ["SELECT * FROM t FOR/*!x*/SHARE", pg],
     ] as const) {
       expect(approvableRead(sql, dialect), sql).toBe(false);
     }
@@ -316,6 +320,9 @@ describe("classifyQuery", () => {
       ["SELECT * FROM t /*M! INTO OUTFILE '/tmp/x' */", "mariadb"],
       ["SELECT 1 /*!50000INTO OUTFILE '/tmp/x'*/", "mysql"],
       ["SELECT 1 /*M!100000INTO OUTFILE '/tmp/x'*/", "mariadb"],
+      // A '--' or '/*' in the string must not blank the body the version is glued to.
+      ["SELECT '-- ' /*!50000INTO OUTFILE '/tmp/x'*/", "mysql"],
+      ["SELECT '/*' /*M!100000INTO OUTFILE '/tmp/x'*/", "mariadb"],
     ] as const) {
       expect(classifyQuery(sql, dialect), sql).toEqual({
         class: "destructive",
@@ -399,14 +406,22 @@ describe("classifyQuery", () => {
     for (const sql of [
       "SELECT '\\' DROP TABLE t -- '",
       "SELECT 1 SHUTDOWN",
+      "SELECT 1SHUTDOWN",
+      "SELECT TOP 1SHUTDOWN",
+      "SELECT 0xSHUTDOWN",
       "SELECT * FROM t RECONFIGURE",
       "SELECT * FROM t CHECKPOINT",
+      "SELECT 1 SETUSER",
     ]) {
       expect(classifyQuery(sql, "transactsql"), sql).toEqual({
         class: "destructive",
         parseOk: false,
         blocked: false,
       });
+    }
+    // No EXPLAIN in SQL Server: it calls a procedure of that name and runs the rest.
+    for (const sql of ["EXPLAIN DROP TABLE t", "EXPLAIN SELECT 1 SELECT 2"]) {
+      expect(approvableRead(sql, "transactsql"), sql).toBe(false);
     }
     expect(classifyQuery("SELECT name FROM t WHERE id = 1", "transactsql").class).toBe("read");
   });

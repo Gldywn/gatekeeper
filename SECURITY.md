@@ -89,10 +89,12 @@ blocked. This is a stopgap until these engines are read by their own grammar.
 so the text check cannot count them: a SQL Server statement no parser read is never classed
 a read. T-SQL strings have no backslash escape, which `node-sql-parser`'s grammar assumes,
 so a SQL Server statement holding a backslash is unread and destructive too. The grammar also
-takes a one-word statement for an alias (`SELECT 1 SHUTDOWN`), so a SQL Server statement
-naming `SHUTDOWN`, `RECONFIGURE`, `CHECKPOINT`, `COMMIT`, `ROLLBACK` or `REVERT` anywhere, a
-string or a column name included, is unread too. SQL Server is not an officially tested
-engine.
+takes a one-word statement for an alias (`SELECT 1 SHUTDOWN`, `SELECT 1SHUTDOWN`), so a SQL
+Server statement naming `SHUTDOWN`, `RECONFIGURE`, `CHECKPOINT`, `COMMIT`, `ROLLBACK`,
+`REVERT` or `SETUSER` anywhere, a string, a column name or the end of a longer name included,
+is unread too. SQL Server has no `EXPLAIN` either: it calls a procedure of that name and runs
+what follows, so a SQL Server `EXPLAIN` is never taken for a plan. SQL Server is not an
+officially tested engine.
 
 **MySQL executable comments.** MySQL and MariaDB run the body of a `/*! ... */` comment,
 and MariaDB also runs `/*M! ... */`, unlike an ordinary comment. Both classifiers keep that

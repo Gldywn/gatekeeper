@@ -5,8 +5,8 @@ export type RiskClass = AccessMode;
 
 export interface RiskAssessment {
   class: RiskClass;
-  // false only when the statement is empty or multi-statement: those are never
-  // enqueued. A write/destructive is ok:true and forwarded; the human gate decides.
+  // false only when the statement is empty, multi-statement or holds a lone CR: those are
+  // never enqueued. A write/destructive is ok:true and forwarded; the human gate decides.
   ok: boolean;
   reason?: string;
 }
@@ -39,13 +39,15 @@ const EMBED_INTO = /\binto\b/i;
 const LEADING_COMMENTS =
   /^(?:\s+|--(?=[ \t\r\n]|$)[^\r\n]*(?:\r?\n|$)|\/\*(?!M?!)(?:(?!\/\*)[\s\S])*?\*\/)*/;
 
-// Same two views as the plugin's matches(): as written, or with ordinary comments and
-// executable markers blanked (DELETE/**/FROM), an open comment ending at the end of the text.
+// Same three views as the plugin's matches() (packages/plugin/src/sql/classify.ts): markers
+// spaced out, executable bodies kept, every comment dropped (DELETE/**/FROM); all linear.
 function matches(re: RegExp, sql: string): boolean {
-  const blanked = sql
+  const marked = sql.replace(/\/\*M?!\d*/g, " ");
+  const kept = sql
     .replace(/\/\*(?!M?!)[\s\S]*?(?:\*\/|$)/g, " ")
     .replace(/--[^\r\n]*|\/\*M?!\d*|\*\//g, " ");
-  return re.test(sql) || re.test(blanked);
+  const dropped = sql.replace(/\/\*[\s\S]*?(?:\*\/|$)/g, " ").replace(/--[^\r\n]*/g, " ");
+  return [marked, kept, dropped].some((view) => re.test(view));
 }
 
 // Advisory, regex-only risk classifier mirroring the plugin's classes. The plugin

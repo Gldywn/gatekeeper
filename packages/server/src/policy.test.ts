@@ -61,7 +61,6 @@ describe("classifyRisk", () => {
     for (const sql of [
       "SELECT '--'; FLUSH TABLES",
       "SELECT '/*'; DROP TABLE t; SELECT '*/'",
-      "SELECT 1 -- x\r; DROP TABLE t",
       "SELECT 1--1; DROP TABLE t",
       "SELECT 1 -- a; b",
       "SELECT 1; -- end",

@@ -68,9 +68,10 @@ const LONE_CR = /\r(?!\n)/;
 // `--` then any character above space: MySQL wants whitespace or a control character there.
 const MYSQL_DASHES = /--(?=[!-\u{10FFFF}])/u;
 // Its T-SQL grammar also takes \' for an escaped quote, where SQL Server ends the string, and
-// takes a one-word statement for an alias: SQL Server runs SELECT 1 SHUTDOWN as two.
+// takes a one-word statement for an alias: SQL Server runs SELECT 1 SHUTDOWN as two. No left
+// edge: the word can be glued to a number (1SHUTDOWN, 0xABSHUTDOWN).
 const TSQL_BACKSLASH = /\\/;
-const TSQL_ONE_WORD = /\b(?:shutdown|reconfigure|checkpoint|commit|rollback|revert)\b/i;
+const TSQL_ONE_WORD = /(?:shutdown|reconfigure|checkpoint|commit|rollback|revert|setuser)\b/i;
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
@@ -149,7 +150,8 @@ export function classifyQuery(sql: string, dialect = "postgresql"): RiskVerdict 
   ) {
     return { class: "destructive", parseOk: false, blocked: fallback(sql).blocked };
   }
-  const explain = stripExplain(sql);
+  // SQL Server has no EXPLAIN: it calls a procedure of that name and runs what follows.
+  const explain = dialect === "transactsql" ? null : stripExplain(sql);
   if (explain && explain.inner.length > 0) {
     // Nested EXPLAIN is invalid in every supported dialect; fail it closed rather than let
     // the plain-EXPLAIN downgrade below turn an inner EXPLAIN ANALYZE <modify> into a read.
@@ -211,14 +213,16 @@ function executableCommentModifies(sql: string): boolean {
   return /\/\*M?!/.test(sql) && matches(MODIFY_KEYWORDS, sql);
 }
 
-// The text as written, or with ordinary comments and executable markers blanked so the tokens
-// they separate meet (FOR/**/SHARE); an executable body stays, the engine runs it. A comment
-// left open ends at the end of the text, which keeps the scan linear on many unclosed `/*`.
+// A match in any view escalates: markers spaced out (/*!50000INTO), deleting nothing; executable
+// bodies kept as MySQL runs them; every comment dropped, as an engine skips /*M! or a gated
+// version. Comments become spaces (FOR/**/SHARE); one left open ends at the end, so it is linear.
 function matches(re: RegExp, sql: string): boolean {
-  const blanked = sql
+  const marked = sql.replace(/\/\*M?!\d*/g, " ");
+  const kept = sql
     .replace(/\/\*(?!M?!)[\s\S]*?(?:\*\/|$)/g, " ")
     .replace(/--[^\r\n]*|\/\*M?!\d*|\*\//g, " ");
-  return re.test(sql) || re.test(blanked);
+  const dropped = sql.replace(/\/\*[\s\S]*?(?:\*\/|$)/g, " ").replace(/--[^\r\n]*/g, " ");
+  return [marked, kept, dropped].some((view) => re.test(view));
 }
 
 // Parser gaps fall back to text: reject empty/multi, a leading SELECT/WITH with no
