@@ -1246,6 +1246,92 @@ describe("analyzeOutput, keys read from a document returned whole", () => {
         ["p", "profile"],
         true,
       ],
+      [
+        "postgresql",
+        "SELECT v.p FROM users u CROSS JOIN LATERAL (VALUES (u.profile)) v(p) WHERE u.profile->>'email' IS NOT NULL",
+        users,
+        ["p", "profile", "email"],
+        true,
+      ],
+      // A part of the document is not the document.
+      [
+        "postgresql",
+        "SELECT profile->'contact' AS c FROM users WHERE profile->>'ssn' IS NOT NULL",
+        users,
+        ["c", "profile", "contact"],
+        true,
+      ],
+    ]);
+  });
+
+  it("follows the document wrapped whole in a constructor or an aggregate", () => {
+    check([
+      [
+        "postgresql",
+        "SELECT jsonb_build_object('payload', profile) AS o FROM users WHERE profile->>'email' IS NOT NULL",
+        users,
+        ["o", "profile", "email"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT jsonb_agg(profile) FROM users WHERE profile->>'email' IS NOT NULL",
+        users,
+        ["jsonb_agg", "profile", "email"],
+        true,
+      ],
+    ]);
+  });
+
+  it("learns keys only from a read, never from a document the statement builds or edits", () => {
+    check([
+      [
+        "mysql",
+        "SELECT profile FROM users WHERE JSON_SET(profile, '$.note', 'email') IS NOT NULL",
+        users,
+        ["profile"],
+        true,
+      ],
+      [
+        "mysql",
+        "SELECT profile FROM users WHERE JSON_EXTRACT(profile, '$.email') IS NOT NULL",
+        users,
+        ["profile", "email"],
+        true,
+      ],
+    ]);
+  });
+
+  it("returns what a write put in a column, read against the row as it was", () => {
+    const live = { users: ["id", "profile", "backup"] };
+    const removed =
+      "UPDATE users SET profile = profile - 'email' WHERE profile->>'email' IS NOT NULL";
+    const copied = "UPDATE users SET profile = backup WHERE profile->>'email' IS NOT NULL";
+    check([
+      ["postgresql", `${removed} RETURNING profile`, live, ["profile"], true],
+      ["postgresql", `${removed} RETURNING new.profile`, live, ["profile"], true],
+      ["postgresql", `${removed} RETURNING old.profile`, live, ["profile", "email"], true],
+      ["postgresql", `${copied} RETURNING backup`, live, ["backup"], true],
+      ["postgresql", `${copied} RETURNING profile`, live, ["profile", "backup"], true],
+      [
+        "postgresql",
+        "INSERT INTO archive (memo) SELECT profile FROM users WHERE profile->>'email' IS NOT NULL ON CONFLICT (id) DO UPDATE SET other = EXCLUDED.memo RETURNING other",
+        { archive: ["id", "memo", "other"], users: ["id", "profile"] },
+        ["other", "memo", "profile", "email"],
+        true,
+      ],
+    ]);
+  });
+
+  it("keeps a key whose column cannot be told apart, as untraced", () => {
+    check([
+      [
+        "postgresql",
+        "SELECT a.profile FROM a JOIN b ON a.id = b.id WHERE profile->>'email' IS NOT NULL",
+        null,
+        ["profile", "email"],
+        false,
+      ],
     ]);
   });
 });

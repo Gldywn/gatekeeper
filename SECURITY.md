@@ -278,8 +278,12 @@ itself is in neither the URL nor the prompt.
   trojan-source guards applied, and never include result rows.
 - Its PII and Client flags never query the connected database. Flags computed now describe
   what the statement returns to the agent, never a column it only filters on or a value it
-  carries. A JSON key read anywhere in the statement counts when the statement returns that
-  same table column's document unchanged, since the key reaches the agent inside it. The plugin posts them with the decision as three booleans
+  carries. A JSON key read anywhere in the statement counts when the statement returns a
+  document of that same table column, unchanged or wrapped (`jsonb_agg(profile)`), since the
+  key may reach the agent inside it. A read on another row of that column counts too (a
+  self-join, a semijoin); a part of the document (`profile->'contact'`), a document edited
+  through a path (`JSON_SET`) or with a key removed does not. Tables are matched by the name as
+  written, not by catalog identity. The plugin posts them with the decision as three booleans
   (`policy_json.sensitivity`), never a table, column or value. When the output could not be
   fully traced, it records the flags it did find and records nothing if it found none, so the
   trail never stores an all-clear it could not vouch for. The third boolean, Value, is always false since literals

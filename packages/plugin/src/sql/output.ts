@@ -8,7 +8,6 @@ import {
   columnLabel,
   formatRef,
   isFunctionRelation,
-  isJsonFunction,
   isNode,
   JSON_OPERATORS,
   piiColumns,
@@ -41,6 +40,8 @@ export interface QueryOutput {
 interface Doc {
   keys: Set<string>;
   row?: Doc;
+  // Some key was read through a value that may hold another column instead.
+  uncertain?: boolean;
 }
 // One returned column. A `rest` slot stands for columns nobody could list: a table's own
 // ("pass", a column read through it keeps its name) or a function's or recursion's ("opaque").
@@ -128,8 +129,8 @@ const join = (...values: Value[]): Value => ({
   names: new Set(values.flatMap((v) => [...v.names])),
   unknown: values.some((v) => v.unknown),
 });
-// Values handed back unchanged, one or another: each keeps the columns it carries. Anything
-// computed from a column (`profile - 'email'`, a function, an operator) goes through `join`.
+// Values that may hand back the columns they carry, unchanged or wrapped: a part of a document
+// (`profile->'contact'`) or one with a key removed goes through `join` instead.
 const whole = (...values: Value[]): Value => ({
   ...join(...values),
   docs: [...new Set(values.flatMap((v) => v.docs ?? []))],
@@ -216,7 +217,13 @@ class Resolver {
         relations.push(row("old", before), row("new", target.slots.map(copy)));
       }
       const out = this.projection(returning, scope);
-      this.reads(ast, scope);
+      // Every clause but RETURNING reads the row as it was.
+      const was: Scope = {
+        ...scope,
+        relations: relations.map((r) => (r === target ? { ...r, slots: before } : r)),
+      };
+      this.reads({ ...ast, returning: null }, was);
+      this.reads({ returning: ast.returning }, scope);
       return out;
     }
     // SHOW, DESCRIBE, CALL and anything unmodeled may return rows we cannot trace.
@@ -227,13 +234,20 @@ class Resolver {
   // as well as what the column held before.
   private assign(ast: Node, target: Relation | undefined, scope: Scope): void {
     if (!target) return;
+    const written = new Set<Slot>();
     const put = (column: string | null, value: Value) => {
       if (!column) return;
       const slot = target.slots.find((s) => s.label !== null && this.same(s.label, column));
       if (slot) {
         for (const n of value.names) slot.names.add(n);
         slot.unknown ||= value.unknown;
-        slot.docs = whole(slotValue(slot), value).docs;
+        // A written column hands back what was written, and its old document only on an
+        // upsert's conflicting row whose SET leaves it alone.
+        const upsert = inserted.length > 0 && sets.length > 0;
+        const kept =
+          written.has(slot) || (upsert && !sets.some(([c]) => c !== null && this.same(c, column)));
+        slot.docs = whole(kept ? slotValue(slot) : NOTHING, value).docs;
+        written.add(slot);
       } else {
         target.slots.unshift({ label: column, ...whole(named([column]), value) });
       }
@@ -258,7 +272,7 @@ class Resolver {
         // A star nobody could list holds any number of columns: from there on, any destination
         // may receive any of them.
         if (slot.rest) {
-          const any = { ...join(...source.slice(i).map(slotValue)), unknown: true };
+          const any = { ...whole(...source.slice(i).map(slotValue)), unknown: true };
           for (const d of destinations.slice(i)) inserted.push([d, any]);
           if (destinations.length <= i) inserted.push([null, any]);
           break;
@@ -275,7 +289,7 @@ class Resolver {
       alias: "excluded",
       slots: inserted
         .filter((e): e is [string, Value] => e[0] !== null)
-        .map(([label, value]) => ({ label, ...join(named([label]), value) })),
+        .map(([label, value]) => ({ label, ...whole(named([label]), value) })),
       using: [],
       natural: false,
       joined: false,
@@ -296,9 +310,9 @@ class Resolver {
     });
     for (const [column, value] of [...inserted, ...sets]) put(column, value);
     if (positionsUnknown) {
-      const carried = join(...dropped);
+      const carried = whole(...dropped);
       target.slots = target.slots.map((s) =>
-        s.rest ? { ...s, rest: "opaque", names: join(slotValue(s), carried).names } : s,
+        s.rest ? { ...s, ...whole(slotValue(s), carried), rest: "opaque" } : s,
       );
     }
   }
@@ -384,8 +398,14 @@ class Resolver {
         return;
       }
       const subscript = isNode(n.column) ? offsetKeys(n.column.offset) : [];
-      const keys = [...accessorKeys(n), ...subFields(n), ...subscript];
-      for (const doc of keys.length ? this.source(n, scope) : []) {
+      const keys =
+        n.type === "function" && !readsPath(n)
+          ? []
+          : [...accessorKeys(n), ...subFields(n), ...subscript];
+      const docs = keys.length ? this.source(n, scope) : [];
+      for (const doc of docs) {
+        // Read through a value that may hold one column or another: the key's owner is unknown.
+        if (docs.length > 1) doc.uncertain = true;
         for (const k of keys) {
           doc.keys.add(k);
           doc.row?.keys.add(k);
@@ -399,7 +419,7 @@ class Resolver {
     }
   }
 
-  // The column a key is read from, through JSON paths, JSON functions and casts.
+  // The column a key is read from, through JSON paths, JSON reading functions and casts.
   private source(node: unknown, scope: Scope): Doc[] {
     if (!isNode(node)) return [];
     switch (node.type) {
@@ -409,7 +429,7 @@ class Resolver {
         return JSON_OPERATORS.has(String(node.operator)) ? this.source(node.left, scope) : [];
       case "function": {
         const args = isNode(node.args) && Array.isArray(node.args.value) ? node.args.value : [];
-        return isJsonFunction(node) ? this.source(args[0], scope) : [];
+        return readsPath(node) ? this.source(args[0], scope) : [];
       }
       case "column_ref": {
         const inner = isNode(node.column) && isNode(node.column.expr) ? node.column.expr : null;
@@ -506,10 +526,9 @@ class Resolver {
     const rows = (Array.isArray(expr.values) ? expr.values : [])
       .map((row) => (isNode(row) && Array.isArray(row.value) ? row.value : []))
       .filter((row) => row.length > 0);
-    return (rows[0] ?? []).map((_, i): Slot => {
-      const value = join(...rows.map((row) => this.value(row[i], scope)));
-      return { label: null, names: value.names, unknown: value.unknown };
-    });
+    return (rows[0] ?? []).map(
+      (_, i): Slot => ({ label: null, ...whole(...rows.map((row) => this.value(row[i], scope))) }),
+    );
   }
 
   private cte(scope: Scope | undefined, name: string): Slot[] | undefined {
@@ -638,7 +657,7 @@ class Resolver {
   private column(expr: Node, scope: Scope): Value {
     const name = columnLabel(expr.column);
     if (!name) return NOTHING;
-    if (name === "*") return join(...this.star(expr, scope, []).map(slotValue));
+    if (name === "*") return whole(...this.star(expr, scope, []).map(slotValue));
     const qualifier = columnLabel(expr.table);
     const own = named([name]);
     for (let s: Scope | undefined = scope; s; s = s.parent) {
@@ -692,7 +711,7 @@ class Resolver {
 
   value(node: unknown, scope: Scope): Value {
     if (!isNode(node)) return NOTHING;
-    if (Array.isArray(node)) return join(...node.map((n) => this.value(n, scope)));
+    if (Array.isArray(node)) return whole(...node.map((n) => this.value(n, scope)));
     switch (String(node.type ?? "")) {
       case "column_ref": {
         // BigQuery nests a subscripted column (`p.profile['email']`) inside the reference.
@@ -716,7 +735,9 @@ class Resolver {
           return join(this.value(node.left, scope), named(accessorKeys(node)));
         }
         if (BOOLEAN_OPS.has(op)) return NOTHING;
-        return join(this.value(node.left, scope), this.value(node.right, scope));
+        const sides = [this.value(node.left, scope), this.value(node.right, scope)];
+        // `profile - 'email'` and `#-` remove a key: the document is no longer the one returned.
+        return op === "-" || op === "#-" ? join(...sides) : whole(...sides);
       }
       case "unary_expr":
         return String(node.operator).toUpperCase() === "NOT"
@@ -730,8 +751,11 @@ class Resolver {
         const fn = nameOf(node).toLowerCase();
         if (grammar && (fn === "not" || fn === "exists")) return NOTHING;
         // Every argument may reach the result (a JSON constructor's values, JSON_SET's new one);
-        // an extractor adds the keys it reads.
-        return join(this.value(node.args, scope), named(accessorKeys(node)));
+        // an extractor adds the keys it reads. A function that reads or edits a path returns a
+        // part or an edit of the document; any other may wrap it whole (`jsonb_agg(profile)`).
+        const keys = accessorKeys(node);
+        const args = this.value(node.args, scope);
+        return keys.length ? join(args, named(keys)) : whole(args);
       }
       case "aggr_func": {
         // A count returns how many, never what it counted; FILTER, OVER and the aggregate's own
@@ -742,7 +766,7 @@ class Resolver {
           ? node.within_group_orderby.map((o) => (isNode(o) ? o.expr : null))
           : [];
         // BigQuery's ARRAY_AGG hands its argument over directly rather than under `expr`.
-        return join(
+        return whole(
           this.value("expr" in args ? args.expr : args, scope),
           this.value(args.separator, scope),
           ...within.map((w) => this.value(w, scope)),
@@ -821,6 +845,17 @@ class Resolver {
     const value = join(...parts);
     return opaque ? { ...value, unknown: true } : value;
   }
+}
+
+// A JSON function that reads a path out of a document (JSON_EXTRACT, JSON_VALUE), as opposed to
+// one that builds or edits a document (JSON_SET, JSON_REMOVE): only a read shows what it holds.
+const JSON_READ = /extract|^json_value$|^json_query$|^jsonb?_path_/i;
+function readsPath(node: Node): boolean {
+  let match = false;
+  walk(node.name, (n) => {
+    if (typeof n.value === "string" && JSON_READ.test(n.value)) match = true;
+  });
+  return match;
 }
 
 // The set-operation chain: each node carries the operator joining it to its `_next`.
@@ -944,7 +979,8 @@ export function analyzeOutput(sql: string, dialect: string, columns?: Columns): 
     for (const n of slotValue(slot).names) names.add(n);
     for (const doc of slot.docs ?? []) for (const k of doc.keys) names.add(k);
   }
-  return { names: [...names], complete: !slots.some((s) => s.unknown) };
+  const uncertain = (s: Slot) => s.docs?.some((d) => d.uncertain) ?? false;
+  return { names: [...names], complete: !slots.some((s) => s.unknown || uncertain(s)) };
 }
 
 // The reviewer's annotation: the statement's tables, and the person and client data among the
