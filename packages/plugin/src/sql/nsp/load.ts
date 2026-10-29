@@ -306,6 +306,7 @@ class Walker {
       empty: conjuncts(where).some(contradiction),
       limited: false,
       preview: false,
+      passes: true,
       ...extra,
     };
     this.blocks.push(block);
@@ -348,6 +349,13 @@ class Walker {
     const block = this.block(from, ast.where, ctes, depth, {
       limited: count !== undefined,
       preview,
+      passes:
+        ast.groupby == null &&
+        ast.having == null &&
+        !distinct(ast.distinct) &&
+        !aggregates(ast.columns) &&
+        !offset &&
+        count === undefined,
     });
     if (!branch) block.indexOrder = indexOrder(ast, block, count, skip);
     this.nested([ast.columns, ast.having, ast.orderby], ctes, depth);
@@ -371,7 +379,7 @@ class Walker {
       );
     }
     if (!items.length || target < 0) throw new Incomplete();
-    const block = this.block(items, ast.where, ctes, depth);
+    const block = this.block(items, ast.where, ctes, depth, { passes: false });
     this.nested([ast.set, ast.returning], ctes, depth);
     this.writes.push({ op, target, block });
   }

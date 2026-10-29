@@ -723,6 +723,27 @@ describe("no false alert on bounded queries", () => {
     ]);
   });
 
+  it("never lets an outer filter bound what must be read in full first", () => {
+    for (const sql of [
+      "WITH r AS (SELECT count(*) AS n FROM public.t) SELECT * FROM (SELECT * FROM r) y WHERE y.n = 1",
+      "WITH r AS (SELECT id, count(*) OVER () AS n FROM public.t) SELECT * FROM (SELECT * FROM r) y WHERE y.id = 1",
+      "SELECT * FROM (SELECT count(*) AS n FROM public.t) y WHERE y.n = 1",
+      "SELECT * FROM (SELECT DISTINCT id FROM public.t) y WHERE y.id = 1",
+      // PostgreSQL computes a materialized CTE, or one used twice, before filtering it.
+      "WITH r AS MATERIALIZED (SELECT * FROM public.t) SELECT * FROM r WHERE id = 1",
+      "WITH r AS (SELECT * FROM public.t) SELECT * FROM r WHERE id = 1 UNION ALL SELECT * FROM r WHERE id = 2",
+    ])
+      expect(check(sql, big).lines, sql).toEqual([
+        "Reads every row of `t` without a `WHERE` clause",
+      ]);
+    expect(
+      check(
+        "WITH r AS NOT MATERIALIZED (SELECT * FROM public.t) SELECT * FROM r WHERE id = 1 UNION ALL SELECT * FROM r WHERE id = 2",
+        big,
+      ).lines,
+    ).toEqual([]);
+  });
+
   it("bounds each side of a set operation by its own LIMIT only", () => {
     expect(
       check(

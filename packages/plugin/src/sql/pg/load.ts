@@ -298,6 +298,22 @@ function indexOrder(
   return args.every((a): a is string => a !== null) ? { table: null, columns: args } : undefined;
 }
 
+// ponytail: counts every unqualified use of the name, shadowed ones included, so a CTE can read
+// as referenced twice and lose its inlining; scoped counting would lift that.
+function references(owner: Node, name: string): number {
+  let count = 0;
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) for (const item of value) visit(item);
+    else if (node(value)) {
+      const rv = value.RangeVar;
+      if (node(rv) && rv.relname === name && rv.schemaname == null) count++;
+      for (const child of Object.values(value)) visit(child);
+    }
+  };
+  visit(owner);
+  return count;
+}
+
 function relOf(value: unknown): { schema: string | null; table: string } | undefined {
   const rv = node(value) && node(value.RangeVar) ? value.RangeVar : value;
   if (!node(rv) || typeof rv.relname !== "string") return undefined;
@@ -318,30 +334,29 @@ class Walker {
     if (depth > MAX_DEPTH || this.blocks.length > MAX_BLOCKS) throw new Incomplete();
   }
 
-  statement(wrapped: unknown, ctes: Ctes, depth: number): void {
+  // The blocks of its own level, which a derived table or CTE exposes: not those of its sublinks.
+  statement(wrapped: unknown, ctes: Ctes, depth: number): Block[] {
     this.guard(depth);
     const [kind, s] = only(wrapped) ?? ["", null];
-    if (!s) return;
-    const scope = this.ctes(s.withClause, ctes, depth);
+    if (!s) return [];
+    const scope = this.ctes(s.withClause, ctes, depth, s);
     switch (kind) {
       case "SelectStmt":
-        this.select(s, scope, depth);
-        return;
+        return this.select(s, scope, depth);
       case "UpdateStmt":
       case "DeleteStmt":
-        this.write(kind === "UpdateStmt" ? "update" : "delete", s, scope, depth);
-        return;
+        return [this.write(kind === "UpdateStmt" ? "update" : "delete", s, scope, depth)];
       case "InsertStmt":
         this.statement(s.selectStmt, scope, depth + 1);
         this.nested([s.onConflictClause, s.returningList], scope, depth);
-        return;
+        return [];
       case "CreateTableAsStmt":
         // WITH NO DATA defines the table without running the query.
         if (!(node(s.into) && s.into.skipData === true)) this.statement(s.query, scope, depth + 1);
-        return;
+        return [];
       case "CreateStmt":
       case "ViewStmt":
-        return;
+        return [];
       case "IndexStmt":
         if (s.concurrent !== true)
           this.lock(
@@ -349,24 +364,24 @@ class Walker {
             (t) => ["CREATE INDEX without CONCURRENTLY blocks writes on ", t, " during the build"],
             INDEX_HINT,
           );
-        return;
+        return [];
       case "AlterTableStmt":
         // ALTER INDEX, VIEW or SEQUENCE share the node: only ALTER TABLE is judged.
         if (s.objtype === "OBJECT_TABLE")
           this.lock(s.relation, (t) => ["ALTER TABLE may lock and rewrite ", t], ALTER_HINT);
         else this.covered = false;
-        return;
+        return [];
       case "LockStmt":
         for (const rel of list(s.relations))
           this.lock(rel, (t) => ["LOCK TABLE holds an explicit lock on ", t], LOCK_HINT);
-        return;
+        return [];
       case "ExplainStmt":
         // A plain EXPLAIN only plans the statement it wraps; EXPLAIN ANALYZE runs it.
         if (hasOption(s.options, "analyze")) this.statement(s.query, scope, depth + 1);
-        return;
+        return [];
       default:
         this.maintenance(kind, s);
-        return;
+        return [];
     }
   }
 
@@ -409,19 +424,25 @@ class Walker {
 
   // Without RECURSIVE a CTE body sees only the CTEs before it, and a name it reuses is a table;
   // with it, every body sees them all.
-  private ctes(clause: unknown, outer: Ctes, depth: number): Ctes {
+  private ctes(clause: unknown, outer: Ctes, depth: number, owner: Node): Ctes {
     if (!node(clause)) return outer;
     const scope = new Map(outer);
     const items = list(clause.ctes).map((item) => {
       const cte = node(item) && node(item.CommonTableExpr) ? item.CommonTableExpr : null;
       if (!cte || typeof cte.ctename !== "string") throw new Incomplete();
-      return { name: cte.ctename, query: cte.ctequery };
+      return { name: cte.ctename, query: cte.ctequery, materialized: cte.ctematerialized };
     });
-    if (clause.recursive === true) for (const { name } of items) scope.set(name, []);
-    for (const { name, query } of items) {
-      const before = this.blocks.length;
-      this.statement(query, scope, depth + 1);
-      scope.set(name, this.blocks.slice(before));
+    const recursive = clause.recursive === true;
+    if (recursive) for (const { name } of items) scope.set(name, []);
+    for (const { name, query, materialized } of items) {
+      const tops = this.statement(query, scope, depth + 1);
+      // An outer filter reaches the body only when PostgreSQL inlines the CTE; otherwise the
+      // body runs in full, so the reference exposes none of its blocks.
+      const inlined =
+        !recursive &&
+        (materialized === "CTEMaterializeNever" ||
+          (materialized !== "CTEMaterializeAlways" && references(owner, name) <= 1));
+      scope.set(name, inlined ? tops : []);
     }
     return scope;
   }
@@ -489,14 +510,12 @@ class Walker {
       case "RangeSubselect": {
         const lateral = item.lateral === true;
         if (lateral) this.covered = false;
-        const before = this.blocks.length;
-        this.statement(item.subquery, ctes, depth + 1);
         return {
           alias: alias ?? `#${index}`,
           joinedBy,
           using,
           reads: lateral ? null : undefined,
-          inner: this.blocks.slice(before),
+          inner: this.statement(item.subquery, ctes, depth + 1),
         };
       }
       case "RangeFunction": {
@@ -530,6 +549,7 @@ class Walker {
       empty: conjuncts(where).some(contradiction),
       limited: false,
       preview: false,
+      passes: true,
       ...extra,
     };
     this.blocks.push(block);
@@ -554,18 +574,22 @@ class Walker {
 
   // Each side of a set operation is read under its own ORDER BY and LIMIT, never the
   // operation's, which apply to the combined rows.
-  private select(s: Node, ctes: Ctes, depth: number): void {
+  private select(s: Node, ctes: Ctes, depth: number): Block[] {
     this.guard(depth);
     if (s.op !== "SETOP_NONE") {
-      for (const side of [s.larg, s.rarg])
-        if (node(side)) this.select(side, this.ctes(side.withClause, ctes, depth), depth + 1);
+      const sides = [s.larg, s.rarg].flatMap((side) =>
+        node(side)
+          ? this.select(side, this.ctes(side.withClause, ctes, depth, side), depth + 1)
+          : [],
+      );
       this.nested([s.sortClause, s.limitCount, s.limitOffset], ctes, depth);
-      return;
+      // A filter reaches each side, unless the operation's own LIMIT stands in between.
+      return s.limitCount == null && s.limitOffset == null ? sides : [];
     }
     // A VALUES list reads no table, only the statements its rows may hold.
     if (list(s.valuesLists).length) {
       this.nested(s.valuesLists, ctes, depth);
-      return;
+      return [];
     }
     const from = list(s.fromClause);
     const { count, offset, skip } = limitParts(s);
@@ -586,6 +610,13 @@ class Walker {
     const block = this.block(from, s.whereClause, ctes, depth, {
       limited: count !== undefined,
       preview,
+      passes:
+        !list(s.groupClause).length &&
+        s.havingClause == null &&
+        !list(s.distinctClause).length &&
+        !aggregates(s.targetList) &&
+        !offset &&
+        count === undefined,
     });
     block.indexOrder = indexOrder(s, block, count, skip);
     this.nested(
@@ -593,13 +624,17 @@ class Walker {
       ctes,
       depth,
     );
+    return [block];
   }
 
-  private write(op: Write["op"], s: Node, ctes: Ctes, depth: number): void {
+  private write(op: Write["op"], s: Node, ctes: Ctes, depth: number): Block {
     const others = list(op === "update" ? s.fromClause : s.usingClause);
-    const block = this.block([{ RangeVar: s.relation }, ...others], s.whereClause, ctes, depth);
+    const block = this.block([{ RangeVar: s.relation }, ...others], s.whereClause, ctes, depth, {
+      passes: false,
+    });
     this.nested([s.targetList, s.returningList], ctes, depth);
     this.writes.push({ op, target: 0, block });
+    return block;
   }
 }
 

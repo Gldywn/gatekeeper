@@ -48,6 +48,10 @@ export interface Block {
   empty: boolean;
   limited: boolean;
   preview: boolean;
+  // A filter or LIMIT on this block's rows bounds what it reads. False when it must consume its
+  // whole input first (an aggregate, a window, GROUP BY, DISTINCT, its own LIMIT) or always
+  // runs in full (a write).
+  passes: boolean;
   // A source whose columns, if each leads an index, let PostgreSQL answer from a few index
   // entries: the ORDER BY of a small LIMIT, or every min/max argument.
   indexOrder?: { table: string | null; columns: string[] };

@@ -167,12 +167,17 @@ export function planLoad(sql: string, databaseType: string): LoadPlan {
     for (const [i, s] of b.sources.entries()) {
       const group = u.groups.find((g) => g.includes(i)) ?? [i];
       const bounded = b.empty || group.some((j) => u.filtered[j]);
-      for (const inner of s.inner ?? []) if (bounded || b.preview) plan.dependent.add(inner);
+      for (const inner of s.inner ?? [])
+        if ((bounded || b.preview) && inner.passes) plan.dependent.add(inner);
     }
   }
-  // What bounds a block bounds the blocks read through it, however deep.
-  for (const b of plan.dependent)
-    for (const s of b.sources) for (const inner of s.inner ?? []) plan.dependent.add(inner);
+  // A bound goes on into what a bounded block reads when its sources form one joined group, so
+  // the bound reaches all of them, and only into a block that lets it through.
+  for (const b of plan.dependent) {
+    if (usage(b, null).groups.length !== 1) continue;
+    for (const s of b.sources)
+      for (const inner of s.inner ?? []) if (inner.passes) plan.dependent.add(inner);
+  }
   // Computed before any catalog fact exists, so a hint never tells the agent about the data.
   plan.hints = hintsFor(plan);
   return plan;
