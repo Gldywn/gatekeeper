@@ -255,6 +255,10 @@ describe("classifyQuery", () => {
       // A number ends at a letter, so no word boundary precedes INTO.
       ["SELECT 1e1INTO OUTFILE '/tmp/x'", "mysql"],
       ["SELECT .5INTO OUTFILE '/tmp/x'", "mariadb"],
+      // Nor does it after a dollar quote's closing $: PostgreSQL creates the table.
+      ["SELECT $$a$$INTO TABLE t FROM u", pg],
+      ["SELECT id, $q$x$q$INTO TABLE stolen FROM users", pg],
+      ["SELECT * FROM t WHERE a = $$x$$FOR SHARE", pg],
       ["SELECT '/*' FROM t FOR NO KEY UPDATE -- */", pg],
       ["SELECT '--' FROM t\nFOR SHARE", pg],
     ] as const) {
@@ -435,6 +439,11 @@ describe("classifyQuery", () => {
     // No EXPLAIN in SQL Server: it calls a procedure of that name and runs the rest.
     for (const sql of ["EXPLAIN DROP TABLE t", "EXPLAIN SELECT 1 SELECT 2"]) {
       expect(approvableRead(sql, "transactsql"), sql).toBe(false);
+    }
+    // The parser still splits a batch the guard distrusts; its count keeps the block.
+    const nbspBatch = "DELETE t\nDELETE u /*\u00a0*/";
+    for (const sql of ["BEGIN TRAN DELETE FROM t COMMIT", nbspBatch]) {
+      expect(classifyQuery(sql, "transactsql").blocked, sql).toBe(true);
     }
     expect(classifyQuery("SELECT name FROM t WHERE id = 1", "transactsql").class).toBe("read");
   });

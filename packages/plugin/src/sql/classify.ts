@@ -51,11 +51,12 @@ const MODIFY_NODE: Record<string, RiskClass> = {
   unlock: "destructive",
 };
 
-// The left edge is no word boundary: a number ends at a letter (SELECT 1e1INTO OUTFILE ...).
+// The left edge is no word boundary: a number ends at a letter (SELECT 1e1INTO OUTFILE ...),
+// and a PostgreSQL dollar quote at its closing $ (SELECT $$a$$INTO TABLE t).
 const LOCKING_READ =
-  /(?<![A-Za-z_$])(?:for\s+(update|share|no\s+key\s+update|key\s+share)\b|lock\s+in\s+share\s+mode\b)/i;
+  /(?<![A-Za-z_])(?:for\s+(update|share|no\s+key\s+update|key\s+share)\b|lock\s+in\s+share\s+mode\b)/i;
 const MODIFY_KEYWORDS =
-  /(?<![A-Za-z_$])(insert|update|delete|drop|truncate|alter|create|replace|merge|grant|revoke|call|vacuum|pragma|attach|copy|into|lock)\b/i;
+  /(?<![A-Za-z_])(insert|update|delete|drop|truncate|alter|create|replace|merge|grant|revoke|call|vacuum|pragma|attach|copy|into|lock)\b/i;
 
 // The comments every engine closes at the same place: `--` plus whitespace, up to LF, CRLF or
 // the end (SQLite runs past a lone CR), and a non-executable /* */ with no nested opener.
@@ -142,6 +143,17 @@ export function stripExplain(sql: string): { inner: string; analyze: boolean } |
   return { inner: rest.trim(), analyze: analyze || hidden("", rest) };
 }
 
+// The parser's statement count can only add a block, so it is safe to take on text whose tree
+// is not trusted: a SQL Server batch (DELETE t DELETE u) needs no `;` the text check would see.
+function parsesAsSeveral(sql: string, dialect: string): boolean {
+  try {
+    const ast = parser.astify(prepareSql(sql, dialect).sql, { database: dialect });
+    return Array.isArray(ast) && ast.length > 1;
+  } catch {
+    return false;
+  }
+}
+
 // The plugin is the only component that runs SQL, so the risk gate lives here: a
 // dialect-aware parse, escalated on any embedded modify node; unparseable is blocked.
 export function classifyQuery(sql: string, dialect = "postgresql"): RiskVerdict {
@@ -153,7 +165,11 @@ export function classifyQuery(sql: string, dialect = "postgresql"): RiskVerdict 
     (dialect === "transactsql" &&
       (TSQL_BACKSLASH.test(sql) || TSQL_ONE_WORD.test(sql) || TSQL_C1_NBSP.test(sql)))
   ) {
-    return { class: "destructive", parseOk: false, blocked: fallback(sql).blocked };
+    return {
+      class: "destructive",
+      parseOk: false,
+      blocked: fallback(sql).blocked || parsesAsSeveral(sql, dialect),
+    };
   }
   // SQL Server has no EXPLAIN: it calls a procedure of that name and runs what follows.
   const explain = dialect === "transactsql" ? null : stripExplain(sql);
