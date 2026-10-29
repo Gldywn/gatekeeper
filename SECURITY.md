@@ -279,8 +279,9 @@ itself is in neither the URL nor the prompt.
 - Its PII and Client flags never query the connected database. Flags computed now describe
   what the statement returns to the agent, never a column it only filters on or a value it
   carries. The plugin posts them with the decision as three booleans
-  (`policy_json.sensitivity`), never a table, column or value, and records nothing when the
-  output could not be fully traced. The third boolean, Value, is always false since literals
+  (`policy_json.sensitivity`), never a table, column or value. When the output could not be
+  fully traced, it records the flags it did find and records nothing if it found none, so the
+  trail never stores an all-clear it could not vouch for. The third boolean, Value, is always false since literals
   stopped being flagged. A stored record is never rewritten: one decided before this change
   keeps its PII, Client and Value as the earlier rules computed them, filters and literals
   included. Requests with no stored record, decided before flags were recorded or never shown

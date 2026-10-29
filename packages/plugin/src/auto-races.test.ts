@@ -1219,17 +1219,29 @@ describe("sensitivity recorded with the decision", () => {
     });
   });
 
-  it("records no flags for an output it could not fully trace, even with PII known in it", async () => {
+  it("records the PII an untraced output was found to return, with the decision", async () => {
     const { app, card } = harness();
     app.renderCardSchema = vi.fn();
     card.sql = "SELECT u.email, f.* FROM public.users u, contact_points(u.id) f";
     await app.analyzeSchema(card);
     expect(card.schema?.complete).toBe(false);
-    expect(card.sensitivity).toBeUndefined();
+    const found = { pii: true, value: false, client: false };
+    expect(card.sensitivity).toEqual(found);
     await app.postExecuting(card);
     await app.postResult(card, { status: "rejected" });
+    expect(app.broker.executing.mock.calls[0][3]).toEqual(found);
+    expect(app.broker.result.mock.calls[0][2].sensitivity).toEqual(found);
+  });
+
+  it("records nothing for an untraced output with nothing found, never an all-clear", async () => {
+    const { app, card } = harness();
+    app.renderCardSchema = vi.fn();
+    card.sql = "SELECT f.* FROM contact_points(1) f";
+    await app.analyzeSchema(card);
+    expect(card.schema?.complete).toBe(false);
+    expect(card.sensitivity).toBeUndefined();
+    await app.postExecuting(card);
     expect(app.broker.executing.mock.calls[0][3]).toBeUndefined();
-    expect(app.broker.result.mock.calls[0][2].sensitivity).toBeUndefined();
   });
 
   it("posts the card's analysis with an approval and with a rejection", async () => {

@@ -196,8 +196,8 @@ from `policy_json.sensitivity`, three booleans the plugin freezes from its card 
 `/executing` or `/result` records the decision (while the request is executing, a later
 `/result` never overwrites the `/executing` one), or from the SQL text alone when nothing was recorded, so opening the trail
 never queries the connected database. Flags computed now describe what the statement returns
-(`sql/output.ts`); a decision whose output could not be fully traced records none, and Value
-is always false since literals stopped being flagged. Stored records are never rewritten, so
+(`sql/output.ts`); a decision whose output could not be fully traced records the flags it found,
+or none when it found none, and Value is always false since literals stopped being flagged. Stored records are never rewritten, so
 an older one keeps the PII, Client and Value its rules computed, filters included; the detail
 recomputes the legend with the current rules. Each entry says whether its sealed rows were kept
 (`kept`) and, for a decline, who declined (`declinedBy`: a person, the plugin's gate refusing to run

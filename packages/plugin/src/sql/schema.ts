@@ -723,10 +723,12 @@ export function sensitivityOf(schema: SchemaContext): SensitivityRecord {
   };
 }
 
-// What a decision records: nothing when the output was not fully traced, so the trail never
-// stores an all-clear it could not vouch for.
+// What a decision records. A flag found is a fact even in an output not fully traced, so it is
+// kept; an untraced output with nothing found records nothing, never an all-clear.
 export function recordedSensitivity(
   schema: SchemaContext | null | undefined,
 ): SensitivityRecord | undefined {
-  return schema?.complete ? sensitivityOf(schema) : undefined;
+  if (!schema) return undefined;
+  const found = schema.pii.length > 0 || schema.client.length > 0;
+  return schema.complete || found ? sensitivityOf(schema) : undefined;
 }

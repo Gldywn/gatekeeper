@@ -184,7 +184,8 @@ first line, the tables, what the SQL marks, the SQL, then the decision.
 - When part of what a statement returns cannot be traced (a table function, recursion, `SHOW`,
   a star over columns that could not be read), one standing line heads the legend in the
   analysis-limit box: "Gatekeeper cannot tell every column this statement returns. The flags
-  may be incomplete." No flags are recorded with such a decision.
+  may be incomplete." Such a decision records the flags found and nothing else; with none found
+  it records nothing, so a row never shows an all-clear the analysis could not vouch for.
 - A returned name is tinted wherever it appears in the SQL, a filter included: the tint is
   name-based, so a same-name column of another relation is tinted too. A known limit.
 - A limit of the analysis sits just above the SQL it qualifies; the state of Auto mode just

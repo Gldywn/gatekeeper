@@ -877,7 +877,10 @@ describe("recordedSensitivity", () => {
     );
   });
 
-  it("records nothing for an output it could not fully trace, rather than an all-clear", () => {
+  it("records the flags found in an output it could not fully trace, and nothing when none", () => {
+    expect(
+      recordedSensitivity({ tables: [], pii: ["email"], client: [], complete: false }),
+    ).toEqual({ pii: true, value: false, client: false });
     expect(
       recordedSensitivity({ tables: [], pii: [], client: [], complete: false }),
     ).toBeUndefined();
