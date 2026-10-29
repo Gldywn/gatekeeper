@@ -140,6 +140,10 @@ Layering and scrolling hold a few invariants a change can break:
 - A pane body is positioned: its absolutely positioned descendants (every `.sr-only` word)
   must scroll and clip with it, or they stretch the page below the Inbox.
 - The pending card's decision bar stays reachable at the pane's foot while the SQL scrolls.
+- The open item's sections and decision controls use the pane body's full content width; only
+  the first line gives way to the floated X, and the decision bar's band runs on to the pane's
+  inner edges. The open item's containers (`#queue`, `#detail`) stay plain blocks: a flex or
+  grid box beside the float would give up the X's width for its whole height.
 
 ## Lists and rows
 
