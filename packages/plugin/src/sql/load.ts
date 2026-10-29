@@ -170,6 +170,9 @@ export function planLoad(sql: string, databaseType: string): LoadPlan {
       for (const inner of s.inner ?? []) if (bounded || b.preview) plan.dependent.add(inner);
     }
   }
+  // What bounds a block bounds the blocks read through it, however deep.
+  for (const b of plan.dependent)
+    for (const s of b.sources) for (const inner of s.inner ?? []) plan.dependent.add(inner);
   // Computed before any catalog fact exists, so a hint never tells the agent about the data.
   plan.hints = hintsFor(plan);
   return plan;

@@ -691,23 +691,32 @@ describe("no false alert on bounded queries", () => {
       expect(check(sql, big).lines).toEqual([]);
   });
 
-  it("reads two different constants of one kind as reading nothing, never a cast or two kinds", () => {
+  it("reads two different numbers or booleans as reading nothing, never a string or a cast", () => {
     for (const sql of [
       "SELECT * FROM public.t WHERE 1.5 = 2.5",
-      "SELECT * FROM public.t WHERE 'a' = 'b'",
+      "SELECT * FROM public.t WHERE true = false",
     ])
       expect(check(sql, big).lines, sql).toEqual([]);
-    // PostgreSQL casts '1' to an integer: equal, so the table is read.
-    expect(check("SELECT * FROM public.t WHERE '1' = 1", big).lines).toHaveLength(1);
+    // PostgreSQL types each string as the other side ('1' is 1, 'true' is true), and a collation
+    // may equate two spellings: the table is read.
+    for (const sql of [
+      "SELECT * FROM public.t WHERE '1' = 1",
+      "SELECT * FROM public.t WHERE 'true' = true",
+      "SELECT * FROM public.t WHERE 'false' = false",
+      "SELECT * FROM public.t WHERE 'a' = 'b'",
+      "UPDATE public.t SET x = 1 WHERE 'true' = true",
+    ])
+      expect(check(sql, big).lines, sql).toHaveLength(1);
   });
 
-  it("reads an aliased join as one source the enclosing query filters", () => {
-    expect(
-      check(
-        "SELECT * FROM (public.a JOIN public.b USING (id)) j, public.c WHERE j.id = c.id AND c.id = 1",
-        big,
-      ).lines,
-    ).toEqual([]);
+  it("reads an aliased join as one source the enclosing query filters, however nested", () => {
+    for (const sql of [
+      "SELECT * FROM (public.a JOIN public.b USING (id)) j, public.c WHERE j.id = c.id AND c.id = 1",
+      "SELECT * FROM ((public.a JOIN public.b USING (id)) j JOIN public.c USING (id)) k WHERE k.id = 1",
+      "SELECT * FROM ((public.a NATURAL JOIN public.b) j NATURAL JOIN public.c) k WHERE k.id = 1",
+      "SELECT * FROM (SELECT * FROM (SELECT * FROM public.t) x) y WHERE y.id = 1",
+    ])
+      expect(check(sql, big).lines, sql).toEqual([]);
     expect(check("SELECT * FROM (public.a JOIN public.b USING (id)) j", big).lines).toEqual([
       "Reads every row of `a` since no condition filters it",
       "Reads every row of `b` since no condition filters it",
@@ -726,11 +735,17 @@ describe("no false alert on bounded queries", () => {
     ).toEqual(["Reads every row of `a` without a `WHERE` clause"]);
   });
 
-  it("stops at the traversal bounds, set operations included", () => {
-    const sql = Array.from({ length: 70 }, () => "SELECT id FROM public.t").join(" UNION ALL ");
-    const plan = planLoad(sql, "postgresql");
-    expect(plan.covered).toBe(false);
-    expect(plan.blocks.length).toBeLessThanOrEqual(65);
+  it("stops at the traversal bounds, set operations and aliased joins included", () => {
+    let joins = "public.t t0";
+    for (let i = 1; i <= 70; i++) joins = `(${joins} JOIN public.t t${i} USING (id)) j${i}`;
+    for (const sql of [
+      Array.from({ length: 70 }, () => "SELECT id FROM public.t").join(" UNION ALL "),
+      `SELECT * FROM ${joins}`,
+    ]) {
+      const plan = planLoad(sql, "postgresql");
+      expect(plan.covered).toBe(false);
+      expect(plan.blocks.length).toBeLessThanOrEqual(65);
+    }
   });
 
   it("reads TABLESAMPLE SYSTEM as a fraction of the pages, BERNOULLI as all of them", () => {

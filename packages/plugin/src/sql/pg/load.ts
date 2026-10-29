@@ -123,11 +123,9 @@ function numeric(n: Node): string | null {
   return `${m[1]}${whole || "0"}${fraction ? `.${fraction}` : ""}`;
 }
 
-// An untyped string or boolean constant's value, typed so 't' and TRUE never compare.
-function plain(n: Node): string | null {
+function boolean(n: Node): string | null {
   const c = constant(n);
-  if (c && node(c.sval)) return `s:${String(c.sval.sval ?? "")}`;
-  return c && node(c.boolval) ? `b:${c.boolval.boolval === true}` : null;
+  return c && node(c.boolval) ? String(c.boolval.boolval === true) : null;
 }
 
 // WHERE TRUE, or a constant compared with itself (1 = 1, 1.0 = 1.00): restricts nothing.
@@ -140,8 +138,8 @@ function tautology(expr: unknown): boolean {
   return spelled(a) === spelled(b) || (numeric(a) !== null && numeric(a) === numeric(b));
 }
 
-// WHERE FALSE, or two untyped constants of one kind with different values: reads nothing. A
-// cast or two kinds ('1' = 1) can still be equal, so it proves nothing.
+// WHERE FALSE, or two different untyped numbers or booleans: reads nothing. A cast, a string
+// ('1' = 1, 'true' = true) or two spellings a collation may equate prove nothing.
 function contradiction(expr: unknown): boolean {
   const c = constant(expr);
   if (c) return node(c.boolval) && c.boolval.boolval !== true;
@@ -149,7 +147,7 @@ function contradiction(expr: unknown): boolean {
   if (!sides) return false;
   const [a, b] = sides;
   const differ = (x: string | null, y: string | null) => x !== null && y !== null && x !== y;
-  return differ(numeric(a), numeric(b)) || differ(plain(a), plain(b));
+  return differ(numeric(a), numeric(b)) || differ(boolean(a), boolean(b));
 }
 
 function integer(expr: unknown): number | undefined {
@@ -445,7 +443,9 @@ class Walker {
       // An aliased join hides the names inside it, as a derived table does, so it is read as one:
       // a block of its own the enclosing query filters or not through the alias.
       if (node(body.alias)) {
-        const inner = this.block([{ JoinExpr: { ...body, alias: undefined } }], null, ctes, depth);
+        this.guard(depth + 1);
+        const unaliased = { JoinExpr: { ...body, alias: undefined } };
+        const inner = this.block([unaliased], null, ctes, depth + 1);
         const alias = aliasOf(body) ?? `#${sources.length}`;
         sources.push({ alias, joinedBy, using, inner: [inner] });
         return;
