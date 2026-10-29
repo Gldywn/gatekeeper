@@ -1,3 +1,4 @@
+import type { LoadWalk } from "./load-plan";
 import { nspEngine } from "./nsp/engine";
 import { pgEngine } from "./pg/engine";
 import type { RiskVerdict } from "./risk";
@@ -15,6 +16,8 @@ export interface SqlEngine {
   sensitiveLiterals(sql: string): string[];
   receipt(sql: string): Receipt | null;
   countsRows(sql: string): boolean | null;
+  // What the load check reads: tables, joins, filters and locks; never null, covered says how far.
+  load(sql: string): LoadWalk;
 }
 
 // The single place that maps Beekeeper's databaseType to a parser. Only a real PostgreSQL

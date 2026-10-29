@@ -424,18 +424,21 @@ describe("SchemaAnnotator.inspectLoad", () => {
     expect(await a.inspectLoad("SELECT id FROM public.t")).toBeUndefined();
   });
 
-  it("never sends catalog SQL outside PostgreSQL", async () => {
-    const getMetadata = vi.fn(async () => []);
-    const a = new SchemaAnnotator({
-      getColumns: async () => [],
-      getMetadata,
-      databaseType: () => "mysql",
-      defaultSchema: () => "app",
-      generation: () => 0,
-    });
-    expect((await a.inspectLoad("DELETE FROM sessions"))?.heavy).toBe(true);
-    expect(getMetadata).not.toHaveBeenCalled();
-  });
+  it.each(["mysql", "redshift"])(
+    "never sends catalog SQL outside PostgreSQL: %s",
+    async (databaseType) => {
+      const getMetadata = vi.fn(async () => []);
+      const a = new SchemaAnnotator({
+        getColumns: async () => [],
+        getMetadata,
+        databaseType: () => databaseType,
+        defaultSchema: () => "app",
+        generation: () => 0,
+      });
+      expect((await a.inspectLoad("DELETE FROM sessions"))?.heavy).toBe(true);
+      expect(getMetadata).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("SchemaAnnotator.inspectLoad host work", () => {

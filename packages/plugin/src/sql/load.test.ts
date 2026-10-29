@@ -69,9 +69,11 @@ describe("rows changed", () => {
     expect(check("EXPLAIN ANALYZE DELETE FROM public.t").lines).toHaveLength(1);
   });
 
-  it("leaves a statement the parser rejects incomplete, never clean", () => {
-    // node-sql-parser 5.4 rejects RETURNING inside a PostgreSQL CTE.
-    const r = check("WITH d AS (DELETE FROM public.t RETURNING id) SELECT id FROM d");
+  it("reads a write inside a CTE, and leaves a statement the parser rejects incomplete", () => {
+    expect(check("WITH d AS (DELETE FROM public.t RETURNING id) SELECT id FROM d").lines).toEqual([
+      "DELETE without WHERE removes every row of `t`",
+    ]);
+    const r = check("DELETE FROM");
     expect(r.lines).toEqual([]);
     expect(r.complete).toBe(false);
   });
@@ -130,12 +132,17 @@ describe("scans", () => {
   });
 
   it("exempts a small unfiltered preview, but not with an offset, an order, an aggregate or RLS", () => {
-    expect(check("SELECT * FROM public.payment_attempt LIMIT 50", f).lines).toEqual([]);
-    expect(check("SELECT * FROM public.payment_attempt WHERE 1 = 1 LIMIT 50", f).lines).toEqual([]);
+    for (const sql of [
+      "SELECT * FROM public.payment_attempt LIMIT 50",
+      "SELECT * FROM public.payment_attempt WHERE 1 = 1 LIMIT 50",
+      "SELECT lower(status) FROM public.payment_attempt LIMIT 50",
+    ])
+      expect(check(sql, f).lines, sql).toEqual([]);
     for (const sql of [
       "SELECT * FROM public.payment_attempt LIMIT 50 OFFSET 10",
       "SELECT * FROM public.payment_attempt ORDER BY created_at LIMIT 50",
       "SELECT count(*) FROM public.payment_attempt LIMIT 50",
+      "SELECT coalesce(sum(amount), 0) FROM public.payment_attempt LIMIT 50",
       "SELECT * FROM public.payment_attempt LIMIT 5000",
     ])
       expect(check(sql, f).lines).toHaveLength(1);
@@ -232,10 +239,40 @@ describe("scans", () => {
     expect(late.notes).toEqual(["Statistics did not return within 5 seconds"]);
   });
 
-  it("applies no size rule outside PostgreSQL", () => {
-    const r = check("SELECT * FROM payment_attempt", f, "mysql");
-    expect(r.lines).toEqual([]);
-    expect(r.complete).toBe(true);
+  it("applies no size rule outside PostgreSQL, even on an engine read with its grammar", () => {
+    for (const engine of ["mysql", "redshift"]) {
+      const r = check("SELECT * FROM payment_attempt", f, engine);
+      expect(r.lines, engine).toEqual([]);
+      expect(r.complete, engine).toBe(true);
+    }
+  });
+
+  it("reads the queries a statement runs inside it", () => {
+    const big = facts({ "public.big": { rows: BIG }, "public.small": { rows: 10 } });
+    for (const sql of [
+      "CREATE TABLE public.copy AS SELECT * FROM public.big",
+      "SELECT id, (SELECT count(*) FROM public.big) AS n FROM public.small WHERE id = 1",
+      "UPDATE public.small SET n = (SELECT count(*) FROM public.big) WHERE id = 1",
+    ])
+      expect(check(sql, big).lines, sql).toEqual([
+        "Reads every row of `big` without a `WHERE` clause",
+      ]);
+    expect(
+      check("CREATE TABLE public.copy AS SELECT * FROM public.big WITH NO DATA", big).lines,
+    ).toEqual([]);
+  });
+
+  it("sees a CTE only where PostgreSQL does", () => {
+    const big = facts({ big: { rows: BIG } });
+    expect(check("WITH big AS (SELECT * FROM big) SELECT count(*) FROM big", big).lines).toEqual([
+      "Reads every row of `big` without a `WHERE` clause",
+    ]);
+    expect(
+      check(
+        "WITH RECURSIVE big AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM big WHERE n < 3) SELECT n FROM big",
+        big,
+      ).lines,
+    ).toEqual([]);
   });
 });
 
@@ -267,10 +304,12 @@ describe("joins", () => {
     expect(check("SELECT * FROM public.a, public.b JOIN public.c ON b.id = c.b_id").lines).toEqual([
       "Missing join condition pairs every row of `a` with every row of `b`",
     ]);
-    // The 5.4 grammar swallows a comma after JOIN ... ON into the ON clause.
-    expect(check("SELECT * FROM public.a JOIN public.b ON a.id = b.a_id, public.c").complete).toBe(
-      false,
-    );
+    const comma = "SELECT * FROM public.a JOIN public.b ON a.id = b.a_id, public.c";
+    expect(check(comma).lines).toEqual([
+      "Missing join condition pairs every row of `a` with every row of `c`",
+    ]);
+    // node-sql-parser's PostgreSQL grammar swallows a comma after JOIN ... ON into the ON clause.
+    expect(check(comma, new Map(), "redshift").complete).toBe(false);
   });
 
   it("flags an explicit CROSS JOIN only when both sizes make it large", () => {
@@ -304,10 +343,15 @@ describe("locks", () => {
     ]);
   });
 
-  it("reads the commands the parser does not know", () => {
+  it("reads the maintenance commands that lock whole tables", () => {
     expect(check("VACUUM FULL public.big", f).lines).toEqual([
       "VACUUM FULL locks and rewrites `big`",
     ]);
+    expect(check("VACUUM (FULL) public.big, public.mv", f).lines).toEqual([
+      "VACUUM FULL locks and rewrites `big`",
+      "VACUUM FULL locks and rewrites `mv`",
+    ]);
+    expect(check("VACUUM (FULL false) public.big", f).lines).toEqual([]);
     expect(check("VACUUM public.big", f).lines).toEqual([]);
     expect(check("VACUUM FULL", f).lines).toEqual([
       "VACUUM FULL locks and rewrites the tables it covers",
@@ -325,6 +369,7 @@ describe("locks", () => {
 
   it("leaves DDL alone outside PostgreSQL", () => {
     expect(check("ALTER TABLE big ADD COLUMN x int", new Map(), "mysql").lines).toEqual([]);
+    expect(check("ALTER TABLE public.big ADD COLUMN x int", f, "redshift").lines).toEqual([]);
   });
 });
 
@@ -827,6 +872,7 @@ describe("index-served reads", () => {
       "SELECT * FROM public.t ORDER BY id DESC",
       "SELECT * FROM public.t ORDER BY id DESC LIMIT 20 OFFSET 5000",
       "SELECT max(id) OVER () FROM public.t",
+      "SELECT max(id) FILTER (WHERE status = 'paid') FROM public.t",
     ])
       expect(check(sql, g).lines).toHaveLength(1);
     const rls = facts({ "public.t": { rows: 41_000_000, rls: true } });

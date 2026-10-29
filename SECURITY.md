@@ -151,8 +151,10 @@ indexed column can still scan most of a table and shows no alert.
   `track_counts` is on.
   Relation names travel as escaped literals, and none of these reads locks a user table. Index
   lists come from Beekeeper's `getTableIndexes` (Beekeeper 5.5 and later), for large tables only.
-- PostgreSQL gets every rule. Other engines get only the rules that read the SQL alone, which
-  flag `UPDATE` or `DELETE` without `WHERE` and sources that no join condition links.
+- PostgreSQL gets every rule, read on PostgreSQL's own parse tree. Other engines get only the
+  rules that read the SQL alone, which flag `UPDATE` or `DELETE` without `WHERE` and sources that
+  no join condition links. An engine read with node-sql-parser's PostgreSQL grammar (Redshift,
+  CockroachDB, DuckDB) counts as another engine: no catalog read, no size or lock rule.
 - **Auto mode** holds a query with an alert before anything is sent to TypeSafe. History keeps
   the fixed reason `Heavy query`, never a table name. A check that could not finish (a view, an
   unknown size, a late catalog read) blocks nothing, with or without Auto mode, and shows

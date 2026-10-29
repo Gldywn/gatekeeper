@@ -1,7 +1,9 @@
 import type { SqlEngine } from "../engine";
+import { unreadWalk } from "../load-plan";
 import { fallback, type RiskVerdict } from "../risk";
 import { classifyNsp } from "./classify";
 import * as inspect from "./inspect";
+import { loadNsp } from "./load";
 
 // Beekeeper's databaseType to node-sql-parser's grammar name. Engines without a grammar of
 // their own are read with its PostgreSQL grammar, as they always were.
@@ -46,6 +48,7 @@ export function nspEngine(databaseType: string): SqlEngine {
       sensitiveLiterals: (sql) => (unread(sql) ? [] : inspect.sensitiveLiterals(sql, grammar)),
       receipt: (sql) => (unread(sql) ? null : inspect.statementReceipt(sql, grammar)),
       countsRows: (sql) => (unread(sql) ? null : inspect.countsRows(sql, grammar)),
+      load: (sql) => (unread(sql) ? unreadWalk() : loadNsp(sql, grammar)),
     };
     engines.set(grammar, engine);
   }

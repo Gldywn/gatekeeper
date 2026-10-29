@@ -110,8 +110,10 @@ PostgreSQL, so only `sql/pg/` builds evaluator input. The server also preflights
 regex to block empty and multi-statement input before enqueueing.
 
 The plugin also runs a local load check on each proposal (`sql/load.ts`, host calls in
-`annotate.ts`). It never runs or explains the proposal. It reads the SQL and, on PostgreSQL,
-one Gatekeeper-built catalog query for row estimates. Its alert does not gate a manual
+`annotate.ts`). It never runs or explains the proposal. It reads the SQL with the engine's own
+walker (`sql/pg/load.ts` on PostgreSQL's tree, `sql/nsp/load.ts` on node-sql-parser's) into a
+plan no parser shapes (`sql/load-plan.ts`) and, on PostgreSQL, one Gatekeeper-built catalog
+query for row estimates. Its alert does not gate a manual
 approval. It holds Auto mode, and Auto-deny heavy queries rejects a flagged proposal on
 arrival. See [`SECURITY.md`](../SECURITY.md#load-check).
 

@@ -43,14 +43,19 @@ function statementClass(stmt: Node | undefined): RiskClass {
   return cls;
 }
 
-// EXPLAIN ANALYZE runs the statement it wraps, a plain EXPLAIN only plans it. An ANALYZE option
-// counts unless its value is explicitly false, so contradictory options still count as running.
+// EXPLAIN ANALYZE runs the statement it wraps, a plain EXPLAIN only plans it.
 function explainClass(explain: Node): RiskClass {
-  const runs = ((explain.options as Node[] | undefined) ?? []).some((option) => {
-    const def = option.DefElem as Node | undefined;
-    return def?.defname === "analyze" && !explicitlyFalse(def.arg as Node | undefined);
+  return hasOption(explain.options, "analyze")
+    ? statementClass(explain.query as Node | undefined)
+    : "read";
+}
+
+// An option counts unless its value is explicitly false, so contradictory options still count.
+export function hasOption(options: unknown, name: string): boolean {
+  return (Array.isArray(options) ? (options as Node[]) : []).some((option) => {
+    const def = option?.DefElem as Node | undefined;
+    return def?.defname === name && !explicitlyFalse(def.arg as Node | undefined);
   });
-  return runs ? statementClass(explain.query as Node | undefined) : "read";
 }
 
 function explicitlyFalse(arg: Node | undefined): boolean {
