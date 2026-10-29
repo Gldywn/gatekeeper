@@ -776,6 +776,23 @@ describe("no false alert on bounded queries", () => {
     ).toEqual(["DELETE without WHERE removes every row of `t`"]);
   });
 
+  it("lets a UNION ALL's own small LIMIT stop each side, never through a sort or deduplication", () => {
+    const union = "SELECT id FROM public.a WHERE id = 1 UNION ALL SELECT id FROM public.b";
+    for (const sql of [
+      `${union} LIMIT 10`,
+      `SELECT * FROM (${union} LIMIT 10) y`,
+      `WITH r AS (${union} LIMIT 10) SELECT * FROM r`,
+    ])
+      expect(check(sql, big).lines, sql).toEqual([]);
+    for (const sql of [
+      "SELECT id FROM public.a WHERE id = 1 UNION SELECT id FROM public.b LIMIT 10",
+      `${union} ORDER BY id LIMIT 10`,
+    ])
+      expect(check(sql, big).lines, sql).toEqual([
+        "Reads every row of `b` without a `WHERE` clause",
+      ]);
+  });
+
   it("bounds each side of a set operation by its own LIMIT only", () => {
     expect(
       check(

@@ -594,10 +594,22 @@ class Walker {
       // skipping rows needs every side in full before an enclosing LIMIT can stop.
       const { count, offset } = limitParts(s);
       const dedups = s.op !== "SETOP_UNION" || s.all !== true;
+      const sorted = list(s.sortClause).length > 0;
+      // Otherwise its own small LIMIT stops each side as a preview would.
+      const stops =
+        !dedups &&
+        !sorted &&
+        !offset &&
+        count !== undefined &&
+        Number.isInteger(count) &&
+        count >= 0 &&
+        count <= PREVIEW_LIMIT;
       for (const side of sides) {
         if (count !== undefined || offset) side.filterable = false;
-        if (dedups || offset || list(s.sortClause).length) side.streams = false;
+        if (dedups || offset || sorted) side.streams = false;
         side.ordered = undefined;
+        if (count !== undefined) side.limited = true;
+        if (stops && side.streams && side.noWhere && side.sources.length) side.preview = true;
       }
       return sides;
     }
