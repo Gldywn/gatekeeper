@@ -123,3 +123,28 @@ chose, documented where it lives, with a tracked ticket to remove it.
 Example: `packages/plugin/src/sql/pg/syntax.ts` rewrites PostgreSQL so that node-sql-parser,
 a third-party reconstruction of each SQL dialect, can read it. Each unsupported spelling
 would mean one more rewrite; the fix is a parser built from PostgreSQL's own grammar.
+
+## No exception lists
+
+Gatekeeper serves several engines, so a list of engine-specific cases (function names,
+argument positions, dialect spellings, one patch per query shape) never ends: every review
+round finds the next entry. Do not build one, and do not extend one to answer a finding.
+
+- Use one generic rule that holds across engines, read from the grammar or the live catalog,
+  never from a name.
+- Where that rule cannot decide, frame the limit instead of enumerating: fall back to the safe
+  default (manual review in Auto mode, the untraced line on the reviewer's flags), document the
+  limit where it lives, and pin it with a test.
+- Answer a review finding of the form "case X is not handled" by checking that X lands on the
+  safe default. If it does, X is the documented limit, not a bug. If it does not (a silent
+  all-clear, an automatic run), fix the default path, never X alone.
+- Not exception lists: the grammar's own finite facts (operators, statement kinds), decoding
+  the AST a parser actually produces, and a short fail-closed allow-list at a security gate
+  (`classify.ts`). That allow-list grows only by an operator decision, never as a review fix.
+- Where this is heading: Auto mode is meant to generalize through learned risk scores (models
+  per engine, or layers of small specialized models), not through longer rule lists. Keep the
+  code ready for it: a few generic signals and a safe default, no catalogue to migrate.
+
+Example: the reviewer's flags (`packages/plugin/src/sql/output.ts`) once classified JSON
+functions by name and argument role; five review rounds each added another engine's family.
+Now a JSON function is never interpreted and leaves what it returns untraced.
