@@ -370,6 +370,22 @@ marked `shared-read-3` must carry dependency usage on every input. `shared-read-
 evaluator's SQL from PostgreSQL's own parse tree instead of node-sql-parser's; the dependencies
 of every eligible case are unchanged, only the text's formatting differs.
 
+The operator ran `auto-beta-8` with `shared-read-3` live on 2026-10-29 over `auto-cases.json`,
+`auto-export-cases.json` and `auto-name-cases.json`, both splits (`.orch/auto-evals/sr3-*.json`):
+272 provider observations, no provider error, no expected review case auto-approved, no local
+regression, and 7 unnecessary holds: `healthcare-consultation-tariff` (personal),
+`construction-gate-model`, `property-entry-hardware`, `events-ticket-format` and
+`telecom-device-format` (secret), `export-v-provider-request-paths` (personal and
+organization) and `name-campaign-template` (organization). The `auto-beta-7` measurement above
+held one fewer format description. A paired rerun of those 7 cases the next day, alternating
+`shared-read-3` with the archived `shared-read-2` analysis, twice each (`ab-sr*.json`), sent
+identical dependencies and SQL differing only in formatting (`"care"."consultations"` became
+`care.consultations`). `shared-read-2` held all 7 in both passes and `shared-read-3` held 6, as
+`construction-gate-model` passed (secret 0.14 and 0.13, against 0.17 twice). The formatting
+moved some probabilities by up to 0.07 in either direction (`telecom-device-format` secret up,
+`construction-gate-model` secret down) without reversing any other decision. Seven cases
+repeated twice are not a calibration.
+
 ### Bare name columns, auto-beta-8
 
 `auto-beta-8` keeps the `auto-beta-7` questions and thresholds and changes only the local
