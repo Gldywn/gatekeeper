@@ -2,7 +2,7 @@ Notices for the PostgreSQL parser and deparser shipped in this plugin bundle.
 libpg-query.wasm embeds libpg_query and parser sources extracted from PostgreSQL.
 
 ================================================================================
-libpg-query 18.2.1 (JavaScript wrapper, loader modified by Gatekeeper), MIT License
+libpg-query 18.2.2 (JavaScript wrapper), MIT License
 ================================================================================
 
 The MIT License (MIT)

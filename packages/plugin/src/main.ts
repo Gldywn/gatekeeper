@@ -5,7 +5,7 @@ import "./style.css";
 import { addNotificationListener, getAppInfo, log } from "@beekeeperstudio/plugin";
 import { Gatekeeper } from "./app";
 import { loadPgParser } from "./sql/pg/parse";
-import { instantiateWasm } from "./sql/pg/wasm";
+import { wasmBytes } from "./sql/pg/wasm";
 
 function applyTheme(cssString: string): void {
   const el = document.getElementById("app-theme");
@@ -19,7 +19,7 @@ async function bootstrap(): Promise<void> {
   if (!root) {
     return;
   }
-  if (!(await loadPgParser(instantiateWasm))) {
+  if (!(await loadPgParser(wasmBytes))) {
     log.error("PostgreSQL parser failed to load");
   }
   const app = new Gatekeeper(root);

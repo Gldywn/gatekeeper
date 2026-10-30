@@ -1,5 +1,5 @@
 import { loadPgParser } from "./sql/pg/parse";
-import { instantiateWasm } from "./sql/pg/wasm";
+import { wasmBytes } from "./sql/pg/wasm";
 
 // As main.ts does before the app starts, through the same hook, so tests load what Beekeeper loads.
-if (!(await loadPgParser(instantiateWasm))) throw new Error("PostgreSQL parser failed to load");
+if (!(await loadPgParser(wasmBytes))) throw new Error("PostgreSQL parser failed to load");

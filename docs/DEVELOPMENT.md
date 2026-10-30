@@ -167,11 +167,10 @@ SECURITY.md          supply-chain policy + DB boundary
 
 - **Plugin:** TypeScript, Vite, `@beekeeperstudio/plugin`, `libpg-query` and `pgsql-deparser`
   (PostgreSQL), `node-sql-parser` (other engines). Requires Beekeeper
-  Studio >= 5.4. `libpg-query` carries `patches/libpg-query@18.2.1.patch`, which every
-  `pnpm install` applies: it lets the plugin hand over the WASM bundled in its JavaScript,
-  since Beekeeper cannot fetch a plugin's own files. Drop it once
-  [constructive-io/libpg-query-node#191](https://github.com/constructive-io/libpg-query-node/pull/191)
-  or an equivalent is released.
+  Studio >= 5.4. Beekeeper cannot fetch a plugin's own files, so the plugin bundles
+  `libpg-query`'s WASM in its JavaScript and hands it over with `loadModule({ wasm })`
+  (libpg-query 18.2.2 and later). The library still tries its default load at import, which
+  fails in Beekeeper and logs to the console before the bundled bytes replace it.
 - **Server:** TypeScript, `@modelcontextprotocol/sdk`, `better-sqlite3`, Node's built-in
   `http`. Published to npm as `@gldywn/gatekeeper-mcp-server`. Requires Node >= 22, the floor
   at which `better-sqlite3` ships a prebuilt binary so `npx` needs no C++ toolchain.

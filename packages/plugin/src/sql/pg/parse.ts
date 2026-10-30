@@ -1,20 +1,11 @@
-import {
-  type LoadModuleOptions,
-  loadModule,
-  type ParseResult,
-  parseSync,
-  type ScanToken,
-  scanSync,
-} from "libpg-query";
+import { loadModule, type ParseResult, parseSync, type ScanToken, scanSync } from "libpg-query";
 
 // PostgreSQL's grammar ships as WASM and compiles once, asynchronously; every parse after that
 // is synchronous, so callers in rendering stay synchronous too. Until it loads, a parse throws.
-export async function loadPgParser(
-  instantiateWasm?: LoadModuleOptions["instantiateWasm"],
-): Promise<boolean> {
+// Given the bytes, every instance, reloads after a WASM exception included, is built from them.
+export async function loadPgParser(wasm?: Uint8Array): Promise<boolean> {
   try {
-    // TODO(constructive-io/libpg-query-node#191): options come from patches/ until released.
-    await loadModule(instantiateWasm ? { instantiateWasm } : undefined);
+    await loadModule(wasm ? { wasm } : undefined);
     return true;
   } catch {
     return false;

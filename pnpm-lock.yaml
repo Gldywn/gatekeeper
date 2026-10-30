@@ -10,9 +10,6 @@ overrides:
   jose: 6.2.3
   postcss: 8.5.19
 
-patchedDependencies:
-  libpg-query@18.2.1: 080287c9542c61b424c908c26cda781be1b2787ca53522cf254175816f9d7d88
-
 importers:
 
   .:
@@ -46,8 +43,8 @@ importers:
         specifier: 3.2.8
         version: 3.2.8
       libpg-query:
-        specifier: 18.2.1
-        version: 18.2.1(patch_hash=080287c9542c61b424c908c26cda781be1b2787ca53522cf254175816f9d7d88)
+        specifier: 18.2.2
+        version: 18.2.2
       motion:
         specifier: 12.42.2
         version: 12.42.2
@@ -1796,8 +1793,8 @@ packages:
     resolution: {integrity: sha512-eTIzlVOSUR+JxdDFepEYcBMtZ9Qqdef+rnzWdRZuMbOywu5tO2w2N7rqjoANZ5k9vywhL6Br1VRjUIgTQx4E8w==}
     engines: {node: '>=6'}
 
-  libpg-query@18.2.1:
-    resolution: {integrity: sha512-0zPlJei06//awjKmslKEwmGMSjF0n4p4OnPa3boRp8Xzl6ZnDIOddyLAsoJcJntrPCBLrWUbEwv5Laxg8BZYlA==}
+  libpg-query@18.2.2:
+    resolution: {integrity: sha512-BOKY0X05vnxkFe+FD8JH71sSO560UKoSRv9Fsy67zapmryhqcew+4Hq0Phu8a6mcENklK7LiHJi0d0j8DbIb4A==}
 
   longest-streak@3.1.0:
     resolution: {integrity: sha512-9Ri+o0JYgehTaVBBDoMqIl8GXtbWg711O3srftcHhZ0dqnETqLaoIK0x17fUw9rFSlK/0NlsKe0Ahhyl5pXE2g==}
@@ -4232,7 +4229,7 @@ snapshots:
 
   kleur@3.0.3: {}
 
-  libpg-query@18.2.1(patch_hash=080287c9542c61b424c908c26cda781be1b2787ca53522cf254175816f9d7d88):
+  libpg-query@18.2.2:
     dependencies:
       '@pgsql/types': 18.0.0
 
