@@ -1272,6 +1272,22 @@ describe("analyzeOutput, keys read from a document returned whole", () => {
         ["profile"],
         false,
       ],
+      // JSON aggregates reach the parser as calls, so they are JSON functions too.
+      ["mysql", "SELECT JSON_ARRAYAGG(profile) AS a FROM users", users, ["a", "profile"], false],
+      [
+        "mysql",
+        "SELECT JSON_OBJECTAGG(id, profile) AS a FROM users",
+        users,
+        ["a", "id", "profile"],
+        false,
+      ],
+      [
+        "mysql",
+        "SELECT profile FROM users GROUP BY profile HAVING JSON_ARRAYAGG(profile) IS NOT NULL",
+        users,
+        ["profile"],
+        false,
+      ],
       // Only the document the call read: another returned column stays traced.
       [
         "mysql",
