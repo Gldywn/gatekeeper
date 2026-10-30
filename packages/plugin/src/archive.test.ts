@@ -138,6 +138,28 @@ describe("ResultArchive", () => {
     const sealed = await archive.seal(RESULT, "req_1");
     expect(await new ResultArchive(storage).open(sealed, "req_1")).toEqual(RESULT);
   });
+
+  // Beekeeper 6.1.6's plugin frame: getRandomValues only, no crypto.subtle.
+  it("seals and opens nothing without Web Crypto, before touching the key storage", async () => {
+    const storage = memoryStorage();
+    const archive = new ResultArchive(storage);
+    const sealed = await archive.seal(RESULT, "req_1");
+    const get = vi.spyOn(storage, "getItem");
+    const set = vi.spyOn(storage, "setItem");
+    const native = globalThis.crypto;
+    vi.stubGlobal("crypto", { getRandomValues: native.getRandomValues.bind(native) });
+    try {
+      const unavailable = "Result encryption unavailable";
+      await expect(archive.ready()).rejects.toThrow(unavailable);
+      await expect(archive.seal(RESULT, "req_2")).rejects.toThrow(unavailable);
+      await expect(archive.open(sealed, "req_1")).rejects.toThrow(unavailable);
+      await expect(new ResultArchive(storage).seal(RESULT, "req_3")).rejects.toThrow(unavailable);
+      expect(get).not.toHaveBeenCalled();
+      expect(set).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });
 
 describe("parseResult", () => {

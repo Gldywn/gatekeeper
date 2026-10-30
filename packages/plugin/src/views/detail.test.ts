@@ -9,6 +9,7 @@ vi.mock("@beekeeperstudio/plugin", () => ({
   requestFileSave: vi.fn(),
 }));
 
+import { NO_ENCRYPTION } from "../render/detail";
 import { DetailView } from "./detail";
 
 const item = {
@@ -292,5 +293,21 @@ describe("DetailView kept rows", () => {
     const { detail } = view(load);
     detail.open({ ...kept("a"), result: { ...ROWS, rows: [], rowCount: 0 } }, "text");
     expect(load).not.toHaveBeenCalled();
+  });
+
+  // Beekeeper 6.1.6's plugin frame: getRandomValues only, no crypto.subtle.
+  it("reads nothing it could not open where Beekeeper has no Web Crypto, and says to update", () => {
+    const load = vi.fn(async () => ROWS);
+    const { detail, panel } = view(load);
+    const native = globalThis.crypto;
+    vi.stubGlobal("crypto", { getRandomValues: native.getRandomValues.bind(native) });
+    try {
+      detail.open(kept("a"), "text");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(load).not.toHaveBeenCalled();
+    expect(panel.innerHTML).not.toContain("loading");
+    expect(panel.innerHTML).toContain(NO_ENCRYPTION);
   });
 });

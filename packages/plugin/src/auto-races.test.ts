@@ -22,6 +22,7 @@ vi.mock("@beekeeperstudio/plugin", () => ({
 }));
 vi.mock("./anim", () => ({ enter: vi.fn(), reveal: vi.fn(), pulse: vi.fn() }));
 
+import { log } from "@beekeeperstudio/plugin";
 import { SchemaAnnotator } from "./annotate";
 import { Gatekeeper } from "./app";
 import { AUTO_APPROVED, SAVED_KEY_MASK } from "./render/auto";
@@ -1373,6 +1374,32 @@ describe("kept results", () => {
     const body = app.broker.result.mock.calls[0][2];
     expect(body).toMatchObject({ status: "approved", rows: [{ quantity: 3 }] });
     expect(body).not.toHaveProperty("archive");
+  });
+
+  // Beekeeper 6.1.6's plugin frame: getRandomValues only, no crypto.subtle.
+  it("delivers the rows once, unsealed and without an error, where Beekeeper has no Web Crypto", async () => {
+    const { app, card } = harness();
+    vi.mocked(log.error).mockClear();
+    const native = globalThis.crypto;
+    vi.stubGlobal("crypto", { getRandomValues: native.getRandomValues.bind(native) });
+    try {
+      query.mockResolvedValue(rows);
+      await app.approve(card.id);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(app.archive.seal).not.toHaveBeenCalled();
+    expect(app.broker.result).toHaveBeenCalledOnce();
+    const body = app.broker.result.mock.calls[0][2];
+    expect(body).toMatchObject({ status: "approved", rows: [{ quantity: 3 }] });
+    expect(body).not.toHaveProperty("archive");
+    expect(app.finish).toHaveBeenCalledWith(
+      card.id,
+      "approved",
+      expect.any(String),
+      expect.objectContaining({ kept: false }),
+    );
+    expect(log.error).not.toHaveBeenCalled();
   });
 });
 

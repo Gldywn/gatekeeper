@@ -175,7 +175,9 @@ Every approved result is kept twice, for two readers.
   9 MiB) is dropped and the decision still lands. If sealing fails, the agent still gets its rows
   and only the kept copy is missing. The server cannot read it; the plugin
   fetches it with `GET /results/:id` (same scope as `/activity`, approved requests only) and
-  opens it. It holds exactly what the agent was sent: at most 10,000 rows and 8 MiB, counted in
+  opens it. A Beekeeper whose plugin page has no `crypto.subtle` (6.1.6 registers its schemes so
+  that the page is not a secure context; 6.2.0 fixes it) seals nothing and fetches nothing, and
+  the detail says to update Beekeeper. The kept copy holds exactly what the agent was sent: at most 10,000 rows and 8 MiB, counted in
   UTF-8 bytes over the whole result, so the history never shows a row the agent did not get.
   Decisions from before this copy existed have none, and rows already stripped cannot be
   recovered. A server from before this copy ignores it, so results decided while such a server
