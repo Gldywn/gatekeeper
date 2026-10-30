@@ -186,8 +186,9 @@ first line, the tables, what the SQL marks, the SQL, then the decision.
   edge, slid left only as far as the pane requires (`placeLegendPop`). No list that repeats
   what the SQL shows. The legend sits 16px under the tables and 10px above the SQL it explains.
 - When part of what a statement returns cannot be traced (a table function, recursion, `SHOW`,
-  a star over columns that could not be read, a JSON key a column or a parameter supplies), so
-  that a flag may be missing, one standing line heads the legend in the
+  a star over columns that could not be read, a JSON key a column or a parameter supplies, a
+  JSON function, whose literals are never read: operator decision, 2026-10-30), so that a flag
+  may be missing, one standing line heads the legend in the
   analysis-limit box: "Gatekeeper cannot tell every column this statement returns. The flags
   may be incomplete." Such a decision records the flags found and nothing else; with none found
   it records nothing, so a row never shows an all-clear the analysis could not vouch for.

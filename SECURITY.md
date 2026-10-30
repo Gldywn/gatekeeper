@@ -278,13 +278,16 @@ itself is in neither the URL nor the prompt.
   trojan-source guards applied, and never include result rows.
 - Its PII and Client flags never query the connected database. Flags computed now describe
   what the statement returns to the agent, never a column it only filters on or a value it
-  carries. A JSON key read anywhere in the statement (a path, a field, or a test for the key
-  such as `profile ? 'ssn'`, the keys of a `@>` literal but not its values) counts when the statement returns a
-  document of that same table column, unchanged or wrapped (`jsonb_agg(profile)`), since the
-  key may reach the agent inside it. A read on another row of that column counts too (a
-  self-join, a semijoin); a part of the document (`profile->'contact'`), a document edited
-  through a path (`JSON_SET`) or with a key removed does not. Tables are matched by the name as
-  written, not by catalog identity. The plugin posts them with the decision as three booleans
+  carries. A JSON key the grammar shows being read anywhere in the statement (an operator such
+  as `profile->>'email'`, a subscript, a field, a key test such as `profile ? 'ssn'`, the keys
+  of a `@>` literal but not its values) counts when the statement returns a document of that
+  same table column, since the key may reach the agent inside it. A read on another row of
+  that column counts too (a self-join, a semijoin); a part of the document
+  (`profile->'contact'`) or one with a key removed does not. Tables are matched by the name as
+  written, not by catalog identity. Functions are not interpreted: an ordinary one passes on
+  the columns it receives, and a JSON function (its name contains `json`) never has its
+  literals read, so its result, and a document it reads that the statement returns, are
+  untraced. The plugin posts them with the decision as three booleans
   (`policy_json.sensitivity`), never a table, column or value. When the output could not be
   fully traced, it records the flags it did find and records nothing if it found none, so the
   trail never stores an all-clear it could not vouch for. The third boolean, Value, is always false since literals

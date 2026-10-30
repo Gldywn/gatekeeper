@@ -8,6 +8,7 @@ import {
   columnLabel,
   formatRef,
   isFunctionRelation,
+  isJsonFunction,
   isNode,
   JSON_OPERATORS,
   jsonKeyNames,
@@ -42,6 +43,8 @@ export interface QueryOutput {
 interface Doc {
   keys: Set<string>;
   row?: Doc;
+  // A JSON function read it: it may hold keys nobody could name.
+  opaque?: true;
 }
 // One returned column. A `rest` slot stands for columns nobody could list: a table's own
 // ("pass", a column read through it keeps its name) or a function's or recursion's ("opaque").
@@ -486,6 +489,11 @@ class Resolver {
         this.statement(isNode(n.ast) ? n.ast : n, scope);
         return;
       }
+      // A JSON function reads its documents in ways only its own semantics could name: whatever
+      // returns one of them is untraced.
+      if ((n.type === "function" || n.type === "tablefunc") && isJsonFunction(n)) {
+        for (const doc of this.sources(n.args, scope).docs ?? []) doc.opaque = true;
+      }
       const keys = this.keysRead(n, scope);
       if (keys.length) this.learn(this.source(n, scope), keys);
       for (const key of Object.keys(n)) visit(n[key]);
@@ -496,27 +504,25 @@ class Resolver {
     }
   }
 
-  // The keys a node reads out of a document: a JSON path, a subscript, a field, a key test.
+  // The keys the grammar shows a node reading out of a document: a JSON operator, a subscript, a
+  // field, a key test. A function's arguments name no key: only its semantics could tell a key
+  // from a value.
   private keysRead(n: Node, scope: Scope): string[] {
-    if (n.type === "function") return readsPath(n) ? pathKeys(n) : [];
+    if (n.type === "function" || n.type === "tablefunc") return [];
     if (n.type === "binary_expr" && KEY_TESTS.has(String(n.operator))) return testedKeys(n);
     const subscript = isNode(n.column) ? offsetKeys(n.column.offset) : [];
     const fields = n.type === "column_ref" ? (this.path(n, scope)?.fields ?? []) : [];
     return [...accessorKeys(n), ...subFields(n), ...subscript, ...fields];
   }
 
-  // The document a key is read from: through JSON paths, key tests, JSON reading functions and
-  // casts down to a column, or whatever value hands one back whole (`COALESCE(profile, '{}')`).
+  // The document a key is read from: through JSON operators, key tests and casts down to a
+  // column, or whatever value hands one back (`COALESCE(profile, '{}')`).
   private source(node: unknown, scope: Scope): Value {
     if (!isNode(node)) return NOTHING;
     const op = String(node.operator ?? "");
     if (node.type === "cast") return this.source(node.expr, scope);
     if (node.type === "binary_expr" && (JSON_OPERATORS.has(op) || KEY_TESTS.has(op))) {
       return this.source(node.left, scope);
-    }
-    if (node.type === "function" && readsPath(node)) {
-      const args = isNode(node.args) && Array.isArray(node.args.value) ? node.args.value : [];
-      return this.source(args[0], scope);
     }
     if (node.type === "column_ref") {
       const inner = isNode(node.column) && isNode(node.column.expr) ? node.column.expr : null;
@@ -583,14 +589,6 @@ class Resolver {
         // documents, so a key read through its columns is read from them.
         const unpacked = this.sources(call.args, sees).docs;
         const fields = renames.length ? renames : columnDefinitions(expr);
-        // `jsonb_to_record(profile) AS r(email text)` reads the fields it declares out of the
-        // document; `jsonb_populate_record(base, profile)` takes the document second.
-        const record = /^jsonb?_(to|populate)_record(set)?$/i.exec(callName(call));
-        if (record && expr) {
-          const list = isNode(expr.args) && Array.isArray(expr.args.value) ? expr.args.value : [];
-          const doc = list[record[1].toLowerCase() === "populate" ? 1 : 0];
-          this.learn(this.source(doc, sees), columnDefinitions(expr));
-        }
         const field = (label: string | null): Slot => ({
           label,
           names: new Set(args.names),
@@ -892,27 +890,10 @@ class Resolver {
         const grammar = !name.schema && part?.type !== "double_quote_string";
         const fn = nameOf(node).toLowerCase();
         if (grammar && (fn === "not" || fn === "exists")) return NOTHING;
-        // Every argument may reach the result (a JSON constructor's values, JSON_SET's new one);
-        // a reader or a setter adds the keys it returns, never a value written, a key removed or
-        // a key a test looked for.
-        const args = this.value(node.args, scope);
-        const call = callName(node);
-        const operands = pathOperands(node);
-        const returned = JSON_TESTS.test(call) || /^jsonb?_remove$/i.test(call);
-        const value = join(args, named(returned ? [] : pathKeys(node)));
-        // A key a column or a parameter supplies may be any key.
-        const dynamic = !operands.every(fixedKey);
-        // A test or an edit returns no document. A reader returns a part of it, unless its path
-        // is the root or every field (`JSON_QUERY(profile)`, `'$'`, `'$.*'`), or nobody can
-        // tell. Any other call may wrap it whole.
-        const all = operands.length === 0 || operands.some(wholePath) || dynamic;
-        const changed =
-          JSON_TESTS.test(call) || JSON_EDITORS.test(call) || (JSON_PARTS.test(call) && !all);
-        return {
-          ...value,
-          docs: changed ? undefined : args.docs,
-          unknown: value.unknown || dynamic,
-        };
+        // Every argument may reach the result, documents included. A JSON function's literals may
+        // be paths, keys or values, which only its semantics tell apart: its result is untraced.
+        const args = whole(this.value(node.args, scope));
+        return isJsonFunction(node) ? { ...args, unknown: true } : args;
       }
       case "aggr_func": {
         // A count returns how many, never what it counted; FILTER, OVER and the aggregate's own
@@ -1004,72 +985,14 @@ class Resolver {
         parts.push(this.value(n, scope));
         return;
       }
-      parts.push(named(accessorKeys(n)));
+      if (n.type === "function" && isJsonFunction(n)) opaque = true;
+      else parts.push(named(accessorKeys(n)));
       for (const key of Object.keys(n)) visit(n[key]);
     };
     visit(node);
     const value = join(...parts);
     return opaque ? { ...value, unknown: true } : value;
   }
-}
-
-// A call's own name, without its schema; BigQuery keeps an unqualified one under `schema`.
-function callName(node: Node): string {
-  const name = isNode(node.name) ? node.name : {};
-  const parts = Array.isArray(name.name) ? name.name : [];
-  const own = parts.length ? parts[parts.length - 1] : name.schema;
-  return isNode(own) && typeof own.value === "string" ? own.value : "";
-}
-
-// JSON functions that hand back a part of their first argument (JSON_EXTRACT, JSON_QUERY,
-// Snowflake's GET_PATH), or the whole of it when their path names no key.
-const JSON_PARTS =
-  /^(jsonb?_(extract(_\w+)?|value(_array)?|query(_array)?|path_query(_\w+)?|keys)|get(_path|_ignore_case)?)$/i;
-// JSON functions that test their first argument for a key or a property.
-const JSON_TESTS =
-  /^jsonb?_(exists(_any|_all)?|path_(exists|match)|contains(_path)?|search|type|typeof|length|array_length)$/i;
-// JSON functions that edit their first argument at a path.
-const JSON_EDITORS =
-  /^jsonb?_(set(_lax)?|insert|replace|remove|array_append|array_insert|modify)$/i;
-// Only a read or a test shows what a document holds.
-const readsPath = (node: Node) =>
-  JSON_PARTS.test(callName(node)) || JSON_TESTS.test(callName(node));
-
-const callArgs = (node: Node): unknown[] =>
-  isNode(node.args) && Array.isArray(node.args.value) ? node.args.value : [];
-
-// The arguments of a JSON call that name paths or keys, never a value it writes or looks for.
-function pathOperands(node: Node): unknown[] {
-  const name = callName(node);
-  const args = callArgs(node);
-  // JSON_CONTAINS(doc, candidate, path), JSON_CONTAINS_PATH(doc, mode, path, ...).
-  if (/^jsonb?_contains(_path)?$/i.test(name)) return args.slice(2);
-  // JSON_SEARCH(doc, mode, value, escape, path, ...).
-  if (/^json_search$/i.test(name)) return args.slice(4);
-  if (/^jsonb?_remove$/i.test(name)) return args.slice(1);
-  // JSON_SET(doc, path, value, path, value, ...), jsonb_set(doc, path, value).
-  if (JSON_EDITORS.test(name)) return args.filter((_, i) => i % 2 === 1);
-  return readsPath(node) ? args.slice(1) : [];
-}
-
-// A literal path selecting the document itself (`'$'`, PostgreSQL's `'{}'`) or every field
-// (`'$.*'`): what it returns holds every key the document does.
-function wholePath(n: unknown): boolean {
-  const text = stringLiteral(n);
-  return text !== null && (/^\s*\$?\s*$/.test(text) || text.trim() === "{}" || text.includes("*"));
-}
-
-function pathKeys(node: Node): string[] {
-  const get = /^get(_path|_ignore_case)?$/i.test(callName(node));
-  const keys: string[] = [];
-  walk(pathOperands(node), (n) => {
-    const text = stringLiteral(n);
-    // Snowflake's GET_PATH spells its path `contact.email`, with no leading `$`.
-    if (text !== null) keys.push(...(get ? text.split(/[.[\]]/) : jsonKeyNames(text)));
-  });
-  // JSON_CONTAINS(doc, '{"ssn": 1}') tests the candidate's keys, as `@>` does.
-  if (/^jsonb?_contains$/i.test(callName(node))) keys.push(...literalKeys(callArgs(node)[1]));
-  return keys.filter((k) => k !== "" && k !== "*");
 }
 
 // A key the statement spells out, as opposed to one a column or a parameter supplies.
@@ -1235,7 +1158,8 @@ export function analyzeOutput(sql: string, dialect: string, columns?: Columns): 
     for (const n of slotValue(slot).names) names.add(n);
     for (const doc of slot.docs ?? []) for (const k of doc.keys) names.add(k);
   }
-  return { names: [...names], complete: !slots.some((s) => s.unknown) };
+  const opaque = (s: Slot) => s.docs?.some((d) => d.opaque) ?? false;
+  return { names: [...names], complete: !slots.some((s) => s.unknown || opaque(s)) };
 }
 
 // The reviewer's annotation: the statement's tables, and the person and client data among the

@@ -239,43 +239,8 @@ describe("analyzeOutput", () => {
         true,
       ],
       [
-        "postgresql",
-        "SELECT jsonb_extract_path_text(profile, 'email') AS e FROM people",
-        null,
-        ["profile", "email", "e"],
-        true,
-      ],
-      [
         "mysql",
         "SELECT profile->>'$.email' AS e FROM people",
-        null,
-        ["profile", "email", "e"],
-        true,
-      ],
-      [
-        "mysql",
-        "SELECT JSON_EXTRACT(profile, '$.email') AS e FROM people",
-        null,
-        ["profile", "email", "e"],
-        true,
-      ],
-      [
-        "sqlite",
-        "SELECT json_extract(profile, '$.email') AS e FROM people",
-        null,
-        ["profile", "email", "e"],
-        true,
-      ],
-      [
-        "transactsql",
-        "SELECT JSON_VALUE(profile, '$.email') AS e FROM people",
-        null,
-        ["profile", "email", "e"],
-        true,
-      ],
-      [
-        "bigquery",
-        "SELECT JSON_EXTRACT_SCALAR(profile, '$.email') AS e FROM people",
         null,
         ["profile", "email", "e"],
         true,
@@ -291,50 +256,63 @@ describe("analyzeOutput", () => {
     ]);
   });
 
-  it("returns every value a JSON constructor or modifier puts in the document it builds", () => {
+  // Only a function's own semantics tell a path from a key or a value: a JSON call reads no
+  // literal and returns an untraced value that keeps its arguments' names.
+  it("leaves what a JSON function returns untraced, in every dialect", () => {
+    const e = (dialect: string, sql: string): Case => [dialect, sql, null, ["profile", "e"], false];
     check([
+      e("postgresql", "SELECT jsonb_extract_path_text(profile, 'email') AS e FROM people"),
+      e("mysql", "SELECT JSON_EXTRACT(profile, '$.email') AS e FROM people"),
+      e("sqlite", "SELECT json_extract(profile, '$.email') AS e FROM people"),
+      e("transactsql", "SELECT JSON_VALUE(profile, '$.email') AS e FROM people"),
+      e("bigquery", "SELECT JSON_EXTRACT_SCALAR(profile, '$.email') AS e FROM people"),
       [
         "postgresql",
         "SELECT json_build_object('contact', email) AS payload FROM people",
         null,
         ["email", "payload"],
-        true,
+        false,
       ],
       [
         "postgresql",
         "SELECT json_build_array(id, email) AS payload FROM people",
         null,
         ["id", "email", "payload"],
-        true,
+        false,
       ],
       [
         "mysql",
         "SELECT JSON_OBJECT('contact', email) AS payload FROM people",
         null,
         ["email", "payload"],
-        true,
+        false,
       ],
       [
         "sqlite",
         "SELECT json_object('contact', email) AS payload FROM people",
         null,
         ["email", "payload"],
-        true,
+        false,
       ],
       [
         "transactsql",
         "SELECT JSON_MODIFY(profile, '$.contact', email) AS payload FROM people",
         null,
-        ["profile", "contact", "email", "payload"],
-        true,
+        ["profile", "email", "payload"],
+        false,
       ],
       [
         "mysql",
         "SELECT JSON_SET(profile, '$.contact', email) AS payload FROM people",
         null,
-        ["profile", "contact", "email", "payload"],
-        true,
+        ["profile", "email", "payload"],
+        false,
       ],
+    ]);
+  });
+
+  it("returns every value another function puts in its result", () => {
+    check([
       [
         "postgresql",
         "SELECT string_agg(id::text, email) AS v FROM people",
@@ -544,7 +522,7 @@ describe("analyzeOutput", () => {
         "SELECT row_to_json(p) AS record FROM people p",
         { people: ["id", "email"] },
         ["id", "email", "record"],
-        true,
+        false,
       ],
     ]);
   });
@@ -1176,7 +1154,7 @@ describe("analyzeOutput, keys read from a document returned whole", () => {
       ],
       [
         "mysql",
-        "SELECT profile FROM users WHERE JSON_EXTRACT(profile, '$.email') IS NOT NULL",
+        "SELECT profile FROM users WHERE profile->>'$.email' IS NOT NULL",
         null,
         ["profile", "email"],
         true,
@@ -1264,39 +1242,42 @@ describe("analyzeOutput, keys read from a document returned whole", () => {
     ]);
   });
 
-  it("follows the document wrapped whole in a constructor or an aggregate", () => {
+  it("leaves a document a JSON function reads untraced where it is returned, learning no key", () => {
     check([
       [
         "postgresql",
         "SELECT jsonb_build_object('payload', profile) AS o FROM users WHERE profile->>'email' IS NOT NULL",
         users,
         ["o", "profile", "email"],
-        true,
+        false,
       ],
       [
         "postgresql",
         "SELECT jsonb_agg(profile) FROM users WHERE profile->>'email' IS NOT NULL",
         users,
         ["jsonb_agg", "profile", "email"],
-        true,
+        false,
       ],
-    ]);
-  });
-
-  it("learns keys only from a read, never from a document the statement builds or edits", () => {
-    check([
       [
         "mysql",
         "SELECT profile FROM users WHERE JSON_SET(profile, '$.note', 'email') IS NOT NULL",
         users,
         ["profile"],
-        true,
+        false,
       ],
       [
         "mysql",
         "SELECT profile FROM users WHERE JSON_EXTRACT(profile, '$.email') IS NOT NULL",
         users,
-        ["profile", "email"],
+        ["profile"],
+        false,
+      ],
+      // Only the document the call read: another returned column stays traced.
+      [
+        "mysql",
+        "SELECT id FROM users WHERE JSON_EXTRACT(profile, '$.email') IS NOT NULL",
+        users,
+        ["id"],
         true,
       ],
     ]);
@@ -1376,47 +1357,39 @@ describe("analyzeOutput, round 3 of the cross-review", () => {
         ["profile", "email"],
         true,
       ],
+      // A FROM function's declared fields describe its result, not its argument's keys.
       [
         "postgresql",
         "SELECT u.profile FROM users u, jsonb_to_record(u.profile) AS r(email text)",
         users,
-        ["profile", "email"],
-        true,
+        ["profile"],
+        false,
       ],
     ]);
   });
 
-  it("tells a function that wraps a document from one that reads or edits a path", () => {
+  it("never reads a JSON function's literals, a key or a value alike", () => {
     check([
-      // A value the agent writes into a constructor is not a key.
       [
         "postgresql",
         `SELECT jsonb_build_array(profile, 'ssn') AS a FROM users ${where}`,
         users,
         ["a", "profile", "email"],
-        true,
+        false,
       ],
       [
         "mysql",
         "SELECT JSON_ARRAY(profile, 'ssn') FROM users WHERE JSON_EXTRACT(profile, '$.email') IS NOT NULL",
         users,
-        ["profile", "email"],
-        true,
-      ],
-      // A key a column supplies may be any key, the ones read elsewhere included.
-      [
-        "postgresql",
-        `SELECT jsonb_extract_path(profile, k.name) AS v FROM users, keys k ${where}`,
-        { ...users, keys: ["name"] },
-        ["v", "profile", "name", "email"],
+        ["profile"],
         false,
       ],
       [
         "postgresql",
         "SELECT jsonb_extract_path(profile, 'contact') AS c FROM users WHERE profile->>'ssn' IS NOT NULL",
         users,
-        ["c", "profile", "contact"],
-        true,
+        ["c", "profile", "ssn"],
+        false,
       ],
     ]);
   });
@@ -1542,7 +1515,7 @@ describe("analyzeOutput, round 3 of the cross-review", () => {
     ]);
   });
 
-  it("learns the keys a statement tests the document for, never the values", () => {
+  it("learns the keys a key-test operator names, never the values", () => {
     const sql = (test: string) => `SELECT profile FROM users WHERE ${test}`;
     check([
       ["postgresql", sql("profile ? 'ssn'"), users, ["profile", "ssn"], true],
@@ -1551,20 +1524,6 @@ describe("analyzeOutput, round 3 of the cross-review", () => {
         sql("profile ?| array['ssn', 'email']"),
         users,
         ["profile", "ssn", "email"],
-        true,
-      ],
-      [
-        "postgresql",
-        sql("jsonb_exists_any(profile, ARRAY['ssn'])"),
-        users,
-        ["profile", "ssn"],
-        true,
-      ],
-      [
-        "mysql",
-        sql("JSON_CONTAINS_PATH(profile, 'one', '$.ssn')"),
-        users,
-        ["profile", "ssn"],
         true,
       ],
       ["postgresql", sql(`profile @> '{"ssn": "known"}'::jsonb`), users, ["profile", "ssn"], true],
@@ -1626,84 +1585,15 @@ describe("analyzeOutput, round 3 of the cross-review", () => {
 describe("analyzeOutput, round 4 of the cross-review", () => {
   const users = { users: ["id", "profile"] };
 
-  it("tells a reader returning the document from one returning a part of it", () => {
-    const ssn = "WHERE JSON_EXTRACT(profile, '$.ssn') IS NOT NULL";
+  // A key a column supplies may be any key: the ones read elsewhere are kept.
+  it("leaves a value read through a key nobody spelled out untraced", () => {
     check([
-      [
-        "transactsql",
-        "SELECT id, JSON_QUERY(profile) AS profile FROM users WHERE JSON_VALUE(profile, '$.ssn') IS NOT NULL",
-        users,
-        ["id", "profile", "ssn"],
-        true,
-      ],
-      [
-        "mysql",
-        `SELECT JSON_EXTRACT(profile, '$') AS p FROM users ${ssn}`,
-        users,
-        ["p", "profile", "ssn"],
-        true,
-      ],
-      [
-        "mysql",
-        `SELECT JSON_EXTRACT(profile, '$.*') AS p FROM users ${ssn}`,
-        users,
-        ["p", "profile", "ssn"],
-        true,
-      ],
-      [
-        "mysql",
-        `SELECT JSON_EXTRACT(profile, '$.contact') AS p FROM users ${ssn}`,
-        users,
-        ["p", "profile", "contact"],
-        true,
-      ],
-      [
-        "mysql",
-        `SELECT JSON_EXTRACT(profile, '$[0]') AS p FROM users ${ssn}`,
-        users,
-        ["p", "profile"],
-        true,
-      ],
-      // A key a column supplies may be any key, the ones read elsewhere included.
       [
         "postgresql",
         "SELECT profile->>k.name AS v FROM users, keys k WHERE profile->>'ssn' IS NOT NULL",
         { ...users, keys: ["name"] },
         ["v", "profile", "ssn"],
         false,
-      ],
-    ]);
-  });
-
-  it("names the keys an edit sets, never the ones it removes or a test looks for", () => {
-    check([
-      [
-        "transactsql",
-        "SELECT JSON_MODIFY(profile, '$.ssn', NULL) AS p FROM users WHERE JSON_VALUE(profile, '$.email') IS NOT NULL",
-        users,
-        ["p", "profile", "ssn"],
-        true,
-      ],
-      [
-        "mysql",
-        "SELECT JSON_SET(profile, '$.note', 'ssn') AS p FROM users",
-        users,
-        ["p", "profile", "note"],
-        true,
-      ],
-      [
-        "mysql",
-        "SELECT JSON_REMOVE(profile, '$.ssn') AS p FROM users",
-        users,
-        ["p", "profile"],
-        true,
-      ],
-      [
-        "mysql",
-        "SELECT JSON_CONTAINS_PATH(profile, 'one', '$.ssn') AS has FROM users",
-        users,
-        ["has", "profile"],
-        true,
       ],
     ]);
   });
@@ -1727,11 +1617,12 @@ describe("analyzeOutput, round 4 of the cross-review", () => {
         ["id", "profile", "contacts", "email"],
         true,
       ],
+      // A function whose name says nothing of JSON is an ordinary one: a known limit.
       [
         "snowflake",
         "SELECT id, profile FROM users WHERE GET_PATH(profile, 'contact.email') IS NOT NULL",
         null,
-        ["id", "profile", "contact", "email"],
+        ["id", "profile"],
         true,
       ],
     ]);
@@ -1743,38 +1634,21 @@ describe("analyzeOutput, round 4 of the cross-review", () => {
         "postgresql",
         "SELECT u.id, u.profile FROM users u, jsonb_to_recordset(u.profile->'contacts') AS c(email text) WHERE c.email LIKE '%@acme.com'",
         null,
-        ["id", "profile", "contacts", "email"],
-        true,
+        ["id", "profile", "contacts"],
+        false,
       ],
       [
         "postgresql",
         "SELECT u.id, u.profile FROM users u, jsonb_array_elements(u.profile->'contacts') c WHERE c->>'email' LIKE '%@acme.com'",
         null,
         ["id", "profile", "contacts", "email"],
-        true,
+        false,
       ],
       [
         "postgresql",
-        "SELECT u.profile FROM users u WHERE EXISTS (SELECT 1 FROM jsonb_array_elements(u.profile->'phones') p WHERE p->>'type' = 'home' AND profile->>'ssn' IS NOT NULL)",
+        "SELECT u.profile FROM users u, generate_series(1, 3) g WHERE EXISTS (SELECT 1 FROM unnest(ARRAY[1]) p WHERE profile->>'ssn' IS NOT NULL)",
         null,
-        ["profile", "phones", "type", "ssn"],
-        true,
-      ],
-    ]);
-  });
-
-  it("reads MySQL, SQLite and Snowflake key tests at their path positions", () => {
-    const sql = (test: string) => `SELECT profile FROM users WHERE ${test}`;
-    check([
-      ["sqlite", sql("json_type(profile, '$.ssn') = 'text'"), users, ["profile", "ssn"], true],
-      ["mysql", sql("JSON_LENGTH(profile, '$.phones') > 0"), users, ["profile", "phones"], true],
-      ["mysql", sql(`JSON_CONTAINS(profile, '"x"', '$.email')`), users, ["profile", "email"], true],
-      ["mysql", sql(`JSON_CONTAINS(profile, '{"ssn": "1"}')`), users, ["profile", "ssn"], true],
-      [
-        "mysql",
-        sql("JSON_SEARCH(profile, 'one', 'x', NULL, '$.email') IS NOT NULL"),
-        users,
-        ["profile", "email"],
+        ["profile", "ssn"],
         true,
       ],
     ]);

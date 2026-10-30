@@ -238,7 +238,7 @@ another among the columns, aliases and JSON keys the statement returns, with a `
 expanded against the real columns so nothing hides behind the star. A column used only to
 filter, join or sort is not flagged, nor is a value the agent wrote into its own query: it
 already knows it. When part of what a statement returns cannot be traced (a table function, a
-recursive query, `SHOW`), the card says so instead of showing an all-clear. A dot on the header's database icon shows
+recursive query, `SHOW`, a JSON function), the card says so instead of showing an all-clear. A dot on the header's database icon shows
 whether the last connection check passed, and the icon opens the details: that check, then
 the three read-only layers (the armed mode, the Beekeeper connection and the database
 endpoint). The robot beside it shows the link to the Gatekeeper server that your agents send
