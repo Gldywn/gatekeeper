@@ -1,8 +1,8 @@
 import type { SqlEngine } from "../engine";
-import { outputNsp } from "../nsp/output";
 import { classifyPg } from "./classify";
 import { analyzePg, countsRowsPg, receiptPg, sensitiveLiteralsPg, tableOpsPg } from "./inspect";
 import { loadPg } from "./load";
+import { outputPg } from "./output";
 
 export const pgEngine: SqlEngine = {
   dialect: "postgresql",
@@ -12,7 +12,6 @@ export const pgEngine: SqlEngine = {
   sensitiveLiterals: sensitiveLiteralsPg,
   receipt: receiptPg,
   countsRows: countsRowsPg,
-  // Stopgap the operator chose while item 20 ports the output walker to PostgreSQL's grammar.
-  output: (sql, columns) => outputNsp(sql, "postgresql", columns),
+  output: outputPg,
   load: loadPg,
 };

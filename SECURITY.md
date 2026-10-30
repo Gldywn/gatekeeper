@@ -338,11 +338,19 @@ itself is in neither the URL nor the prompt.
   of a `@>` literal but not its values) counts when the statement returns a document of that
   same table column, since the key may reach the agent inside it. A read on another row of
   that column counts too (a self-join, a semijoin); a part of the document
-  (`profile->'contact'`) or one with a key removed does not. Tables are matched by the name as
+  (`profile->'contact'`) or one with a key removed does not. Known limit: a key read inside such
+  a part (`profile->'contact'->>'ssn'`) is not attached to it either when the statement returns
+  that part, and the output still counts as traced. Tables are matched by the name as
   written, not by catalog identity. Functions are not interpreted: an ordinary one passes on
   the columns it receives, and a JSON function (its name contains `json`) never has its
   literals read, so its result, and a document it reads that the statement returns, are
-  untraced. The plugin posts them with the decision as three booleans
+  untraced; on PostgreSQL so are the SQL/JSON expressions (`JSON_VALUE`, `JSON_TABLE`...), the
+  `JSON_EXISTS` and `IS JSON` tests aside, which return a boolean. A write to part of a column
+  (`SET profile['note'] = ...`), or any of `MERGE`'s alternative actions, leaves what the column
+  held among what RETURNING hands back. A name that no column of a fully known relation answers
+  to (an implicit name the plugin got wrong, say) leaves its value untraced rather than empty,
+  and where names compare without case two CTEs that differ only by case count as both.
+  The plugin posts them with the decision as three booleans
   (`policy_json.sensitivity`), never a table, column or value. When the output could not be
   fully traced, it records the flags it did find and records nothing if it found none, so the
   trail never stores an all-clear it could not vouch for. The third boolean, Value, is always false since literals
