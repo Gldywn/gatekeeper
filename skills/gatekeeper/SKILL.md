@@ -116,7 +116,7 @@ Keep rolling waits going for as long as the proposal can live. Slowness is never
 
 ## Modes: reads by default, writes are human-armed
 
-Reads (one `SELECT`, or a read-only CTE) are always allowed. Writes (INSERT/UPDATE) run only if the human has armed **Write** mode, and destructive statements (DELETE/DROP/TRUNCATE/ALTER) only under **Destructive** mode. Those modes are off by default, ephemeral, and the human's decision, not yours. One statement per proposal, never several. Propose a write only when the task genuinely calls for it; expect it to sit pending until the human arms the matching mode, and make its `intent` state what changes and whether it's reversible. Whether to restrict what a query may read (personal data, for instance) is a policy of your task, not of Gatekeeper; follow your own instructions on that.
+Reads (one `SELECT`, or a read-only CTE) are always allowed. Writes (INSERT/UPDATE) run only if the human has armed **Write** mode, and destructive statements (DELETE/DROP/TRUNCATE/ALTER) only under **Destructive** mode. Those modes are off by default, ephemeral, and the human's decision, not yours. One statement per proposal, never several. The server refuses a `;` anywhere but at the very end, even inside a string or a comment, and a carriage return not followed by a line feed: keep both out of what you propose, and use LF or CRLF line endings. Propose a write only when the task genuinely calls for it; expect it to sit pending until the human arms the matching mode, and make its `intent` state what changes and whether it's reversible. Whether to restrict what a query may read (personal data, for instance) is a policy of your task, not of Gatekeeper; follow your own instructions on that.
 
 ## Get the query right the first time
 
