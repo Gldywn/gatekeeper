@@ -30,20 +30,14 @@ export const DETECTION_TOGGLES: ToggleSpec[] = [
   {
     key: "piiFlagging",
     name: "PII flagging",
-    desc: "Highlight person-data columns and values on the approval card.",
+    desc: "Highlight person-data columns the agent will receive, on the approval card.",
     example: { text: "email", cls: "pii" },
   },
   {
     key: "clientFlagging",
     name: "Client-data flagging",
-    desc: "Highlight company and commercial columns and values, with a separate accent.",
+    desc: "Highlight company and commercial columns the agent will receive, with a separate accent.",
     example: { text: "company", cls: "client" },
-  },
-  {
-    key: "sensitiveValues",
-    name: "Sensitive-value detection",
-    desc: "Flag a sensitive literal used in a WHERE filter, not just projected columns.",
-    example: { text: "'a@b.co'", cls: "lit" },
   },
 ];
 

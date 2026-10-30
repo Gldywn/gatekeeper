@@ -2,13 +2,14 @@ import type { SensitivityRecord } from "@gatekeeper/shared";
 import { prepareSql } from "./identifiers";
 import { parser } from "./sql-parser";
 
+// What the reviewer is shown about a statement: the tables it touches, and among the names of
+// what it returns to the agent, those that read as person or client data.
 export interface SchemaContext {
   tables: string[];
   pii: string[];
   client: string[];
-  literals: string[];
-  star: boolean;
-  analysis?: import("./read-analysis").ReadSnapshot;
+  // False when part of what it returns could not be traced, so a flag may be missing.
+  complete: boolean;
 }
 
 export interface TableRef {
@@ -161,11 +162,11 @@ function dedupeRefs(refs: TableRef[]): TableRef[] {
   return out;
 }
 
-function isNode(x: unknown): x is Record<string, unknown> {
+export function isNode(x: unknown): x is Record<string, unknown> {
   return typeof x === "object" && x !== null;
 }
 
-function walk(node: unknown, visit: (n: Record<string, unknown>) => void): void {
+export function walk(node: unknown, visit: (n: Record<string, unknown>) => void): void {
   if (Array.isArray(node)) {
     for (const child of node) walk(child, visit);
     return;
@@ -176,7 +177,7 @@ function walk(node: unknown, visit: (n: Record<string, unknown>) => void): void 
 }
 
 // The parser's typings allow a value node as alias besides the usual plain string.
-function aliasName(as: unknown): string | null {
+export function aliasName(as: unknown): string | null {
   if (typeof as === "string") return as;
   if (isNode(as) && typeof as.value === "string") return as.value;
   return null;
@@ -187,7 +188,7 @@ function aliasName(as: unknown): string | null {
 // indistinguishable and is split too; a quoted column name holding them never matches.
 const RELATION_COLUMN_LIST = /^[^()]+\(([^()]*)\)$/;
 
-function relationColumnAliases(as: unknown): string[] {
+export function relationColumnAliases(as: unknown): string[] {
   const alias = aliasName(as);
   const columns = alias ? RELATION_COLUMN_LIST.exec(alias.trim())?.[1] : undefined;
   if (columns === undefined) return [];
@@ -199,7 +200,7 @@ function relationColumnAliases(as: unknown): string[] {
 
 // A table function has no relation to rename, so its alias names the single output column
 // it returns ("FROM unnest(tags) AS contact_email") instead of standing for a table.
-function isFunctionRelation(item: Record<string, unknown>): boolean {
+export function isFunctionRelation(item: Record<string, unknown>): boolean {
   return item.type === "unnest" || (isNode(item.expr) && item.expr.type === "function");
 }
 
@@ -258,7 +259,7 @@ export function jsonKeyNames(path: string): string[] {
 
 // The parser spreads a function name over name.name[] and name.schema (an unqualified
 // bigquery name lands in the latter, a qualifier in the other), so any part counts.
-function isJsonFunction(node: Record<string, unknown>): boolean {
+export function isJsonFunction(node: Record<string, unknown>): boolean {
   let match = false;
   walk(node.name, (n) => {
     if (typeof n.value === "string" && JSON_FUNCTION.test(n.value)) match = true;
@@ -287,7 +288,7 @@ function keyOperands(node: Record<string, unknown>): unknown[] {
   return args.length < 2 || stringLiteral(args[0]) !== null ? [] : args.slice(1);
 }
 
-function accessorKeys(node: Record<string, unknown>): string[] {
+export function accessorKeys(node: Record<string, unknown>): string[] {
   return keyOperands(node).flatMap((operand) => {
     const path = stringLiteral(operand);
     return path === null ? [] : jsonKeyNames(path);
@@ -353,7 +354,7 @@ export function analyzeSql(sql: string, dialect: string): ParsedQuery | null {
   }
 }
 
-function formatRef(ref: TableRef): string {
+export function formatRef(ref: TableRef): string {
   return ref.schema ? `${ref.schema}.${ref.name}` : ref.name;
 }
 
@@ -501,35 +502,15 @@ export function countsRows(sql: string, dialect: string): boolean {
   }
 }
 
-type ExposedInput = Pick<ParsedQuery, "columns" | "star"> &
-  Partial<Pick<ParsedQuery, "aliases" | "jsonKeys">>;
-
-// The distinct column names a query would expose: the ones it names, the output
-// aliases it assigns, the JSON keys it reads, plus (for SELECT *) the real columns
-// of the tables it reads.
-function exposedColumns(parsed: ExposedInput, tableColumns: string[]): string[] {
-  const exposed = new Set<string>([
-    ...parsed.columns,
-    ...(parsed.aliases ?? []),
-    ...(parsed.jsonKeys ?? []),
-  ]);
-  if (parsed.star) {
-    for (const name of tableColumns) {
-      exposed.add(name);
-    }
-  }
-  return [...exposed];
+export function piiColumns(names: string[]): string[] {
+  return unique(names.filter((c) => classifyColumn(c) === "pii"));
 }
 
-export function piiColumns(parsed: ExposedInput, tableColumns: string[]): string[] {
-  return unique(exposedColumns(parsed, tableColumns).filter((c) => classifyColumn(c) === "pii"));
+export function clientColumns(names: string[]): string[] {
+  return unique(names.filter((c) => classifyColumn(c) === "client"));
 }
 
-export function clientColumns(parsed: ExposedInput, tableColumns: string[]): string[] {
-  return unique(exposedColumns(parsed, tableColumns).filter((c) => classifyColumn(c) === "client"));
-}
-
-const COMPARISON_OPS = new Set([
+export const COMPARISON_OPS = new Set([
   "=",
   "!=",
   "<>",
@@ -567,7 +548,7 @@ const CARD_LIKE_RE = /^\d{13,19}$/;
 
 // A column name as the parser spells it: a plain string, a value node, or a nested
 // expr, depending on the dialect and on whether the identifier was quoted.
-function columnLabel(node: unknown): string | null {
+export function columnLabel(node: unknown): string | null {
   if (typeof node === "string") return node;
   if (isNode(node)) {
     if (typeof node.value === "string") return node.value;
@@ -615,7 +596,7 @@ function literalValues(node: unknown): string[] {
 }
 
 // A node the grammar allows only one string in: an OUTFILE path, a SELECT ... INTO target.
-function stringLiteral(node: unknown): string | null {
+export function stringLiteral(node: unknown): string | null {
   return literalValues(node)[0] ?? null;
 }
 
@@ -648,8 +629,8 @@ function hasSensitiveColumn(node: unknown): boolean {
 
 // String literals that expose a sensitive value in the query text itself: a value
 // bound to a PII/client column (WHERE company_name = 'ACME', SET company_name = 'ACME',
-// an inserted row), or one whose shape is itself sensitive. Display and sharing checks
-// consume the same detection, before display preferences are applied.
+// an inserted row), or one whose shape is itself sensitive. Auto mode keeps such a query on
+// this machine; the reviewer is not shown it, since the agent wrote the value itself.
 export function sensitiveLiterals(sql: string, dialect: string): string[] {
   let ast: unknown;
   try {
@@ -732,26 +713,22 @@ export function sensitiveReference(name: string): boolean {
   );
 }
 
-// What the statement text alone exposes: no table columns, so a SELECT * shows nothing
-// here. The Audit Trail reads this instead of querying the database it audits.
-export function textSchema(sql: string, dialect: string): SchemaContext | null {
-  const parsed = analyzeSql(sql, dialect);
-  if (!parsed) {
-    return null;
-  }
-  return {
-    tables: parsed.tables.map((t) => (t.schema ? `${t.schema}.${t.name}` : t.name)),
-    pii: piiColumns(parsed, []),
-    client: clientColumns(parsed, []),
-    literals: sensitiveLiterals(sql, dialect),
-    star: parsed.star,
-  };
-}
-
+// `value` stays on the wire for older brokers and records: a literal is text the agent wrote
+// itself, never something the database hands it, so it is no longer flagged.
 export function sensitivityOf(schema: SchemaContext): SensitivityRecord {
   return {
     pii: schema.pii.length > 0,
-    value: schema.literals.length > 0,
+    value: false,
     client: schema.client.length > 0,
   };
+}
+
+// What a decision records. A flag found is a fact even in an output not fully traced, so it is
+// kept; an untraced output with nothing found records nothing, never an all-clear.
+export function recordedSensitivity(
+  schema: SchemaContext | null | undefined,
+): SensitivityRecord | undefined {
+  if (!schema) return undefined;
+  const found = schema.pii.length > 0 || schema.client.length > 0;
+  return schema.complete || found ? sensitivityOf(schema) : undefined;
 }

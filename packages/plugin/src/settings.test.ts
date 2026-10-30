@@ -17,8 +17,7 @@ const full: SchemaContext = {
   tables: ["audit.users"],
   pii: ["email"],
   client: ["company_name"],
-  literals: ["jane@acme.io"],
-  star: false,
+  complete: false,
 };
 
 describe("settings/normalizeSettings", () => {
@@ -66,22 +65,28 @@ describe("settings/filterSchema", () => {
   });
 
   it("keeps annotating whatever an older stored blob asked for (2026-09-21 decision)", () => {
-    // schemaAnnotation was removed as a setting; a false left in storage cannot bring it
-    // back, and the three display preferences keep their own effect.
-    const stored = normalizeSettings({ schemaAnnotation: false, piiFlagging: false });
+    // schemaAnnotation and sensitiveValues were removed as settings; a value left in storage
+    // cannot bring them back, and the two display preferences keep their own effect.
+    const stored = normalizeSettings({
+      schemaAnnotation: false,
+      sensitiveValues: false,
+      piiFlagging: false,
+    });
     expect("schemaAnnotation" in stored).toBe(false);
+    expect("sensitiveValues" in stored).toBe(false);
     expect(filterSchema(full, stored)).toEqual({ ...full, pii: [] });
   });
 
-  it("blanks each detection axis independently", () => {
+  it("blanks each detection axis independently, never the untraced-output limit", () => {
     expect(filterSchema(full, { ...defaultSettings(), piiFlagging: false })).toEqual({
       ...full,
       pii: [],
     });
     expect(filterSchema(full, { ...defaultSettings(), clientFlagging: false })?.client).toEqual([]);
-    expect(filterSchema(full, { ...defaultSettings(), sensitiveValues: false })?.literals).toEqual(
-      [],
-    );
+    expect(
+      filterSchema(full, { ...defaultSettings(), piiFlagging: false, clientFlagging: false })
+        ?.complete,
+    ).toBe(false);
   });
 
   it("returns null for a null annotation", () => {

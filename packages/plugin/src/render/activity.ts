@@ -10,8 +10,9 @@ import {
   outcomeMeta,
 } from "../html";
 import { agentBadge, alertTriangleIcon, chevronDown } from "../icons";
+import { textSchema } from "../sql/output";
 import { visibleControls } from "../sql/sanitize";
-import { type SchemaContext, sensitivityOf, textSchema } from "../sql/schema";
+import { type SchemaContext, sensitivityOf } from "../sql/schema";
 import type { ActivityEntry } from "../types";
 import { approvalLabel } from "./auto";
 import { auditItem, doneRowHtml } from "./inbox";
@@ -225,7 +226,7 @@ export function activityEntryHtml(e: ActivityEntry, selected: boolean, dialect: 
     "audit",
     `<span class="act-time">${escapeHtml(clockTime(ts))}</span>`,
     dialect,
-    entryFlags(e, textSchema(e.sql, dialect)),
+    entryFlags(e, null) ?? entryFlags(e, textSchema(e.sql, dialect)),
     true,
   );
 }

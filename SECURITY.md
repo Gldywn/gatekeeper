@@ -309,10 +309,27 @@ itself is in neither the URL nor the prompt.
   connection scoping) does show the raw SQL, because it is the operator's own review view.
   Its Markdown, CSV, and JSON exports carry the SQL with formula-injection and
   trojan-source guards applied, and never include result rows.
-- Its PII, Value and Client flags never query the connected database. The plugin posts them
-  with the decision as three booleans (`policy_json.sensitivity`), never a table, column or
-  value; requests decided before that, or never shown on a card, are
-  flagged from their SQL text alone, which cannot see the columns behind a `SELECT *`.
+- Its PII and Client flags never query the connected database. Flags computed now describe
+  what the statement returns to the agent, never a column it only filters on or a value it
+  carries. A JSON key the grammar shows being read anywhere in the statement (an operator such
+  as `profile->>'email'`, a subscript, a field, a key test such as `profile ? 'ssn'`, the keys
+  of a `@>` literal but not its values) counts when the statement returns a document of that
+  same table column, since the key may reach the agent inside it. A read on another row of
+  that column counts too (a self-join, a semijoin); a part of the document
+  (`profile->'contact'`) or one with a key removed does not. Tables are matched by the name as
+  written, not by catalog identity. Functions are not interpreted: an ordinary one passes on
+  the columns it receives, and a JSON function (its name contains `json`) never has its
+  literals read, so its result, and a document it reads that the statement returns, are
+  untraced. The plugin posts them with the decision as three booleans
+  (`policy_json.sensitivity`), never a table, column or value. When the output could not be
+  fully traced, it records the flags it did find and records nothing if it found none, so the
+  trail never stores an all-clear it could not vouch for. The third boolean, Value, is always false since literals
+  stopped being flagged. A stored record is never rewritten: one decided before this change
+  keeps its PII, Client and Value as the earlier rules computed them, filters and literals
+  included. Requests with no stored record, decided before flags were recorded or never shown
+  on a card, are flagged from their SQL text alone with the current rules, which cannot see the
+  columns behind a `SELECT *`. Opening an entry recomputes its legend with the current rules,
+  so it can differ from the marks its row recorded.
 - Opening an approved entry shows its kept rows: the plugin fetches the sealed copy
   (`GET /results/:id`, under the same auth and connection scoping, approved requests only) and
   opens it. The broker cannot read what it serves, and no agent-facing tool reaches it.

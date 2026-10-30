@@ -1,7 +1,17 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { helpCircleIcon } from "../icons";
 import type { LoadResult } from "../sql/load";
 import type { Card, RunState, SessionMeta } from "../types";
-import { accessMatrix, cardHtml, loadInner, paintLegend, runningActions } from "./queue";
+import {
+  accessMatrix,
+  cardHtml,
+  loadInner,
+  paintLegend,
+  popX,
+  runningActions,
+  sensitiveLegend,
+  UNTRACED_NOTE,
+} from "./queue";
 
 // Byte-for-byte lock on the extracted builders: one ready read-only card whose
 // schema annotation and open deny draft exercise every conditional branch.
@@ -31,8 +41,7 @@ const card: Card = {
     tables: ["audit.users"],
     pii: ["email"],
     client: ["company_name"],
-    literals: ["jane@acme.io"],
-    star: false,
+    complete: true,
   },
 };
 
@@ -56,16 +65,17 @@ describe("render/queue", () => {
     // Tables by role, before the SQL; the read's table comes from the column analysis.
     expect(html).toContain('<div class="cs-matrix" id="cm-q_ab12"><table class="mx">');
     expect(html).toContain('<th scope="row" class="nm">audit.users</th><td class="mk on read">');
-    // The legend names each category the SQL marks, with its count; focus names its objects.
+    // The legend names each category the SQL marks, with its count and a mark that says it
+    // opens; focus names its objects. The value the agent typed is never one of them.
     expect(html).toContain(
-      '<span class="lg-slot"><button class="lg pii" type="button" aria-describedby="lg-pii-q_ab12"><span class="sw">Possible PII</span><span class="ct">1</span></button><span class="lg-pop" id="lg-pii-q_ab12" role="tooltip">email</span></span>',
+      `<span class="lg-slot"><button class="lg pii" type="button" aria-describedby="lg-pii-q_ab12"><span class="sw">Possible PII</span><span class="ct">1</span><span class="lg-hint">${helpCircleIcon}</span></button><span class="lg-pop" id="lg-pii-q_ab12" role="tooltip">email</span></span>`,
     );
     expect(html).toContain(
       '<span class="lg-pop" id="lg-client-q_ab12" role="tooltip">company_name</span>',
     );
-    expect(html).toContain(
-      '<span class="lg-pop" id="lg-val-q_ab12" role="tooltip">\'jane@acme.io\'</span>',
-    );
+    expect(html).not.toContain("lg-val");
+    expect(html).not.toContain("sensitive-val");
+    expect(html).not.toContain(UNTRACED_NOTE);
     expect(html.indexOf('id="cs-q_ab12"')).toBeLessThan(html.indexOf('<pre class="sql">'));
     expect(html).toContain('<span class="pii-col" title="Possible PII">email</span>');
     expect(html).toContain(
@@ -406,8 +416,7 @@ describe("the pending card's order", () => {
       tables: ["public.orders"],
       pii: [],
       client: [],
-      literals: [],
-      star: true,
+      complete: true,
     });
     expect(html).toContain('<th scope="row" class="nm">public.orders</th>');
     expect(accessMatrix("SELECT 1", "postgresql", "read", null)).toBe("");
@@ -427,12 +436,43 @@ describe("sensitive names the SQL does not spell out", () => {
         sessionId: "s1",
         session,
         state: "ready",
-        schema: { tables: ["public.users"], pii: ["email"], client: [], literals: [], star: true },
+        schema: { tables: ["public.users"], pii: ["email"], client: [], complete: true },
       },
       "postgresql",
       new Map(),
     );
     expect(html).toContain('<span class="lg-pop" id="lg-pii-q_s" role="tooltip">email</span>');
+  });
+});
+
+describe("sensitiveLegend", () => {
+  it("heads the flags with the limit when part of the output could not be traced", () => {
+    const html = sensitiveLegend({ tables: [], pii: ["email"], client: [], complete: false }, "q");
+    expect(html.indexOf(UNTRACED_NOTE)).toBeGreaterThan(-1);
+    expect(html.indexOf(UNTRACED_NOTE)).toBeLessThan(html.indexOf('class="lg pii"'));
+    expect(html).toContain('<div class="cs-unparsed">');
+  });
+
+  it("says the limit even with nothing flagged, and nothing at all for a traced clean output", () => {
+    const untraced = { tables: [], pii: [], client: [], complete: false };
+    expect(sensitiveLegend(untraced, "q")).toContain(UNTRACED_NOTE);
+    expect(sensitiveLegend({ ...untraced, complete: true }, "q")).toBe("");
+    expect(sensitiveLegend(null, "q")).toBe("");
+  });
+});
+
+describe("popX", () => {
+  it("opens from the entry's own left edge when the names fit", () => {
+    expect(popX(120, 400, 150)).toBe(120);
+  });
+
+  it("slides left only as far as the legend's right edge requires", () => {
+    expect(popX(300, 400, 150)).toBe(250);
+  });
+
+  it("starts at the legend's left edge when the names are wider than the legend", () => {
+    expect(popX(120, 300, 360)).toBe(0);
+    expect(popX(-4, 400, 150)).toBe(0);
   });
 });
 
@@ -459,7 +499,7 @@ describe("paintLegend", () => {
     };
     return { el: el as unknown as HTMLElement, doc, focused, entry: (i: number) => entries[i] };
   }
-  const both = { tables: [], pii: ["email"], client: ["company_name"], literals: [], star: false };
+  const both = { tables: [], pii: ["email"], client: ["company_name"], complete: true };
 
   afterAll(() => vi.unstubAllGlobals());
 
