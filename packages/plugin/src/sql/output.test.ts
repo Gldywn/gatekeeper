@@ -1335,3 +1335,288 @@ describe("analyzeOutput, keys read from a document returned whole", () => {
     ]);
   });
 });
+
+describe("analyzeOutput, round 3 of the cross-review", () => {
+  const users = { users: ["id", "profile"] };
+  const where = "WHERE profile->>'email' IS NOT NULL";
+
+  it("reads BigQuery's bracket array literal", () => {
+    check([
+      [
+        "bigquery",
+        "SELECT id, [email, phone] AS c FROM users",
+        null,
+        ["id", "c", "email", "phone"],
+        true,
+      ],
+    ]);
+  });
+
+  it("finds the document a key is read from through what hands it back whole", () => {
+    check([
+      [
+        "postgresql",
+        "SELECT profile FROM users WHERE coalesce(profile, '{}'::jsonb)->>'email' IS NOT NULL",
+        users,
+        ["profile", "email"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT profile FROM users WHERE (CASE WHEN id > 0 THEN profile ELSE '{}'::jsonb END)->>'email' IS NOT NULL",
+        users,
+        ["profile", "email"],
+        true,
+      ],
+      // Either column may hold the key.
+      [
+        "postgresql",
+        "SELECT profile FROM users WHERE coalesce(profile, backup)->>'email' IS NOT NULL",
+        { users: ["id", "profile", "backup"] },
+        ["profile", "email"],
+        false,
+      ],
+      [
+        "postgresql",
+        "SELECT u.profile FROM users u, jsonb_to_record(u.profile) AS r(email text)",
+        users,
+        ["profile", "email"],
+        true,
+      ],
+    ]);
+  });
+
+  it("tells a function that wraps a document from one that reads or edits a path", () => {
+    check([
+      [
+        "postgresql",
+        `SELECT jsonb_build_array(profile, 'marker') AS a FROM users ${where}`,
+        users,
+        ["a", "profile", "marker", "email"],
+        true,
+      ],
+      [
+        "mysql",
+        "SELECT JSON_ARRAY(profile, 'marker') FROM users WHERE JSON_EXTRACT(profile, '$.email') IS NOT NULL",
+        users,
+        ["profile", "marker", "email"],
+        true,
+      ],
+      [
+        "postgresql",
+        `SELECT jsonb_extract_path(profile, k.name) AS v FROM users, keys k ${where}`,
+        { ...users, keys: ["name"] },
+        ["v", "profile", "name"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT jsonb_extract_path(profile, 'contact') AS c FROM users WHERE profile->>'ssn' IS NOT NULL",
+        users,
+        ["c", "profile", "contact"],
+        true,
+      ],
+    ]);
+  });
+
+  it("keeps a key whose document cannot be pinned, as untraced", () => {
+    check([
+      [
+        "postgresql",
+        `SELECT u.id, u.profile FROM users u, generate_series(1, 3) g ${where}`,
+        null,
+        ["id", "profile", "email"],
+        false,
+      ],
+      [
+        "postgresql",
+        "SELECT u.profile FROM users u WHERE EXISTS (SELECT 1 FROM orders o WHERE o.user_id = u.id AND profile->>'email' LIKE '%@acme.com')",
+        null,
+        ["profile", "email"],
+        false,
+      ],
+      [
+        "postgresql",
+        "SELECT (SELECT profile FROM orders LIMIT 1) AS p FROM users u WHERE u.profile->>'email' IS NOT NULL",
+        null,
+        ["p", "profile", "email"],
+        false,
+      ],
+      // Nothing was read from either candidate: the name alone is known.
+      [
+        "postgresql",
+        "SELECT (SELECT name FROM orders o WHERE o.user_id = u.id LIMIT 1) AS n FROM users u",
+        null,
+        ["n", "name"],
+        true,
+      ],
+    ]);
+  });
+
+  it("counts one table column once, and keeps an INSERT's rows away from its target", () => {
+    check([
+      [
+        "postgresql",
+        "DELETE FROM sessions WHERE data->>'user' = '42' RETURNING id, data",
+        null,
+        ["id", "data", "user"],
+        true,
+      ],
+      [
+        "postgresql",
+        "INSERT INTO users (id, profile) SELECT id, profile FROM staging ON CONFLICT (id) DO NOTHING RETURNING profile",
+        users,
+        ["profile"],
+        true,
+      ],
+    ]);
+  });
+
+  it("follows writes alike with and without the target's columns", () => {
+    const live = { users: ["id", "profile", "memo"], staging: ["id", "profile"] };
+    const upsert = "INSERT INTO users (id, profile) SELECT id, profile FROM staging";
+    const rows = ["(SELECT profile FROM users WHERE profile->>'ssn' = '1' LIMIT 1)", "('x')"];
+    const both = (sql: string, names: string[]): Case[] => [
+      ["postgresql", sql, live, names, true],
+      ["postgresql", sql, null, names, true],
+    ];
+    check([
+      ...both(
+        `${upsert} ON CONFLICT (id) DO UPDATE SET memo = EXCLUDED.profile->>'ssn' RETURNING profile`,
+        ["profile", "ssn"],
+      ),
+      ...both(
+        `${upsert} WHERE staging.profile->>'ssn' IS NOT NULL ON CONFLICT (id) DO UPDATE SET profile = '{}' RETURNING profile`,
+        ["profile", "ssn"],
+      ),
+      // The conflicting row keeps its old profile, read for ssn.
+      ...both(
+        "INSERT INTO users (id, profile) VALUES (1, '{}') ON CONFLICT (id) DO UPDATE SET memo = 'seen' WHERE users.profile->>'ssn' IS NULL RETURNING profile",
+        ["profile", "ssn"],
+      ),
+      // Replaced on conflict, inserted otherwise: the old profile is never returned.
+      ...both(
+        "INSERT INTO users (id, profile) VALUES (1, '{}') ON CONFLICT (id) DO UPDATE SET profile = '{}' WHERE users.profile->>'ssn' IS NULL RETURNING profile",
+        ["profile"],
+      ),
+      ...both(`INSERT INTO archive (memo) VALUES ${rows.join(", ")} RETURNING memo`, [
+        "memo",
+        "profile",
+        "ssn",
+      ]),
+      ...both(
+        `INSERT INTO archive (memo) VALUES ${[...rows].reverse().join(", ")} RETURNING memo`,
+        ["memo", "profile", "ssn"],
+      ),
+    ]);
+  });
+
+  it("reads Snowflake and BigQuery fields hung on a column", () => {
+    check([
+      ["snowflake", "SELECT profile:email AS e FROM users", null, ["e", "profile", "email"], true],
+      [
+        "snowflake",
+        "SELECT id, profile FROM users WHERE profile:email IS NOT NULL",
+        null,
+        ["id", "profile", "email"],
+        true,
+      ],
+      [
+        "bigquery",
+        "SELECT * FROM events WHERE contact.email IS NOT NULL",
+        { events: ["id", "contact"] },
+        ["id", "contact", "email"],
+        true,
+      ],
+      [
+        "bigquery",
+        "SELECT user.email FROM events",
+        { events: ["id", "user"] },
+        ["user", "email"],
+        true,
+      ],
+      // No column of that name in reach: a misspelt qualifier, not a field.
+      ["bigquery", "SELECT zz.email FROM events", { events: ["id", "user"] }, ["email"], false],
+    ]);
+  });
+
+  it("learns the keys a statement tests the document for, never the values", () => {
+    const sql = (test: string) => `SELECT profile FROM users WHERE ${test}`;
+    check([
+      ["postgresql", sql("profile ? 'ssn'"), users, ["profile", "ssn"], true],
+      [
+        "postgresql",
+        sql("profile ?| array['ssn', 'email']"),
+        users,
+        ["profile", "ssn", "email"],
+        true,
+      ],
+      [
+        "postgresql",
+        sql("jsonb_exists_any(profile, ARRAY['ssn'])"),
+        users,
+        ["profile", "ssn"],
+        true,
+      ],
+      [
+        "mysql",
+        sql("JSON_CONTAINS_PATH(profile, 'one', '$.ssn')"),
+        users,
+        ["profile", "ssn"],
+        true,
+      ],
+      ["postgresql", sql(`profile @> '{"ssn": "known"}'::jsonb`), users, ["profile", "ssn"], true],
+      ["postgresql", sql(`profile @> '{"note": "ssn"}'::jsonb`), users, ["profile", "note"], true],
+      ["postgresql", sql(`profile @> '["ssn"]'::jsonb`), users, ["profile"], true],
+      ["postgresql", "SELECT profile ? 'ssn' AS has FROM users", users, ["has"], true],
+    ]);
+  });
+
+  it("follows the document through CAST, CASE, aggregates, windows and scalar subqueries", () => {
+    check([
+      [
+        "postgresql",
+        `SELECT CAST(profile AS text) AS t FROM users ${where}`,
+        users,
+        ["t", "profile", "email"],
+        true,
+      ],
+      [
+        "postgresql",
+        `SELECT CASE WHEN id > 0 THEN profile END AS c FROM users ${where}`,
+        users,
+        ["c", "profile", "email"],
+        true,
+      ],
+      [
+        "postgresql",
+        `SELECT max(profile::text) AS m FROM users ${where}`,
+        users,
+        ["m", "profile", "email"],
+        true,
+      ],
+      [
+        "postgresql",
+        `SELECT lag(profile) OVER (ORDER BY id) AS l FROM users ${where}`,
+        users,
+        ["l", "profile", "email"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT (SELECT u2.profile FROM users u2 WHERE u2.id = u.id) AS s FROM users u WHERE u.profile->>'email' IS NOT NULL",
+        users,
+        ["s", "profile", "email"],
+        true,
+      ],
+    ]);
+  });
+
+  it("resolves a deep chain of derived tables once", () => {
+    let sql = "SELECT email AS x FROM people";
+    for (let i = 0; i < 20; i++) sql = `SELECT x FROM (${sql}) t${i}`;
+    const start = performance.now();
+    check([["postgresql", sql, null, ["x", "email"], true]]);
+    expect(performance.now() - start).toBeLessThan(1000);
+  });
+});

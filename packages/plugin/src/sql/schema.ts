@@ -596,7 +596,7 @@ function literalValues(node: unknown): string[] {
 }
 
 // A node the grammar allows only one string in: an OUTFILE path, a SELECT ... INTO target.
-function stringLiteral(node: unknown): string | null {
+export function stringLiteral(node: unknown): string | null {
   return literalValues(node)[0] ?? null;
 }
 

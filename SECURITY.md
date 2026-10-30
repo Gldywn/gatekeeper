@@ -278,7 +278,8 @@ itself is in neither the URL nor the prompt.
   trojan-source guards applied, and never include result rows.
 - Its PII and Client flags never query the connected database. Flags computed now describe
   what the statement returns to the agent, never a column it only filters on or a value it
-  carries. A JSON key read anywhere in the statement counts when the statement returns a
+  carries. A JSON key read anywhere in the statement (a path, a field, or a test for the key
+  such as `profile ? 'ssn'`, the keys of a `@>` literal but not its values) counts when the statement returns a
   document of that same table column, unchanged or wrapped (`jsonb_agg(profile)`), since the
   key may reach the agent inside it. A read on another row of that column counts too (a
   self-join, a semijoin); a part of the document (`profile->'contact'`), a document edited
