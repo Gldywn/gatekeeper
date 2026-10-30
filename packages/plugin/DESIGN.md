@@ -177,8 +177,8 @@ first line, the tables, what the SQL marks, the SQL, then the decision.
   the agent, never a column it filters, joins or sorts on, nor a value it carries. A JSON key
   read in a filter counts when a document of the same table column is returned, unchanged or
   wrapped, since the key may reach the agent inside it (operator decision, 2026-10-29); a key
-  read through a column that cannot be told apart from another counts too, with the untraced
-  line. Each category
+  read through a column that cannot be told apart from another counts for every candidate.
+  That over-reports but misses nothing, so it adds no untraced line. Each category
   is written as it is marked in the query, with its count (Possible PII, Client data), then the
   outline help mark (`helpCircleIcon`, 12px, faint, its category's colour on hover and focus,
   centred one pixel below the line box, between the cap and lowercase middles). Hover or focus
@@ -186,7 +186,8 @@ first line, the tables, what the SQL marks, the SQL, then the decision.
   edge, slid left only as far as the pane requires (`placeLegendPop`). No list that repeats
   what the SQL shows. The legend sits 16px under the tables and 10px above the SQL it explains.
 - When part of what a statement returns cannot be traced (a table function, recursion, `SHOW`,
-  a star over columns that could not be read), one standing line heads the legend in the
+  a star over columns that could not be read, a JSON key a column or a parameter supplies), so
+  that a flag may be missing, one standing line heads the legend in the
   analysis-limit box: "Gatekeeper cannot tell every column this statement returns. The flags
   may be incomplete." Such a decision records the flags found and nothing else; with none found
   it records nothing, so a row never shows an all-clear the analysis could not vouch for.

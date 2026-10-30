@@ -1323,14 +1323,14 @@ describe("analyzeOutput, keys read from a document returned whole", () => {
     ]);
   });
 
-  it("keeps a key whose column cannot be told apart, as untraced", () => {
+  it("gives a key whose column cannot be told apart to every candidate", () => {
     check([
       [
         "postgresql",
         "SELECT a.profile FROM a JOIN b ON a.id = b.id WHERE profile->>'email' IS NOT NULL",
         null,
         ["profile", "email"],
-        false,
+        true,
       ],
     ]);
   });
@@ -1368,13 +1368,13 @@ describe("analyzeOutput, round 3 of the cross-review", () => {
         ["profile", "email"],
         true,
       ],
-      // Either column may hold the key.
+      // Either column may hold the key: both get it.
       [
         "postgresql",
         "SELECT profile FROM users WHERE coalesce(profile, backup)->>'email' IS NOT NULL",
         { users: ["id", "profile", "backup"] },
         ["profile", "email"],
-        false,
+        true,
       ],
       [
         "postgresql",
@@ -1388,26 +1388,28 @@ describe("analyzeOutput, round 3 of the cross-review", () => {
 
   it("tells a function that wraps a document from one that reads or edits a path", () => {
     check([
+      // A value the agent writes into a constructor is not a key.
       [
         "postgresql",
-        `SELECT jsonb_build_array(profile, 'marker') AS a FROM users ${where}`,
+        `SELECT jsonb_build_array(profile, 'ssn') AS a FROM users ${where}`,
         users,
-        ["a", "profile", "marker", "email"],
+        ["a", "profile", "email"],
         true,
       ],
       [
         "mysql",
-        "SELECT JSON_ARRAY(profile, 'marker') FROM users WHERE JSON_EXTRACT(profile, '$.email') IS NOT NULL",
+        "SELECT JSON_ARRAY(profile, 'ssn') FROM users WHERE JSON_EXTRACT(profile, '$.email') IS NOT NULL",
         users,
-        ["profile", "marker", "email"],
+        ["profile", "email"],
         true,
       ],
+      // A key a column supplies may be any key, the ones read elsewhere included.
       [
         "postgresql",
         `SELECT jsonb_extract_path(profile, k.name) AS v FROM users, keys k ${where}`,
         { ...users, keys: ["name"] },
-        ["v", "profile", "name"],
-        true,
+        ["v", "profile", "name", "email"],
+        false,
       ],
       [
         "postgresql",
@@ -1419,30 +1421,30 @@ describe("analyzeOutput, round 3 of the cross-review", () => {
     ]);
   });
 
-  it("keeps a key whose document cannot be pinned, as untraced", () => {
+  it("gives a key whose document cannot be pinned to every candidate", () => {
     check([
       [
         "postgresql",
         `SELECT u.id, u.profile FROM users u, generate_series(1, 3) g ${where}`,
         null,
         ["id", "profile", "email"],
-        false,
+        true,
       ],
       [
         "postgresql",
         "SELECT u.profile FROM users u WHERE EXISTS (SELECT 1 FROM orders o WHERE o.user_id = u.id AND profile->>'email' LIKE '%@acme.com')",
         null,
         ["profile", "email"],
-        false,
+        true,
       ],
       [
         "postgresql",
         "SELECT (SELECT profile FROM orders LIMIT 1) AS p FROM users u WHERE u.profile->>'email' IS NOT NULL",
         null,
         ["p", "profile", "email"],
-        false,
+        true,
       ],
-      // Nothing was read from either candidate: the name alone is known.
+      // Nothing was read from either candidate.
       [
         "postgresql",
         "SELECT (SELECT name FROM orders o WHERE o.user_id = u.id LIMIT 1) AS n FROM users u",
@@ -1618,5 +1620,176 @@ describe("analyzeOutput, round 3 of the cross-review", () => {
     const start = performance.now();
     check([["postgresql", sql, null, ["x", "email"], true]]);
     expect(performance.now() - start).toBeLessThan(1000);
+  });
+});
+
+describe("analyzeOutput, round 4 of the cross-review", () => {
+  const users = { users: ["id", "profile"] };
+
+  it("tells a reader returning the document from one returning a part of it", () => {
+    const ssn = "WHERE JSON_EXTRACT(profile, '$.ssn') IS NOT NULL";
+    check([
+      [
+        "transactsql",
+        "SELECT id, JSON_QUERY(profile) AS profile FROM users WHERE JSON_VALUE(profile, '$.ssn') IS NOT NULL",
+        users,
+        ["id", "profile", "ssn"],
+        true,
+      ],
+      [
+        "mysql",
+        `SELECT JSON_EXTRACT(profile, '$') AS p FROM users ${ssn}`,
+        users,
+        ["p", "profile", "ssn"],
+        true,
+      ],
+      [
+        "mysql",
+        `SELECT JSON_EXTRACT(profile, '$.*') AS p FROM users ${ssn}`,
+        users,
+        ["p", "profile", "ssn"],
+        true,
+      ],
+      [
+        "mysql",
+        `SELECT JSON_EXTRACT(profile, '$.contact') AS p FROM users ${ssn}`,
+        users,
+        ["p", "profile", "contact"],
+        true,
+      ],
+      [
+        "mysql",
+        `SELECT JSON_EXTRACT(profile, '$[0]') AS p FROM users ${ssn}`,
+        users,
+        ["p", "profile"],
+        true,
+      ],
+      // A key a column supplies may be any key, the ones read elsewhere included.
+      [
+        "postgresql",
+        "SELECT profile->>k.name AS v FROM users, keys k WHERE profile->>'ssn' IS NOT NULL",
+        { ...users, keys: ["name"] },
+        ["v", "profile", "ssn"],
+        false,
+      ],
+    ]);
+  });
+
+  it("names the keys an edit sets, never the ones it removes or a test looks for", () => {
+    check([
+      [
+        "transactsql",
+        "SELECT JSON_MODIFY(profile, '$.ssn', NULL) AS p FROM users WHERE JSON_VALUE(profile, '$.email') IS NOT NULL",
+        users,
+        ["p", "profile", "ssn"],
+        true,
+      ],
+      [
+        "mysql",
+        "SELECT JSON_SET(profile, '$.note', 'ssn') AS p FROM users",
+        users,
+        ["p", "profile", "note"],
+        true,
+      ],
+      [
+        "mysql",
+        "SELECT JSON_REMOVE(profile, '$.ssn') AS p FROM users",
+        users,
+        ["p", "profile"],
+        true,
+      ],
+      [
+        "mysql",
+        "SELECT JSON_CONTAINS_PATH(profile, 'one', '$.ssn') AS has FROM users",
+        users,
+        ["has", "profile"],
+        true,
+      ],
+    ]);
+  });
+
+  it("reads Snowflake paths through their qualifier, nested fields and named indexes", () => {
+    const join = "FROM users u JOIN accounts a ON a.id = u.id WHERE u.profile:ssn IS NOT NULL";
+    check([
+      ["snowflake", `SELECT u.id, u.profile ${join}`, null, ["id", "profile", "ssn"], true],
+      ["snowflake", `SELECT a.profile ${join}`, null, ["profile"], true],
+      [
+        "snowflake",
+        "SELECT id, profile FROM users WHERE profile:contact.email IS NOT NULL",
+        null,
+        ["id", "profile", "contact", "email"],
+        true,
+      ],
+      [
+        "snowflake",
+        "SELECT id, profile FROM users WHERE profile:contacts[0].email IS NOT NULL",
+        null,
+        ["id", "profile", "contacts", "email"],
+        true,
+      ],
+      [
+        "snowflake",
+        "SELECT id, profile FROM users WHERE GET_PATH(profile, 'contact.email') IS NOT NULL",
+        null,
+        ["id", "profile", "contact", "email"],
+        true,
+      ],
+    ]);
+  });
+
+  it("learns keys read through what a FROM function unpacks, or past an opaque neighbour", () => {
+    check([
+      [
+        "postgresql",
+        "SELECT u.id, u.profile FROM users u, jsonb_to_recordset(u.profile->'contacts') AS c(email text) WHERE c.email LIKE '%@acme.com'",
+        null,
+        ["id", "profile", "contacts", "email"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT u.id, u.profile FROM users u, jsonb_array_elements(u.profile->'contacts') c WHERE c->>'email' LIKE '%@acme.com'",
+        null,
+        ["id", "profile", "contacts", "email"],
+        true,
+      ],
+      [
+        "postgresql",
+        "SELECT u.profile FROM users u WHERE EXISTS (SELECT 1 FROM jsonb_array_elements(u.profile->'phones') p WHERE p->>'type' = 'home' AND profile->>'ssn' IS NOT NULL)",
+        null,
+        ["profile", "phones", "type", "ssn"],
+        true,
+      ],
+    ]);
+  });
+
+  it("reads MySQL, SQLite and Snowflake key tests at their path positions", () => {
+    const sql = (test: string) => `SELECT profile FROM users WHERE ${test}`;
+    check([
+      ["sqlite", sql("json_type(profile, '$.ssn') = 'text'"), users, ["profile", "ssn"], true],
+      ["mysql", sql("JSON_LENGTH(profile, '$.phones') > 0"), users, ["profile", "phones"], true],
+      ["mysql", sql(`JSON_CONTAINS(profile, '"x"', '$.email')`), users, ["profile", "email"], true],
+      ["mysql", sql(`JSON_CONTAINS(profile, '{"ssn": "1"}')`), users, ["profile", "ssn"], true],
+      [
+        "mysql",
+        sql("JSON_SEARCH(profile, 'one', 'x', NULL, '$.email') IS NOT NULL"),
+        users,
+        ["profile", "email"],
+        true,
+      ],
+    ]);
+  });
+
+  // Untraced by the outer column `p` may read (R2-5), never by the nesting itself.
+  it("keeps a key read two correlations away", () => {
+    check([
+      [
+        "postgresql",
+        "WITH d AS (SELECT (SELECT profile FROM orders LIMIT 1) AS profile FROM users) SELECT (SELECT profile FROM items LIMIT 1) AS p FROM d WHERE d.profile->>'ssn' IS NOT NULL",
+        null,
+        ["p", "profile", "ssn"],
+        false,
+      ],
+    ]);
   });
 });
