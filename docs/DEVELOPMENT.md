@@ -107,7 +107,8 @@ The repo ships its dev wiring, so a clone is ready without hand-editing config:
   in-memory broker (`packages/plugin/preview/`), so an agent can screenshot a layout without
   Beekeeper, a database or the broker. URL parameters set the scenario (`agents`, `queue`,
   `history` for how many of today's seeded decisions the broker serves, `delay`,
-  `engine=sqlite` for the untested-engine notice), and
+  `engine=sqlite` for the untested-engine notice, `crypto=0` for a Beekeeper with no Web
+  Crypto), and
   `preview/frame.html?w=440&h=800` renders it at a fixed size. Port 5199 is held strictly, so
   a second worktree adds `--port <free port>`. Agents judge UI work there (`AGENTS.md`); the
   human checks the real plugin in Beekeeper before merging.

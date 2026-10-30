@@ -1,4 +1,5 @@
 import { appStorage } from "@beekeeperstudio/plugin";
+import { canEncrypt } from "./archive-availability";
 import type { Field, HistResult } from "./result";
 
 // Sealed here so the server stores rows it cannot read. Beekeeper keeps the key encrypted on
@@ -15,6 +16,8 @@ const HEADER_BYTES = 1 + KEY_ID_BYTES + IV_BYTES;
 // larger is refused before it is decoded. Opened, twice the 8 MiB the agent can be sent.
 const MAX_SEALED_BYTES = 9 * 1024 * 1024;
 const MAX_OPENED_BYTES = 16 * 1024 * 1024;
+
+const UNAVAILABLE = "Result encryption unavailable";
 
 const CURRENT = "gatekeeper.history.current";
 const entry = (id: string) => `gatekeeper.history.key.${id}`;
@@ -82,6 +85,7 @@ export class ResultArchive {
   // Keys are written once under their own id and the pointer only names the next one to use, so
   // two tabs creating a key at once leave two valid keys, never a lost one.
   ready(): Promise<CurrentKey> {
+    if (!canEncrypt()) return Promise.reject(new Error(UNAVAILABLE));
     this.current ??= this.loadCurrent().catch((err: unknown) => {
       this.current = undefined;
       throw err;
@@ -108,6 +112,7 @@ export class ResultArchive {
   // Throws on anything it cannot vouch for (a missing key, a tampered or foreign envelope, an
   // oversized or malformed result); the caller shows the rows as not available.
   async open(payload: string, requestId: string): Promise<HistResult> {
+    if (!canEncrypt()) throw new Error(UNAVAILABLE);
     if (payload.length > Math.ceil(MAX_SEALED_BYTES / 3) * 4) {
       throw new Error("Result envelope too large");
     }

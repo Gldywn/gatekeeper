@@ -258,7 +258,9 @@ itself is in neither the URL nor the prompt.
     id) with a key the server never holds. The key lives in Beekeeper's encrypted plugin
     storage, the same place as the broker token. A result has no kept copy when the plugin
     could not seal it (the agent still gets its rows) or the broker refused the sealed copy as
-    malformed or over 9 MiB; decisions made before this version have none either.
+    malformed or over 9 MiB; decisions made before this version have none either. A Beekeeper
+    that gives the plugin page no Web Crypto (6.1.6 does not; 6.2.0 does) keeps none and opens
+    none, and says so in the request's detail. Rows are never kept in clear instead.
 - **What the encryption protects.** Beekeeper encrypts its plugin storage with a random key it
   keeps in its own data folder, itself encrypted with a constant that ships in Beekeeper's
   source. It is not the operating system's keychain. In plain words:

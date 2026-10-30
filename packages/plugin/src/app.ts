@@ -22,6 +22,7 @@ import type {
 import { enter, type Loop, pulse, reveal } from "./anim";
 import { SchemaAnnotator } from "./annotate";
 import { ResultArchive } from "./archive";
+import { canEncrypt } from "./archive-availability";
 import { capitalize, clock, countsLabel, escapeHtml, relAge } from "./html";
 import {
   agentBadge,
@@ -680,9 +681,11 @@ export class Gatekeeper {
     }
     this.polling = true;
     // Started now so the first seal rarely waits for it; sealing awaits it either way.
-    this.archive
-      .ready()
-      .catch((err: unknown) => log.error(err instanceof Error ? err : String(err)));
+    if (canEncrypt()) {
+      this.archive
+        .ready()
+        .catch((err: unknown) => log.error(err instanceof Error ? err : String(err)));
+    }
     void this.loadInflight();
     void this.poll();
     void this.refreshRecent();
@@ -3556,10 +3559,12 @@ export class Gatekeeper {
       const forAgent = capResult(rows, fields, undefined, undefined, changed);
       // Sealed while still executing, so the lease keeps renewing however long sealing takes.
       // The kept copy rides with the decision; failing to seal it never holds back the rows.
-      const archive = await this.archive.seal(forAgent, id).catch((err: unknown) => {
-        log.error(err instanceof Error ? err : String(err));
-        return undefined;
-      });
+      const archive = canEncrypt()
+        ? await this.archive.seal(forAgent, id).catch((err: unknown) => {
+            log.error(err instanceof Error ? err : String(err));
+            return undefined;
+          })
+        : undefined;
       if (!this.cards.includes(card) || active !== this.activeGen) {
         return;
       }
