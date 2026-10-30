@@ -10,7 +10,7 @@ import {
   outcomeMeta,
 } from "../html";
 import { agentBadge, alertTriangleIcon, chevronDown } from "../icons";
-import { textSchema } from "../sql/inspect";
+import { textSchema } from "../sql/output";
 import { visibleControls } from "../sql/sanitize";
 import { type SchemaContext, sensitivityOf } from "../sql/schema";
 import type { ActivityEntry } from "../types";
@@ -230,7 +230,7 @@ export function activityEntryHtml(
     "audit",
     `<span class="act-time">${escapeHtml(clockTime(ts))}</span>`,
     databaseType,
-    entryFlags(e, textSchema(e.sql, databaseType)),
+    entryFlags(e, null) ?? entryFlags(e, textSchema(e.sql, databaseType)),
     true,
   );
 }

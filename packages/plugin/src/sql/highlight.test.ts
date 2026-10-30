@@ -32,35 +32,23 @@ describe("highlight (pinned output for the Phase 2 rewrite)", () => {
     );
   });
 
-  it("flags a sensitive literal value as sensitive-val", () => {
-    expect(
-      highlight("SELECT id FROM users WHERE token = 'secret'", undefined, undefined, ["secret"]),
-    ).toBe(
-      '<span class="kw">SELECT</span> id <span class="kw">FROM</span> users <span class="kw">WHERE</span> token = <span class="st sensitive-val" title="Sensitive value">\'secret\'</span>',
+  it("never marks a value: the agent wrote it, so it already knows it", () => {
+    expect(highlight("SELECT id FROM users WHERE token = 'secret'")).toBe(
+      '<span class="kw">SELECT</span> id <span class="kw">FROM</span> users <span class="kw">WHERE</span> token = <span class="st">\'secret\'</span>',
     );
   });
 
-  it("flags a sensitive value written as an E-string, with the E prefix left outside", () => {
+  it("leaves an E-string's prefix outside its literal", () => {
     expect(
-      highlight(
-        "SELECT id FROM firms WHERE company_name = E'ACME'",
-        undefined,
-        ["company_name"],
-        ["ACME"],
-      ),
+      highlight("SELECT id FROM firms WHERE company_name = E'ACME'", undefined, ["company_name"]),
     ).toBe(
-      '<span class="kw">SELECT</span> id <span class="kw">FROM</span> firms <span class="kw">WHERE</span> <span class="client-col" title="Client data">company_name</span> = E<span class="st sensitive-val" title="Sensitive value">\'ACME\'</span>',
+      '<span class="kw">SELECT</span> id <span class="kw">FROM</span> firms <span class="kw">WHERE</span> <span class="client-col" title="Client data">company_name</span> = E<span class="st">\'ACME\'</span>',
     );
   });
 
-  it("leaves a dollar-quoted value untinted: the tokenizer has no such string token", () => {
+  it("leaves a dollar-quoted value as written: the tokenizer has no such string token", () => {
     expect(
-      highlight(
-        "SELECT id FROM firms WHERE company_name = $$ACME$$",
-        undefined,
-        ["company_name"],
-        ["ACME"],
-      ),
+      highlight("SELECT id FROM firms WHERE company_name = $$ACME$$", undefined, ["company_name"]),
     ).toBe(
       '<span class="kw">SELECT</span> id <span class="kw">FROM</span> firms <span class="kw">WHERE</span> <span class="client-col" title="Client data">company_name</span> = $$ACME$$',
     );
@@ -78,16 +66,15 @@ describe("highlight (pinned output for the Phase 2 rewrite)", () => {
     );
   });
 
-  it("composes pii, client, and sensitive-literal passes without corrupting each other", () => {
+  it("composes the pii and client passes without corrupting a literal", () => {
     expect(
       highlight(
         "SELECT email, company_name FROM users WHERE plan = 'enterprise'",
         ["email"],
         ["company_name"],
-        ["enterprise"],
       ),
     ).toBe(
-      '<span class="kw">SELECT</span> <span class="pii-col" title="Possible PII">email</span>, <span class="client-col" title="Client data">company_name</span> <span class="kw">FROM</span> users <span class="kw">WHERE</span> plan = <span class="st sensitive-val" title="Sensitive value">\'enterprise\'</span>',
+      '<span class="kw">SELECT</span> <span class="pii-col" title="Possible PII">email</span>, <span class="client-col" title="Client data">company_name</span> <span class="kw">FROM</span> users <span class="kw">WHERE</span> plan = <span class="st">\'enterprise\'</span>',
     );
   });
 

@@ -22,6 +22,7 @@ import type {
 import { enter, type Loop, pulse, reveal } from "./anim";
 import { SchemaAnnotator } from "./annotate";
 import { ResultArchive } from "./archive";
+import { canEncrypt } from "./archive-availability";
 import { capitalize, clock, countsLabel, escapeHtml, relAge } from "./html";
 import {
   agentBadge,
@@ -33,6 +34,7 @@ import {
   copyIcon,
   externalLinkIcon,
   gearIcon,
+  helpCircleIcon,
   historyIcon,
   keyIcon,
   pencilIcon,
@@ -76,6 +78,7 @@ import {
   LONG_RUN_MS,
   loadInner,
   paintLegend,
+  placeLegendPop,
   readyActions,
 } from "./render/queue";
 import { type LayerState, readOnlyView } from "./render/readonly";
@@ -95,11 +98,12 @@ import { classifyQuery, type RiskClass, rank } from "./sql/classify";
 import { engineFor } from "./sql/engine";
 import { formatSql } from "./sql/format";
 import { highlight } from "./sql/highlight";
-import { statementReceipt, textSchema } from "./sql/inspect";
+import { statementReceipt } from "./sql/inspect";
 import { agentMessage, checkLoad, type LoadResult, planLoad } from "./sql/load";
 import { modeRank, type RiskMode } from "./sql/mode";
+import { textSchema } from "./sql/output";
 import { type EndpointReadOnly, hasProbe, probeReadOnly, runErrorText } from "./sql/readonly-probe";
-import { sensitivityOf } from "./sql/schema";
+import { recordedSensitivity } from "./sql/schema";
 import {
   newStopToken,
   readStop,
@@ -681,9 +685,11 @@ export class Gatekeeper {
     }
     this.polling = true;
     // Started now so the first seal rarely waits for it; sealing awaits it either way.
-    this.archive
-      .ready()
-      .catch((err: unknown) => log.error(err instanceof Error ? err : String(err)));
+    if (canEncrypt()) {
+      this.archive
+        .ready()
+        .catch((err: unknown) => log.error(err instanceof Error ? err : String(err)));
+    }
     void this.loadInflight();
     void this.poll();
     void this.refreshRecent();
@@ -1221,7 +1227,7 @@ export class Gatekeeper {
   // A layer row: name, a "?" help affordance revealing the explanation on hover and
   // keyboard focus (with an aria-label for screen readers), then the state chip.
   private roRow(name: string, help: string, label: string, state: LayerState): string {
-    return `<div class="ro-row"><span class="ro-help" tabindex="0" role="button" aria-label="${escapeHtml(help)}">?<span class="ro-tip" role="tooltip">${escapeHtml(help)}</span></span><span class="ro-name">${name}</span><span class="ro-state ${state}">${layerGlyph(state)}${label}</span></div>`;
+    return `<div class="ro-row"><span class="ro-help" tabindex="0" role="button" aria-label="${escapeHtml(help)}">${helpCircleIcon}<span class="ro-tip" role="tooltip">${escapeHtml(help)}</span></span><span class="ro-name">${name}</span><span class="ro-state ${state}">${layerGlyph(state)}${label}</span></div>`;
   }
 
   // Hand the agent non-sensitive context (dialect, database, schema, read-only)
@@ -2216,6 +2222,7 @@ export class Gatekeeper {
     }
     glyph.closest("[data-dismissed]")?.removeAttribute("data-dismissed");
     this.placeAgentPop();
+    if (glyph.matches(".lg-slot")) placeLegendPop(glyph);
   }
 
   // The server popover opens leftwards when rightwards would cross the header's edge (a long
@@ -3073,7 +3080,7 @@ export class Gatekeeper {
     // Raw, before the display toggles: the audit trail is a durable security record, so it
     // keeps every flag even on a connection whose detection toggles are off.
     if (schema) {
-      card.sensitivity = sensitivityOf(schema);
+      card.sensitivity = recordedSensitivity(schema);
     }
     this.renderCardSchema(card);
   }
@@ -3266,6 +3273,9 @@ export class Gatekeeper {
     this.maybeCheckEndpoint();
     this.renderCheckTimes();
     this.renderAgentLinkTimes();
+    // An open legend entry follows a resize the way the server popover does.
+    const legendEntry = this.root.querySelector(".lg-slot:is(:hover, :focus-within)");
+    if (legendEntry) placeLegendPop(legendEntry);
     const now = Date.now();
     for (const card of [...this.cards]) {
       if (card.state === "ready" && card.expiresAt - now <= 0) {
@@ -3395,12 +3405,7 @@ export class Gatekeeper {
     // up in the query text too, not only in the flags below.
     const body = this.root.querySelector<HTMLElement>(`#sqlbody-${CSS.escape(card.id)}`);
     if (body) {
-      body.innerHTML = highlight(
-        formatSql(card.sql),
-        card.schema?.pii,
-        card.schema?.client,
-        card.schema?.literals,
-      );
+      body.innerHTML = highlight(formatSql(card.sql), card.schema?.pii, card.schema?.client);
     }
   }
 
@@ -3557,10 +3562,12 @@ export class Gatekeeper {
       const forAgent = capResult(rows, fields, undefined, undefined, changed);
       // Sealed while still executing, so the lease keeps renewing however long sealing takes.
       // The kept copy rides with the decision; failing to seal it never holds back the rows.
-      const archive = await this.archive.seal(forAgent, id).catch((err: unknown) => {
-        log.error(err instanceof Error ? err : String(err));
-        return undefined;
-      });
+      const archive = canEncrypt()
+        ? await this.archive.seal(forAgent, id).catch((err: unknown) => {
+            log.error(err instanceof Error ? err : String(err));
+            return undefined;
+          })
+        : undefined;
       if (!this.cards.includes(card) || active !== this.activeGen) {
         return;
       }
@@ -3802,8 +3809,7 @@ export class Gatekeeper {
   }
 
   private textSensitivity(card: Card): SensitivityRecord | undefined {
-    const text = textSchema(card.sql, this.databaseType);
-    return text ? sensitivityOf(text) : undefined;
+    return recordedSensitivity(textSchema(card.sql, this.databaseType));
   }
 
   private async postExecuting(card: Card): Promise<boolean> {

@@ -1,7 +1,7 @@
 import { dayKey } from "./html";
 import type { BrokerClient } from "./net/broker";
 import { activityFlagLabels, entryFlags } from "./render/activity";
-import { textSchema } from "./sql/inspect";
+import { textSchema } from "./sql/output";
 import type { ActivityEntry } from "./types";
 import { splitWholeDays } from "./views/activity";
 

@@ -46,12 +46,60 @@ describe("classifyRisk", () => {
   });
 
   it("refuses only empty and multi-statement input", () => {
-    for (const sql of ["", "   ", "SELECT 1; DROP TABLE t", "SELECT 1; SELECT 2"]) {
+    for (const sql of ["", "   ", ";", "SELECT 1; DROP TABLE t", "SELECT 1; SELECT 2"]) {
       expect(classifyRisk(sql).ok, sql).toBe(false);
     }
   });
 
   it("fails closed on a semicolon inside a string literal (known limitation)", () => {
     expect(classifyRisk("SELECT 'a;b'").ok).toBe(false);
+  });
+
+  // Strings are not delimited here, so a semicolon inside a comment fails closed too: removing
+  // comments let a '--' or '/*' inside a string hide a second statement.
+  it("fails closed on a semicolon anywhere but at the end, even inside a comment", () => {
+    for (const sql of [
+      "SELECT '--'; FLUSH TABLES",
+      "SELECT '/*'; DROP TABLE t; SELECT '*/'",
+      "SELECT 1--1; DROP TABLE t",
+      "SELECT 1 -- a; b",
+      "SELECT 1; -- end",
+      "SELECT 1 /*M!; SET @q = 1 */",
+    ]) {
+      expect(classifyRisk(sql).ok, sql).toBe(false);
+    }
+    for (const sql of ["SELECT 1;", "/* ; UPDATE */ -- note;\nSELECT 1"]) {
+      expect(classifyRisk(sql), sql).toEqual({ class: "read", ok: true });
+    }
+  });
+
+  it("stamps what a string-opened or nested comment hid as destructive", () => {
+    for (const sql of [
+      "SELECT '/*' FROM t INTO OUTFILE '/tmp/x' -- */",
+      "/* /* */ SELECT 1 */ CHECKPOINT",
+      "--x\nSELECT 1",
+      "WITH x AS (DELETE/**/FROM t RETURNING *) SELECT * FROM x",
+      "WITH d AS (DELETE -- /*\nFROM t RETURNING *) SELECT * FROM d",
+    ]) {
+      expect(classifyRisk(sql), sql).toEqual({ class: "destructive", ok: true });
+    }
+  });
+
+  // SECURITY: an older plugin parses a string where MySQL and SQLite run SQL after a lone CR;
+  // refusing it here covers a server updated before the plugin.
+  it("refuses a carriage return not followed by a line feed", () => {
+    for (const sql of ["-- x\rSELECT 'a\nDROP TABLE t -- '", "-- x\rSELECT 1\nREINDEX", "\r"]) {
+      expect(classifyRisk(sql).ok, sql).toBe(false);
+    }
+    expect(classifyRisk("-- x\r\nSELECT 1").ok).toBe(true);
+  });
+
+  // Each submission runs this; a comment-blanking scan that restarted at each unclosed `/*`
+  // took over a second on 100k characters, the submission cap.
+  it("classifies adversarial comment openers in linear time", () => {
+    const sql = `SELECT 1 ${"/* ".repeat(33_000)}`;
+    const start = performance.now();
+    classifyRisk(sql);
+    expect(performance.now() - start).toBeLessThan(300);
   });
 });

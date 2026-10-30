@@ -1,5 +1,5 @@
 import type { Column, TableIndex } from "@beekeeperstudio/plugin";
-import { analyzeSql, sensitiveLiterals } from "./sql/inspect";
+import { analyzeSql } from "./sql/inspect";
 import {
   checkLoad,
   type Facts,
@@ -12,6 +12,7 @@ import {
   relKey,
   type StatRow,
 } from "./sql/load";
+import { analyzeOutput, outputSchema } from "./sql/output";
 import {
   planRead,
   type ReadSnapshot,
@@ -20,7 +21,9 @@ import {
   resolveRead,
   searchPathVerified,
 } from "./sql/read-analysis";
-import { clientColumns, piiColumns, type SchemaContext } from "./sql/schema";
+import { formatRef, type SchemaContext, type TableRef } from "./sql/schema";
+
+const refKey = (ref: TableRef) => `${ref.schema ?? ""}.${ref.name}`;
 
 // Live views into the owning app's state, read on demand so the annotator never
 // holds a stale engine, schema, or connection generation across an await.
@@ -49,11 +52,11 @@ export class SchemaAnnotator {
     this.deps = deps;
   }
 
-  // The tables and sensitive columns a query touches. Returns null when the SQL will
-  // not parse, or undefined when a connection switch invalidated the column fetch
-  // mid-flight. Host-side only: no table or column name from here ever reaches the broker.
+  // Null when the SQL will not parse, undefined when a connection switch invalidated the fetch.
+  // Host-side only: no table or column name from here ever reaches the broker.
   async schemaFor(sql: string): Promise<SchemaContext | null | undefined> {
-    const parsed = analyzeSql(sql, this.deps.databaseType());
+    const databaseType = this.deps.databaseType();
+    const parsed = analyzeSql(sql, databaseType);
     if (!parsed) {
       return null;
     }
@@ -66,24 +69,15 @@ export class SchemaAnnotator {
     if (gen !== this.deps.generation() || revision !== this.revision) {
       return undefined;
     }
-    const allColumns = perTable.flatMap((columns) => columns ?? []).map((c) => c.name);
-    const analysis = this.deps.getMetadata
-      ? perTable.some((columns) => columns === null)
-        ? { complete: false, reasons: ["Metadata unavailable"] }
-        : await this.inspectRead(sql)
-      : undefined;
-    if (gen !== this.deps.generation() || revision !== this.revision) return undefined;
-    const inspectedColumns = analysis?.complete
-      ? (analysis.input?.dependencies.map((column) => column.column) ?? [])
-      : allColumns;
-    return {
-      tables: parsed.tables.map((t) => (t.schema ? `${t.schema}.${t.name}` : t.name)),
-      pii: piiColumns(parsed, inspectedColumns),
-      client: clientColumns(parsed, inspectedColumns),
-      literals: sensitiveLiterals(sql, this.deps.databaseType()),
-      star: parsed.star,
-      ...(this.deps.getMetadata ? { analysis } : {}),
-    };
+    // A host that lists no column for a table it cannot see leaves that table's star unknown.
+    const live = new Map(
+      parsed.tables.map((t, i) => {
+        const columns = perTable[i];
+        return [refKey(t), columns?.length ? columns.map((c) => c.name) : null];
+      }),
+    );
+    const output = analyzeOutput(sql, databaseType, (ref) => live.get(refKey(ref)) ?? null);
+    return outputSchema(parsed.tables.map(formatRef), output);
   }
 
   clearCache(): void {

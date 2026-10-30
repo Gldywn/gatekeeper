@@ -513,15 +513,12 @@ describe("analyzeSql", () => {
     );
   });
 
-  it("exposes the column list a CTE renames its columns with", () => {
-    // The parser folds a CTE column list into columnList, so it reaches the classifier
-    // as a source column rather than an alias; assert the exposure, not the bucket.
+  it("lists the column list a CTE renames its columns with among its output names", () => {
     const parsed = analyzeSql(
       "WITH x(company_name) AS (SELECT name FROM billing.firms) SELECT * FROM x",
       "postgresql",
     );
-    expect(parsed).not.toBeNull();
-    expect(clientColumns(parsed as NonNullable<typeof parsed>, [])).toEqual(["company_name"]);
+    expect(parsed?.aliases).toContain("company_name");
   });
 
   it("returns null when the statement cannot be parsed", () => {
@@ -529,36 +526,17 @@ describe("analyzeSql", () => {
   });
 });
 
+// Which returned names count as which category; tracing what is returned is analyzeOutput's.
 describe("piiColumns", () => {
-  it("checks only referenced columns when there is no star", () => {
-    const parsed = { columns: ["id", "email"], star: false };
-    expect(piiColumns(parsed, ["id", "email", "phone"])).toEqual(["email"]);
+  it("keeps the names that read as personal, once each", () => {
+    expect(piiColumns(["id", "email", "contact_email", "email"])).toEqual([
+      "email",
+      "contact_email",
+    ]);
   });
 
-  it("expands to every table column under SELECT *", () => {
-    const parsed = { columns: [], star: true };
-    expect(piiColumns(parsed, ["id", "email", "phone", "status"])).toEqual(["email", "phone"]);
-  });
-
-  it("returns nothing when no column looks sensitive", () => {
-    const parsed = { columns: ["id", "status"], star: false };
-    expect(piiColumns(parsed, ["id", "status", "amount"])).toEqual([]);
-  });
-
-  it("flags an output alias that reads as personal even when its source column does not", () => {
-    // "name" alone is deliberately not PII; the alias is what the result set exposes.
-    const parsed = { columns: ["name"], aliases: ["contact_email"], star: false };
-    expect(piiColumns(parsed, ["id", "name"])).toEqual(["contact_email"]);
-  });
-
-  it("keeps flagging the source column when its alias is innocuous", () => {
-    const parsed = { columns: ["email"], aliases: ["e"], star: false };
-    expect(piiColumns(parsed, ["id", "email"])).toEqual(["email"]);
-  });
-
-  it("flags a JSON key the containing column hides", () => {
-    const parsed = { columns: ["profile"], jsonKeys: ["email"], star: false };
-    expect(piiColumns(parsed, ["id", "profile"])).toEqual(["email"]);
+  it("returns nothing when no name looks sensitive", () => {
+    expect(piiColumns(["id", "status", "amount"])).toEqual([]);
   });
 });
 
@@ -621,28 +599,13 @@ describe("classifyColumn", () => {
 });
 
 describe("clientColumns", () => {
-  it("checks only referenced columns when there is no star", () => {
-    const parsed = { columns: ["id", "company_name"], star: false };
-    expect(clientColumns(parsed, ["id", "company_name", "email"])).toEqual(["company_name"]);
-  });
-
-  it("expands to every table column under SELECT *", () => {
-    const parsed = { columns: [], star: true };
-    expect(clientColumns(parsed, ["id", "siren", "company", "status"])).toEqual([
-      "siren",
-      "company",
-    ]);
-  });
-
-  it("flags a JSON key the containing column hides", () => {
-    const parsed = { columns: ["profile"], jsonKeys: ["company_name"], star: false };
-    expect(clientColumns(parsed, ["id", "profile"])).toEqual(["company_name"]);
+  it("keeps the names that read as client data", () => {
+    expect(clientColumns(["id", "siren", "company", "status"])).toEqual(["siren", "company"]);
   });
 
   it("is disjoint from piiColumns: a personal column never counts as client data", () => {
-    const parsed = { columns: ["email", "company"], star: false };
-    expect(piiColumns(parsed, [])).toEqual(["email"]);
-    expect(clientColumns(parsed, [])).toEqual(["company"]);
+    expect(piiColumns(["email", "company"])).toEqual(["email"]);
+    expect(clientColumns(["email", "company"])).toEqual(["company"]);
   });
 });
 

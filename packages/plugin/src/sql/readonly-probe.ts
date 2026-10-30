@@ -76,8 +76,8 @@ async function probeMysql(run: RunQuery): Promise<ProbeOutcome> {
   return withVersion({ replica, sessionReadOnly: false }, r.row);
 }
 
-// Keyed by Beekeeper's raw databaseType, never the parser dialect: mapDialect() folds every
-// engine it does not know into "postgresql", which would send this SQL to Oracle or ClickHouse.
+// Keyed by Beekeeper's raw databaseType, never the parser dialect: engineFor() reads every engine
+// it does not know with the "postgresql" grammar, which would send this SQL to Oracle or ClickHouse.
 const PROBES: Record<string, (run: RunQuery) => Promise<ProbeOutcome>> = {
   postgresql: probePostgres,
   mysql: probeMysql,

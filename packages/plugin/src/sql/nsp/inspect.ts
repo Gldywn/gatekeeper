@@ -33,11 +33,11 @@ function parseTableRef(entry: string): TableRef | null {
   return { schema: qualifier && qualifier !== "null" ? qualifier : null, name };
 }
 
-function isNode(x: unknown): x is Record<string, unknown> {
+export function isNode(x: unknown): x is Record<string, unknown> {
   return typeof x === "object" && x !== null;
 }
 
-function walk(node: unknown, visit: (n: Record<string, unknown>) => void): void {
+export function walk(node: unknown, visit: (n: Record<string, unknown>) => void): void {
   if (Array.isArray(node)) {
     for (const child of node) walk(child, visit);
     return;
@@ -47,8 +47,22 @@ function walk(node: unknown, visit: (n: Record<string, unknown>) => void): void 
   for (const key of Object.keys(node)) walk(node[key], visit);
 }
 
+// The parser hands a relation's column list back inside its alias, unsplit: "f(company_name)".
+// A quoted alias holding parentheses is split too; a quoted column name holding them never is.
+const RELATION_COLUMN_LIST = /^[^()]+\(([^()]*)\)$/;
+
+export function relationColumnAliases(as: unknown): string[] {
+  const alias = aliasName(as);
+  const columns = alias ? RELATION_COLUMN_LIST.exec(alias.trim())?.[1] : undefined;
+  if (columns === undefined) return [];
+  return columns
+    .split(",")
+    .map((c) => c.trim())
+    .filter(Boolean);
+}
+
 // The parser's typings allow a value node as alias besides the usual plain string.
-function aliasName(as: unknown): string | null {
+export function aliasName(as: unknown): string | null {
   if (typeof as === "string") return as;
   if (isNode(as) && typeof as.value === "string") return as.value;
   return null;
@@ -75,7 +89,7 @@ function tableEntries(tableList: string[], ast: unknown): { op: string; ref: Tab
 
 // A table function has no relation to rename, so its alias names the single output column
 // it returns ("FROM unnest(tags) AS contact_email") instead of standing for a table.
-function isFunctionRelation(item: Record<string, unknown>): boolean {
+export function isFunctionRelation(item: Record<string, unknown>): boolean {
   return item.type === "unnest" || (isNode(item.expr) && item.expr.type === "function");
 }
 
@@ -104,7 +118,7 @@ function outputAliases(ast: unknown): string[] {
 
 // The parser spreads a function name over name.name[] and name.schema (an unqualified
 // bigquery name lands in the latter, a qualifier in the other), so any part counts.
-function isJsonFunction(node: Record<string, unknown>): boolean {
+export function isJsonFunction(node: Record<string, unknown>): boolean {
   let match = false;
   walk(node.name, (n) => {
     if (typeof n.value === "string" && JSON_FUNCTION.test(n.value)) match = true;
@@ -133,7 +147,7 @@ function keyOperands(node: Record<string, unknown>): unknown[] {
   return args.length < 2 || stringLiteral(args[0]) !== null ? [] : args.slice(1);
 }
 
-function accessorKeys(node: Record<string, unknown>): string[] {
+export function accessorKeys(node: Record<string, unknown>): string[] {
   return keyOperands(node).flatMap((operand) => {
     const path = stringLiteral(operand);
     return path === null ? [] : jsonKeyNames(path);
@@ -304,7 +318,7 @@ export function countsRows(sql: string, grammar: string): boolean | null {
   }
 }
 
-const COMPARISON_OPS = new Set([
+export const COMPARISON_OPS = new Set([
   "=",
   "!=",
   "<>",
@@ -339,7 +353,7 @@ const COMPARISON_OPS = new Set([
 
 // A column name as the parser spells it: a plain string, a value node, or a nested
 // expr, depending on the dialect and on whether the identifier was quoted.
-function columnLabel(node: unknown): string | null {
+export function columnLabel(node: unknown): string | null {
   if (typeof node === "string") return node;
   if (isNode(node)) {
     if (typeof node.value === "string") return node.value;
@@ -371,7 +385,7 @@ function literalValues(node: unknown): string[] {
 }
 
 // A node the grammar allows only one string in: an OUTFILE path, a SELECT ... INTO target.
-function stringLiteral(node: unknown): string | null {
+export function stringLiteral(node: unknown): string | null {
   return literalValues(node)[0] ?? null;
 }
 

@@ -1,3 +1,4 @@
+import { canEncrypt } from "../archive-availability";
 import { capitalize, escapeHtml, formatCount, previewSql, sessionDisplayName } from "../html";
 import {
   agentBadge,
@@ -30,6 +31,8 @@ export const CANCELLED_NOTE = "cancelled by the agent";
 // when an execution lease lapses with no outcome. Both leave the outcome unconfirmed.
 export const NOT_DELIVERED_NOTE = "result not delivered";
 export const EXECUTION_UNKNOWN = "execution_unknown";
+export const NO_ENCRYPTION =
+  "This version of Beekeeper gives plugins no encryption, so rows can be neither kept nor opened here. Update Beekeeper to 6.2 or later.";
 
 // Which list a decided request was opened from: the Queue's Recently resolved says when it was
 // resolved, the Audit Trail when it was recorded.
@@ -226,12 +229,13 @@ function resultHtml(
   const owed = Boolean(r?.rowCount) || (r?.rowCount == null && cls === "read");
   // Whatever kept them from showing (decided before rows were kept, a key this Beekeeper no
   // longer has, a failed read), one sentence: the reader can do nothing different about any.
+  // A Beekeeper without Web Crypto is the exception, which updating it fixes.
   const body = rows
     ? resultGrid()
     : loading
       ? resultGrid(true)
       : owed
-        ? `<p class="dt-fact dt-quiet">These rows are not available.</p>`
+        ? `<p class="dt-fact dt-quiet">${canEncrypt() ? "These rows are not available." : NO_ENCRYPTION}</p>`
         : "";
   // The kept result is what the agent was sent, so a cut says how many rows that was.
   const cap =

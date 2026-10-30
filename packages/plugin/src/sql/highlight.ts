@@ -35,7 +35,6 @@ function lastSegment(word: string): string {
 const MARK_TITLES: Record<string, string> = {
   "pii-col": "Possible PII",
   "client-col": "Client data",
-  "st sensitive-val": "Sensitive value",
 };
 function markTitle(cls: string): string {
   return Object.hasOwn(MARK_TITLES, cls) ? ` title="${MARK_TITLES[cls]}"` : "";
@@ -97,11 +96,9 @@ export function highlight(
   sql: string,
   pii?: readonly string[],
   client?: readonly string[],
-  literals?: readonly string[],
 ): string {
   const piiSet = new Set((pii ?? []).map((c) => c.toLowerCase()));
   const clientSet = new Set((client ?? []).map((c) => c.toLowerCase()));
-  const sensitive = new Set(literals ?? []);
   const toks: Tok[] = tokenize(visibleControls(sql));
   let out = "";
 
@@ -127,7 +124,7 @@ export function highlight(
       const quote = tk.v[0];
       const closed = tk.v.length >= 2 && tk.v.endsWith(quote);
       const inner = closed ? tk.v.slice(1, -1) : tk.v.slice(1);
-      // Single quotes are a value literal; a flagged value adds "sensitive-val".
+      // Single quotes are a value literal, never marked: the agent wrote it, so it already knows it.
       if (quote === "'") {
         const prev = prevSignificant(toks, i);
         const keySpan =
@@ -138,8 +135,7 @@ export function highlight(
           out += `${quote}${keySpan}${closed ? quote : ""}`;
           continue;
         }
-        const cls = sensitive.has(inner) ? "st sensitive-val" : "st";
-        out += `<span class="${cls}"${markTitle(cls)}>${escapeHtml(tk.v)}</span>`;
+        out += `<span class="st">${escapeHtml(tk.v)}</span>`;
         continue;
       }
       // Double-quote (ANSI) and backtick (MySQL) quote an identifier, not a value,

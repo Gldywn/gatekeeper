@@ -36,7 +36,7 @@ follow Beekeeper's theme, so the plugin reads the same on any of them.
 Colour always means something, read in its context. Amber is the primary action, the held
 state, SQL keywords, the write class, an open Audit Trail day, a declined outcome and a reason
 you typed yourself; it is never decoration. Red marks the destructive class, failures and
-possible PII; a sensitive value gets a red wash. `--auto` reuses the existing shapes (the armed
+possible PII; a value in the SQL is never marked, since the agent wrote it. `--auto` reuses the existing shapes (the armed
 chip, the hint, the note, the row bolt) and adds only what evaluation needs: the evaluating row
 dot and the ring around the SQL. Versions follow the same rule: amber only when the plugin and
 the server are out of step, on the side that has to act; a newer release while both agree is
@@ -104,7 +104,9 @@ header, then the agents strip), the Inbox, the status line. Only the Inbox panes
   database spelled out whenever it is known, never invented; no schema, since a proposal can
   target any), the server glyph, then the settings. Statuses sit on the left, settings on the
   right. The glyphs carry a status dot and a popover with the detail; the header shows no
-  other check or read-only word.
+  other check or read-only word. Each read-only layer's help is the same outline mark as the
+  legend's (`helpCircleIcon`, 15px, faint, brighter on hover, an amber focus ring), drawn rather
+  than a font "?" so it is centred whatever the system font.
 - **Feature hints** (Auto mode, Schema access) share one shape: an icon with a pulsing dot
   while off, a popover on hover or keyboard focus with one direct action (filled to enable,
   tinted to disable), and the icon itself opening its Settings section.
@@ -155,8 +157,9 @@ Layering and scrolling hold a few invariants a change can break:
   fact takes that slot.
 - Row outcomes: Completed (shown as its fact), Declined, Not run (the gate refused to run an
   approved statement), Failed, Unconfirmed (a question-mark glyph), Expired, Cancelled.
-- Marks: a pencil for a write, a trash for a destructive query, the PII, Client and Value
-  flags. The class icon and the flags show only where the query ran (Completed, Unconfirmed); a
+- Marks: a pencil for a write, a trash for a destructive query, the PII and Client flags, and
+  Value on a decision recorded before literals stopped being flagged (its stored flags are never
+  rewritten). The class icon and the flags show only where the query ran (Completed, Unconfirmed); a
   pending row keeps its icon. Auto mode shows as one bolt, never twice; a decline by the load
   check takes its gauge as the row's glyph.
 - The open row is marked by tone, never by a coloured bar. Rows span the pane's full width.
@@ -174,9 +177,27 @@ first line, the tables, what the SQL marks, the SQL, then the decision.
 
 - **Tables**: an access matrix, one row per table, Read, Write and Delete columns. Delete is
   only for what removes data (DELETE, DROP, TRUNCATE); any other change is Write.
-- **Sensitive data**: a legend just above the SQL, each category written as it is marked in
-  the query, with its count (Possible PII, Client data, Sensitive values); hover or focus shows
-  the exact names. No list that repeats what the SQL shows.
+- **Sensitive data**: a legend just above the SQL flagging only what the statement returns to
+  the agent, never a column it filters, joins or sorts on, nor a value it carries. A JSON key
+  read in a filter counts when a document of the same table column is returned, unchanged or
+  wrapped, since the key may reach the agent inside it (operator decision, 2026-10-29); a key
+  read through a column that cannot be told apart from another counts for every candidate.
+  That over-reports but misses nothing, so it adds no untraced line. Each category
+  is written as it is marked in the query, with its count (Possible PII, Client data), then the
+  outline help mark (`helpCircleIcon`, 12px, faint, its category's colour on hover and focus,
+  centred one pixel below the line box, between the cap and lowercase middles). Hover or focus
+  opens the exact names and nothing else, no heading, above that entry itself: from its left
+  edge, slid left only as far as the pane requires (`placeLegendPop`). No list that repeats
+  what the SQL shows. The legend sits 16px under the tables and 10px above the SQL it explains.
+- When part of what a statement returns cannot be traced (a table function, recursion, `SHOW`,
+  a star over columns that could not be read, a JSON key a column or a parameter supplies, a
+  JSON function, whose literals are never read: operator decision, 2026-10-30), so that a flag
+  may be missing, one standing line heads the legend in the
+  analysis-limit box: "Gatekeeper cannot tell every column this statement returns. The flags
+  may be incomplete." Such a decision records the flags found and nothing else; with none found
+  it records nothing, so a row never shows an all-clear the analysis could not vouch for.
+- A returned name is tinted wherever it appears in the SQL, a filter included: the tint is
+  name-based, so a same-name column of another relation is tinted too. A known limit.
 - A limit of the analysis sits just above the SQL it qualifies; the state of Auto mode just
   above the decision it hands back. No catch-all findings table.
 - **Heavy query**: the load check is a second assessment, never the operation's class. Its badge
@@ -195,7 +216,7 @@ first line, the tables, what the SQL marks, the SQL, then the decision.
 - While Auto mode evaluates, the row's dot turns `--auto` and pulses, with no word, and a ring
   runs around the SQL block at the brackets' width, radius and position, so its fill covers
   them cleanly as it passes.
-- The detection toggles (PII, client data, sensitive values) are display preferences for the
+- The detection toggles (PII, client data) are display preferences for the
   requests still to decide, applied live. Settings and its quick menu show each with a sample
   of what it surfaces, in that detection's own accent.
 

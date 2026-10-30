@@ -1,6 +1,7 @@
 import { clipboard, log, requestFileSave } from "@beekeeperstudio/plugin";
 import type { TabulatorFull } from "tabulator-tables";
 import type { SchemaAnnotator } from "../annotate";
+import { canEncrypt } from "../archive-availability";
 import { dayKey, sessionDisplayName } from "../html";
 import { checkIcon, copyIcon } from "../icons";
 import { takeOver } from "../modal";
@@ -12,7 +13,7 @@ import type { HistResult } from "../result";
 import { classifyQuery } from "../sql/classify";
 import { formatSql } from "../sql/format";
 import { highlight } from "../sql/highlight";
-import { textSchema } from "../sql/inspect";
+import { textSchema } from "../sql/output";
 import type { HistItem } from "../types";
 
 // The grid's own header, pager and the row-count footer under it, so a grid scrolled into
@@ -86,11 +87,13 @@ export class DetailView {
         : listed;
     this.opened = item.result?.rows.length ? { id: item.id, result: item.result } : null;
     // A count of zero has no rows to fetch; a failed read is never remembered, so reopening retries.
+    // Without Web Crypto nothing kept can be opened, so nothing is fetched.
     const loading =
       item.status === "approved" &&
       item.kept === true &&
       !item.result?.rows.length &&
-      item.result?.rowCount !== 0;
+      item.result?.rowCount !== 0 &&
+      canEncrypt();
     this.detailItem = item;
     if (this.requestOpen !== item.id) this.requestOpen = null;
     panel.innerHTML = detailHtml(
@@ -250,12 +253,7 @@ export class DetailView {
     }
     const body = this.root.querySelector<HTMLElement>("#detail-sqlbody");
     if (body) {
-      body.innerHTML = highlight(
-        formatSql(item.sql),
-        schema?.pii,
-        schema?.client,
-        schema?.literals,
-      );
+      body.innerHTML = highlight(formatSql(item.sql), schema?.pii, schema?.client);
     }
   }
 

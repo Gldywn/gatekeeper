@@ -22,6 +22,7 @@ vi.mock("@beekeeperstudio/plugin", () => ({
 }));
 vi.mock("./anim", () => ({ enter: vi.fn(), reveal: vi.fn(), pulse: vi.fn() }));
 
+import { log } from "@beekeeperstudio/plugin";
 import { SchemaAnnotator } from "./annotate";
 import { Gatekeeper } from "./app";
 import { AUTO_APPROVED, SAVED_KEY_MASK } from "./render/auto";
@@ -596,10 +597,9 @@ describe("shared manual/automatic execution authority", () => {
     app.settingsStore.get = () => ({
       piiFlagging: false,
       clientFlagging: false,
-      sensitiveValues: false,
     });
     card.sql = sql;
-    card.schema = { tables: [], pii: [], client: [], literals: [], star: false };
+    card.schema = { tables: [], pii: [], client: [], complete: true };
     await app.evaluateNext();
     expect(card.state).toBe("ready");
     expect(card.autoStatus).toBe(`Needs review: ${reason}`);
@@ -1220,6 +1220,31 @@ describe("sensitivity recorded with the decision", () => {
     });
   });
 
+  it("records the PII an untraced output was found to return, with the decision", async () => {
+    const { app, card } = harness();
+    app.renderCardSchema = vi.fn();
+    card.sql = "SELECT u.email, f.* FROM public.users u, contact_points(u.id) f";
+    await app.analyzeSchema(card);
+    expect(card.schema?.complete).toBe(false);
+    const found = { pii: true, value: false, client: false };
+    expect(card.sensitivity).toEqual(found);
+    await app.postExecuting(card);
+    await app.postResult(card, { status: "rejected" });
+    expect(app.broker.executing.mock.calls[0][3]).toEqual(found);
+    expect(app.broker.result.mock.calls[0][2].sensitivity).toEqual(found);
+  });
+
+  it("records nothing for an untraced output with nothing found, never an all-clear", async () => {
+    const { app, card } = harness();
+    app.renderCardSchema = vi.fn();
+    card.sql = "SELECT f.* FROM contact_points(1) f";
+    await app.analyzeSchema(card);
+    expect(card.schema?.complete).toBe(false);
+    expect(card.sensitivity).toBeUndefined();
+    await app.postExecuting(card);
+    expect(app.broker.executing.mock.calls[0][3]).toBeUndefined();
+  });
+
   it("posts the card's analysis with an approval and with a rejection", async () => {
     const { app, card } = harness();
     const recorded = { pii: false, value: true, client: true };
@@ -1349,6 +1374,32 @@ describe("kept results", () => {
     const body = app.broker.result.mock.calls[0][2];
     expect(body).toMatchObject({ status: "approved", rows: [{ quantity: 3 }] });
     expect(body).not.toHaveProperty("archive");
+  });
+
+  // Beekeeper 6.1.6's plugin frame: getRandomValues only, no crypto.subtle.
+  it("delivers the rows once, unsealed and without an error, where Beekeeper has no Web Crypto", async () => {
+    const { app, card } = harness();
+    vi.mocked(log.error).mockClear();
+    const native = globalThis.crypto;
+    vi.stubGlobal("crypto", { getRandomValues: native.getRandomValues.bind(native) });
+    try {
+      query.mockResolvedValue(rows);
+      await app.approve(card.id);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(app.archive.seal).not.toHaveBeenCalled();
+    expect(app.broker.result).toHaveBeenCalledOnce();
+    const body = app.broker.result.mock.calls[0][2];
+    expect(body).toMatchObject({ status: "approved", rows: [{ quantity: 3 }] });
+    expect(body).not.toHaveProperty("archive");
+    expect(app.finish).toHaveBeenCalledWith(
+      card.id,
+      "approved",
+      expect.any(String),
+      expect.objectContaining({ kept: false }),
+    );
+    expect(log.error).not.toHaveBeenCalled();
   });
 });
 
@@ -1809,8 +1860,7 @@ describe("schema repaint", () => {
       tables: ["public.users"],
       pii: ["email"],
       client: [],
-      literals: [],
-      star: false,
+      complete: true,
     };
     app.renderCardSchema(card);
     expect(nodes["#cs-req"].innerHTML).toContain('class="lg pii"');

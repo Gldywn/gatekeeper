@@ -59,7 +59,9 @@ Two classifiers agree on the read / write / destructive classes:
   `SELECT ... INTO`, `EXPLAIN ANALYZE` of a write, a locking read), and classes an
   unrecognized statement **destructive**. When a parse fails, a text check decides: a
   plain `SELECT` or `WITH` without a modifying keyword is a read (a write if it locks
-  rows), anything else is destructive, and the card says the class is a guess.
+  rows), anything else is destructive, and the card says the class is a guess. On
+  PostgreSQL, `EXPLAIN`'s options come from the tree, so a comment, a quoted or an escaped
+  name cannot hide an `ANALYZE` from it.
 - **PostgreSQL strings with one reading only.** With `standard_conforming_strings` off, a
   backslash escapes a quote in an ordinary string; with it on, it does not. An ordinary
   string holding a backslash before a quote therefore ends at a different place under each
@@ -73,8 +75,42 @@ Two classifiers agree on the read / write / destructive classes:
   confirmation where the human types the database name, and its card carries a standing
   warning that Gatekeeper could not read it and the judgement is theirs. What no mode can
   approve is unchanged: empty input, and anything holding more than one statement.
-- The **server** classifier is advisory. It stamps the audit trail and refuses the two
-  cases no mode may approve: empty and multi-statement input.
+- The **server** classifier is advisory. It stamps the audit trail and refuses the cases
+  no mode may approve: empty and multi-statement input, and a carriage return not followed
+  by a line feed (see below), so a server updated before the plugin still covers it.
+
+**Text the classifiers cannot delimit.** When no parser reads a statement, the plugin falls
+back to a text check that does not know where strings end. It removes only the comments that
+open the statement, and only those every engine closes at the same place, then takes the rest
+as written, strings and comments included: a `;` anywhere but at the end blocks the
+statement, and a modifying or locking keyword raises its class even inside a string or a
+comment. Removing comments any further let a `--` or `/*` inside a string hide a second
+statement. The server preflight applies the same rule to every statement: past the leading
+comments it can delimit, a `;` inside a string or a comment is refused too.
+
+**Where the parser and the engine end a comment differently.** `node-sql-parser` ends a
+`--` comment, and MySQL's `#` one, at a lone carriage return, where MySQL and SQLite run on
+to the line feed, and reads MySQL's `--1` as a comment where MySQL reads minus minus one. Its tree is
+then not the statement the engine runs. On an engine `node-sql-parser` reads, a carriage
+return not followed by a line feed, or on MySQL and MariaDB a `--` followed by any character
+above U+0020, therefore makes the statement unread and destructive wherever it appears,
+strings and comments included (on MySQL, `SELECT '--'` needs Destructive mode). Nothing is
+taken from its tree then: no flags, no tables, no load check reading. The text check and the
+parser's statement count still decide whether it is blocked. PostgreSQL's own grammar ends
+its comments where the server does. This is a stopgap until these engines are read by their
+own grammar.
+
+**SQL Server batches.** SQL Server runs a batch whose statements need no `;` between them,
+so the text check cannot count them: a SQL Server statement no parser read is never classed
+a read. T-SQL strings have no backslash escape, which `node-sql-parser`'s grammar assumes,
+so a SQL Server statement holding a backslash is unread and destructive too. The grammar also
+takes a one-word statement for an alias (`SELECT 1 SHUTDOWN`, `SELECT 1SHUTDOWN`), so a SQL
+Server statement naming `SHUTDOWN`, `RECONFIGURE`, `CHECKPOINT`, `COMMIT`, `ROLLBACK`,
+`REVERT` or `SETUSER` anywhere, a string, a column name or the end of a longer name included,
+is unread too, as is one holding a character from U+0080 to U+00A0, which the grammar takes
+for part of a name where T-SQL does not. SQL Server has no `EXPLAIN` either: it calls a
+procedure of that name and runs what follows, so a SQL Server `EXPLAIN` is never taken for a
+plan. SQL Server is not an officially tested engine.
 
 **MySQL executable comments.** MySQL and MariaDB run the body of a `/*! ... */` comment,
 unlike an ordinary comment, and MariaDB also runs `/*M! ... */`. `node-sql-parser` drops
@@ -242,7 +278,9 @@ itself is in neither the URL nor the prompt.
     id) with a key the server never holds. The key lives in Beekeeper's encrypted plugin
     storage, the same place as the broker token. A result has no kept copy when the plugin
     could not seal it (the agent still gets its rows) or the broker refused the sealed copy as
-    malformed or over 9 MiB; decisions made before this version have none either.
+    malformed or over 9 MiB; decisions made before this version have none either. A Beekeeper
+    that gives the plugin page no Web Crypto (6.1.6 does not; 6.2.0 does) keeps none and opens
+    none, and says so in the request's detail. Rows are never kept in clear instead.
 - **What the encryption protects.** Beekeeper encrypts its plugin storage with a random key it
   keeps in its own data folder, itself encrypted with a constant that ships in Beekeeper's
   source. It is not the operating system's keychain. In plain words:
@@ -293,10 +331,27 @@ itself is in neither the URL nor the prompt.
   connection scoping) does show the raw SQL, because it is the operator's own review view.
   Its Markdown, CSV, and JSON exports carry the SQL with formula-injection and
   trojan-source guards applied, and never include result rows.
-- Its PII, Value and Client flags never query the connected database. The plugin posts them
-  with the decision as three booleans (`policy_json.sensitivity`), never a table, column or
-  value; requests decided before that, or never shown on a card, are
-  flagged from their SQL text alone, which cannot see the columns behind a `SELECT *`.
+- Its PII and Client flags never query the connected database. Flags computed now describe
+  what the statement returns to the agent, never a column it only filters on or a value it
+  carries. A JSON key the grammar shows being read anywhere in the statement (an operator such
+  as `profile->>'email'`, a subscript, a field, a key test such as `profile ? 'ssn'`, the keys
+  of a `@>` literal but not its values) counts when the statement returns a document of that
+  same table column, since the key may reach the agent inside it. A read on another row of
+  that column counts too (a self-join, a semijoin); a part of the document
+  (`profile->'contact'`) or one with a key removed does not. Tables are matched by the name as
+  written, not by catalog identity. Functions are not interpreted: an ordinary one passes on
+  the columns it receives, and a JSON function (its name contains `json`) never has its
+  literals read, so its result, and a document it reads that the statement returns, are
+  untraced. The plugin posts them with the decision as three booleans
+  (`policy_json.sensitivity`), never a table, column or value. When the output could not be
+  fully traced, it records the flags it did find and records nothing if it found none, so the
+  trail never stores an all-clear it could not vouch for. The third boolean, Value, is always false since literals
+  stopped being flagged. A stored record is never rewritten: one decided before this change
+  keeps its PII, Client and Value as the earlier rules computed them, filters and literals
+  included. Requests with no stored record, decided before flags were recorded or never shown
+  on a card, are flagged from their SQL text alone with the current rules, which cannot see the
+  columns behind a `SELECT *`. Opening an entry recomputes its legend with the current rules,
+  so it can differ from the marks its row recorded.
 - Opening an approved entry shows its kept rows: the plugin fetches the sealed copy
   (`GET /results/:id`, under the same auth and connection scoping, approved requests only) and
   opens it. The broker cannot read what it serves, and no agent-facing tool reaches it.

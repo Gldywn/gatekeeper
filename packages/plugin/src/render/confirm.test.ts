@@ -1,14 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { takeOver } from "../modal";
 import { ConfirmModal, type ConfirmSpec, confirmHtml, runSentence } from "./confirm";
-import { cardHtml } from "./queue";
+import { cardHtml, UNTRACED_NOTE } from "./queue";
 
 const schema = {
   tables: ["audit.users"],
   pii: ["email"],
   client: ["company_name"],
-  literals: ["jane@acme.io"],
-  star: false,
+  complete: true,
 };
 
 const spec: ConfirmSpec = {
@@ -30,15 +29,33 @@ describe("render/confirm", () => {
     expect(html).toContain(
       '<button class="copy-sql" type="button" data-copy-sql="DELETE FROM audit.users WHERE email = \'jane@acme.io\'" aria-label="Copy SQL">',
     );
-    // Same marks as the card, so a sensitive value cannot look ordinary here.
+    // Same marks as the card; the value the agent wrote stays an ordinary literal.
     expect(html).toContain('<span class="kw">DELETE</span>');
     expect(html).toContain('<span class="pii-col" title="Possible PII">email</span>');
-    expect(html).toContain(
-      '<span class="st sensitive-val" title="Sensitive value">\'jane@acme.io\'</span>',
-    );
+    expect(html).toContain("<span class=\"st\">'jane@acme.io'</span>");
     // The tone reaches the card, which is what turns the frame red on a destructive.
     expect(html).toContain(
       '<div class="detail-card confirm-card destructive with-sql" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">',
+    );
+  });
+
+  it("carries the card's legend above the SQL, the untraced-output line included", () => {
+    const html = confirmHtml(spec);
+    expect(html).toContain('<div class="cs-legend confirm-legend">');
+    expect(html).toContain('aria-describedby="lg-pii-confirm"');
+    expect(html.indexOf("confirm-legend")).toBeLessThan(html.indexOf('<pre class="sql'));
+    expect(html).not.toContain(UNTRACED_NOTE);
+    const untraced = confirmHtml({
+      ...spec,
+      schema: { ...schema, pii: [], client: [], complete: false },
+    });
+    expect(untraced).toContain(UNTRACED_NOTE);
+    expect(untraced).not.toContain('class="lg ');
+    const partial = confirmHtml({ ...spec, schema: { ...schema, complete: false } });
+    expect(partial).toContain(UNTRACED_NOTE);
+    expect(partial).toContain('aria-describedby="lg-pii-confirm"');
+    expect(confirmHtml({ ...spec, schema: { ...schema, pii: [], client: [] } })).not.toContain(
+      "confirm-legend",
     );
   });
 

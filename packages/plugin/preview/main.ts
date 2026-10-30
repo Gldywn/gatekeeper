@@ -11,6 +11,11 @@ function applyTheme(cssString: string): void {
   if (el) el.textContent = `:root { ${cssString} }`;
 }
 
+// crypto=0: the plugin frame of a Beekeeper with no Web Crypto, such as 6.1.6.
+if (new URLSearchParams(location.search).get("crypto") === "0") {
+  Object.defineProperty(crypto, "subtle", { value: undefined });
+}
+
 const root = document.querySelector<HTMLDivElement>("#app");
 // Same order as src/main.ts: the grammar loads before the app parses anything.
 if (root && !(await loadPgParser(wasmBytes)))

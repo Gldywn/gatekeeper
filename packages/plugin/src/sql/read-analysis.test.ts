@@ -307,6 +307,12 @@ describe("shared read analysis", () => {
   ])("keeps sensitivity checks on decoded names: %s", (sql) => {
     expect(planRead(sql, "postgresql")).toMatch(/^Sensitive source or alias:/);
   });
+  it.each([
+    "WITH x(company_name) AS (SELECT sku FROM public.products) SELECT * FROM x",
+    "SELECT * FROM (SELECT sku FROM public.products) f(company_name)",
+  ])("screens the names a column list gives: %s", (sql) => {
+    expect(analyze(sql, products).reasons).toContain("Sensitive source or alias: company_name");
+  });
   it("checks decoded star fields and keeps a quoted star distinct", () => {
     const relations = {
       "public.products": { createdAt: "timestamp", "E mail": "text", "*": "int4" },

@@ -102,12 +102,16 @@ PostgreSQL connection, `node-sql-parser` for every other engine, in the engine's
 when the library has one and in its PostgreSQL grammar otherwise. If PostgreSQL's grammar
 fails to load, the failure is logged and every PostgreSQL statement takes the text check
 used for a failed parse. Each engine module (`sql/pg/`, `sql/nsp/`) answers the same questions from its
-own tree: the risk class, the tables and columns for the annotation, the sensitive
-literals, the receipt. The gate classifies each query read / write / destructive
+own tree: the risk class, the tables and columns for the annotation, what the statement
+returns for the reviewer's flags, the sensitive literals, the receipt, the load check's
+reading. Where node-sql-parser's tree is not the statement the engine runs (a MySQL `/*!`
+body, a lone carriage return, a SQL Server batch it reads as one statement), that engine
+module answers nothing. The gate classifies each query read / write / destructive
 (escalating on any embedded modify node, with a conservative fallback when parsing fails),
 and only lets the human approve a class the armed mode allows. Auto mode exists only on
 PostgreSQL, so only `sql/pg/` builds evaluator input. The server also preflights with a
-regex to block empty and multi-statement input before enqueueing.
+regex to block empty and multi-statement input, and a lone carriage return, before
+enqueueing.
 
 The plugin also runs a local load check on each proposal (`sql/load.ts`, host calls in
 `annotate.ts`). It never runs or explains the proposal. It reads the SQL with the engine's own
@@ -184,7 +188,9 @@ Every approved result is kept twice, for two readers.
   9 MiB) is dropped and the decision still lands. If sealing fails, the agent still gets its rows
   and only the kept copy is missing. The server cannot read it; the plugin
   fetches it with `GET /results/:id` (same scope as `/activity`, approved requests only) and
-  opens it. It holds exactly what the agent was sent: at most 10,000 rows and 8 MiB, counted in
+  opens it. A Beekeeper whose plugin page has no `crypto.subtle` (6.1.6 registers its schemes so
+  that the page is not a secure context; 6.2.0 fixes it) seals nothing and fetches nothing, and
+  the detail says to update Beekeeper. The kept copy holds exactly what the agent was sent: at most 10,000 rows and 8 MiB, counted in
   UTF-8 bytes over the whole result, so the history never shows a row the agent did not get.
   Decisions from before this copy existed have none, and rows already stripped cannot be
   recovered. A server from before this copy ignores it, so results decided while such a server
@@ -205,7 +211,11 @@ header only; its rows are built the first time it opens. The PII, Value and Clie
 from `policy_json.sensitivity`, three booleans the plugin freezes from its card analysis when
 `/executing` or `/result` records the decision (while the request is executing, a later
 `/result` never overwrites the `/executing` one), or from the SQL text alone when nothing was recorded, so opening the trail
-never queries the connected database. Each entry says whether its sealed rows were kept
+never queries the connected database. Flags computed now describe what the statement returns
+(`sql/output.ts`); a decision whose output could not be fully traced records the flags it found,
+or none when it found none, and Value is always false since literals stopped being flagged. Stored records are never rewritten, so
+an older one keeps the PII, Client and Value its rules computed, filters included; the detail
+recomputes the legend with the current rules. Each entry says whether its sealed rows were kept
 (`kept`) and, for a decline, who declined (`declinedBy`: a person, the plugin's gate refusing to run
 an approved statement, or the load check turning down a heavy query) and whether a person's reason
 starts with words they typed (`reasonTyped`), since the reason is what the agent received, load

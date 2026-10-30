@@ -86,3 +86,21 @@ export function classifyNsp(sql: string, grammar: string): RiskVerdict | null {
   });
   return { class: cls, parseOk: true, blocked: false };
 }
+
+// Behind a leading EXPLAIN the whole text no longer parses, so the statements are counted there.
+const EXPLAIN_HEAD = /^\s*explain\b(?:\s*\([^)]*\)|\s+(?:analy[sz]e|verbose)\b)*/i;
+
+// The parser's statement count can only add a block, so it is safe to take on text whose tree
+// is not trusted: a SQL Server batch (DELETE t DELETE u) needs no `;` the text check would see.
+export function parsesAsSeveral(sql: string, grammar: string): boolean {
+  const head = EXPLAIN_HEAD.exec(sql)?.[0];
+  return [sql, head === undefined ? "" : sql.slice(head.length)].some((text) => {
+    if (!text.trim()) return false;
+    try {
+      const ast = parser.astify(text, { database: grammar });
+      return Array.isArray(ast) && ast.length > 1;
+    } catch {
+      return false;
+    }
+  });
+}

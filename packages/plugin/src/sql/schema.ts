@@ -1,12 +1,13 @@
 import type { SensitivityRecord } from "@gatekeeper/shared";
 
+// What the reviewer is shown about a statement: the tables it touches, and among the names of
+// what it returns to the agent, those that read as person or client data.
 export interface SchemaContext {
   tables: string[];
   pii: string[];
   client: string[];
-  literals: string[];
-  star: boolean;
-  analysis?: import("./read-analysis").ReadSnapshot;
+  // False when part of what it returns could not be traced, so a flag may be missing.
+  complete: boolean;
 }
 
 export interface TableRef {
@@ -179,6 +180,17 @@ export interface ParsedQuery {
   star: boolean;
 }
 
+/** A table's columns in their order, from the live connection; absent when reading text alone. */
+export type Columns = (ref: TableRef) => string[] | null;
+
+export interface QueryOutput {
+  // Every name that describes a returned value: its label, the source columns and inner
+  // labels it traces back to, the JSON keys read into it.
+  names: string[];
+  // False when some returned value could not be traced, so a sensitive one may be missing.
+  complete: boolean;
+}
+
 // The tables a statement writes versus reads, for the card's Writes/Deletes annotation.
 export interface TableOps {
   writes: string[];
@@ -196,32 +208,12 @@ export function formatRef(ref: TableRef): string {
   return ref.schema ? `${ref.schema}.${ref.name}` : ref.name;
 }
 
-type ExposedInput = Pick<ParsedQuery, "columns" | "star"> &
-  Partial<Pick<ParsedQuery, "aliases" | "jsonKeys">>;
-
-// The distinct column names a query would expose: the ones it names, the output
-// aliases it assigns, the JSON keys it reads, plus (for SELECT *) the real columns
-// of the tables it reads.
-function exposedColumns(parsed: ExposedInput, tableColumns: string[]): string[] {
-  const exposed = new Set<string>([
-    ...parsed.columns,
-    ...(parsed.aliases ?? []),
-    ...(parsed.jsonKeys ?? []),
-  ]);
-  if (parsed.star) {
-    for (const name of tableColumns) {
-      exposed.add(name);
-    }
-  }
-  return [...exposed];
+export function piiColumns(names: string[]): string[] {
+  return unique(names.filter((c) => classifyColumn(c) === "pii"));
 }
 
-export function piiColumns(parsed: ExposedInput, tableColumns: string[]): string[] {
-  return unique(exposedColumns(parsed, tableColumns).filter((c) => classifyColumn(c) === "pii"));
-}
-
-export function clientColumns(parsed: ExposedInput, tableColumns: string[]): string[] {
-  return unique(exposedColumns(parsed, tableColumns).filter((c) => classifyColumn(c) === "client"));
+export function clientColumns(names: string[]): string[] {
+  return unique(names.filter((c) => classifyColumn(c) === "client"));
 }
 
 // A value whose shape is sensitive whatever column it meets: an email, an IBAN, a card number.
@@ -247,10 +239,22 @@ export function sensitiveReference(name: string): boolean {
   );
 }
 
+// `value` stays on the wire for older brokers and records: a literal is text the agent wrote
+// itself, never something the database hands it, so it is no longer flagged.
 export function sensitivityOf(schema: SchemaContext): SensitivityRecord {
   return {
     pii: schema.pii.length > 0,
-    value: schema.literals.length > 0,
+    value: false,
     client: schema.client.length > 0,
   };
+}
+
+// What a decision records. A flag found is a fact even in an output not fully traced, so it is
+// kept; an untraced output with nothing found records nothing, never an all-clear.
+export function recordedSensitivity(
+  schema: SchemaContext | null | undefined,
+): SensitivityRecord | undefined {
+  if (!schema) return undefined;
+  const found = schema.pii.length > 0 || schema.client.length > 0;
+  return schema.complete || found ? sensitivityOf(schema) : undefined;
 }

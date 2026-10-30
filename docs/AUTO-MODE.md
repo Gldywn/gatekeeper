@@ -149,8 +149,10 @@ subscripts and `= ANY (...)` over an array, row comparisons, `COLLATE`, bind par
 star over a `USING` join, schema-qualified calls outside `pg_catalog`, whole-row
 references and anything the walker does not model. Unknown node types and unknown node
 keys hold instead of being skipped. LIMIT and OFFSET must be nonnegative integers at most 1000000.
-Existing source/output-alias/JSON/literal detections run before sharing. IP addresses
-receive stricter treatment than display annotations.
+Existing source/output-alias/JSON/literal detections run before sharing, over the whole query,
+filters and joins included (`analyzeSql`, `sensitiveLiterals`). The reviewer's annotation is a
+separate reading of the output alone (`sql/output.ts`): narrowing it never narrows these checks.
+IP addresses receive stricter treatment than display annotations.
 There is no automatic fallback for parse failures and no function is implicitly trusted.
 
 ### Deliberate beta limitation: identifier names
@@ -282,9 +284,9 @@ This is a conservative approximation, not the planner. It can hold reads Postgre
 would resolve harmlessly. Every uncertainty keeps a candidate, and any user-defined
 candidate left standing holds the read. The analysis assumes PostgreSQL 12 or later
 (`prokind`, `attgenerated`).
-`SchemaAnnotator.inspectRead` builds the same `ReadSnapshot` for ordinary annotations
-and Auto mode. It records incomplete analysis explicitly. `filterSchema` only affects
-display. Auto mode obtains a fresh snapshot and checks activation, connection and lease
+`SchemaAnnotator.inspectRead` builds the `ReadSnapshot` Auto mode evaluates; the reviewer's
+annotation does not use it. It records incomplete analysis explicitly. `filterSchema` only
+affects display. Auto mode obtains a fresh snapshot and checks activation, connection and lease
 authority across asynchronous calls. This analysis is independent of schema access and
 every detection display toggle.
 No table or field editor is part of this beta. Any future Sensitive tables policy belongs

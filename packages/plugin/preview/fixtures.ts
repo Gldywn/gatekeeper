@@ -153,6 +153,15 @@ LEFT JOIN shipments s ON s.order_id = o.id
 WHERE o.created_at >= '2026-10-01'
 ORDER BY o.id
 LIMIT 2000`,
+  // Person and client data returned, plus a filter on a phone it never returns: not flagged.
+  contacts: `SELECT c.email, a.company_name, a.contract_value, a.headcount
+FROM customers c
+JOIN accounts a ON a.id = c.account_id
+WHERE c.phone LIKE '+33%'`,
+  // A function's columns that no analysis can list.
+  points: `SELECT c.email, f.*
+FROM customers c
+CROSS JOIN LATERAL contact_points(c.id) f`,
 };
 
 export const COLUMNS: Record<string, { name: string; type: string }[]> = {
@@ -169,7 +178,9 @@ export const COLUMNS: Record<string, { name: string; type: string }[]> = {
   customers: [
     { name: "id", type: "integer" },
     { name: "email", type: "text" },
+    { name: "phone", type: "text" },
     { name: "name", type: "text" },
+    { name: "account_id", type: "integer" },
     { name: "created_at", type: "timestamptz" },
   ],
   payments: [
@@ -190,6 +201,12 @@ export const COLUMNS: Record<string, { name: string; type: string }[]> = {
     { name: "id", type: "integer" },
     { name: "customer_id", type: "integer" },
     { name: "created_at", type: "timestamptz" },
+  ],
+  accounts: [
+    { name: "id", type: "integer" },
+    { name: "company_name", type: "text" },
+    { name: "contract_value", type: "numeric" },
+    { name: "headcount", type: "integer" },
   ],
 };
 
@@ -267,6 +284,25 @@ export function proposals(): Proposal[] {
       sql: SQL.voidDup,
       intent: "mark the two duplicate invoices as void",
       createdAt: NOW - 6_000,
+      expiresAt: NOW + 4.9 * MIN,
+      sessionId: session(0).sessionId,
+      session: session(0),
+    },
+    // Past the default three: queue=5 shows the legend's two categories and an untraced output.
+    {
+      id: "req_c62d90e4a1f8",
+      sql: SQL.contacts,
+      intent: "list customer contacts with their account",
+      createdAt: NOW - 4_000,
+      expiresAt: NOW + 4.9 * MIN,
+      sessionId: session(1).sessionId,
+      session: session(1),
+    },
+    {
+      id: "req_e17b4c3d0a52",
+      sql: SQL.points,
+      intent: "list every contact point per customer",
+      createdAt: NOW - 2_000,
       expiresAt: NOW + 4.9 * MIN,
       sessionId: session(0).sessionId,
       session: session(0),
