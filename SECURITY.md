@@ -54,7 +54,8 @@ Two classifiers agree on the read / write / destructive classes:
   that runs SQL. It parses each query in the connection's dialect with `node-sql-parser`,
   escalates the class on any embedded modifying node (a CTE, a subquery, `SELECT ... INTO`,
   `EXPLAIN ANALYZE` of a write, a locking read), and fails closed to **destructive** when a
-  parse fails or a statement is unrecognized.
+  parse fails or a statement is unrecognized. An `EXPLAIN` whose options hold a comment, a
+  quoted or an escaped name is taken as `EXPLAIN ANALYZE`, since either can hide one.
 - **A failed parse raises the class; it does not block the query.** `node-sql-parser` knows
   no `DROP DATABASE`, `VACUUM`, or `ALTER SYSTEM`, and blocking them outright made the
   archetypal destructive statement unapprovable in the very mode built to gate it. Such a
@@ -62,13 +63,45 @@ Two classifiers agree on the read / write / destructive classes:
   confirmation where the human types the database name, and its card carries a standing
   warning that Gatekeeper could not read it and the judgement is theirs. What no mode can
   approve is unchanged: empty input, and anything holding more than one statement.
-- The **server** classifier is advisory. It stamps the audit trail and refuses the two
-  cases no mode may approve: empty and multi-statement input.
+- The **server** classifier is advisory. It stamps the audit trail and refuses the cases
+  no mode may approve: empty and multi-statement input, and a carriage return not followed
+  by a line feed (see below), so a server updated before the plugin still covers it.
+
+**Text the classifiers cannot delimit.** When no parser reads a statement, the plugin falls
+back to a text check that does not know where strings end. It removes only the comments that
+open the statement, and only those every engine closes at the same place, then takes the rest
+as written, strings and comments included: a `;` anywhere but at the end blocks the
+statement, and a modifying or locking keyword raises its class even inside a string or a
+comment. Removing comments any further let a `--` or `/*` inside a string hide a second
+statement. The server preflight applies the same rule to every statement: past the leading
+comments it can delimit, a `;` inside a string or a comment is refused too.
+
+**Where the parser and the engine end a comment differently.** `node-sql-parser` ends a
+`--` comment, and MySQL's `#` one, at a lone carriage return, where MySQL and SQLite run on
+to the line feed, and reads MySQL's `--1` as a comment where MySQL reads minus minus one. Its tree is
+then not the statement the engine runs. A carriage return not followed by a line feed, or on
+MySQL and MariaDB a `--` followed by any character above U+0020, therefore makes the
+statement unread and destructive wherever it appears, strings and comments included (on
+MySQL, `SELECT '--'` needs Destructive mode). The text check still decides whether it is
+blocked. This is a stopgap until these engines are read by their own grammar.
+
+**SQL Server batches.** SQL Server runs a batch whose statements need no `;` between them,
+so the text check cannot count them: a SQL Server statement no parser read is never classed
+a read. T-SQL strings have no backslash escape, which `node-sql-parser`'s grammar assumes,
+so a SQL Server statement holding a backslash is unread and destructive too. The grammar also
+takes a one-word statement for an alias (`SELECT 1 SHUTDOWN`, `SELECT 1SHUTDOWN`), so a SQL
+Server statement naming `SHUTDOWN`, `RECONFIGURE`, `CHECKPOINT`, `COMMIT`, `ROLLBACK`,
+`REVERT` or `SETUSER` anywhere, a string, a column name or the end of a longer name included,
+is unread too, as is one holding a character from U+0080 to U+00A0, which the grammar takes
+for part of a name where T-SQL does not. SQL Server has no `EXPLAIN` either: it calls a
+procedure of that name and runs what follows, so a SQL Server `EXPLAIN` is never taken for a
+plan. SQL Server is not an officially tested engine.
 
 **MySQL executable comments.** MySQL and MariaDB run the body of a `/*! ... */` comment,
-unlike an ordinary comment. Both classifiers keep that body when scanning, and the plugin
-never lets a modifying keyword hidden inside such a comment ride in under a read verdict;
-it escalates to destructive so a human must arm and confirm it explicitly.
+and MariaDB also runs `/*M! ... */`, unlike an ordinary comment. Both classifiers keep that
+body when scanning, and the plugin never lets a modifying keyword hidden inside such a
+comment ride in under a read verdict; it escalates to destructive so a human must arm and
+confirm it explicitly. A `;` inside one starts a second statement, so it blocks.
 
 **Trojan-source text.** Unicode bidirectional overrides and other invisible formatting
 characters can make submitted SQL render in an order the reviewer never approved. The

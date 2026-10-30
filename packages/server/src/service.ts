@@ -122,8 +122,8 @@ export interface SubmitInput {
 // Omitting the notifier raises no alert, which is what keeps the test suite silent;
 // mcp.ts owns the one real instance.
 export function submitQuery(store: RequestStore, input: SubmitInput, notifier?: Notifier): Ticket {
-  // Advisory now: only empty/multi-statement are refused here. A write/destructive is
-  // forwarded and shown to the human, who arms the matching mode and approves it.
+  // Advisory now: only empty, multi-statement and lone-CR input are refused here. A
+  // write/destructive is forwarded and shown to the human, who arms the matching mode.
   const risk = classifyRisk(input.sql);
   if (!risk.ok) {
     throw new ServiceError(

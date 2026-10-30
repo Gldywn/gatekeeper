@@ -137,7 +137,7 @@ packages/
       service.ts     submit / get / cancel, ticket shaping, read-only preflight
       store.ts       durable SQLite lease queue + audit trail
       connection.ts  non-sensitive connection snapshot
-      policy.ts      server-side advisory risk classifier (blocks empty/multi-statement)
+      policy.ts      server-side advisory risk classifier (blocks empty/multi-statement/lone CR)
       config.ts      environment and constants
   plugin/
     manifest.json
