@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.4.0](https://github.com/Gldywn/gatekeeper/compare/v0.3.1...v0.4.0) (2026-10-31)
+
+
+### Features
+
+* add a local query load check before approval ([#55](https://github.com/Gldywn/gatekeeper/issues/55)) ([fffef82](https://github.com/Gldywn/gatekeeper/commit/fffef82446bbf2d9b9cfeeeb22eb8dcfdd5e3ec6))
+* advance to the next request and ring only when a human is needed ([#64](https://github.com/Gldywn/gatekeeper/issues/64)) ([7f7a606](https://github.com/Gldywn/gatekeeper/commit/7f7a60686844fd3bd3eae8ef78081c5b22e950f6))
+* **auto:** drop Jev's read_only check from Auto mode ([#47](https://github.com/Gldywn/gatekeeper/issues/47)) ([9766bd8](https://github.com/Gldywn/gatekeeper/commit/9766bd8d300e72ed90460862f7fd55ff87a9e6d4))
+* **auto:** let bare names reach Jev and keep hold reasons precise ([#62](https://github.com/Gldywn/gatekeeper/issues/62)) ([8dbf621](https://github.com/Gldywn/gatekeeper/commit/8dbf621b22e6026bae1a5e239c777b8979a37277))
+* bound get_schema and report schema gaps ([#48](https://github.com/Gldywn/gatekeeper/issues/48)) ([157a3dd](https://github.com/Gldywn/gatekeeper/commit/157a3dd642c3196c9ba377950d6652f7afd0b682))
+* bring Beekeeper forward when a notification is clicked ([#46](https://github.com/Gldywn/gatekeeper/issues/46)) ([0adf17a](https://github.com/Gldywn/gatekeeper/commit/0adf17aeac2050b3820797748697ff0c8094cea5))
+* keep approved results encrypted, one history for both lists ([#67](https://github.com/Gldywn/gatekeeper/issues/67)) ([1b4197e](https://github.com/Gldywn/gatekeeper/commit/1b4197ed77b04a120d8b0347ca0aaaf514c70b70))
+* page the Audit Trail and stop it querying the connected database ([#50](https://github.com/Gldywn/gatekeeper/issues/50)) ([3966a07](https://github.com/Gldywn/gatekeeper/commit/3966a077f9b2180898354c38d1f756319248769c))
+* **plugin:** check the database connection live in the header ([#53](https://github.com/Gldywn/gatekeeper/issues/53)) ([6bce327](https://github.com/Gldywn/gatekeeper/commit/6bce327493d86e8342ba7d8b546ed8dafc5fd59c))
+* **plugin:** enlarge a result's rows over the whole tab ([#66](https://github.com/Gldywn/gatekeeper/issues/66)) ([7bd0a75](https://github.com/Gldywn/gatekeeper/commit/7bd0a75cfd89b1fac7996db84a92480d78e8de8b))
+* **plugin:** export the whole Audit Trail by period or chosen days ([#63](https://github.com/Gldywn/gatekeeper/issues/63)) ([947fb6c](https://github.com/Gldywn/gatekeeper/commit/947fb6c1f1c2d8160a75b7616858989cdfcd70a3))
+* **plugin:** flag only what a statement returns to the agent ([#71](https://github.com/Gldywn/gatekeeper/issues/71)) ([4cb2f3c](https://github.com/Gldywn/gatekeeper/commit/4cb2f3c5d6fd80f017d74bfce4af367713f8c8ca))
+* **plugin:** parse SQL with each engine's own grammar, PostgreSQL first ([#73](https://github.com/Gldywn/gatekeeper/issues/73)) ([524d1f4](https://github.com/Gldywn/gatekeeper/commit/524d1f4aa1bb42fa7a676250c9474a23aeadf210))
+* **plugin:** review requests in an in-page Inbox instead of pop-ups ([#59](https://github.com/Gldywn/gatekeeper/issues/59)) ([e03283e](https://github.com/Gldywn/gatekeeper/commit/e03283eaeda09904a9b397e86ddd6018b7af9e36))
+* **plugin:** rework the header status glyphs ([#57](https://github.com/Gldywn/gatekeeper/issues/57)) ([84eec51](https://github.com/Gldywn/gatekeeper/commit/84eec51f61bc0385f3e057db329bc1faebfd12d4))
+* **plugin:** stop a running query from its card ([#52](https://github.com/Gldywn/gatekeeper/issues/52)) ([e7c0fe2](https://github.com/Gldywn/gatekeeper/commit/e7c0fe22992359e4b693fbcfa96d75b8ce63604a))
+* **server:** play a distinct sound when Auto mode approves a query ([#49](https://github.com/Gldywn/gatekeeper/issues/49)) ([8f49d1d](https://github.com/Gldywn/gatekeeper/commit/8f49d1dea587b1b85415890e294b6e1c85984269))
+* show plugin and server versions with update guidance ([#51](https://github.com/Gldywn/gatekeeper/issues/51)) ([f3de54c](https://github.com/Gldywn/gatekeeper/commit/f3de54c702f3b08940001a950afd35fb5abaa5d7))
+
+
+### Bug Fixes
+
+* **dev:** keep the dev server in charge of the broker port ([#56](https://github.com/Gldywn/gatekeeper/issues/56)) ([71edcf7](https://github.com/Gldywn/gatekeeper/commit/71edcf7219daab674d0804a63d4716d4056993a2))
+* **plugin:** give every block of the pending card the pane's full width ([#69](https://github.com/Gldywn/gatekeeper/issues/69)) ([336909c](https://github.com/Gldywn/gatekeeper/commit/336909c773ba2d3bb2b263c3a9f767ee42eac79e))
+* **plugin:** keep no rows, and say why, where Beekeeper has no Web Crypto ([#72](https://github.com/Gldywn/gatekeeper/issues/72)) ([3b336da](https://github.com/Gldywn/gatekeeper/commit/3b336dac0f00df9e4ea30739e667cd1f7f1da789))
+* **plugin:** make the untested-engine notice a modal dialog ([#61](https://github.com/Gldywn/gatekeeper/issues/61)) ([0fa69d2](https://github.com/Gldywn/gatekeeper/commit/0fa69d283ea4f4c653be76592336a903d3f3fe79))
+* **server:** guard the result sweep against JSON SQLite cannot parse ([#68](https://github.com/Gldywn/gatekeeper/issues/68)) ([8e166c8](https://github.com/Gldywn/gatekeeper/commit/8e166c8d40966ed11c69225405adafd38a6e6b5b))
+* stop stale Gatekeeper servers on dev unlink and update ([#44](https://github.com/Gldywn/gatekeeper/issues/44)) ([5f5a0e4](https://github.com/Gldywn/gatekeeper/commit/5f5a0e4a968078f1585276a81c5588fee66c9570))
+* stop the execution gate reading past text it cannot delimit ([#70](https://github.com/Gldywn/gatekeeper/issues/70)) ([7cdff6b](https://github.com/Gldywn/gatekeeper/commit/7cdff6b8f86eb8c58827b827ad6c4587d407b5f4))
+
 ## [0.3.1](https://github.com/Gldywn/gatekeeper/compare/v0.3.0...v0.3.1) (2026-09-23)
 
 
