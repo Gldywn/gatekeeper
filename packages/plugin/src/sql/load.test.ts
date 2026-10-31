@@ -822,6 +822,28 @@ describe("no false alert on bounded queries", () => {
     expect(check("SELECT * FROM public.t TABLESAMPLE SYSTEM (1)", big).lines).toEqual([]);
     expect(check("SELECT * FROM public.t TABLESAMPLE BERNOULLI (1)", big).lines).toHaveLength(1);
   });
+
+  // The two limits `boundedBlocks` documents: they alert where PostgreSQL may read little, which
+  // can hold Auto or auto-decline the query. Pinned so that lifting one is a deliberate change.
+  it("still alerts on a sort through a plain copy and on a shared CTE no use reads", () => {
+    const full = "Reads every row of `t` without a `WHERE` clause";
+    const indexed = facts({ "public.t": { rows: BIG_ROWS, leading: new Set(["id"]) } });
+    expect(
+      check("SELECT * FROM (SELECT * FROM public.t ORDER BY id) y LIMIT 10", indexed).lines,
+    ).toEqual([]);
+    expect(
+      check(
+        "SELECT * FROM (SELECT * FROM (SELECT * FROM public.t) x ORDER BY id) y LIMIT 10",
+        indexed,
+      ).lines,
+    ).toEqual([full]);
+    expect(
+      check(
+        "WITH r AS (SELECT * FROM public.t) SELECT * FROM r WHERE false UNION ALL SELECT * FROM r WHERE false",
+        big,
+      ).lines,
+    ).toEqual([full]);
+  });
 });
 
 describe("joins without a filter", () => {

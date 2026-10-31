@@ -174,7 +174,10 @@ connection in Beekeeper's pool.
 
 Before approval, the plugin estimates whether a proposal could load or lock the database and
 shows a Heavy query alert on its card. It is a warning, not a guarantee. A read filtered on an
-indexed column can still scan most of a table and shows no alert.
+indexed column can still scan most of a table and shows no alert. The other way round, two
+shapes alert where PostgreSQL may read little: a small `LIMIT` over a sort that an index serves,
+when a subquery that only copies the table sits between them, and a CTE used twice whose every
+use returns nothing (`WHERE false`). Both alert as a full read of the table.
 
 - **The proposal is never run, planned or explained before approval.** The PostgreSQL planner
   evaluates IMMUTABLE and STABLE functions while it plans, and `EXPLAIN` takes the locks of the
