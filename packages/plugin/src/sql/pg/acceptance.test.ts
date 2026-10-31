@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { classifyQuery } from "../classify";
-import { prepareSql } from "../identifiers";
 import { planRead, readMetadataSql, resolveRead } from "../read-analysis";
 import {
   ACCEPTANCE_QUERIES,
@@ -497,9 +496,9 @@ describe("resolution regressions: implicit effects and overloads", () => {
       },
     );
     expect(snapshot.reasons).toEqual([]);
-    expect(snapshot.input?.sql).toContain("CAST($1 AS DATE)");
-    expect(snapshot.input?.sql).toContain("CAST($2 AS TIMESTAMP)");
-    expect(snapshot.input?.sql).toContain("CAST($3 AS INTERVAL)");
+    expect(snapshot.input?.sql).toContain("CAST($1 AS date)");
+    expect(snapshot.input?.sql).toContain("CAST($2 AS timestamp)");
+    expect(snapshot.input?.sql).toContain("CAST($3 AS interval)");
     expect(snapshot.input?.sql).not.toMatch(/2026|1 day/);
   });
 });
@@ -696,11 +695,18 @@ describe("set operations and literal projections", () => {
       snapshot.input?.dependencies.map((d) => `${d.table}.${d.column}:${d.usage}`).sort(),
     ).toEqual(["debits.status:control", "transfers.status:output"]);
   });
-  it.each([
-    [
+  it("walks mixed precedence and a parenthesized branch as PostgreSQL's tree nests them", () => {
+    for (const sql of [
       "SELECT status FROM public.transfers UNION SELECT status FROM public.debits INTERSECT SELECT status FROM public.refunds",
-      /precedence/,
-    ],
+      "SELECT status FROM public.transfers UNION ALL (SELECT status FROM public.debits ORDER BY 1 LIMIT 1)",
+      "(SELECT status FROM public.transfers EXCEPT ALL SELECT status FROM public.debits) INTERSECT ALL SELECT status FROM public.refunds",
+    ]) {
+      const snapshot = analyze(sql, flows);
+      expect(snapshot.reasons, sql).toEqual([]);
+      expect(snapshot.input?.dependencies.length, sql).toBeGreaterThan(1);
+    }
+  });
+  it.each([
     [
       "SELECT status FROM public.transfers UNION ALL SELECT status, amount FROM public.debits",
       /Unresolved/,
@@ -716,10 +722,6 @@ describe("set operations and literal projections", () => {
     [
       "SELECT status FROM public.transfers UNION ALL SELECT current_setting('x') FROM public.debits",
       /Function effects/,
-    ],
-    [
-      "SELECT status FROM public.transfers UNION ALL (SELECT status FROM public.debits ORDER BY 1 LIMIT 1)",
-      /Unresolved relation/,
     ],
     ["SELECT status FROM public.transfers UNION ALL SELECT email FROM public.debits", /Sensitive/],
   ])("keeps unsafe or ambiguous set operations manual: %s", (sql, reason) => {
@@ -757,8 +759,8 @@ describe("set operations and literal projections", () => {
     );
     expect(snapshot.reasons).toEqual([]);
     expect(snapshot.input?.sql).not.toMatch(/Someone Personal|2026-01-01/);
-    expect(snapshot.input?.sql).toContain("CAST($2 AS INTEGER)");
-    expect(snapshot.input?.sql).toContain("CAST($3 AS DATE)");
+    expect(snapshot.input?.sql).toContain("CAST($2 AS int)");
+    expect(snapshot.input?.sql).toContain("CAST($3 AS date)");
     expect(
       analyze("SELECT 'alex@example.invalid' AS contact FROM public.transfers", flows).reasons[0],
     ).toMatch(/Sensitive/);
@@ -828,9 +830,8 @@ describe("exported shapes under alternative inferred types", () => {
         expect(snapshot.reasons, sql).toEqual([]);
         expect(snapshot.input?.sql).not.toMatch(/tre_(?:peu|ahd)_0001|00000000-0000-4000/);
       }
-      expect(analyze(flows, relations, { types: statuses }).input?.sql).toMatch(
-        /ORDER BY 1 ASC, 2 ASC/,
-      );
+      // The ordinals stay: they are syntax, not values.
+      expect(analyze(flows, relations, { types: statuses }).input?.sql).toMatch(/ORDER BY 1, 2$/);
     },
   );
 });
@@ -843,7 +844,7 @@ describe("typed JSON scalar extraction", () => {
       requests,
     );
     expect(snapshot.reasons).toEqual([]);
-    expect(snapshot.input?.sql).toContain("::BOOLEAN");
+    expect(snapshot.input?.sql).toContain("AS boolean)");
   });
 });
 
@@ -897,8 +898,8 @@ describe("parser-only PostgreSQL spellings", () => {
     });
   });
   it.each([
-    ["seen >= timestamp with time zone '2026-01-01 00:00:00+00'", "timestamptz"],
-    ["id = int8 '7'", "bigint"],
+    ["seen >= timestamp with time zone '2026-01-01 00:00:00+00'", "timestamp with time zone"],
+    ["id = int8 '7'", "int8"],
     ["id = bigint '7'", "bigint"],
     ["amount > numeric '1.5'", "numeric"],
     ["paid = boolean 'true'", "boolean"],
@@ -906,15 +907,23 @@ describe("parser-only PostgreSQL spellings", () => {
     const snapshot = analyze(`SELECT id FROM public.orders WHERE ${predicate}`, orders);
     expect(snapshot.reasons).toEqual([]);
     expect(snapshot.complete).toBe(true);
-    expect(snapshot.input?.sql).toContain(`AS ${type.toUpperCase()})`);
+    expect(snapshot.input?.sql).toContain(`CAST($1 AS ${type})`);
   });
-  it("parses FETCH FIRST n ROWS ONLY as LIMIT n for analysis only", () => {
-    const sql = "SELECT id FROM public.orders ORDER BY id FETCH FIRST 5 ROWS ONLY";
-    expect(parsed(sql)).toMatchObject({ class: "read", parseOk: true });
-    expect(prepareSql(sql, "postgresql").sql).toContain("limit 5");
-    expect(analyze("SELECT id FROM public.orders FETCH FIRST 1 ROW ONLY", orders).complete).toBe(
-      true,
-    );
+  it("reads FETCH FIRST as the row count PostgreSQL applies, with or without a count", () => {
+    for (const [fetch, limit] of [
+      ["ORDER BY id FETCH FIRST 5 ROWS ONLY", "ORDER BY id LIMIT 5"],
+      ["FETCH FIRST ROW ONLY", "LIMIT 1"],
+      ["FETCH NEXT 3 ROWS ONLY", "LIMIT 3"],
+    ]) {
+      const snapshot = analyze(`SELECT id FROM public.orders ${fetch}`, orders);
+      expect(snapshot.reasons, fetch).toEqual([]);
+      expect(snapshot.input?.sql, fetch).toBe(`SELECT id FROM public.orders ${limit}`);
+    }
+  });
+  it("resolves a timetz literal, which node-sql-parser could not read, like any typed value", () => {
+    const snapshot = analyze("SELECT id, timetz '10:00+00' AS t FROM public.orders", orders);
+    expect(snapshot.reasons).toEqual([]);
+    expect(snapshot.input?.sql).toBe("SELECT id, CAST($1 AS timetz) AS t FROM public.orders");
   });
   it.each([
     [
@@ -933,29 +942,18 @@ describe("parser-only PostgreSQL spellings", () => {
     expect(planRead(sql, "postgresql")).toBe("A parsed single read is required");
   });
   it.each([
-    ["a user-defined type", "SELECT id FROM public.orders WHERE note = mood 'happy'"],
+    ["a type the catalog does not know", "note = mood 'happy'", "Unresolved cast"],
+    ["a schema-qualified type", "note = public.text 'a'", "Unresolved cast"],
     [
-      "timetz, which has no faithful parser cast",
-      "SELECT id FROM public.orders WHERE note = timetz '10:00+00'",
+      "a comparison PostgreSQL has no operator for",
+      "note = timetz '10:00+00'",
+      /Unresolved function or operator/,
     ],
-    ["a schema-qualified type", "SELECT id FROM public.orders WHERE note = public.text 'a'"],
-    ["FETCH without a literal count", "SELECT id FROM public.orders FETCH FIRST ROW ONLY"],
-    ["FETCH WITH TIES", "SELECT id FROM public.orders ORDER BY id FETCH FIRST 5 ROWS WITH TIES"],
-  ])("keeps %s unparsed", (_, sql) => {
-    expect(parsed(sql).parseOk).toBe(false);
-    expect(planRead(sql, "postgresql")).toBe("A parsed single read is required");
-  });
-  it.each([
-    ["a string", "SELECT id FROM public.orders WHERE note = 'uuid ''x'' fetch first 5 rows only'"],
-    [
-      "a comment",
-      "SELECT id FROM public.orders /* text 'x' fetch first 5 rows only */ WHERE id = 1",
-    ],
-    ["a quoted identifier", 'SELECT "text" FROM public.orders WHERE id = 1'],
-  ])("leaves type names and FETCH inside %s untouched", (_, sql) => {
-    const prepared = prepareSql(sql, "postgresql").sql;
-    expect(prepared).not.toContain("CAST(");
-    expect(prepared).not.toContain("limit 5");
+    ["FETCH WITH TIES", "id > 0 ORDER BY id FETCH FIRST 5 ROWS WITH TIES", "Unsupported LIMIT"],
+  ])("reads %s with PostgreSQL's grammar but keeps it out of Auto", (_, where, reason) => {
+    const sql = `SELECT id FROM public.orders WHERE ${where}`;
+    expect(parsed(sql)).toEqual({ class: "read", parseOk: true, blocked: false });
+    expect(analyze(sql, orders).reasons[0]).toMatch(reason);
   });
 });
 
@@ -1026,6 +1024,6 @@ describe("evaluator input values", () => {
     );
     expect(snapshot.complete).toBe(true);
     expect(snapshot.input?.sql).toMatch(/sku = \$1/);
-    expect(snapshot.input?.sql).toMatch(/price > CAST\(\$2 AS INTEGER\)/);
+    expect(snapshot.input?.sql).toMatch(/price > CAST\(\$2 AS int\)/);
   });
 });

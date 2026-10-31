@@ -7,13 +7,10 @@ import {
   AUTO_POLICY as PLUGIN_POLICY,
   AUTO_THRESHOLDS as PLUGIN_THRESHOLDS,
 } from "../../plugin/src/sql/auto";
+import { analyzeSql, sensitiveLiterals } from "../../plugin/src/sql/inspect";
+import { loadPgParser } from "../../plugin/src/sql/pg/parse";
 import { planRead } from "../../plugin/src/sql/read-analysis";
-import {
-  analyzeSql,
-  looksLikeClientData,
-  looksLikePii,
-  sensitiveLiterals,
-} from "../../plugin/src/sql/schema";
+import { looksLikeClientData, looksLikePii } from "../../plugin/src/sql/schema";
 import {
   AUTO_MODEL,
   AUTO_POLICY,
@@ -22,6 +19,7 @@ import {
   evaluationQuestions,
 } from "../src/evaluator.js";
 import {
+  ANALYSIS,
   type Case,
   corpusSchema,
   digest,
@@ -31,6 +29,9 @@ import {
   summarize,
   validateReport,
 } from "./auto";
+
+// The plugin's PostgreSQL grammar is WASM: the bench loads it once, as the plugin does.
+if (!(await loadPgParser())) throw new Error("PostgreSQL parser failed to load");
 
 const allCases = corpusSchema.parse(
   JSON.parse(await readFile(new URL("auto-cases.json", import.meta.url), "utf8")),
@@ -584,7 +585,7 @@ describe("archived reports", () => {
       ),
     ).rejects.toThrow("replay-only");
     const mixed = JSON.parse(JSON.stringify(archived));
-    mixed.analysis = "shared-read-2";
+    mixed.analysis = ANALYSIS;
     expect(() => validateReport(mixed)).toThrow("dependency usage");
   });
 });
@@ -615,7 +616,7 @@ describe("auto-beta-5 broad shapes (prepared, never sent to TypeSafe here)", () 
     let sent = 0;
     for (const split of ["development", "validation"] as const) {
       const report = prepare(broadCases, questions, split);
-      expect(report.analysis).toBe("shared-read-2");
+      expect(report.analysis).toBe(ANALYSIS);
       await runLive(report, "synthetic-key", new AbortController().signal, async () => {});
       sent += report.results.filter((r) => r.probabilities).length;
     }

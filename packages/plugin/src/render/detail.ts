@@ -17,8 +17,8 @@ import {
 import { classifyQuery, type RiskClass } from "../sql/classify";
 import { formatSql } from "../sql/format";
 import { highlight } from "../sql/highlight";
+import { countsRows, statementReceipt } from "../sql/inspect";
 import { visibleControls } from "../sql/sanitize";
-import { countsRows, statementReceipt } from "../sql/schema";
 import { parseStopNote } from "../sql/stop";
 import type { HistItem } from "../types";
 import { approvalHtml } from "./auto";
@@ -43,16 +43,16 @@ export type DetailSource = "hist" | "audit";
 export function detailHtml(
   item: HistItem,
   source: DetailSource,
-  dialect: string,
+  databaseType: string,
   requestOpen = false,
   loadingRows = false,
 ): string {
-  const cls = classifyQuery(item.sql, dialect).class;
+  const cls = classifyQuery(item.sql, databaseType).class;
   return `
       <div class="detail-flat ${cls === "read" ? "" : cls}">
-        ${statusHtml(item, source)}${resultHtml(item, dialect, cls, loadingRows)}
+        ${statusHtml(item, source)}${resultHtml(item, databaseType, cls, loadingRows)}
         ${requestFoldHtml(item, requestOpen)}
-        <div class="rq-body" id="detail-rq"${requestOpen ? "" : " hidden"}>${requestHtml(item, dialect, cls)}</div>
+        <div class="rq-body" id="detail-rq"${requestOpen ? "" : " hidden"}>${requestHtml(item, databaseType, cls)}</div>
       </div>`;
 }
 
@@ -195,23 +195,28 @@ function statusHtml(item: HistItem, source: DetailSource): string {
 const rowsHtml = (n: number) => `<b>${formatCount(n)}</b> ${n === 1 ? "row" : "rows"}`;
 
 // The result block alone, for rows that arrive after the detail is on screen.
-export function detailResultHtml(item: HistItem, dialect: string): string {
-  return resultHtml(item, dialect, classifyQuery(item.sql, dialect).class, false);
+export function detailResultHtml(item: HistItem, databaseType: string): string {
+  return resultHtml(item, databaseType, classifyQuery(item.sql, databaseType).class, false);
 }
 
 // One receipt for reads and writes alike. DDL reports a conventional zero that measures
 // nothing, and a write's empty result set says nothing either: neither is counted.
-function resultHtml(item: HistItem, dialect: string, cls: RiskClass, loading: boolean): string {
+function resultHtml(
+  item: HistItem,
+  databaseType: string,
+  cls: RiskClass,
+  loading: boolean,
+): string {
   if (item.status !== "approved") {
     return "";
   }
-  const receipt = statementReceipt(item.sql, dialect);
+  const receipt = statementReceipt(item.sql, databaseType);
   const head = receipt
     ? `<code class="kw">${receipt.op}</code> on ${receipt.tables.map((t) => `<code class="name">${escapeHtml(t)}</code>`).join(", ")} completed`
     : "Query completed";
   const r = item.result;
   const parts: string[] = [];
-  if (r?.affectedRows != null && countsRows(item.sql, dialect)) {
+  if (r?.affectedRows != null && countsRows(item.sql, databaseType)) {
     parts.push(`<b>affecting</b> ${rowsHtml(r.affectedRows)}`);
   }
   if (r?.rowCount != null && !(cls !== "read" && r.rowCount === 0)) {
@@ -269,7 +274,7 @@ export function resultsDialogHtml(item: HistItem, pending: number): string {
   return `<div class="detail-card results-card" role="dialog" aria-modal="true" aria-labelledby="resultsTitle"><div class="panel-head"><span class="panel-head-ico">${tableIcon}</span><span class="panel-title" id="resultsTitle">${what}</span><button class="results-queue" type="button" data-results-queue${pending ? "" : " hidden"}>Queue<span class="n">${pending}</span></button><button class="detail-close" type="button" data-results-close aria-label="Close" title="Close">${xIcon}</button></div></div>`;
 }
 
-function requestHtml(item: HistItem, dialect: string, cls: RiskClass): string {
+function requestHtml(item: HistItem, databaseType: string, cls: RiskClass): string {
   const harness = item.session?.harness?.trim() || null;
   const task = item.session?.sessionLabel?.trim();
   const meta = [
@@ -280,7 +285,7 @@ function requestHtml(item: HistItem, dialect: string, cls: RiskClass): string {
   return `<div class="pd-who">${agentBadge(harness)}<span class="pd-name">${escapeHtml(sessionDisplayName(item.session, item.id))}</span>${task ? `<span class="pd-task" title="${escapeHtml(capitalize(task))}">${escapeHtml(capitalize(task))}</span>` : ""}</div>
         <div class="top">${riskBadge(cls)}<span class="intent">${escapeHtml(item.intent ? capitalize(item.intent) : previewSql(item.sql))}</span></div>
         <div class="meta">${meta.join(" &middot; ")}</div>
-        <div class="cs-matrix" id="detail-cm">${accessMatrix(item.sql, dialect, cls)}</div>
+        <div class="cs-matrix" id="detail-cm">${accessMatrix(item.sql, databaseType, cls)}</div>
         <div class="cs-legend" id="detail-cs"></div>
         <pre class="sql"><button class="copy-sql" type="button" data-copy-sql="${escapeHtml(visibleControls(item.sql))}" aria-label="Copy SQL">${copyIcon}</button><code class="sql-body" id="detail-sqlbody">${highlight(formatSql(item.sql))}</code></pre>
         ${approvalHtml(item.approval, item.evaluation, item.autoHold)}`;

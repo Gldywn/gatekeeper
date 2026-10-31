@@ -54,10 +54,13 @@ describe("classifyQuery", () => {
     }
   });
 
-  it("leaves a benign MySQL optimizer hint as a read", () => {
-    const v = classifyQuery("SELECT /*!40001 SQL_NO_CACHE */ * FROM t", "mysql");
-    expect(v.class).toBe("read");
-    expect(v.blocked).toBe(false);
+  // The parser drops the body MySQL runs, so even a harmless hint leaves the statement unread.
+  it("keeps a MySQL optimizer hint approvable, as an unread statement", () => {
+    expect(classifyQuery("SELECT /*!40001 SQL_NO_CACHE */ * FROM t", "mysql")).toEqual({
+      class: "destructive",
+      parseOk: false,
+      blocked: false,
+    });
   });
 
   it("never reads a locking read (FOR SHARE / LOCK IN SHARE MODE)", () => {
@@ -95,7 +98,7 @@ describe("classifyQuery", () => {
     );
   });
 
-  it("reads an EXPLAIN of a SELECT, approvable (the parser cannot parse EXPLAIN itself)", () => {
+  it("reads an EXPLAIN of a SELECT, approvable", () => {
     for (const sql of [
       "EXPLAIN SELECT 1",
       "EXPLAIN VERBOSE SELECT id FROM users",
@@ -162,21 +165,27 @@ describe("classifyQuery", () => {
   });
 
   // Nested EXPLAIN is invalid SQL; it must never downgrade an inner ANALYZE modify to read.
-  it("blocks a nested EXPLAIN instead of reading its inner ANALYZE", () => {
+  // PostgreSQL's grammar rejects a nested EXPLAIN, so it takes the unread path: the strictest
+  // class, approvable like any statement Gatekeeper cannot read, and never a read.
+  it("never reads a nested EXPLAIN, which PostgreSQL rejects", () => {
     for (const sql of [
       "EXPLAIN EXPLAIN ANALYZE DELETE FROM users",
       "EXPLAIN ANALYZE EXPLAIN SELECT 1",
     ]) {
-      const v = classifyQuery(sql, pg);
-      expect(v.class === "read", sql).toBe(false);
-      expect(v.blocked, sql).toBe(true);
+      expect(classifyQuery(sql, pg), sql).toEqual({
+        class: "destructive",
+        parseOk: false,
+        blocked: false,
+      });
     }
   });
 
-  it("treats an unrecognized statement as destructive (fail safe on the class)", () => {
-    const v = classifyQuery("VACUUM", pg);
-    expect(v.class).toBe("destructive");
-    expect(v.parseOk).toBe(false);
+  it("classifies a statement that is neither a read nor a row write as destructive", () => {
+    expect(classifyQuery("VACUUM", pg)).toEqual({
+      class: "destructive",
+      parseOk: true,
+      blocked: false,
+    });
   });
 
   it("classifies a MySQL REPLACE as destructive", () => {
@@ -203,15 +212,25 @@ describe("classifyQuery", () => {
     }
   });
 
-  // node-sql-parser knows none of these. Blocking them made the archetypal destructive
-  // statement unapprovable in the very mode built to gate it.
-  it("leaves a single unparseable statement approvable, at the strictest class", () => {
+  it("reads DROP DATABASE and VACUUM FULL as destructive, approvable, and no longer a guess", () => {
     for (const sql of [
       'DROP DATABASE IF EXISTS "hpal__6590549bf90d4356a1f3196bd3bcf0a7"',
       'DROP DATABASE IF EXISTS "hpal__6590549bf90d4356a1f3196bd3bcf0a7" WITH (FORCE)',
       "DROP DATABASE gatekeeper_test",
       "VACUUM FULL users",
     ]) {
+      expect(classifyQuery(sql, pg), sql).toEqual({
+        class: "destructive",
+        parseOk: true,
+        blocked: false,
+      });
+    }
+  });
+
+  // Blocking what the grammar cannot read made the archetypal destructive statement
+  // unapprovable in the very mode built to gate it.
+  it("leaves a single unparseable statement approvable, at the strictest class", () => {
+    for (const sql of ["FLUSH PRIVILEGES", "OPTIMIZE TABLE users"]) {
       const v = classifyQuery(sql, pg);
       expect(v.class, sql).toBe("destructive");
       expect(v.blocked, sql).toBe(false);
@@ -341,7 +360,7 @@ describe("classifyQuery", () => {
     ] as const) {
       expect(classifyQuery(sql, dialect), sql).toEqual({
         class: "destructive",
-        parseOk: true,
+        parseOk: false,
         blocked: false,
       });
     }
@@ -358,7 +377,7 @@ describe("classifyQuery", () => {
       expect(classifyQuery(sql, dialect).blocked, sql).toBe(true);
     }
     const hint = classifyQuery("SELECT /*!40001 SQL_NO_CACHE */ * FROM t;", "mysql");
-    expect(hint).toEqual({ class: "read", parseOk: true, blocked: false });
+    expect(hint).toEqual({ class: "destructive", parseOk: false, blocked: false });
   });
 
   // Every render of the queue classifies each row; a comment-blanking scan that restarted at
@@ -411,7 +430,7 @@ describe("classifyQuery", () => {
       "SELECT * FROM t EXEC xp_cmdshell 'whoami'",
       "SELECT 1 KILL 52",
     ]) {
-      expect(classifyQuery(sql, "transactsql"), sql).toEqual({
+      expect(classifyQuery(sql, "sqlserver"), sql).toEqual({
         class: "destructive",
         parseOk: false,
         blocked: false,
@@ -430,7 +449,7 @@ describe("classifyQuery", () => {
       // It also takes NBSP and the C1 controls for identifier characters.
       "SELECT name FROM users u\u00a0DELETE\u00a0FROM\u00a0users",
     ]) {
-      expect(classifyQuery(sql, "transactsql"), sql).toEqual({
+      expect(classifyQuery(sql, "sqlserver"), sql).toEqual({
         class: "destructive",
         parseOk: false,
         blocked: false,
@@ -438,7 +457,7 @@ describe("classifyQuery", () => {
     }
     // No EXPLAIN in SQL Server: it calls a procedure of that name and runs the rest.
     for (const sql of ["EXPLAIN DROP TABLE t", "EXPLAIN SELECT 1 SELECT 2"]) {
-      expect(approvableRead(sql, "transactsql"), sql).toBe(false);
+      expect(approvableRead(sql, "sqlserver"), sql).toBe(false);
     }
     // The parser still splits a batch the guard distrusts; its count keeps the block.
     const nbspBatch = "DELETE t\nDELETE u /*\u00a0*/";
@@ -450,9 +469,136 @@ describe("classifyQuery", () => {
       "EXPLAIN KILL 51 KILL 52",
       "EXPLAIN BEGIN TRAN DELETE FROM t COMMIT",
     ]) {
-      expect(classifyQuery(sql, "transactsql").blocked, sql).toBe(true);
+      expect(classifyQuery(sql, "sqlserver").blocked, sql).toBe(true);
     }
-    expect(classifyQuery("SELECT name FROM t WHERE id = 1", "transactsql").class).toBe("read");
+    expect(classifyQuery("SELECT name FROM t WHERE id = 1", "sqlserver").class).toBe("read");
+  });
+});
+
+describe("classifyQuery on PostgreSQL's own grammar", () => {
+  const pg = "postgresql";
+
+  it("runs an EXPLAIN whose ANALYZE option is not explicitly false", () => {
+    for (const [sql, cls] of [
+      ["EXPLAIN (ANALYZE false) DELETE FROM t", "read"],
+      ["EXPLAIN (ANALYZE off) DELETE FROM t", "read"],
+      ["EXPLAIN (ANALYZE 0) DELETE FROM t", "read"],
+      ["EXPLAIN (ANALYZE 'FALSE') DELETE FROM t", "read"],
+      ["EXPLAIN (ANALYZE 1) DELETE FROM t", "destructive"],
+      ["EXPLAIN (ANALYZE true) DELETE FROM t", "destructive"],
+      ["EXPLAIN (ANALYZE true, ANALYZE false) DELETE FROM t", "destructive"],
+      ["EXPLAIN (ANALYZE false, ANALYZE) DELETE FROM t", "destructive"],
+    ] as const) {
+      expect(classifyQuery(sql, pg).class, sql).toBe(cls);
+    }
+  });
+
+  it("carries a data-modifying CTE under EXPLAIN ANALYZE, plans it under a plain EXPLAIN", () => {
+    const cte = "WITH d AS (DELETE FROM t RETURNING id) SELECT id FROM d";
+    expect(classifyQuery(`EXPLAIN ANALYZE ${cte}`, pg).class).toBe("destructive");
+    expect(classifyQuery(`EXPLAIN ${cte}`, pg).class).toBe("read");
+  });
+
+  it("escalates a lock or an INTO wherever it sits", () => {
+    expect(classifyQuery("SELECT * FROM (SELECT * FROM t FOR UPDATE) s", pg).class).toBe("write");
+    expect(classifyQuery("SELECT 1 WHERE EXISTS (SELECT 1 FROM t FOR SHARE)", pg).class).toBe(
+      "write",
+    );
+    expect(classifyQuery("CREATE TABLE t2 AS SELECT * FROM t", pg).class).toBe("destructive");
+    expect(classifyQuery("COPY t TO '/tmp/x'", pg).class).toBe("destructive");
+  });
+
+  it("reads a semicolon inside a dollar-quoted string as part of one statement", () => {
+    expect(classifyQuery("SELECT $$a; DROP TABLE t$$ AS note", pg)).toEqual({
+      class: "read",
+      parseOk: true,
+      blocked: false,
+    });
+  });
+
+  // With standard_conforming_strings off on the server, 'a\' ends later than the parser reads,
+  // and the DROP below becomes a second statement.
+  it("blocks a backslash before a quote in an ordinary string, never reading it as text", () => {
+    for (const sql of [
+      "SELECT 'a\\' , '; DROP TABLE t; --'",
+      // The text fallback strips this comment and would read it, while the server sees a DELETE.
+      "SELECT 'a\\' /*'; DELETE FROM t; -- */",
+      "SELECT 'C:\\temp\\'",
+    ]) {
+      expect(classifyQuery(sql, pg), sql).toEqual({
+        class: "destructive",
+        parseOk: false,
+        blocked: true,
+      });
+    }
+    expect(classifyQuery("SELECT E'a\\'b'", pg).parseOk).toBe(true);
+  });
+
+  it("blocks text holding a NUL, which ends the parser's C string", () => {
+    for (const sql of ["SELECT 1\0; DROP TABLE t", "SELECT 1 /*\0*/"]) {
+      expect(classifyQuery(sql, pg).blocked, JSON.stringify(sql)).toBe(true);
+    }
+  });
+
+  it("never reads an engine that only looks like PostgreSQL with PostgreSQL's grammar", () => {
+    for (const engine of ["redshift", "duckdb", "cockroach"]) {
+      expect(classifyQuery("VACUUM", engine).parseOk, engine).toBe(false);
+    }
+    expect(classifyQuery("VACUUM", pg).parseOk).toBe(true);
+  });
+});
+
+describe("classifyQuery on node-sql-parser", () => {
+  it("reads what the grammar parses and leaves the rest to the strict text check", () => {
+    for (const [sql, verdict] of [
+      ["EXPLAIN SELECT id FROM users", { class: "read", parseOk: true, blocked: false }],
+      ["EXPLAIN DELETE FROM users", { class: "destructive", parseOk: false, blocked: false }],
+      ["EXPLAIN ANALYZE SELECT 1", { class: "destructive", parseOk: false, blocked: false }],
+    ] as const) {
+      expect(classifyQuery(sql, "mysql"), sql).toEqual(verdict);
+    }
+  });
+
+  it("escalates a row lock wherever the grammar places it", () => {
+    for (const sql of [
+      "SELECT * FROM (SELECT * FROM t FOR UPDATE) s",
+      "SELECT * FROM t LOCK IN SHARE MODE",
+    ]) {
+      expect(classifyQuery(sql, "mysql"), sql).toEqual({
+        class: "write",
+        parseOk: true,
+        blocked: false,
+      });
+    }
+  });
+
+  // The refusal is textual, so an executable comment marker inside a string is refused too.
+  it("does not trust the parse of a statement holding an executable comment", () => {
+    const unread = { class: "destructive", parseOk: false, blocked: false };
+    for (const engine of ["mysql", "mariadb"]) {
+      expect(classifyQuery("SELECT '/*!' AS x", engine), engine).toEqual(unread);
+    }
+    expect(classifyQuery("SELECT 1 /*M! INTO OUTFILE '/tmp/x' */", "mariadb")).toEqual(unread);
+    expect(classifyQuery("SELECT '/*!' AS x", "sqlite").parseOk).toBe(true);
+  });
+
+  // The text check strips comments without seeing strings: a '/*' in a string must not let it
+  // swallow the clause or the statement that follows.
+  it("never reads an unread statement whose string opens a comment", () => {
+    for (const engine of ["mysql", "mariadb"]) {
+      for (const sql of [
+        "SELECT '/*!', '/*' INTO OUTFILE '/tmp/x' /* end */",
+        "SELECT '/*!', '/*' FROM t FOR UPDATE /* end */",
+      ]) {
+        expect(classifyQuery(sql, engine).class, `${engine}: ${sql}`).toBe("destructive");
+      }
+      for (const sql of [
+        "SELECT '/*!', '/*'; DROP TABLE t; /* end */",
+        "SELECT 1 /*! ; DROP TABLE t */",
+      ]) {
+        expect(classifyQuery(sql, engine).blocked, `${engine}: ${sql}`).toBe(true);
+      }
+    }
   });
 });
 

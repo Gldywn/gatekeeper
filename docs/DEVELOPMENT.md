@@ -145,7 +145,8 @@ packages/
     index.html
     src/
       app.ts         UI, polling, lease renewal, approve / reject, history
-      sql/classify.ts  dialect-aware risk classifier (the execution gate)
+      sql/classify.ts  risk classifier (the execution gate), per engine
+      sql/engine.ts    picks the parser per engine: PostgreSQL's own (sql/pg/), node-sql-parser (sql/nsp/)
       sql/sanitize.ts  surfaces bidi/invisible chars in displayed SQL
       result.ts      result cap (what the agent is sent, and the history keeps)
       archive.ts     seals and opens kept results (key in Beekeeper's encrypted storage)
@@ -165,8 +166,12 @@ SECURITY.md          supply-chain policy + DB boundary
 
 ## Tech stack
 
-- **Plugin:** TypeScript, Vite, `@beekeeperstudio/plugin`, `node-sql-parser`. Requires
-  Beekeeper Studio >= 5.4.
+- **Plugin:** TypeScript, Vite, `@beekeeperstudio/plugin`, `libpg-query` and `pgsql-deparser`
+  (PostgreSQL), `node-sql-parser` (other engines). Requires Beekeeper
+  Studio >= 5.4. Beekeeper cannot fetch a plugin's own files, so the plugin bundles
+  `libpg-query`'s WASM in its JavaScript and hands it over with `loadModule({ wasm })`
+  (libpg-query 18.2.2 and later). The library still tries its default load at import, which
+  fails in Beekeeper and logs to the console before the bundled bytes replace it.
 - **Server:** TypeScript, `@modelcontextprotocol/sdk`, `better-sqlite3`, Node's built-in
   `http`. Published to npm as `@gldywn/gatekeeper-mcp-server`. Requires Node >= 22, the floor
   at which `better-sqlite3` ships a prebuilt binary so `npx` needs no C++ toolchain.

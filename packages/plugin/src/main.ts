@@ -4,6 +4,8 @@ import "tabulator-tables/dist/css/tabulator_midnight.min.css";
 import "./style.css";
 import { addNotificationListener, getAppInfo, log } from "@beekeeperstudio/plugin";
 import { Gatekeeper } from "./app";
+import { loadPgParser } from "./sql/pg/parse";
+import { wasmBytes } from "./sql/pg/wasm";
 
 function applyTheme(cssString: string): void {
   const el = document.getElementById("app-theme");
@@ -16,6 +18,9 @@ async function bootstrap(): Promise<void> {
   const root = document.querySelector<HTMLDivElement>("#app");
   if (!root) {
     return;
+  }
+  if (!(await loadPgParser(wasmBytes))) {
+    log.error("PostgreSQL parser failed to load");
   }
   const app = new Gatekeeper(root);
   void app.start();

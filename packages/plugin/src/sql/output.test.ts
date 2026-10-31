@@ -264,7 +264,7 @@ describe("analyzeOutput", () => {
       e("postgresql", "SELECT jsonb_extract_path_text(profile, 'email') AS e FROM people"),
       e("mysql", "SELECT JSON_EXTRACT(profile, '$.email') AS e FROM people"),
       e("sqlite", "SELECT json_extract(profile, '$.email') AS e FROM people"),
-      e("transactsql", "SELECT JSON_VALUE(profile, '$.email') AS e FROM people"),
+      e("sqlserver", "SELECT JSON_VALUE(profile, '$.email') AS e FROM people"),
       e("bigquery", "SELECT JSON_EXTRACT_SCALAR(profile, '$.email') AS e FROM people"),
       [
         "postgresql",
@@ -295,7 +295,7 @@ describe("analyzeOutput", () => {
         false,
       ],
       [
-        "transactsql",
+        "sqlserver",
         "SELECT JSON_MODIFY(profile, '$.contact', email) AS payload FROM people",
         null,
         ["profile", "email", "payload"],
@@ -442,13 +442,13 @@ describe("analyzeOutput", () => {
         ["email", "c"],
         true,
       ],
-      // node-sql-parser reads NATURAL as an alias, so the merged columns stay unknown.
+      // NATURAL joins on the names both sides share, here id: c is b's email.
       [
         "postgresql",
         "SELECT s.c FROM (SELECT * FROM a NATURAL JOIN b) s(a, b, c)",
         { a: ["id", "code"], b: ["id", "email"] },
-        ["c", "id"],
-        false,
+        ["c", "email"],
+        true,
       ],
       [
         "postgresql",
@@ -623,11 +623,12 @@ describe("analyzeOutput", () => {
         ["email", "a"],
         true,
       ],
+      // PostgreSQL names a VALUES list's columns column1, column2...
       [
         "postgresql",
         "SELECT v.x FROM people p CROSS JOIN LATERAL (VALUES (p.email)) v(x)",
         null,
-        ["email", "x"],
+        ["email", "x", "column1"],
         true,
       ],
       [
@@ -741,7 +742,7 @@ describe("analyzeOutput", () => {
       ["postgresql", "CALL p(1)", null, [], false],
       // node-sql-parser reads T-SQL's OUTPUT clause as a run of variable assignments.
       [
-        "transactsql",
+        "sqlserver",
         "INSERT INTO t (email) OUTPUT inserted.email VALUES ('known@example.invalid')",
         null,
         [],
@@ -766,12 +767,13 @@ describe("analyzeOutput", () => {
         ["known_slot"],
         true,
       ],
+      // PostgreSQL's tree holds the parenthesized branch as an operand like any other.
       [
         "postgresql",
         "SELECT id FROM people UNION ALL (SELECT email FROM contacts ORDER BY email LIMIT 1)",
         null,
         ["id", "email"],
-        false,
+        true,
       ],
     ]);
   });
@@ -788,24 +790,29 @@ describe("analyzeOutput", () => {
     ]);
   });
 
-  it("returns null when the statement does not parse", () => {
+  // PostgreSQL's grammar reads what node-sql-parser could not; only text it rejects, or whose
+  // strings depend on a server setting, stays unread.
+  it("returns null only when PostgreSQL's grammar cannot read the statement", () => {
     check([
       [
         "postgresql",
         "MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN UPDATE SET a = 1 RETURNING email",
         null,
-        null,
-        null,
+        ["email"],
+        true,
       ],
-      ["postgresql", "EXPLAIN SELECT email FROM t", null, null, null],
-      ["postgresql", "VALUES ('a@b.co')", null, null, null],
+      // A plan's rows are not traced.
+      ["postgresql", "EXPLAIN SELECT email FROM t", null, [], false],
+      ["postgresql", "VALUES ('a@b.co')", null, ["column1"], true],
       [
         "postgresql",
         "WITH d AS (DELETE FROM t RETURNING email) SELECT count(*) FROM d",
         null,
-        null,
-        null,
+        ["count"],
+        true,
       ],
+      ["postgresql", "SELECT email FROM", null, null, null],
+      ["postgresql", "SELECT 'a\\' AS e FROM t", null, null, null],
     ]);
   });
 });
@@ -966,7 +973,7 @@ describe("analyzeOutput, round 1 of the cross-review", () => {
       ["bigquery", "SELECT ARRAY_AGG(email) AS x FROM people", null, ["email", "x"], true],
       ["snowflake", "SELECT * FROM db.sch.people", live, ["id", "email"], true],
       ["sqlite", 'SELECT "email" FROM people', null, ["email"], true],
-      ["transactsql", 'SELECT "email" FROM people', null, ["email"], true],
+      ["sqlserver", 'SELECT "email" FROM people', null, ["email"], true],
       ["snowflake", 'SELECT "EMAIL" FROM people', null, ["EMAIL"], true],
       // MySQL and BigQuery read double quotes as a string, which the agent wrote.
       ["mysql", 'SELECT "email" FROM people', null, [], true],
@@ -1228,7 +1235,7 @@ describe("analyzeOutput, keys read from a document returned whole", () => {
         "postgresql",
         "SELECT v.p FROM users u CROSS JOIN LATERAL (VALUES (u.profile)) v(p) WHERE u.profile->>'email' IS NOT NULL",
         users,
-        ["p", "profile", "email"],
+        ["p", "profile", "email", "column1"],
         true,
       ],
       // A part of the document is not the document.
@@ -1466,7 +1473,7 @@ describe("analyzeOutput, round 3 of the cross-review", () => {
   it("follows writes alike with and without the target's columns", () => {
     const live = { users: ["id", "profile", "memo"], staging: ["id", "profile"] };
     const upsert = "INSERT INTO users (id, profile) SELECT id, profile FROM staging";
-    const rows = ["(SELECT profile FROM users WHERE profile->>'ssn' = '1' LIMIT 1)", "('x')"];
+    const rows = ["((SELECT profile FROM users WHERE profile->>'ssn' = '1' LIMIT 1))", "('x')"];
     const both = (sql: string, names: string[]): Case[] => [
       ["postgresql", sql, live, names, true],
       ["postgresql", sql, null, names, true],
@@ -1680,6 +1687,258 @@ describe("analyzeOutput, round 4 of the cross-review", () => {
         ["p", "profile", "ssn"],
         false,
       ],
+    ]);
+  });
+});
+
+describe("analyzeOutput on PostgreSQL's own grammar", () => {
+  it("reads the clauses node-sql-parser could not", () => {
+    check([
+      ["postgresql", "SELECT email FROM people FETCH FIRST 1 ROW ONLY", null, ["email"], true],
+      ["postgresql", "SELECT text 'known@example.invalid' AS memo", null, ["memo"], true],
+      [
+        "postgresql",
+        "SELECT * FROM people TABLESAMPLE SYSTEM (1)",
+        { people: ["id", "email"] },
+        ["id", "email"],
+        true,
+      ],
+      // NULLIF returns its first argument; the second is only compared.
+      ["postgresql", "SELECT NULLIF(email, phone) AS v FROM people", null, ["v", "email"], true],
+    ]);
+  });
+
+  it("names RETURNING's rows before and after the write as the statement does", () => {
+    const people = { people: ["id", "memo", "email"] };
+    check([
+      [
+        "postgresql",
+        "UPDATE people SET memo = email RETURNING old.*, new.*",
+        people,
+        ["id", "memo", "email"],
+        true,
+      ],
+      [
+        "postgresql",
+        "UPDATE people SET memo = email RETURNING WITH (OLD AS before, NEW AS after) before.memo, after.memo",
+        people,
+        ["memo", "email"],
+        true,
+      ],
+      [
+        "postgresql",
+        "UPDATE people SET memo = email RETURNING WITH (OLD AS before) old.memo",
+        people,
+        ["memo"],
+        false,
+      ],
+    ]);
+  });
+
+  it("hands each column of a multiple assignment its own source column", () => {
+    check([
+      [
+        "postgresql",
+        "UPDATE people SET (memo, other) = (SELECT email, phone FROM contacts LIMIT 1) RETURNING memo",
+        null,
+        ["memo", "email"],
+        true,
+      ],
+      [
+        "postgresql",
+        "UPDATE people SET (memo, other) = (email, phone) RETURNING other",
+        null,
+        ["other", "phone"],
+        true,
+      ],
+    ]);
+  });
+
+  // SECURITY: writing one key of a document leaves the others in it, ssn included.
+  it("keeps what a partial write leaves in the column", () => {
+    const sql =
+      "UPDATE people SET profile['note'] = 'x' WHERE profile->>'ssn' IS NOT NULL RETURNING profile";
+    check([
+      ["postgresql", sql, null, ["profile", "ssn"], true],
+      ["postgresql", sql, { people: ["id", "profile"] }, ["profile", "ssn"], true],
+      [
+        "postgresql",
+        "UPDATE people SET profile = '{}' WHERE profile->>'ssn' IS NOT NULL RETURNING profile",
+        { people: ["id", "profile"] },
+        ["profile"],
+        true,
+      ],
+    ]);
+  });
+
+  // SECURITY: a modifying CTE returns nothing to the query, but what it reads out of a document the
+  // query returns still describes that document.
+  it("keeps what a modifying CTE reads, with or without RETURNING", () => {
+    const tail = "SELECT profile FROM users";
+    const both = (sql: string): Case[] => [
+      ["postgresql", sql, null, ["profile", "ssn"], true],
+      ["postgresql", sql, { users: ["id", "memo", "profile"] }, ["profile", "ssn"], true],
+    ];
+    check([
+      ...both(`WITH changed AS (UPDATE users SET memo = profile->>'ssn') ${tail}`),
+      ...both(`WITH changed AS (UPDATE users SET memo = profile->>'ssn' RETURNING id) ${tail}`),
+      ...both(`WITH changed AS (DELETE FROM users WHERE profile->>'ssn' IS NOT NULL) ${tail}`),
+      ...both(
+        `WITH changed AS (INSERT INTO contacts (email) SELECT profile->>'ssn' FROM users) ${tail}`,
+      ),
+    ]);
+  });
+
+  // SECURITY: a row MERGE deletes, or matches without an action, returns what it held.
+  it("returns what any of MERGE's actions, or none, left in a column", () => {
+    check([
+      [
+        "postgresql",
+        "MERGE INTO people p USING contacts c ON p.id = c.id WHEN MATCHED THEN UPDATE SET memo = c.email RETURNING p.memo",
+        null,
+        ["memo", "email"],
+        true,
+      ],
+      [
+        "postgresql",
+        "MERGE INTO people p USING contacts c ON p.id = c.id WHEN MATCHED THEN UPDATE SET memo = c.email WHEN NOT MATCHED THEN INSERT (id, memo) VALUES (c.id, c.phone) RETURNING new.memo",
+        null,
+        ["memo", "email", "phone"],
+        true,
+      ],
+      [
+        "postgresql",
+        "MERGE INTO people p USING contacts c ON p.id = c.id AND p.profile->>'ssn' IS NOT NULL WHEN MATCHED AND c.gone THEN DELETE WHEN MATCHED THEN UPDATE SET profile = '{}' RETURNING p.profile",
+        { people: ["id", "profile"] },
+        ["profile", "ssn"],
+        true,
+      ],
+    ]);
+  });
+
+  it("leaves SQL/JSON untraced unless it only tests", () => {
+    check([
+      [
+        "postgresql",
+        "SELECT JSON_VALUE(profile, '$.email') AS e FROM people",
+        null,
+        ["e", "profile"],
+        false,
+      ],
+      [
+        "postgresql",
+        "SELECT JSON_QUERY(profile, '$.contact') AS c FROM people",
+        null,
+        ["c", "profile"],
+        false,
+      ],
+      [
+        "postgresql",
+        "SELECT JSON_OBJECT('contact': email) AS payload FROM people",
+        null,
+        ["payload", "email"],
+        false,
+      ],
+      [
+        "postgresql",
+        "SELECT JSON_ARRAY(email) AS payload FROM people",
+        null,
+        ["payload", "email"],
+        false,
+      ],
+      [
+        "postgresql",
+        "SELECT JSON_ARRAY(SELECT email FROM people) AS payload",
+        null,
+        ["payload", "email"],
+        false,
+      ],
+      [
+        "postgresql",
+        "SELECT j.email FROM people p, JSON_TABLE(p.profile, '$' COLUMNS (email text PATH '$.email')) AS j",
+        null,
+        ["email", "profile"],
+        false,
+      ],
+      [
+        "postgresql",
+        "SELECT JSON_EXISTS(profile, '$.email') AS has_email FROM people",
+        null,
+        ["has_email"],
+        true,
+      ],
+      ["postgresql", "SELECT email IS JSON AS ok FROM people", null, ["ok"], true],
+      // Read by a path, the document it returns is untraced.
+      [
+        "postgresql",
+        "SELECT profile FROM people WHERE JSON_EXISTS(profile, '$.ssn')",
+        null,
+        ["profile"],
+        false,
+      ],
+    ]);
+  });
+
+  it("follows a function in FROM only to its arguments, ordinality or not", () => {
+    check([
+      [
+        "postgresql",
+        "SELECT f.x FROM people p, ROWS FROM (unnest(ARRAY[p.email])) WITH ORDINALITY AS f(x, n)",
+        null,
+        ["x", "email"],
+        false,
+      ],
+    ]);
+  });
+
+  it("resolves joins as PostgreSQL scopes them", () => {
+    const live = { a: ["id", "code"], b: ["id", "email"] };
+    check([
+      // An aliased join hides its tables.
+      ["postgresql", "SELECT a.code FROM (a JOIN b USING (id)) AS j", live, ["code"], false],
+      ["postgresql", "SELECT j.email FROM (a JOIN b USING (id)) AS j", live, ["email"], true],
+      // A USING alias names the merged key and leaves both tables in reach.
+      [
+        "postgresql",
+        "SELECT x.id, b.email FROM a JOIN b USING (id) AS x",
+        live,
+        ["id", "email"],
+        true,
+      ],
+      // Which names NATURAL merges takes both sides' columns.
+      ["postgresql", "SELECT * FROM a NATURAL JOIN b", null, [], false],
+    ]);
+  });
+
+  // SECURITY: where names compare without case, "X" and "x" may be two CTEs or one.
+  it("never lets a CTE named alike hide another one's columns", () => {
+    const sql =
+      'WITH "X" AS (SELECT email AS v FROM people), "x" AS (SELECT id AS v FROM people) SELECT v FROM "X"';
+    check([
+      ["postgresql", sql, null, ["v", "email"], true],
+      ["redshift", sql, null, ["v", "id", "email"], false],
+    ]);
+  });
+
+  // SECURITY: a name no known column answers to means the walker misread something, an implicit
+  // label for one, so the value it stands for is untraced rather than empty.
+  it("leaves a name no known column has untraced", () => {
+    check([
+      [
+        "postgresql",
+        "SELECT s.memo FROM (SELECT email FROM people UNION SELECT phone AS memo FROM contacts) s",
+        null,
+        ["memo"],
+        false,
+      ],
+      [
+        "postgresql",
+        "SELECT s.coalesce FROM (SELECT coalesce(email, '') FROM people) s",
+        null,
+        ["coalesce", "email"],
+        true,
+      ],
+      ["postgresql", "SELECT s.text FROM (SELECT 'x'::text) s", null, ["text"], true],
     ]);
   });
 });

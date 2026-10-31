@@ -14,7 +14,7 @@ describe("SchemaAnnotator.schemaFor", () => {
     const annotator = new SchemaAnnotator({
       getColumns: async () => columns("quantity"),
       getMetadata,
-      dialect: () => "postgresql",
+      databaseType: () => "postgresql",
       defaultSchema: () => "public",
       generation: () => 0,
     });
@@ -33,12 +33,12 @@ describe("SchemaAnnotator.schemaFor", () => {
   });
   it.each(["mysql", "sqlserver", "sqlite"])(
     "never sends PostgreSQL catalog SQL on a %s connection",
-    async (dialect) => {
+    async (databaseType) => {
       const getMetadata = vi.fn(async () => []);
       const annotator = new SchemaAnnotator({
         getColumns: async () => columns("quantity"),
         getMetadata,
-        dialect: () => dialect,
+        databaseType: () => databaseType,
         defaultSchema: () => "public",
         generation: () => 0,
       });
@@ -55,7 +55,7 @@ describe("SchemaAnnotator.schemaFor", () => {
     const annotator = new SchemaAnnotator({
       getColumns: async () => [],
       getMetadata,
-      dialect: () => "postgresql",
+      databaseType: () => "postgresql",
       defaultSchema: () => "public",
       generation: () => 0,
     });
@@ -65,22 +65,21 @@ describe("SchemaAnnotator.schemaFor", () => {
     });
     expect(getMetadata).toHaveBeenCalledOnce();
   });
-  it("does not blame the host for catalog SQL it could not build", async () => {
+  it("looks up an overlong name truncated as PostgreSQL truncates it", async () => {
     const getMetadata = vi.fn(async () => [{ path: '["pg_catalog","public"]' }]);
     const annotator = new SchemaAnnotator({
       getColumns: async () => [],
       getMetadata,
-      dialect: () => "postgresql",
+      databaseType: () => "postgresql",
       defaultSchema: () => "public",
       generation: () => 0,
     });
-    // A function name over PostgreSQL's 63-byte limit plans, then fails as a catalog literal.
+    // PostgreSQL's scanner cuts a name at 63 bytes, so the catalog query asks for the function
+    // the server would call, never a name it cannot quote.
     const sql = `SELECT ${"f".repeat(64)}(quantity) FROM public.products`;
-    expect(await annotator.inspectRead(sql)).toEqual({
-      complete: false,
-      reasons: ["Metadata unavailable"],
-    });
-    expect(getMetadata).toHaveBeenCalledOnce();
+    await annotator.inspectRead(sql);
+    expect(getMetadata).toHaveBeenCalledTimes(2);
+    expect(getMetadata.mock.calls[1][0]).toContain(`E'${"f".repeat(63)}'`);
   });
   it("discards a snapshot when catalog identity changes while a table is loading", async () => {
     let resolve!: (rows: Record<string, unknown>[]) => void;
@@ -90,7 +89,7 @@ describe("SchemaAnnotator.schemaFor", () => {
         new Promise((r) => {
           resolve = r;
         }),
-      dialect: () => "postgresql",
+      databaseType: () => "postgresql",
       defaultSchema: () => "public",
       generation: () => 0,
     });
@@ -103,7 +102,7 @@ describe("SchemaAnnotator.schemaFor", () => {
     const getColumns = vi.fn(async () => columns("id", "email", "company_name", "status"));
     const annotator = new SchemaAnnotator({
       getColumns,
-      dialect: () => "postgresql",
+      databaseType: () => "postgresql",
       defaultSchema: () => undefined,
       generation: () => 0,
     });
@@ -123,7 +122,7 @@ describe("SchemaAnnotator.schemaFor", () => {
     );
     const annotator = new SchemaAnnotator({
       getColumns,
-      dialect: () => "postgresql",
+      databaseType: () => "postgresql",
       defaultSchema: () => "public",
       generation: () => 0,
     });
@@ -142,7 +141,7 @@ describe("SchemaAnnotator.schemaFor", () => {
       getColumns: async () => {
         throw new Error("unknown table");
       },
-      dialect: () => "postgresql",
+      databaseType: () => "postgresql",
       defaultSchema: () => "public",
       generation: () => 0,
     });
@@ -157,7 +156,7 @@ describe("SchemaAnnotator.schemaFor", () => {
     const getColumns = vi.fn(async () => columns("id", "email"));
     const annotator = new SchemaAnnotator({
       getColumns,
-      dialect: () => "snowflake",
+      databaseType: () => "snowflake",
       defaultSchema: () => "PUBLIC",
       generation: () => 0,
     });
@@ -171,7 +170,7 @@ describe("SchemaAnnotator.schemaFor", () => {
   it("reads a table the host lists no column for as unknown, not as empty", async () => {
     const annotator = new SchemaAnnotator({
       getColumns: async () => [],
-      dialect: () => "postgresql",
+      databaseType: () => "postgresql",
       defaultSchema: () => "public",
       generation: () => 0,
     });
@@ -191,7 +190,7 @@ describe("SchemaAnnotator.schemaFor", () => {
     );
     const annotator = new SchemaAnnotator({
       getColumns,
-      dialect: () => "postgresql",
+      databaseType: () => "postgresql",
       defaultSchema: () => "public",
       generation: () => 0,
     });
@@ -226,7 +225,7 @@ describe("SchemaAnnotator.schemaFor", () => {
     const getColumns = vi.fn(async () => columns("id", "profile"));
     const annotator = new SchemaAnnotator({
       getColumns,
-      dialect: () => "postgresql",
+      databaseType: () => "postgresql",
       defaultSchema: () => undefined,
       generation: () => 0,
     });
@@ -245,7 +244,7 @@ describe("SchemaAnnotator.schemaFor", () => {
     const getColumns = vi.fn(async () => columns("id", "company_name", "status"));
     const annotator = new SchemaAnnotator({
       getColumns,
-      dialect: () => "postgresql",
+      databaseType: () => "postgresql",
       defaultSchema: () => "public",
       generation: () => 0,
     });
@@ -262,7 +261,7 @@ describe("SchemaAnnotator.schemaFor", () => {
     const getColumns = vi.fn(async () => columns("id", "company_name", "status"));
     const annotator = new SchemaAnnotator({
       getColumns,
-      dialect: () => "postgresql",
+      databaseType: () => "postgresql",
       defaultSchema: () => "public",
       generation: () => 0,
     });
@@ -280,7 +279,7 @@ describe("SchemaAnnotator.schemaFor", () => {
     const getColumns = vi.fn(async () => columns("id", "name", "status"));
     const annotator = new SchemaAnnotator({
       getColumns,
-      dialect: () => "postgresql",
+      databaseType: () => "postgresql",
       defaultSchema: () => undefined,
       generation: () => 0,
     });
@@ -298,7 +297,7 @@ describe("SchemaAnnotator.schemaFor", () => {
     const getColumns = vi.fn(async () => columns("id", "name", "status"));
     const annotator = new SchemaAnnotator({
       getColumns,
-      dialect: () => "postgresql",
+      databaseType: () => "postgresql",
       defaultSchema: () => undefined,
       generation: () => 0,
     });
@@ -316,7 +315,7 @@ describe("SchemaAnnotator.schemaFor", () => {
     const getColumns = vi.fn(async () => columns());
     const annotator = new SchemaAnnotator({
       getColumns,
-      dialect: () => "postgresql",
+      databaseType: () => "postgresql",
       defaultSchema: () => undefined,
       generation: () => 0,
     });
@@ -335,7 +334,7 @@ describe("SchemaAnnotator.schemaFor", () => {
     });
     const annotator = new SchemaAnnotator({
       getColumns,
-      dialect: () => "postgresql",
+      databaseType: () => "postgresql",
       defaultSchema: () => undefined,
       generation: () => generation,
     });
@@ -348,7 +347,7 @@ describe("SchemaAnnotator.schemaFor", () => {
     const getColumns = vi.fn(async () => columns("id", "email"));
     const annotator = new SchemaAnnotator({
       getColumns,
-      dialect: () => "postgresql",
+      databaseType: () => "postgresql",
       defaultSchema: () => undefined,
       generation: () => 0,
     });
@@ -384,7 +383,7 @@ describe("SchemaAnnotator.inspectLoad", () => {
       getColumns: async () => columns("id", "failure_code"),
       getMetadata,
       getIndexes,
-      dialect: () => "postgresql",
+      databaseType: () => "postgresql",
       defaultSchema: () => "public",
       generation: () => 0,
     });
@@ -457,7 +456,7 @@ describe("SchemaAnnotator.inspectLoad", () => {
       getMetadata: async () => {
         throw new Error("private database detail");
       },
-      dialect: () => "postgresql",
+      databaseType: () => "postgresql",
       defaultSchema: () => "public",
       generation: () => 0,
     });
@@ -474,25 +473,28 @@ describe("SchemaAnnotator.inspectLoad", () => {
         generation++;
         return PATH;
       },
-      dialect: () => "postgresql",
+      databaseType: () => "postgresql",
       defaultSchema: () => "public",
       generation: () => generation,
     });
     expect(await a.inspectLoad("SELECT id FROM public.t")).toBeUndefined();
   });
 
-  it("never sends catalog SQL outside PostgreSQL", async () => {
-    const getMetadata = vi.fn(async () => []);
-    const a = new SchemaAnnotator({
-      getColumns: async () => [],
-      getMetadata,
-      dialect: () => "mysql",
-      defaultSchema: () => "app",
-      generation: () => 0,
-    });
-    expect((await a.inspectLoad("DELETE FROM sessions"))?.heavy).toBe(true);
-    expect(getMetadata).not.toHaveBeenCalled();
-  });
+  it.each(["mysql", "redshift"])(
+    "never sends catalog SQL outside PostgreSQL: %s",
+    async (databaseType) => {
+      const getMetadata = vi.fn(async () => []);
+      const a = new SchemaAnnotator({
+        getColumns: async () => [],
+        getMetadata,
+        databaseType: () => databaseType,
+        defaultSchema: () => "app",
+        generation: () => 0,
+      });
+      expect((await a.inspectLoad("DELETE FROM sessions"))?.heavy).toBe(true);
+      expect(getMetadata).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("SchemaAnnotator.inspectLoad host work", () => {
@@ -504,7 +506,7 @@ describe("SchemaAnnotator.inspectLoad host work", () => {
     const a = new SchemaAnnotator({
       getColumns,
       getMetadata,
-      dialect: () => "postgresql",
+      databaseType: () => "postgresql",
       defaultSchema: () => "public",
       generation: () => 0,
     });
@@ -524,7 +526,7 @@ describe("SchemaAnnotator.inspectLoad host work", () => {
     const a = new SchemaAnnotator({
       getColumns: async () => [],
       getMetadata,
-      dialect: () => "postgresql",
+      databaseType: () => "postgresql",
       defaultSchema: () => "public",
       generation: () => 0,
     });
@@ -555,7 +557,7 @@ describe("SchemaAnnotator.inspectLoad host work", () => {
         generation++;
         return [];
       },
-      dialect: () => "postgresql",
+      databaseType: () => "postgresql",
       defaultSchema: () => "public",
       generation: () => generation,
     });
@@ -583,7 +585,7 @@ describe("SchemaAnnotator.inspectLoad on never analyzed tables", () => {
     const a = new SchemaAnnotator({
       getColumns: async () => [],
       getMetadata: async () => metadata.shift() ?? [],
-      dialect: () => "postgresql",
+      databaseType: () => "postgresql",
       defaultSchema: () => "public",
       generation: () => 0,
     });

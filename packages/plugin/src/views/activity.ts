@@ -40,8 +40,8 @@ interface ActivityViewDeps {
   // Raw connection name for the broker's scope header, which unlike the display
   // connectionName has no databaseName/"connection" fallback.
   scope: () => string | undefined;
-  // The connection dialect, so each entry's read/write/destructive class can be parsed.
-  dialect: () => string;
+  // The connection's databaseType, so each entry's read/write/destructive class can be parsed.
+  databaseType: () => string;
   // The entry open in the Inbox's right pane, marked as current in the list.
   selected: () => string | null;
   // Called once the first page is on screen, so the right pane can follow an empty trail.
@@ -58,7 +58,7 @@ export class ActivityView {
   private readonly broker: BrokerClient;
   private readonly connectionName: () => string;
   private readonly scope: () => string | undefined;
-  private readonly dialect: () => string;
+  private readonly databaseType: () => string;
   private readonly selected: () => string | null;
   private readonly rendered: () => void;
   // The first page has been shown since the last open, so an empty feed is known to be empty.
@@ -81,7 +81,7 @@ export class ActivityView {
     this.broker = deps.broker;
     this.connectionName = deps.connectionName;
     this.scope = deps.scope;
-    this.dialect = deps.dialect;
+    this.databaseType = deps.databaseType;
     this.selected = deps.selected;
     this.rendered = deps.rendered ?? (() => {});
   }
@@ -197,7 +197,7 @@ export class ActivityView {
       // page that continues a month already shown lands inside that month, not under a twin.
       this.activity.push(...entries);
       const body = this.root.querySelector<HTMLElement>("#listAudit .act-body");
-      for (const chunk of activityDayChunks(entries, this.selected(), this.dialect(), false)) {
+      for (const chunk of activityDayChunks(entries, this.selected(), this.databaseType(), false)) {
         const month =
           chunk.month &&
           body?.querySelector<HTMLElement>(
@@ -274,7 +274,7 @@ export class ActivityView {
     this.settled = true;
     this.setActivityBody(
       this.activity.length
-        ? activityDaysHtml(this.activity, this.selected(), this.dialect())
+        ? activityDaysHtml(this.activity, this.selected(), this.databaseType())
         : emptyListHtml("audit", this.connectionName()),
     );
     this.rendered();
@@ -309,7 +309,7 @@ export class ActivityView {
         key,
         this.activity.filter((e) => dayOf(e) === key),
         this.selected(),
-        this.dialect(),
+        this.databaseType(),
       );
     }
   }

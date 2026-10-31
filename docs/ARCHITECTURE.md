@@ -95,16 +95,29 @@ See [`SECURITY.md`](../SECURITY.md).
 
 ## Where the risk gate lives
 
-The plugin is the only component that can call `runQuery`, so the gate lives there:
-`node-sql-parser` parses each query in the connection's dialect, classifies it read / write /
-destructive (escalating on any embedded modify node, with a conservative fallback when
-parsing fails), and only lets the human approve a class the armed mode allows. The server
-also preflights with a regex to block empty and multi-statement input, and a lone carriage
-return, before enqueueing.
+The plugin is the only component that can call `runQuery`, so the gate lives there. It
+parses each query with a parser picked per engine in `sql/engine.ts`: PostgreSQL's grammar
+(`libpg_query`, bundled as WebAssembly, loading attempted before the plugin starts) for a
+PostgreSQL connection, `node-sql-parser` for every other engine, in the engine's grammar
+when the library has one and in its PostgreSQL grammar otherwise. If PostgreSQL's grammar
+fails to load, the failure is logged and every PostgreSQL statement takes the text check
+used for a failed parse. Each engine module (`sql/pg/`, `sql/nsp/`) answers the same questions from its
+own tree: the risk class, the tables and columns for the annotation, what the statement
+returns for the reviewer's flags, the sensitive literals, the receipt, the load check's
+reading. Where node-sql-parser's tree is not the statement the engine runs (a MySQL `/*!`
+body, a lone carriage return, a SQL Server batch it reads as one statement), that engine
+module answers nothing. The gate classifies each query read / write / destructive
+(escalating on any embedded modify node, with a conservative fallback when parsing fails),
+and only lets the human approve a class the armed mode allows. Auto mode exists only on
+PostgreSQL, so only `sql/pg/` builds evaluator input. The server also preflights with a
+regex to block empty and multi-statement input, and a lone carriage return, before
+enqueueing.
 
 The plugin also runs a local load check on each proposal (`sql/load.ts`, host calls in
-`annotate.ts`). It never runs or explains the proposal. It reads the SQL and, on PostgreSQL,
-one Gatekeeper-built catalog query for row estimates. Its alert does not gate a manual
+`annotate.ts`). It never runs or explains the proposal. It reads the SQL with the engine's own
+walker (`sql/pg/load.ts` on PostgreSQL's tree, `sql/nsp/load.ts` on node-sql-parser's) into a
+plan no parser shapes (`sql/load-plan.ts`) and, on PostgreSQL, one Gatekeeper-built catalog
+query for row estimates. Its alert does not gate a manual
 approval. It holds Auto mode, and Auto-deny heavy queries rejects a flagged proposal on
 arrival. See [`SECURITY.md`](../SECURITY.md#load-check).
 

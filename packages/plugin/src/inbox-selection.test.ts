@@ -44,7 +44,7 @@ function harness() {
     connectionName: "test",
     tab: "queue",
     selection: { queue: null, audit: null },
-    dialect: "postgresql",
+    databaseType: "postgresql",
     autoEnabled: false,
     autoDeferred: new Set(),
     root: { querySelector: () => null, querySelectorAll: () => [] },
@@ -216,7 +216,7 @@ describe("Recently resolved from the server", () => {
     );
     Object.assign(app, {
       polling: true,
-      dialect: "postgresql",
+      databaseType: "postgresql",
       conn: null,
       broker: { activity },
       recentLoading: false,

@@ -5,6 +5,12 @@ packages:
 # Supply chain: refuse any dependency version published less than 7 days ago.
 minimumReleaseAge: 10080
 
+# Operator's one-off exception (2026-10-30): 18.2.2 is the first release taking the WASM bytes
+# Beekeeper's plugin scheme cannot fetch. Its quarantine ends 2026-11-05 19:45 UTC; delete this
+# entry after that.
+minimumReleaseAgeExclude:
+  - libpg-query@18.2.2
+
 # Pin transitive deps whose latest release is inside the window to their newest
 # >=7-day-old version, so the whole tree satisfies the quarantine.
 overrides:

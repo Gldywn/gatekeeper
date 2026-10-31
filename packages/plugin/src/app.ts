@@ -95,14 +95,15 @@ import { collectSchema } from "./schema-collect";
 import { filterSchema, type Settings, SettingsStore } from "./settings";
 import { AUTO_KEY, currentEvaluation, validEvaluation } from "./sql/auto";
 import { classifyQuery, type RiskClass, rank } from "./sql/classify";
+import { engineFor } from "./sql/engine";
 import { formatSql } from "./sql/format";
 import { highlight } from "./sql/highlight";
+import { statementReceipt } from "./sql/inspect";
 import { agentMessage, checkLoad, type LoadResult, planLoad } from "./sql/load";
 import { modeRank, type RiskMode } from "./sql/mode";
 import { textSchema } from "./sql/output";
-import { mapDialect } from "./sql/readonly";
 import { type EndpointReadOnly, hasProbe, probeReadOnly, runErrorText } from "./sql/readonly-probe";
-import { recordedSensitivity, statementReceipt } from "./sql/schema";
+import { recordedSensitivity } from "./sql/schema";
 import {
   newStopToken,
   readStop,
@@ -298,7 +299,7 @@ function layerGlyph(state: LayerState): string {
 export class Gatekeeper {
   private token: string | null = null;
   private connectionName = "";
-  private dialect = "postgresql";
+  private databaseType = "postgresql";
   // Ephemeral armed access mode: in-memory only, never persisted. Resets to "read"
   // on load, on a connection switch, and on re-pair.
   private mode: RiskMode = "read";
@@ -337,7 +338,7 @@ export class Gatekeeper {
     },
     // Resolved on call: Beekeeper before 5.5 has no getTableIndexes.
     getIndexes: (table, schema) => getTableIndexes(table, schema),
-    dialect: () => this.dialect,
+    databaseType: () => this.databaseType,
     defaultSchema: () => this.conn?.schema ?? undefined,
     generation: () => this.connGeneration,
   });
@@ -440,7 +441,7 @@ export class Gatekeeper {
     this.detailView = new DetailView({
       root,
       annotator: this.annotator,
-      dialect: () => this.dialect,
+      databaseType: () => this.databaseType,
       loadRows: (id) => this.loadRows(id),
       closeMenus: () => this.closeFlyoutMenus(),
     });
@@ -449,7 +450,7 @@ export class Gatekeeper {
       broker: this.broker,
       connectionName: () => this.connectionName,
       scope: () => this.connScopeKey(),
-      dialect: () => this.dialect,
+      databaseType: () => this.databaseType,
       selected: () => this.selection.audit?.id ?? null,
       // The trail opens on its newest decision, or on what it keeps when it holds none.
       rendered: () => {
@@ -462,7 +463,7 @@ export class Gatekeeper {
       broker: this.broker,
       scope: () => this.connScopeKey(),
       connectionName: () => this.connectionName,
-      dialect: () => this.dialect,
+      databaseType: () => this.databaseType,
     });
     this.settingsView = new SettingsView({
       root,
@@ -914,7 +915,7 @@ export class Gatekeeper {
   // and the connection-switch path so the two can never drift apart.
   private applyConnection(conn: ConnectionInfo): void {
     this.connectionName = conn.connectionName || conn.databaseName || "connection";
-    this.dialect = mapDialect(conn.databaseType);
+    this.databaseType = conn.databaseType;
     this.conn = {
       id: conn.id,
       connectionName: conn.connectionName,
@@ -969,7 +970,7 @@ export class Gatekeeper {
         this.recent = entries.map((e) => ({
           ...auditItem(e, connection),
           sensitivity:
-            entryFlags(e, null) ?? entryFlags(e, textSchema(e.sql, this.dialect)) ?? undefined,
+            entryFlags(e, null) ?? entryFlags(e, textSchema(e.sql, this.databaseType)) ?? undefined,
         }));
       }
       // A decision leaves the provisional list once the page lists it (unless this tab knows
@@ -1150,7 +1151,7 @@ export class Gatekeeper {
     // would describe the connection, not the queries this queue governs.
     return {
       name: c.connectionName || this.connectionName,
-      dialect: mapDialect(c.databaseType),
+      dialect: engineFor(c.databaseType).dialect,
       path: c.databaseName?.trim() ?? "",
     };
   }
@@ -2069,7 +2070,7 @@ export class Gatekeeper {
     const focusedDeny = this.captureDenyDrafts(queue);
     const who = card.session?.project?.trim() || card.session?.harness?.trim() || card.sessionId;
     const task = card.session?.sessionLabel?.trim();
-    queue.innerHTML = `<div class="pd-who">${agentBadge(card.session?.harness?.trim() || null)}<span class="pd-name">${escapeHtml(who)}</span>${task ? `<span class="pd-task" title="${escapeHtml(capitalize(task))}">${escapeHtml(capitalize(task))}</span>` : ""}</div>${cardHtml(card, this.dialect, this.denyDrafts, this.mode, this.connectionReadOnly())}`;
+    queue.innerHTML = `<div class="pd-who">${agentBadge(card.session?.harness?.trim() || null)}<span class="pd-name">${escapeHtml(who)}</span>${task ? `<span class="pd-task" title="${escapeHtml(capitalize(task))}">${escapeHtml(capitalize(task))}</span>` : ""}</div>${cardHtml(card, this.databaseType, this.denyDrafts, this.mode, this.connectionReadOnly())}`;
     if (focusedDeny) {
       const input = queue.querySelector<HTMLInputElement>(`[data-deny-input="${focusedDeny}"]`);
       input?.focus();
@@ -2582,7 +2583,7 @@ export class Gatekeeper {
       card.autoAttempt !== this.autoGeneration &&
       !card.authorityLost &&
       !this.autoDeferred.has(card.id) &&
-      classifyQuery(card.sql, this.dialect).class === "read"
+      classifyQuery(card.sql, this.databaseType).class === "read"
     );
   }
 
@@ -3087,7 +3088,7 @@ export class Gatekeeper {
   // One promise per card, shared by the card, Auto mode and auto-deny. Only a card's
   // arrival may auto-deny it: a recheck after a schema change never rejects a waiting card.
   private startLoad(card: Card, arrival: boolean): void {
-    const plan = planLoad(card.sql, this.dialect);
+    const plan = planLoad(card.sql, this.databaseType);
     card.loadSession = this.activeGen;
     card.loadResult = checkLoad(plan, "pending");
     // A restart drops the previous result's estimates at once.
@@ -3151,8 +3152,8 @@ export class Gatekeeper {
     const ref = inside ? active?.getAttribute("data-ref") : null;
     let matrix = "";
     if (host) {
-      const cls = classifyQuery(card.sql, this.dialect).class;
-      matrix = accessMatrix(card.sql, this.dialect, cls, card.schema, load);
+      const cls = classifyQuery(card.sql, this.databaseType).class;
+      matrix = accessMatrix(card.sql, this.databaseType, cls, card.schema, load);
       host.innerHTML = matrix;
     }
     if (cause) cause.innerHTML = loadInner(load, matrix !== "");
@@ -3196,7 +3197,7 @@ export class Gatekeeper {
       card.autoStatus = `Needs review: ${HEAVY_REASON}`;
     // Reserved before the await, like a click on Reject, so nothing else can take the card.
     this.setCardState(card.id, "rejecting");
-    const sent = agentMessage(AUTO_DENY_MESSAGE, planLoad(card.sql, this.dialect).hints);
+    const sent = agentMessage(AUTO_DENY_MESSAGE, planLoad(card.sql, this.databaseType).hints);
     const posted = await this.postResult(card, {
       status: "rejected",
       reason: sent,
@@ -3347,7 +3348,7 @@ export class Gatekeeper {
     const pending = this.cards.length
       ? this.cards
           .map((c) =>
-            queueRowHtml(c, classifyQuery(c.sql, this.dialect).class, c.id === selected, now),
+            queueRowHtml(c, classifyQuery(c.sql, this.databaseType).class, c.id === selected, now),
           )
           .join("")
       : emptyListHtml("pending", this.connectionName);
@@ -3362,7 +3363,7 @@ export class Gatekeeper {
         : `${groupHeadHtml("Pending approval", ready, ready > 0)}${pending}${
             recent.length
               ? `${groupHeadHtml("Recently resolved", 0)}${recent
-                  .map((h) => recentRowHtml(h, h.id === selected, this.dialect))
+                  .map((h) => recentRowHtml(h, h.id === selected, this.databaseType))
                   .join("")}`
               : ""
           }`;
@@ -3456,7 +3457,7 @@ export class Gatekeeper {
     }
     // SAFETY-CRITICAL: the real gate. Never run a statement the armed mode cannot
     // approve, nor a blocked (empty or multi-statement) one.
-    const verdict = classifyQuery(card.sql, this.dialect);
+    const verdict = classifyQuery(card.sql, this.databaseType);
     if (verdict.blocked || rank(verdict.class) > modeRank(this.mode)) {
       const reason = this.modeBlockReason(verdict.blocked, verdict.class);
       const recorded = await this.postResult(card, {
@@ -3475,7 +3476,7 @@ export class Gatekeeper {
       const destructive = verdict.class === "destructive";
       // The operation names the title and the button; the sentence says what it does to which
       // table on which database, before the tables it touches and its SQL.
-      const receipt = statementReceipt(card.sql, this.dialect);
+      const receipt = statementReceipt(card.sql, this.databaseType);
       const op = receipt?.op;
       this.confirmModal.open({
         tone: destructive ? "destructive" : "write",
@@ -3493,7 +3494,7 @@ export class Gatekeeper {
             connTag(this.connectionName),
             destructive,
           ),
-          matrix: accessMatrix(card.sql, this.dialect, verdict.class, card.schema),
+          matrix: accessMatrix(card.sql, this.databaseType, verdict.class, card.schema),
         },
         sql: card.sql,
         schema: card.schema ?? undefined,
@@ -3517,7 +3518,7 @@ export class Gatekeeper {
     // Final anti-race guard: the connection poll is throttled, so a switch during the
     // postExecuting round-trip could go unseen; re-read live before touching the DB.
     const connected = await this.checkConnection();
-    const finalVerdict = classifyQuery(card.sql, this.dialect);
+    const finalVerdict = classifyQuery(card.sql, this.databaseType);
     if (
       !connected ||
       !valid() ||
@@ -3732,7 +3733,7 @@ export class Gatekeeper {
     const custom = reason?.trim();
     // Only a card that showed a Heavy query alert sends hints: on any other decline they would
     // read as the reason, which the human never gave. The hints come from the SQL text alone.
-    const hints = card.loadResult?.heavy ? planLoad(card.sql, this.dialect).hints : [];
+    const hints = card.loadResult?.heavy ? planLoad(card.sql, this.databaseType).hints : [];
     const sent = agentMessage(custom, hints);
     this.setCardState(id, "rejecting");
     const recorded = await this.postResult(card, {
@@ -3789,7 +3790,7 @@ export class Gatekeeper {
 
   // The armed-mode verdict for one card, matching what the queue renders.
   private gateFor(card: Card): CardGate {
-    return cardGateFor(card, this.dialect, this.mode, this.connectionReadOnly());
+    return cardGateFor(card, this.databaseType, this.mode, this.connectionReadOnly());
   }
 
   private modeBlockReason(blocked: boolean, cls: RiskClass): string {
@@ -3808,7 +3809,7 @@ export class Gatekeeper {
   }
 
   private textSensitivity(card: Card): SensitivityRecord | undefined {
-    return recordedSensitivity(textSchema(card.sql, this.dialect));
+    return recordedSensitivity(textSchema(card.sql, this.databaseType));
   }
 
   private async postExecuting(card: Card): Promise<boolean> {

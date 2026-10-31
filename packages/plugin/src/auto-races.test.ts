@@ -93,7 +93,7 @@ function harness() {
     autoBusy: false,
     autoRuns: 0,
     mode: "read",
-    dialect: "postgresql",
+    databaseType: "postgresql",
     conn: {
       id: 1,
       connectionName: "test",
@@ -130,7 +130,7 @@ function harness() {
   });
   app.serverVersion = "PostgreSQL 16.2 on x86_64-pc-linux-gnu";
   app.annotator = new SchemaAnnotator({
-    dialect: () => app.dialect,
+    databaseType: () => app.databaseType,
     generation: () => app.connGeneration,
     defaultSchema: () => "public",
     getColumns: async () => [],
@@ -297,7 +297,7 @@ describe("shared manual/automatic execution authority", () => {
     expect(new Set(input.dependencies.map((d: { table: string }) => d.table))).toEqual(
       new Set(["orders", "accounts", "attempts"]),
     );
-    expect(input.sql).toContain("NOT EXISTS");
+    expect(input.sql).toContain("NOT (EXISTS");
     expect(input.sql).toContain("FILTER (WHERE");
     expect(input.sql).not.toContain("2026-01-01");
     expect(input.sql).not.toContain("synthetic-provider");
@@ -642,7 +642,7 @@ describe("shared manual/automatic execution authority", () => {
       expect(app.broker.evaluate).toHaveBeenCalledOnce();
       expect(app.broker.evaluate.mock.calls[0][4]).toEqual({
         dialect: "postgresql",
-        sql: expect.stringContaining(`"public"."${table}"`),
+        sql: expect.stringContaining(`FROM public.${table}`),
         dependencies: columns.map(([column, type]) => ({
           schema: "public",
           table,

@@ -1,22 +1,21 @@
-import { stripExplain } from "./classify";
-import { prepareSql } from "./identifiers";
-import { identifierLiteral, preparePgSql } from "./pg/syntax";
-import { parser } from "./sql-parser";
+import { engineFor } from "./engine";
+import {
+  type Block,
+  type Line,
+  type Lock,
+  PREVIEW_LIMIT,
+  type Ref,
+  type Rel,
+  type Segment,
+  type Source,
+  type Write,
+} from "./load-plan";
+import { identifierLiteral } from "./pg/catalog";
 
 // The proposal is never planned before approval: the PostgreSQL planner evaluates
 // IMMUTABLE and STABLE functions, and EXPLAIN takes the statement's locks.
 
-type Node = Record<string, unknown>;
-
-// A table segment carries its reference as the SQL names it, so the card can tie an estimate to it
-// without matching display text; a keyword is marked to read as SQL.
-export type Segment = string | { code: string; ref?: string; kw?: true };
-export type Line = Segment[];
-
-export interface Rel {
-  schema: string | null;
-  table: string;
-}
+export type { Line, Rel, Segment } from "./load-plan";
 
 // What the host learned about one relation. null always means unknown, never empty.
 export interface RelFacts {
@@ -45,9 +44,6 @@ export interface LoadResult {
 }
 
 export const LARGE_ROWS = 1_000_000;
-const PREVIEW_LIMIT = 1000;
-const MAX_BLOCKS = 64;
-const MAX_DEPTH = 8;
 export const MAX_RELATIONS = 16;
 
 export const relKey = (r: Rel): string => `${r.schema ?? ""}\u0000${r.table}`;
@@ -56,50 +52,9 @@ export const refOf = (r: Rel): string => (r.schema ? `${r.schema}.${r.table}` : 
 const code = (value: string): Segment => ({ code: value });
 const kw = (value: string): Segment => ({ code: value, kw: true });
 
-interface Source {
-  alias: string;
-  // Absent for derived tables, CTE references and table functions: no estimate of their own.
-  rel?: Rel;
-  joinedBy: "first" | "comma" | "cross" | "on" | "using";
-  using?: string[];
-  // A function or LATERAL item reads its siblings: the aliases its arguments name, or null
-  // when they cannot be told, which joins it to every source before it.
-  reads?: string[] | null;
-  // TABLESAMPLE SYSTEM reads only a fraction of the pages.
-  sampled?: boolean;
-  // Blocks read through this source (a derived table or CTE body): their cost depends on how
-  // the enclosing query filters or limits this source.
-  inner?: Block[];
-}
-
-interface Block {
-  sources: Source[];
-  where: unknown;
-  ons: unknown[];
-  noWhere: boolean;
-  // WHERE FALSE or WHERE 1 = 0: nothing is read, a common way to fetch column names.
-  empty: boolean;
-  limited: boolean;
-  preview: boolean;
-  // A source whose columns, if each leads an index, let PostgreSQL answer from a few index
-  // entries: the ORDER BY of a small LIMIT, or every min/max argument.
-  indexOrder?: { table: string | null; columns: string[] };
-}
-
-interface Write {
-  op: "update" | "delete";
-  target: number;
-  block: Block;
-}
-
-interface Lock {
-  rel?: Rel;
-  line: (t: Segment) => Line;
-  hint: string;
-}
-
 export interface LoadPlan {
-  dialect: string;
+  // Beekeeper's own type: only a real PostgreSQL connection has its sizes and locks.
+  databaseType: string;
   blocks: Block[];
   writes: Write[];
   locks: Lock[];
@@ -111,446 +66,9 @@ export interface LoadPlan {
   dependent: Set<Block>;
 }
 
-function node(value: unknown): value is Node {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function label(value: unknown): string | null {
-  if (typeof value === "string") return value;
-  if (node(value)) return label(value.expr ?? value.value);
-  return null;
-}
-
-class Incomplete extends Error {}
-
-type Ctes = Map<string, Block[]>;
-
-function conjuncts(expr: unknown): unknown[] {
-  if (node(expr) && expr.type === "binary_expr" && String(expr.operator).toUpperCase() === "AND")
-    return [...conjuncts(expr.left), ...conjuncts(expr.right)];
-  return expr == null ? [] : [expr];
-}
-
-// A nested statement is a block of its own: expression walks stop there, so a correlated
-// reference never counts as a filter on the enclosing query.
-function isStatement(value: unknown): value is Node & { ast: Node } {
-  return node(value) && node(value.ast);
-}
-
-function visitExpr(expr: unknown, visit: (n: Node) => void): void {
-  if (Array.isArray(expr)) {
-    for (const item of expr) visitExpr(item, visit);
-    return;
-  }
-  if (!node(expr) || isStatement(expr)) return;
-  visit(expr);
-  for (const value of Object.values(expr)) visitExpr(value, visit);
-}
-
-function columnRefs(expr: unknown): { table: string | null; column: string }[] {
-  const refs: { table: string | null; column: string }[] = [];
-  visitExpr(expr, (n) => {
-    if (n.type !== "column_ref") return;
-    const column = label(n.column);
-    if (column && column !== "*") refs.push({ table: label(n.table), column });
-  });
-  return refs;
-}
-
-const LITERALS = new Set([
-  "number",
-  "single_quote_string",
-  "double_quote_string",
-  "string",
-  "bool",
-  "boolean",
-  "natural_string",
-  "hex_string",
-  "full_hex_string",
-  "bit_string",
-]);
-
-function disjuncts(expr: unknown): unknown[] {
-  if (node(expr) && expr.type === "binary_expr" && String(expr.operator).toUpperCase() === "OR")
-    return [...disjuncts(expr.left), ...disjuncts(expr.right)];
-  return [expr];
-}
-
-function literal(expr: unknown): boolean {
-  if (!node(expr)) return false;
-  if (expr.type === "cast") return literal(expr.expr);
-  return LITERALS.has(String(expr.type));
-}
-
-// WHERE TRUE or WHERE 1 = 1 restricts nothing.
-function tautology(expr: unknown): boolean {
-  if (!node(expr)) return false;
-  if ((expr.type === "bool" || expr.type === "boolean") && expr.value === true) return true;
-  return (
-    expr.type === "binary_expr" &&
-    expr.operator === "=" &&
-    literal(expr.left) &&
-    literal(expr.right) &&
-    JSON.stringify(expr.left) === JSON.stringify(expr.right)
-  );
-}
-
-function contradiction(expr: unknown): boolean {
-  if (!node(expr)) return false;
-  if ((expr.type === "bool" || expr.type === "boolean") && expr.value === false) return true;
-  return (
-    expr.type === "binary_expr" &&
-    expr.operator === "=" &&
-    literal(expr.left) &&
-    literal(expr.right) &&
-    node(expr.left) &&
-    node(expr.right) &&
-    expr.left.type === expr.right.type &&
-    JSON.stringify(expr.left) !== JSON.stringify(expr.right)
-  );
-}
-
-function aggregates(columns: unknown): boolean {
-  let found = false;
-  visitExpr(columns, (n) => {
-    if (n.type === "aggr_func" || n.type === "window_func" || n.over != null) found = true;
-  });
-  return found;
-}
-
-function distinct(value: unknown): boolean {
-  return typeof value === "string" ? value !== "" : node(value) && value.type != null;
-}
-
-function limitParts(limit: unknown): { count?: number; offset: boolean; skip: number } {
-  if (!node(limit) || !Array.isArray(limit.value) || !limit.value.length)
-    return { offset: false, skip: 0 };
-  const sep = String(limit.seperator ?? "").toLowerCase();
-  const values = limit.value.map((v) => (node(v) && v.type === "number" ? Number(v.value) : NaN));
-  if (sep === ",") return { count: values[1], offset: true, skip: values[0] };
-  const offset = sep === "offset" || values.length > 1;
-  return { count: values[0], offset, skip: offset ? values[1] : 0 };
-}
-
-const INDEX_HINT = "CREATE INDEX without CONCURRENTLY blocks writes on the table during the build.";
-const REINDEX_HINT = "REINDEX without CONCURRENTLY blocks writes on the table.";
-const ALTER_HINT = "ALTER TABLE may lock and rewrite the table.";
-const REWRITE_HINT = "VACUUM FULL and CLUSTER lock and rewrite the table.";
-const REFRESH_HINT = "REFRESH MATERIALIZED VIEW without CONCURRENTLY blocks reads of the view.";
-const LOCK_HINT = "LOCK TABLE holds an explicit lock on the table.";
-
-class Walker {
-  readonly blocks: Block[] = [];
-  readonly writes: Write[] = [];
-  readonly locks: Lock[] = [];
-  covered = true;
-
-  statement(ast: unknown, ctes: Ctes, depth: number): void {
-    if (depth > MAX_DEPTH || this.blocks.length > MAX_BLOCKS) throw new Incomplete();
-    if (!node(ast)) return;
-    const scope = this.ctes(ast.with, ctes, depth);
-    switch (ast.type) {
-      case "select":
-        this.select(ast, scope, depth);
-        return;
-      case "update":
-      case "delete":
-        this.write(ast, scope, depth);
-        return;
-      case "insert":
-      case "replace":
-        if (node(ast.values) && ast.values.type === "select")
-          this.statement(ast.values, scope, depth + 1);
-        return;
-      case "create":
-        this.create(ast, scope, depth);
-        return;
-      case "alter":
-        // ALTER SEQUENCE, TYPE, VIEW or FUNCTION parse as "alter" too, without a table.
-        if (ast.table)
-          this.lock(ast.table, (t) => ["ALTER TABLE may lock and rewrite ", t], ALTER_HINT);
-        else this.covered = false;
-        return;
-      case "lock":
-        for (const item of Array.isArray(ast.tables) ? ast.tables : [])
-          this.lock(
-            node(item) ? item.table : null,
-            (t) => ["LOCK TABLE holds an explicit lock on ", t],
-            LOCK_HINT,
-          );
-        return;
-      default:
-        // Not modelled, so not checked: never an all-clear.
-        this.covered = false;
-        return;
-    }
-  }
-
-  private ctes(clause: unknown, outer: Ctes, depth: number): Ctes {
-    if (!Array.isArray(clause)) return outer;
-    const scope = new Map(outer);
-    for (const cte of clause) {
-      if (!node(cte)) throw new Incomplete();
-      const name = label(cte.name);
-      // Set before the body so a recursive reference reads as the CTE, not as a table.
-      if (name) scope.set(name, []);
-      const before = this.blocks.length;
-      // PostgreSQL emits the body directly, MySQL keeps it in a statement wrapper.
-      this.statement(isStatement(cte.stmt) ? cte.stmt.ast : cte.stmt, scope, depth + 1);
-      if (name) scope.set(name, this.blocks.slice(before));
-    }
-    return scope;
-  }
-
-  private create(ast: Node, ctes: Ctes, depth: number): void {
-    const keyword = String(ast.keyword ?? "").toLowerCase();
-    if (keyword === "index" && !ast.concurrently)
-      this.lock(
-        ast.table,
-        (t) => ["CREATE INDEX without CONCURRENTLY blocks writes on ", t, " during the build"],
-        INDEX_HINT,
-      );
-    if (keyword === "table" && node(ast.query_expr))
-      this.statement(ast.query_expr, ctes, depth + 1);
-  }
-
-  private lock(table: unknown, line: (t: Segment) => Line, hint: string): void {
-    const item = Array.isArray(table) ? table[0] : table;
-    const name = node(item) ? label(item.table) : null;
-    const schema = node(item) ? label(item.db) : null;
-    this.locks.push({ rel: name ? { schema, table: name } : undefined, line, hint });
-  }
-
-  private source(item: unknown, index: number, ctes: Ctes, depth: number): Source {
-    if (!node(item)) throw new Incomplete();
-    const join = String(item.join ?? "").toUpperCase();
-    // A parenthesized set-operation branch comes back as a FROM item joined by "union", and
-    // a comma after JOIN ... ON is swallowed into the ON as an expression list.
-    if (join && !join.endsWith("JOIN")) throw new Incomplete();
-    if (node(item.on) && item.on.type === "expr_list") throw new Incomplete();
-    // A lateral item can read its siblings; how its rows pair up with them is not modelled.
-    const lateral = String(item.prefix ?? "").toUpperCase() === "LATERAL";
-    if (lateral) this.covered = false;
-    // The PostgreSQL grammar reads "a CROSS JOIN b" as a aliased "cross", then a bare JOIN.
-    const joinedBy: Source["joinedBy"] =
-      index === 0
-        ? "first"
-        : !join
-          ? "comma"
-          : item.using != null
-            ? "using"
-            : join.startsWith("CROSS") || item.on == null
-              ? "cross"
-              : "on";
-    // A column list ("v(id, label)") comes back inside the alias string.
-    const alias = label(item.as)?.replace(/\s*\([^()]*\)\s*$/, "") ?? null;
-    const using = Array.isArray(item.using)
-      ? item.using.map(label).filter((c): c is string => c !== null)
-      : undefined;
-    if (node(item.expr)) {
-      const before = this.blocks.length;
-      const statement = isStatement(item.expr);
-      if (statement) this.statement(item.expr.ast, ctes, depth + 1);
-      else this.covered = false;
-      return {
-        alias: alias ?? `#${index}`,
-        joinedBy,
-        using,
-        reads: lateral
-          ? null
-          : statement || item.expr.type === "values"
-            ? undefined
-            : reads(item.expr),
-        inner: this.blocks.slice(before),
-      };
-    }
-    const table = label(item.table);
-    if (!table) {
-      this.covered = false;
-      return { alias: alias ?? `#${index}`, joinedBy, using };
-    }
-    const schema = label(item.db);
-    if (schema === null && ctes.has(table))
-      return { alias: alias ?? table, joinedBy, using, inner: ctes.get(table) };
-    const sample =
-      node(item.tablesample) && node(item.tablesample.expr) ? item.tablesample.expr : null;
-    const method =
-      node(sample?.name) && Array.isArray(sample.name.name) ? sample.name.name[0] : null;
-    const sampled = /^system$/i.test(label(method) ?? "");
-    return { alias: alias ?? table, rel: { schema, table }, joinedBy, using, sampled };
-  }
-
-  private block(
-    from: unknown[],
-    where: unknown,
-    ctes: Ctes,
-    depth: number,
-    extra: Partial<Block> = {},
-  ): Block {
-    const sources = from.map((item, i) => this.source(item, i, ctes, depth));
-    for (const [i, s] of sources.entries())
-      if (s.alias.toLowerCase() === "cross" && sources[i + 1]?.joinedBy === "cross")
-        s.alias = s.rel?.table ?? s.alias;
-    const ons = from.flatMap((item) => (node(item) && item.on != null ? [item.on] : []));
-    const noWhere = where == null || tautology(where);
-    const block: Block = {
-      sources,
-      where: noWhere ? null : where,
-      ons,
-      noWhere,
-      empty: conjuncts(where).some(contradiction),
-      limited: false,
-      preview: false,
-      ...extra,
-    };
-    this.blocks.push(block);
-    this.nested([where, ...ons], ctes, depth);
-    return block;
-  }
-
-  private nested(expr: unknown, ctes: Ctes, depth: number): void {
-    if (Array.isArray(expr)) {
-      for (const item of expr) this.nested(item, ctes, depth);
-      return;
-    }
-    if (!node(expr)) return;
-    if (isStatement(expr)) {
-      this.statement(expr.ast, ctes, depth + 1);
-      return;
-    }
-    for (const value of Object.values(expr)) this.nested(value, ctes, depth);
-  }
-
-  private select(ast: Node, ctes: Ctes, depth: number): void {
-    const branch = ast._next != null || ast.set_op != null;
-    const from = Array.isArray(ast.from) ? ast.from : [];
-    const { count, offset, skip } = limitParts(ast.limit);
-    // A small LIMIT with no WHERE, order or aggregate lets PostgreSQL stop early, joins included.
-    const preview =
-      !branch &&
-      from.length > 0 &&
-      (ast.where == null || tautology(ast.where)) &&
-      ast.groupby == null &&
-      ast.having == null &&
-      ast.orderby == null &&
-      !distinct(ast.distinct) &&
-      !aggregates(ast.columns) &&
-      !offset &&
-      count !== undefined &&
-      Number.isInteger(count) &&
-      count >= 0 &&
-      count <= PREVIEW_LIMIT;
-    const block = this.block(from, ast.where, ctes, depth, {
-      limited: count !== undefined,
-      preview,
-    });
-    if (!branch) block.indexOrder = indexOrder(ast, block, count, skip);
-    this.nested([ast.columns, ast.having, ast.orderby], ctes, depth);
-    if (node(ast._next)) this.statement(ast._next, ctes, depth + 1);
-  }
-
-  private write(ast: Node, ctes: Ctes, depth: number): void {
-    const op = ast.type as "update" | "delete";
-    const table = Array.isArray(ast.table) ? ast.table : [];
-    const from = Array.isArray(ast.from) ? ast.from : [];
-    // A MySQL multi-table UPDATE or DELETE can write several targets; only one is modelled.
-    if (table.length > 1) this.covered = false;
-    let items: unknown[] = [...table, ...from];
-    let target = 0;
-    if (op === "delete") {
-      // The target may be an alias of a source (MySQL "DELETE a FROM a JOIN b").
-      items = from.length ? from : table;
-      const name = node(table[0]) ? label(table[0].table) : null;
-      target = items.findIndex(
-        (item) => node(item) && (label(item.as) === name || label(item.table) === name),
-      );
-    }
-    if (!items.length || target < 0) throw new Incomplete();
-    const block = this.block(items, ast.where, ctes, depth);
-    this.nested([ast.set, ast.returning], ctes, depth);
-    this.writes.push({ op, target, block });
-  }
-}
-
-const PG_NAME = `(?:"([^"]+)"|([a-z_][a-z0-9_$]*))`;
-const PG_RELATION = new RegExp(`^${PG_NAME}(?:\\s*\\.\\s*${PG_NAME})?`);
-
-// node-sql-parser does not parse these commands; the adapter has already dropped comments
-// and folded case, so only their leading words are read.
-function pgCommandLocks(sql: string): Lock[] {
-  let prepared: ReturnType<typeof preparePgSql>;
-  try {
-    prepared = preparePgSql(sql);
-  } catch {
-    return [];
-  }
-  const text = prepared.sql.trim();
-  const relation = (rest: string): Rel | undefined => {
-    const m = PG_RELATION.exec(rest.trim());
-    if (!m) return undefined;
-    const first = prepared.name(m[1] ?? m[2]);
-    const second = m[3] ?? m[4];
-    return second
-      ? { schema: first, table: prepared.name(second) }
-      : { schema: null, table: first };
-  };
-  const reindex =
-    /^reindex\s*(\([^)]*\))?\s*(table|index|schema|database|system)\s+(concurrently\s+)?/.exec(
-      text,
-    );
-  if (reindex) {
-    // REINDEX INDEX names an index, whose table and size are unknown here: no claim either way.
-    if (reindex[3] || /concurrently/.test(reindex[1] ?? "") || reindex[2] === "index") return [];
-    return [
-      {
-        rel: reindex[2] === "table" ? relation(text.slice(reindex[0].length)) : undefined,
-        line: (t) => ["REINDEX without CONCURRENTLY blocks writes on ", t],
-        hint: REINDEX_HINT,
-      },
-    ];
-  }
-  const vacuum = /^vacuum\s*(\([^)]*\)|(?:(?:full|freeze|verbose|analyze|analyse)\b\s*)*)/.exec(
-    text,
-  );
-  if (vacuum && /\bfull\b/.test(vacuum[0])) {
-    return [
-      {
-        rel: relation(text.slice(vacuum[0].length)),
-        line: (t) => ["VACUUM FULL locks and rewrites ", t],
-        hint: REWRITE_HINT,
-      },
-    ];
-  }
-  const cluster = /^cluster\s*(\([^)]*\)|verbose\s+)?/.exec(text);
-  if (cluster) {
-    return [
-      {
-        rel: relation(text.slice(cluster[0].length)),
-        line: (t) => ["CLUSTER locks and rewrites ", t],
-        hint: REWRITE_HINT,
-      },
-    ];
-  }
-  const refresh = /^refresh\s+materialized\s+view\s+(concurrently\s+)?/.exec(text);
-  if (refresh && !refresh[1]) {
-    return [
-      {
-        rel: relation(text.slice(refresh[0].length)),
-        line: (t) => ["REFRESH MATERIALIZED VIEW without CONCURRENTLY blocks reads of ", t],
-        hint: REFRESH_HINT,
-      },
-    ];
-  }
-  return [];
-}
-
 // "outer" is a correlated reference to an enclosing query; "unresolved" means the owner
 // cannot be proven, which must never read as "unfiltered".
-function bind(
-  block: Block,
-  ref: { table: string | null; column: string },
-  facts: Facts | null,
-): number | "outer" | "unresolved" {
+function bind(block: Block, ref: Ref, facts: Facts | null): number | "outer" | "unresolved" {
   if (ref.table !== null) {
     const index = block.sources.findIndex((s) => s.alias === ref.table);
     return index < 0 ? "outer" : index;
@@ -598,9 +116,9 @@ function usage(block: Block, facts: Facts | null): Usage {
     link(i, i - 1);
     for (const column of s.using ?? []) for (const side of [i, i - 1]) columns[side].add(column);
   }
-  for (const part of [...block.ons, block.where].flatMap(conjuncts)) {
+  for (const part of block.conditions) {
     const owners = new Set<number>();
-    for (const ref of columnRefs(part)) {
+    for (const ref of part.refs) {
       const at = bind(block, ref, facts);
       if (at === "unresolved") {
         ambiguous = true;
@@ -614,8 +132,8 @@ function usage(block: Block, facts: Facts | null): Usage {
     // a real join as missing would block it, while missing a rare odd one only skips an alert.
     // An OR branch can hold without the others, so an OR links only what every branch names.
     let shared = owners;
-    for (const branch of disjuncts(part)) {
-      const names = new Set(columnRefs(branch).map((ref) => bind(block, ref, facts)));
+    for (const branch of part.branches) {
+      const names = new Set(branch.map((ref) => bind(block, ref, facts)));
       shared = new Set([...shared].filter((at) => names.has(at)));
     }
     const [first, ...rest] = shared;
@@ -627,53 +145,65 @@ function usage(block: Block, facts: Facts | null): Usage {
   return { filtered, columns, ambiguous, groups: [...groups.values()] };
 }
 
-// Reads the SQL text only. Never throws: what it cannot read leaves covered false.
-export function planLoad(sql: string, dialect: string): LoadPlan {
+type Bound = "empty" | "filter" | "limit";
+
+// PostgreSQL runs nothing under an empty query, pushes a filter down, or stops early at a small
+// LIMIT, so a block one of these reaches is no full read. A write runs in full regardless.
+function boundedBlocks(plan: LoadPlan): Set<Block> {
+  const writes = new Set(plan.writes.map((w) => w.block));
+  const reached = new Map<Block, Set<Bound>>();
+  const work: [Block, Bound][] = [];
+  // ponytail: no index order is followed below the block that sorts, and a CTE used twice stays
+  // read when every use is empty; both alert where PostgreSQL may read little.
+  const reach = (inner: Block, bound: Bound) => {
+    if (writes.has(inner) || (bound === "filter" && !inner.filterable)) return;
+    if (bound === "limit" && !inner.streams) {
+      // Judged on the catalog facts, as a read in index order under that LIMIT.
+      if (inner.ordered) inner.indexOrder ??= inner.ordered;
+      return;
+    }
+    const bounds = reached.get(inner) ?? new Set<Bound>();
+    if (bounds.has(bound)) return;
+    reached.set(inner, bounds.add(bound));
+    work.push([inner, bound]);
+  };
+  for (const b of plan.blocks) {
+    const u = usage(b, null);
+    for (const [i, s] of b.sources.entries()) {
+      const group = u.groups.find((g) => g.includes(i)) ?? [i];
+      for (const inner of s.inner ?? []) {
+        if (b.empty) reach(inner, "empty");
+        if (group.some((j) => u.filtered[j])) reach(inner, "filter");
+        if (b.preview) reach(inner, "limit");
+      }
+    }
+  }
+  // A filter reaches every source only when they form one joined group; a LIMIT stops early
+  // through any join, as the preview rule already holds.
+  for (let next = work.pop(); next; next = work.pop()) {
+    const [b, bound] = next;
+    if (bound === "filter" && usage(b, null).groups.length !== 1) continue;
+    for (const s of b.sources) for (const inner of s.inner ?? []) reach(inner, bound);
+  }
+  return new Set(reached.keys());
+}
+
+// Reads the SQL text only, through the connection's own parser. Never throws: what it cannot
+// read leaves covered false.
+export function planLoad(sql: string, databaseType: string): LoadPlan {
   const plan: LoadPlan = {
-    dialect,
-    blocks: [],
-    writes: [],
-    locks: [],
+    databaseType,
+    ...engineFor(databaseType).load(sql),
     hints: [],
     relations: [],
-    covered: true,
     dependent: new Set(),
   };
-  const explain = stripExplain(sql);
-  // A plain EXPLAIN only plans the statement it wraps; EXPLAIN ANALYZE runs it.
-  if (explain && !explain.analyze) return plan;
-  const text = explain ? explain.inner : sql;
-  const walker = new Walker();
-  try {
-    const input = prepareSql(text, dialect);
-    const ast = input.restoreAst(parser.astify(input.sql, { database: dialect }));
-    const statements = Array.isArray(ast) ? ast : [ast];
-    if (statements.length !== 1) throw new Incomplete();
-    walker.statement(statements[0], new Map(), 0);
-    plan.covered = walker.covered;
-  } catch {
-    plan.covered = false;
-  }
-  if (dialect === "postgresql" && !walker.locks.length) walker.locks.push(...pgCommandLocks(text));
-  if (dialect !== "postgresql") walker.locks.length = 0;
-  plan.blocks = walker.blocks;
-  plan.writes = walker.writes;
-  plan.locks = walker.locks;
   const seen = new Map<string, Rel>();
   for (const b of plan.blocks) for (const s of b.sources) if (s.rel) seen.set(relKey(s.rel), s.rel);
   for (const l of plan.locks) if (l.rel) seen.set(relKey(l.rel), l.rel);
   plan.relations = [...seen.values()];
   if (plan.relations.length > MAX_RELATIONS) plan.covered = false;
-  // An inner block the enclosing query filters, previews or empties is not read in full:
-  // PostgreSQL pushes the filter down or stops early.
-  for (const b of plan.blocks) {
-    const u = usage(b, null);
-    for (const [i, s] of b.sources.entries()) {
-      const group = u.groups.find((g) => g.includes(i)) ?? [i];
-      const bounded = b.empty || group.some((j) => u.filtered[j]);
-      for (const inner of s.inner ?? []) if (bounded || b.preview) plan.dependent.add(inner);
-    }
-  }
+  plan.dependent = boundedBlocks(plan);
   // Computed before any catalog fact exists, so a hint never tells the agent about the data.
   plan.hints = hintsFor(plan);
   return plan;
@@ -739,7 +269,7 @@ export function checkLoad(plan: LoadPlan, facts: Facts | Pending): LoadResult {
   const notes: Line[] = [];
   const named: Rel[] = [];
   const known = typeof facts === "string" ? null : facts;
-  const sizeAware = plan.dialect === "postgresql";
+  const sizeAware = plan.databaseType === "postgresql";
   const factsOf = (rel?: Rel) => (rel && known ? known.get(relKey(rel)) : undefined);
   const noted = new Set<string>();
   // A size rule fires only on a known large estimate; an unknown one becomes a note.
@@ -1062,44 +592,4 @@ export function parseLoadStats(rels: Rel[], rows: Record<string, unknown>[]): St
     });
   }
   return out;
-}
-
-function indexOrder(
-  ast: Node,
-  b: Block,
-  count: number | undefined,
-  skip: number,
-): Block["indexOrder"] {
-  if (!b.noWhere || ast.groupby != null || ast.having != null || distinct(ast.distinct))
-    return undefined;
-  const orders = Array.isArray(ast.orderby) ? ast.orderby : [];
-  const first = node(orders[0]) && node(orders[0].expr) ? orders[0].expr : null;
-  if (first?.type === "column_ref") {
-    const column = label(first.column);
-    const small = count !== undefined && Number.isInteger(count) && count + skip <= PREVIEW_LIMIT;
-    return small && column && !aggregates(ast.columns)
-      ? { table: label(first.table), columns: [column] }
-      : undefined;
-  }
-  if (orders.length || b.sources.length !== 1 || skip || !Array.isArray(ast.columns))
-    return undefined;
-  const args = ast.columns.map((c) => {
-    const expr = node(c) && node(c.expr) ? c.expr : null;
-    const arg = expr && node(expr.args) && node(expr.args.expr) ? expr.args.expr : null;
-    // A window min/max is computed for every row.
-    return expr?.type === "aggr_func" &&
-      expr.over == null &&
-      /^(min|max)$/i.test(String(expr.name)) &&
-      arg?.type === "column_ref"
-      ? label(arg.column)
-      : null;
-  });
-  return args.length && args.every((a): a is string => a !== null)
-    ? { table: null, columns: args }
-    : undefined;
-}
-
-function reads(expr: unknown): string[] | null {
-  const tables = columnRefs(expr).map((ref) => ref.table);
-  return tables.every((t): t is string => t !== null) ? tables : null;
 }

@@ -8,6 +8,8 @@ import { defineConfig } from "vite";
 const here = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 
 export default defineConfig({
+  // The grammar's WASM is inlined as bytes (src/sql/pg/wasm.ts): Beekeeper cannot fetch it.
+  assetsInclude: ["**/*.wasm"],
   root: here("."),
   envDir: false,
   cacheDir: here("node_modules/.vite-preview"),

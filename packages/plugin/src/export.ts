@@ -327,14 +327,14 @@ export function totals(entries: ActivityEntry[]): {
 // an entry without one parses its SQL, in batches that let the dialog repaint between them.
 export async function exportFlags(
   entries: ActivityEntry[],
-  dialect: string,
+  databaseType: string,
   progress: (done: number) => void,
   alive: () => boolean,
 ): Promise<Map<string, string[]> | null> {
   const flags = new Map<string, string[]>();
   for (let i = 0; i < entries.length; i++) {
     const e = entries[i];
-    const found = entryFlags(e, null) ?? entryFlags(e, textSchema(e.sql, dialect));
+    const found = entryFlags(e, null) ?? entryFlags(e, textSchema(e.sql, databaseType));
     const labels = found ? activityFlagLabels(found) : [];
     if (labels.length) flags.set(e.id, labels);
     if ((i + 1) % 200 === 0 && i + 1 < entries.length) {

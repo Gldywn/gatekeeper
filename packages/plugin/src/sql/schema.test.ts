@@ -2,18 +2,30 @@ import { describe, expect, it } from "vitest";
 import {
   analyzeSql,
   analyzeTableOps,
+  countsRows,
+  sensitiveLiterals,
+  statementReceipt,
+} from "./inspect";
+import {
   classifyColumn,
   clientColumns,
-  countsRows,
   looksLikeClientData,
   looksLikePii,
   piiColumns,
-  sensitiveLiterals,
-  statementReceipt,
 } from "./schema";
 
 describe("analyzeTableOps", () => {
   const pg = "postgresql";
+
+  it.each(["mysql", "redshift"])("lists no CTE among the tables on node-sql-parser: %s", (db) => {
+    const sql =
+      "WITH pay AS (SELECT id FROM po.attempt) SELECT e.id FROM po.event e JOIN pay ON pay.id = e.id";
+    expect(analyzeSql(sql, db)?.tables).toEqual([
+      { schema: "po", name: "attempt" },
+      { schema: "po", name: "event" },
+    ]);
+    expect(analyzeTableOps(sql, db)?.reads).toEqual(["po.attempt", "po.event"]);
+  });
 
   it("returns no write targets for a plain read", () => {
     expect(analyzeTableOps("SELECT * FROM audit.users", pg)).toEqual({
@@ -52,7 +64,7 @@ describe("analyzeTableOps", () => {
     });
   });
 
-  it("names the SELECT ... INTO target when the read comes from a CTE", () => {
+  it("names the SELECT ... INTO target when the read comes from a CTE, which is no table", () => {
     expect(
       analyzeTableOps(
         "WITH recent AS (SELECT * FROM crm.people) SELECT * INTO staging_copy FROM recent",
@@ -60,18 +72,18 @@ describe("analyzeTableOps", () => {
       ),
     ).toEqual({
       writes: ["staging_copy"],
-      reads: ["crm.people", "recent"],
+      reads: ["crm.people"],
       writeOp: "create",
     });
   });
 
   it("names the target of a SELECT ... INTO in T-SQL, including a temporary table", () => {
-    expect(analyzeTableOps("SELECT * INTO staging_copy FROM crm.people", "transactsql")).toEqual({
+    expect(analyzeTableOps("SELECT * INTO staging_copy FROM crm.people", "sqlserver")).toEqual({
       writes: ["staging_copy"],
       reads: ["crm.people"],
       writeOp: "create",
     });
-    expect(analyzeTableOps("SELECT * INTO #staging_copy FROM crm.people", "transactsql")).toEqual({
+    expect(analyzeTableOps("SELECT * INTO #staging_copy FROM crm.people", "sqlserver")).toEqual({
       writes: ["#staging_copy"],
       reads: ["crm.people"],
       writeOp: "create",
@@ -362,7 +374,7 @@ describe("analyzeSql", () => {
       ["mysql", "SELECT JSON_EXTRACT(profile, '$.email') FROM people", ["email"]],
       ["mariadb", "SELECT JSON_EXTRACT(profile, '$.email') FROM people", ["email"]],
       ["sqlite", "SELECT json_extract(profile, '$.email') FROM people", ["email"]],
-      ["transactsql", "SELECT JSON_VALUE(profile, '$.email') FROM people", ["email"]],
+      ["sqlserver", "SELECT JSON_VALUE(profile, '$.email') FROM people", ["email"]],
       ["bigquery", "SELECT JSON_EXTRACT_SCALAR(profile, '$.email') FROM people", ["email"]],
     ];
     for (const [dialect, sql, keys] of cases) {
@@ -495,22 +507,18 @@ describe("analyzeSql", () => {
     }
   });
 
-  it("cannot tell a quoted relation alias holding parentheses from a column list", () => {
-    // The parser strips the quotes, so the alias arrives exactly like a column list. Accepted
-    // as an over-report: the annotation errs toward showing a name rather than hiding one.
-    expect(analyzeSql('SELECT * FROM billing.firms AS "f(email)"', "postgresql")?.aliases).toEqual([
-      "email",
-    ]);
+  it("reads a quoted relation alias holding parentheses as a plain alias", () => {
+    expect(analyzeSql('SELECT * FROM billing.firms AS "f(email)"', "postgresql")?.aliases).toEqual(
+      [],
+    );
   });
 
-  it("lists the column list a CTE renames its columns with among its sources", () => {
-    // The parser folds a CTE column list into columnList, so Auto mode's screen sees it as a
-    // source column rather than an alias.
+  it("lists the column list a CTE renames its columns with among its output names", () => {
     const parsed = analyzeSql(
       "WITH x(company_name) AS (SELECT name FROM billing.firms) SELECT * FROM x",
       "postgresql",
     );
-    expect(parsed?.columns).toContain("company_name");
+    expect(parsed?.aliases).toContain("company_name");
   });
 
   it("returns null when the statement cannot be parsed", () => {
@@ -709,7 +717,7 @@ describe("sensitiveLiterals", () => {
     const cases: Array<[string, string, string[]]> = [
       ["postgresql", "UPDATE billing.firms SET company_name = E'ACME' WHERE id = 1", ["ACME"]],
       ["postgresql", "UPDATE billing.firms SET company_name = $$ACME$$ WHERE id = 1", ["ACME"]],
-      ["transactsql", "INSERT INTO billing.firms (company_name) VALUES (N'ACME')", ["ACME"]],
+      ["sqlserver", "INSERT INTO billing.firms (company_name) VALUES (N'ACME')", ["ACME"]],
       ["postgresql", "UPDATE billing.firms SET company_name = '' WHERE id = 1", []],
     ];
     for (const [dialect, sql, literals] of cases) {
@@ -836,7 +844,7 @@ describe("sensitiveLiterals", () => {
 
   it("reads the string literal a dialect spells its own way", () => {
     expect(
-      sensitiveLiterals("SELECT id FROM firms WHERE company_name = N'ACME'", "transactsql"),
+      sensitiveLiterals("SELECT id FROM firms WHERE company_name = N'ACME'", "sqlserver"),
     ).toEqual(["ACME"]);
     expect(
       sensitiveLiterals('SELECT id FROM firms WHERE company_name = "ACME"', "bigquery"),
@@ -858,12 +866,10 @@ describe("sensitiveLiterals", () => {
     }
   });
 
-  it("stays silent when the parser re-stringifies an operand it did not model", () => {
-    // IS DISTINCT FROM arrives as raw text quoting a value and a column alike.
-    for (const operand of ["'ACME'", "status"]) {
-      const sql = `SELECT id FROM billing.firms WHERE company_name IS DISTINCT FROM ${operand}`;
-      expect(sensitiveLiterals(sql, "postgresql"), sql).toEqual([]);
-    }
+  it("flags the value of IS DISTINCT FROM, never the column it may compare with", () => {
+    const sql = "SELECT id FROM billing.firms WHERE company_name IS DISTINCT FROM";
+    expect(sensitiveLiterals(`${sql} 'ACME'`, "postgresql")).toEqual(["ACME"]);
+    expect(sensitiveLiterals(`${sql} status`, "postgresql")).toEqual([]);
   });
 
   it("never reports an empty literal, which would tint every '' in the query", () => {
@@ -909,6 +915,125 @@ describe("sensitiveLiterals", () => {
         "postgresql",
       ),
     ).toEqual([]);
+  });
+});
+
+describe("PostgreSQL's own parse tree", () => {
+  const pg = "postgresql";
+
+  it("binds each value of a multiple-column assignment to its own column", () => {
+    expect(
+      sensitiveLiterals("UPDATE billing.firms SET (company_name, status) = ('ACME', 'x')", pg),
+    ).toEqual(["ACME"]);
+  });
+
+  it("reads the path of a SQL/JSON function as keys, and the value compared with it", () => {
+    const sql = "SELECT id FROM crm.people WHERE JSON_VALUE(profile, '$.company_name') = 'ACME'";
+    expect(analyzeSql(sql, pg)?.jsonKeys).toEqual(["company_name"]);
+    expect(sensitiveLiterals(sql, pg)).toEqual(["ACME"]);
+  });
+
+  it("takes the columns a typed table function declares as output names", () => {
+    expect(
+      analyzeSql("SELECT * FROM json_to_record(doc) AS t(company_name text, n int)", pg)?.aliases,
+    ).toEqual(["company_name", "n"]);
+  });
+
+  it("never looks up columns of a CTE or of a relation the statement creates", () => {
+    expect(
+      analyzeSql("WITH x AS (SELECT id FROM crm.people) SELECT id INTO copy FROM x", pg)?.tables,
+    ).toEqual([{ schema: "crm", name: "people" }]);
+  });
+
+  it("names the targets of MERGE, TRUNCATE and DROP, and keeps several targets generic", () => {
+    expect(
+      analyzeTableOps("MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN DELETE", pg),
+    ).toEqual({
+      writes: ["t"],
+      reads: ["s"],
+      writeOp: "merge",
+    });
+    expect(analyzeTableOps("TRUNCATE a.t1, t2", pg)).toEqual({
+      writes: ["a.t1", "t2"],
+      reads: [],
+      writeOp: "truncate",
+    });
+    expect(analyzeTableOps("DROP TABLE a.t1, t2", pg)?.writes).toEqual(["a.t1", "t2"]);
+    expect(statementReceipt("DROP TABLE a.t1, t2", pg)).toBeNull();
+    expect(statementReceipt("TRUNCATE a.t1, t2", pg)).toBeNull();
+  });
+
+  it("keeps a real table whose name a CTE in a subquery reuses", () => {
+    const sql =
+      "SELECT * FROM real_table WHERE EXISTS (WITH real_table AS (SELECT 1) SELECT 1 FROM real_table)";
+    expect(analyzeSql(sql, pg)?.tables).toEqual([{ schema: null, name: "real_table" }]);
+  });
+
+  it("lists no CTE among the tables a statement reads", () => {
+    const sql =
+      "WITH pay AS (SELECT id FROM po.attempt) SELECT e.id FROM po.event e JOIN pay ON pay.id = e.id";
+    expect(analyzeSql(sql, pg)?.tables).toEqual([
+      { schema: "po", name: "attempt" },
+      { schema: "po", name: "event" },
+    ]);
+    expect(
+      analyzeTableOps(
+        "WITH stuck AS (SELECT id FROM po.orders) UPDATE po.orders SET s = 1 WHERE id IN (SELECT id FROM stuck)",
+        pg,
+      ),
+    ).toEqual({ writes: ["po.orders"], reads: ["po.orders"], writeOp: "update" });
+  });
+
+  it("sees a CTE only where PostgreSQL does: after it, or anywhere under RECURSIVE", () => {
+    expect(
+      analyzeSql("WITH a AS (SELECT * FROM b), b AS (SELECT 1 AS x) SELECT * FROM a", pg)?.tables,
+    ).toEqual([{ schema: null, name: "b" }]);
+    expect(
+      analyzeSql("WITH RECURSIVE a AS (SELECT * FROM b), b AS (SELECT 1 AS x) SELECT * FROM a", pg)
+        ?.tables,
+    ).toEqual([]);
+  });
+
+  it("screens the columns and values a MERGE updates or inserts", () => {
+    const sql =
+      "MERGE INTO users u USING src s ON u.id = s.id WHEN MATCHED THEN UPDATE SET company_name = 'ACME' WHEN NOT MATCHED THEN INSERT (company_name) VALUES ('BETA')";
+    expect(analyzeSql(sql, pg)?.columns).toContain("company_name");
+    expect(sensitiveLiterals(sql, pg).sort()).toEqual(["ACME", "BETA"]);
+  });
+
+  it("reads the field a composite selection reaches as the column compared", () => {
+    const sql = "SELECT id FROM t WHERE (t.profile).company_name = 'ACME'";
+    expect(analyzeSql(sql, pg)?.columns).toContain("company_name");
+    expect(sensitiveLiterals(sql, pg)).toEqual(["ACME"]);
+  });
+
+  it("takes the columns a join alias renames as output names", () => {
+    expect(
+      analyzeSql("SELECT * FROM (t JOIN s USING (id)) AS j(company_name, n)", pg)?.aliases,
+    ).toEqual(["company_name", "n"]);
+  });
+
+  it("reads a JSON key written as a cast string", () => {
+    expect(analyzeSql("SELECT profile ->> 'email'::text FROM people", pg)?.jsonKeys).toEqual([
+      "email",
+    ]);
+    expect(
+      sensitiveLiterals(
+        "SELECT id FROM people WHERE profile ->> 'company_name'::text = 'ACME'",
+        pg,
+      ),
+    ).toEqual(["ACME"]);
+  });
+
+  it("returns a dollar-quoted value as written whatever its tag", () => {
+    expect(sensitiveLiterals("SELECT id FROM t WHERE company_name = $é$ACME$é$", pg)).toEqual([
+      "ACME",
+    ]);
+  });
+
+  it("reads a statement node-sql-parser could not, without inventing tables for it", () => {
+    expect(analyzeTableOps("VACUUM crm.people", pg)).toBeNull();
+    expect(countsRows("VACUUM crm.people", pg)).toBe(false);
   });
 });
 

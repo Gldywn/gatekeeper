@@ -120,9 +120,9 @@ to the operator first, before any smaller fix, and propose correcting or replaci
 foundation itself, with its cost. A workaround is acceptable only as a stopgap the operator
 chose, documented where it lives, with a tracked ticket to remove it.
 
-Example: `packages/plugin/src/sql/pg/syntax.ts` rewrites PostgreSQL so that node-sql-parser,
-a third-party reconstruction of each SQL dialect, can read it. Each unsupported spelling
-would mean one more rewrite; the fix is a parser built from PostgreSQL's own grammar.
+Example: the plugin used to rewrite PostgreSQL (`sql/pg/syntax.ts`) so that node-sql-parser,
+a third-party reconstruction of each SQL dialect, could read it. Each unsupported spelling
+meant one more rewrite; the fix was to parse PostgreSQL with its own grammar (`sql/pg/`).
 
 ## No exception lists
 

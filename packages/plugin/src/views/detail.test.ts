@@ -86,7 +86,7 @@ function setup() {
   const view = new DetailView({
     root: root as unknown as HTMLElement,
     annotator: {} as never,
-    dialect: () => "postgresql",
+    databaseType: () => "postgresql",
     closeMenus,
     loadRows: vi.fn(),
   });
@@ -229,7 +229,7 @@ function view(loadRows: (id: string) => Promise<HistResult>) {
   const detail = new DetailView({
     root,
     annotator: { schemaFor: async () => null } as unknown as SchemaAnnotator,
-    dialect: () => "postgresql",
+    databaseType: () => "postgresql",
     closeMenus: vi.fn(),
     loadRows,
   });

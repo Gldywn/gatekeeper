@@ -92,7 +92,7 @@ function harness() {
     connectionName: () => "conn",
     scope: () => "scope",
     selected: () => null,
-    dialect: () => "postgresql",
+    databaseType: () => "postgresql",
   });
   const days = () => [...body.innerHTML.matchAll(/data-day="([^"]+)"/g)].map((m) => m[1]);
   return { view, activity, body, tail, days };

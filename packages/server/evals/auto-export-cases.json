@@ -448,10 +448,10 @@
     "id": "export-v-neg-intersect-union-mix",
     "family": "export-v-neg-local",
     "split": "validation",
-    "expected": "local",
+    "expected": "allow",
     "domain": "local-boundary",
-    "category": "unsupported",
-    "reason": "Mixed INTERSECT and UNION precedence is not modelled from the parser's flat chain.",
+    "category": "ordinary",
+    "reason": "Three status columns. Local only while node-sql-parser flattened INTERSECT and UNION precedence; PostgreSQL's own tree reads it since shared-read-3.",
     "sql": "SELECT status FROM treasury.accounts UNION SELECT status FROM treasury.transfer_orders INTERSECT SELECT status FROM treasury.debit_orders",
     "columns": {},
     "relations": {

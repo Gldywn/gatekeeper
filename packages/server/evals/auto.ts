@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { z } from "zod";
 import { analyzeWithFixture, type FixtureOptions } from "../../plugin/src/sql/pg/catalog-fixture";
+import { loadPgParser } from "../../plugin/src/sql/pg/parse";
 import { planRead } from "../../plugin/src/sql/read-analysis";
 import {
   AUTO_MODEL,
@@ -105,7 +106,8 @@ const legacyInput = evaluationInput.extend({
     )
     .max(64),
 });
-export const ANALYSIS = "shared-read-2";
+// shared-read-3: Jev's SQL is rendered from PostgreSQL's own parse tree, no longer by node-sql-parser.
+export const ANALYSIS = "shared-read-3";
 const resultSchema = z
   .object({
     id: identifier,
@@ -128,7 +130,7 @@ export const reportSchema = z
     createdAt: z.string().datetime(),
     model: z.literal(AUTO_MODEL),
     baselinePolicy: z.string().min(1),
-    analysis: z.enum(["shared-read-1", ANALYSIS]).optional(),
+    analysis: z.enum(["shared-read-1", "shared-read-2", ANALYSIS]).optional(),
     mode: z.enum(["dry", "live"]),
     split: z.enum(["development", "validation"]),
     corpus: corpusSchema,
@@ -409,6 +411,7 @@ const root = fileURLToPath(new URL("../../../", import.meta.url));
 const load = async (path: string) => JSON.parse(await readFile(resolve(root, path), "utf8"));
 
 async function main() {
+  if (!(await loadPgParser())) throw new Error("PostgreSQL parser failed to load");
   const { values } = parseArgs({
     options: {
       live: { type: "boolean" },

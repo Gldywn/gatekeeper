@@ -69,9 +69,11 @@ describe("rows changed", () => {
     expect(check("EXPLAIN ANALYZE DELETE FROM public.t").lines).toHaveLength(1);
   });
 
-  it("leaves a statement the parser rejects incomplete, never clean", () => {
-    // node-sql-parser 5.4 rejects RETURNING inside a PostgreSQL CTE.
-    const r = check("WITH d AS (DELETE FROM public.t RETURNING id) SELECT id FROM d");
+  it("reads a write inside a CTE, and leaves a statement the parser rejects incomplete", () => {
+    expect(check("WITH d AS (DELETE FROM public.t RETURNING id) SELECT id FROM d").lines).toEqual([
+      "DELETE without WHERE removes every row of `t`",
+    ]);
+    const r = check("DELETE FROM");
     expect(r.lines).toEqual([]);
     expect(r.complete).toBe(false);
   });
@@ -130,12 +132,17 @@ describe("scans", () => {
   });
 
   it("exempts a small unfiltered preview, but not with an offset, an order, an aggregate or RLS", () => {
-    expect(check("SELECT * FROM public.payment_attempt LIMIT 50", f).lines).toEqual([]);
-    expect(check("SELECT * FROM public.payment_attempt WHERE 1 = 1 LIMIT 50", f).lines).toEqual([]);
+    for (const sql of [
+      "SELECT * FROM public.payment_attempt LIMIT 50",
+      "SELECT * FROM public.payment_attempt WHERE 1 = 1 LIMIT 50",
+      "SELECT lower(status) FROM public.payment_attempt LIMIT 50",
+    ])
+      expect(check(sql, f).lines, sql).toEqual([]);
     for (const sql of [
       "SELECT * FROM public.payment_attempt LIMIT 50 OFFSET 10",
       "SELECT * FROM public.payment_attempt ORDER BY created_at LIMIT 50",
       "SELECT count(*) FROM public.payment_attempt LIMIT 50",
+      "SELECT coalesce(sum(amount), 0) FROM public.payment_attempt LIMIT 50",
       "SELECT * FROM public.payment_attempt LIMIT 5000",
     ])
       expect(check(sql, f).lines).toHaveLength(1);
@@ -232,10 +239,40 @@ describe("scans", () => {
     expect(late.notes).toEqual(["Statistics did not return within 5 seconds"]);
   });
 
-  it("applies no size rule outside PostgreSQL", () => {
-    const r = check("SELECT * FROM payment_attempt", f, "mysql");
-    expect(r.lines).toEqual([]);
-    expect(r.complete).toBe(true);
+  it("applies no size rule outside PostgreSQL, even on an engine read with its grammar", () => {
+    for (const engine of ["mysql", "redshift"]) {
+      const r = check("SELECT * FROM payment_attempt", f, engine);
+      expect(r.lines, engine).toEqual([]);
+      expect(r.complete, engine).toBe(true);
+    }
+  });
+
+  it("reads the queries a statement runs inside it", () => {
+    const big = facts({ "public.big": { rows: BIG }, "public.small": { rows: 10 } });
+    for (const sql of [
+      "CREATE TABLE public.copy AS SELECT * FROM public.big",
+      "SELECT id, (SELECT count(*) FROM public.big) AS n FROM public.small WHERE id = 1",
+      "UPDATE public.small SET n = (SELECT count(*) FROM public.big) WHERE id = 1",
+    ])
+      expect(check(sql, big).lines, sql).toEqual([
+        "Reads every row of `big` without a `WHERE` clause",
+      ]);
+    expect(
+      check("CREATE TABLE public.copy AS SELECT * FROM public.big WITH NO DATA", big).lines,
+    ).toEqual([]);
+  });
+
+  it("sees a CTE only where PostgreSQL does", () => {
+    const big = facts({ big: { rows: BIG } });
+    expect(check("WITH big AS (SELECT * FROM big) SELECT count(*) FROM big", big).lines).toEqual([
+      "Reads every row of `big` without a `WHERE` clause",
+    ]);
+    expect(
+      check(
+        "WITH RECURSIVE big AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM big WHERE n < 3) SELECT n FROM big",
+        big,
+      ).lines,
+    ).toEqual([]);
   });
 });
 
@@ -267,10 +304,12 @@ describe("joins", () => {
     expect(check("SELECT * FROM public.a, public.b JOIN public.c ON b.id = c.b_id").lines).toEqual([
       "Missing join condition pairs every row of `a` with every row of `b`",
     ]);
-    // The 5.4 grammar swallows a comma after JOIN ... ON into the ON clause.
-    expect(check("SELECT * FROM public.a JOIN public.b ON a.id = b.a_id, public.c").complete).toBe(
-      false,
-    );
+    const comma = "SELECT * FROM public.a JOIN public.b ON a.id = b.a_id, public.c";
+    expect(check(comma).lines).toEqual([
+      "Missing join condition pairs every row of `a` with every row of `c`",
+    ]);
+    // node-sql-parser's PostgreSQL grammar swallows a comma after JOIN ... ON into the ON clause.
+    expect(check(comma, new Map(), "redshift").complete).toBe(false);
   });
 
   it("flags an explicit CROSS JOIN only when both sizes make it large", () => {
@@ -304,10 +343,15 @@ describe("locks", () => {
     ]);
   });
 
-  it("reads the commands the parser does not know", () => {
+  it("reads the maintenance commands that lock whole tables", () => {
     expect(check("VACUUM FULL public.big", f).lines).toEqual([
       "VACUUM FULL locks and rewrites `big`",
     ]);
+    expect(check("VACUUM (FULL) public.big, public.mv", f).lines).toEqual([
+      "VACUUM FULL locks and rewrites `big`",
+      "VACUUM FULL locks and rewrites `mv`",
+    ]);
+    expect(check("VACUUM (FULL false) public.big", f).lines).toEqual([]);
     expect(check("VACUUM public.big", f).lines).toEqual([]);
     expect(check("VACUUM FULL", f).lines).toEqual([
       "VACUUM FULL locks and rewrites the tables it covers",
@@ -325,6 +369,7 @@ describe("locks", () => {
 
   it("leaves DDL alone outside PostgreSQL", () => {
     expect(check("ALTER TABLE big ADD COLUMN x int", new Map(), "mysql").lines).toEqual([]);
+    expect(check("ALTER TABLE public.big ADD COLUMN x int", f, "redshift").lines).toEqual([]);
   });
 });
 
@@ -646,9 +691,158 @@ describe("no false alert on bounded queries", () => {
       expect(check(sql, big).lines).toEqual([]);
   });
 
+  it("reads two different numbers or booleans as reading nothing, never a string or a cast", () => {
+    for (const sql of [
+      "SELECT * FROM public.t WHERE 1.5 = 2.5",
+      "SELECT * FROM public.t WHERE true = false",
+    ])
+      expect(check(sql, big).lines, sql).toEqual([]);
+    // PostgreSQL types each string as the other side ('1' is 1, 'true' is true), and a collation
+    // may equate two spellings: the table is read.
+    for (const sql of [
+      "SELECT * FROM public.t WHERE '1' = 1",
+      "SELECT * FROM public.t WHERE 'true' = true",
+      "SELECT * FROM public.t WHERE 'false' = false",
+      "SELECT * FROM public.t WHERE 'a' = 'b'",
+      "UPDATE public.t SET x = 1 WHERE 'true' = true",
+    ])
+      expect(check(sql, big).lines, sql).toHaveLength(1);
+  });
+
+  it("reads an aliased join as one source the enclosing query filters, however nested", () => {
+    for (const sql of [
+      "SELECT * FROM (public.a JOIN public.b USING (id)) j, public.c WHERE j.id = c.id AND c.id = 1",
+      "SELECT * FROM ((public.a JOIN public.b USING (id)) j JOIN public.c USING (id)) k WHERE k.id = 1",
+      "SELECT * FROM ((public.a NATURAL JOIN public.b) j NATURAL JOIN public.c) k WHERE k.id = 1",
+      "SELECT * FROM (SELECT * FROM (SELECT * FROM public.t) x) y WHERE y.id = 1",
+    ])
+      expect(check(sql, big).lines, sql).toEqual([]);
+    expect(check("SELECT * FROM (public.a JOIN public.b USING (id)) j", big).lines).toEqual([
+      "Reads every row of `a` since no condition filters it",
+      "Reads every row of `b` since no condition filters it",
+    ]);
+  });
+
+  it("never lets an outer filter bound what must be read in full first", () => {
+    for (const sql of [
+      "WITH r AS (SELECT count(*) AS n FROM public.t) SELECT * FROM (SELECT * FROM r) y WHERE y.n = 1",
+      "WITH r AS (SELECT id, count(*) OVER () AS n FROM public.t) SELECT * FROM (SELECT * FROM r) y WHERE y.id = 1",
+      "SELECT * FROM (SELECT count(*) AS n FROM public.t) y WHERE y.n = 1",
+      "SELECT * FROM (SELECT DISTINCT id FROM public.t) y WHERE y.id = 1",
+      // PostgreSQL computes a materialized CTE, or one used twice, before filtering it.
+      "WITH r AS MATERIALIZED (SELECT * FROM public.t) SELECT * FROM r WHERE id = 1",
+      "WITH r AS (SELECT * FROM public.t) SELECT * FROM r WHERE id = 1 UNION ALL SELECT * FROM r WHERE id = 2",
+    ])
+      expect(check(sql, big).lines, sql).toEqual([
+        "Reads every row of `t` without a `WHERE` clause",
+      ]);
+    expect(
+      check(
+        "WITH r AS NOT MATERIALIZED (SELECT * FROM public.t) SELECT * FROM r WHERE id = 1 UNION ALL SELECT * FROM r WHERE id = 2",
+        big,
+      ).lines,
+    ).toEqual([]);
+  });
+
+  it("lets each bound through only where PostgreSQL carries it", () => {
+    const indexed = facts({
+      "public.t": { rows: BIG_ROWS, leading: new Set(["id", "created_at"]) },
+    });
+    // An enclosing LIMIT stops at a plain inner LIMIT; WHERE FALSE runs nothing below it.
+    for (const sql of [
+      "SELECT * FROM (SELECT * FROM public.t LIMIT 10000) y LIMIT 10",
+      "SELECT * FROM (SELECT count(*) AS n FROM public.t) y WHERE false",
+      "SELECT * FROM (SELECT * FROM public.t LIMIT 10000) y WHERE false",
+      "WITH r AS (SELECT * FROM public.t ORDER BY created_at) SELECT * FROM (SELECT * FROM r) y LIMIT 10",
+    ])
+      expect(check(sql, indexed).lines, sql).toEqual([]);
+    // Without an index on the order, the first rows need the whole input sorted.
+    expect(
+      check(
+        "WITH r AS (SELECT * FROM public.t ORDER BY x) SELECT * FROM (SELECT * FROM r) y LIMIT 10",
+        indexed,
+      ).lines,
+    ).toEqual(["Reads every row of `t` without a `WHERE` clause"]);
+    // A small LIMIT stops a join of streaming inputs early, cross products included.
+    expect(
+      check(
+        "SELECT * FROM (SELECT * FROM (SELECT * FROM public.a) aa CROSS JOIN (SELECT * FROM public.b) bb) y LIMIT 10",
+        big,
+      ).lines,
+    ).toEqual([]);
+    // A write runs in full whatever reads its rows.
+    expect(
+      check("WITH d AS (DELETE FROM public.t RETURNING id) SELECT * FROM d WHERE false").lines,
+    ).toEqual(["DELETE without WHERE removes every row of `t`"]);
+  });
+
+  it("lets a UNION ALL's own small LIMIT stop each side, never through a sort or deduplication", () => {
+    const union = "SELECT id FROM public.a WHERE id = 1 UNION ALL SELECT id FROM public.b";
+    for (const sql of [
+      `${union} LIMIT 10`,
+      `SELECT * FROM (${union} LIMIT 10) y`,
+      `WITH r AS (${union} LIMIT 10) SELECT * FROM r`,
+    ])
+      expect(check(sql, big).lines, sql).toEqual([]);
+    for (const sql of [
+      "SELECT id FROM public.a WHERE id = 1 UNION SELECT id FROM public.b LIMIT 10",
+      `${union} ORDER BY id LIMIT 10`,
+    ])
+      expect(check(sql, big).lines, sql).toEqual([
+        "Reads every row of `b` without a `WHERE` clause",
+      ]);
+  });
+
+  it("bounds each side of a set operation by its own LIMIT only", () => {
+    expect(
+      check(
+        "(SELECT id FROM public.a WHERE id = 1) UNION ALL (SELECT id FROM public.b LIMIT 10)",
+        big,
+      ).lines,
+    ).toEqual([]);
+    expect(
+      check("SELECT * FROM public.a UNION ALL (SELECT * FROM public.b LIMIT 10)", big).lines,
+    ).toEqual(["Reads every row of `a` without a `WHERE` clause"]);
+  });
+
+  it("stops at the traversal bounds, set operations and aliased joins included", () => {
+    let joins = "public.t t0";
+    for (let i = 1; i <= 70; i++) joins = `(${joins} JOIN public.t t${i} USING (id)) j${i}`;
+    for (const sql of [
+      Array.from({ length: 70 }, () => "SELECT id FROM public.t").join(" UNION ALL "),
+      `SELECT * FROM ${joins}`,
+    ]) {
+      const plan = planLoad(sql, "postgresql");
+      expect(plan.covered).toBe(false);
+      expect(plan.blocks.length).toBeLessThanOrEqual(65);
+    }
+  });
+
   it("reads TABLESAMPLE SYSTEM as a fraction of the pages, BERNOULLI as all of them", () => {
     expect(check("SELECT * FROM public.t TABLESAMPLE SYSTEM (1)", big).lines).toEqual([]);
     expect(check("SELECT * FROM public.t TABLESAMPLE BERNOULLI (1)", big).lines).toHaveLength(1);
+  });
+
+  // The two limits `boundedBlocks` documents: they alert where PostgreSQL may read little, which
+  // can hold Auto or auto-decline the query. Pinned so that lifting one is a deliberate change.
+  it("still alerts on a sort through a plain copy and on a shared CTE no use reads", () => {
+    const full = "Reads every row of `t` without a `WHERE` clause";
+    const indexed = facts({ "public.t": { rows: BIG_ROWS, leading: new Set(["id"]) } });
+    expect(
+      check("SELECT * FROM (SELECT * FROM public.t ORDER BY id) y LIMIT 10", indexed).lines,
+    ).toEqual([]);
+    expect(
+      check(
+        "SELECT * FROM (SELECT * FROM (SELECT * FROM public.t) x ORDER BY id) y LIMIT 10",
+        indexed,
+      ).lines,
+    ).toEqual([full]);
+    expect(
+      check(
+        "WITH r AS (SELECT * FROM public.t) SELECT * FROM r WHERE false UNION ALL SELECT * FROM r WHERE false",
+        big,
+      ).lines,
+    ).toEqual([full]);
   });
 });
 
@@ -806,6 +1000,10 @@ describe("index-served reads", () => {
       "SELECT * FROM public.t ORDER BY id DESC LIMIT 20",
       "SELECT * FROM public.t ORDER BY id DESC LIMIT 20 OFFSET 20",
       "SELECT * FROM public.t WHERE TRUE ORDER BY id DESC LIMIT 20",
+      "SELECT * FROM public.t ORDER BY id DESC FETCH FIRST 20 ROWS ONLY",
+      "SELECT max(id) FROM public.t WHERE 1::integer = 1::integer",
+      "SELECT * FROM public.t WHERE 1::integer = 1::integer LIMIT 10",
+      "SELECT * FROM public.t WHERE 1.0 = 1.00 LIMIT 10",
       "SELECT max(id) FROM public.t",
       "SELECT max(id) FROM public.t WHERE 1 = 1",
       "SELECT min(id), max(id) FROM public.t",
@@ -827,6 +1025,9 @@ describe("index-served reads", () => {
       "SELECT * FROM public.t ORDER BY id DESC",
       "SELECT * FROM public.t ORDER BY id DESC LIMIT 20 OFFSET 5000",
       "SELECT max(id) OVER () FROM public.t",
+      "SELECT max(id) FILTER (WHERE status = 'paid') FROM public.t",
+      // Ties with the tenth row come back too: ten caps nothing.
+      "SELECT * FROM public.t ORDER BY id FETCH FIRST 10 ROWS WITH TIES",
     ])
       expect(check(sql, g).lines).toHaveLength(1);
     const rls = facts({ "public.t": { rows: 41_000_000, rls: true } });

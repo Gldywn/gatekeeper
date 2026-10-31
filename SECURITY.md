@@ -51,13 +51,25 @@ available to the connection.
 Two classifiers agree on the read / write / destructive classes:
 
 - The **plugin** classifier is authoritative, because the plugin is the only component
-  that runs SQL. It parses each query in the connection's dialect with `node-sql-parser`,
-  escalates the class on any embedded modifying node (a CTE, a subquery, `SELECT ... INTO`,
-  `EXPLAIN ANALYZE` of a write, a locking read), and fails closed to **destructive** when a
-  parse fails or a statement is unrecognized. An `EXPLAIN` whose options hold a comment, a
-  quoted or an escaped name is taken as `EXPLAIN ANALYZE`, since either can hide one.
-- **A failed parse raises the class; it does not block the query.** `node-sql-parser` knows
-  no `DROP DATABASE`, `VACUUM`, or `ALTER SYSTEM`, and blocking them outright made the
+  that runs SQL. A PostgreSQL connection is parsed with PostgreSQL's own grammar
+  (`libpg_query`, compiled to WebAssembly and bundled with the plugin); every other engine
+  with `node-sql-parser`, taken as it parses, in the engine's grammar when the library has
+  one and in its PostgreSQL grammar otherwise (Redshift, DuckDB, CockroachDB). The
+  classifier escalates the class on any embedded modifying node (a CTE, a subquery,
+  `SELECT ... INTO`, `EXPLAIN ANALYZE` of a write, a locking read), and classes an
+  unrecognized statement **destructive**. When a parse fails, a text check decides: a
+  plain `SELECT` or `WITH` without a modifying keyword is a read (a write if it locks
+  rows), anything else is destructive, and the card says the class is a guess. On
+  PostgreSQL, `EXPLAIN`'s options come from the tree, so a comment, a quoted or an escaped
+  name cannot hide an `ANALYZE` from it.
+- **PostgreSQL strings with one reading only.** With `standard_conforming_strings` off, a
+  backslash escapes a quote in an ordinary string; with it on, it does not. An ordinary
+  string holding a backslash before a quote therefore ends at a different place under each
+  setting, so the plugin blocks such a statement instead of choosing one reading. `E''`
+  strings mean the same under both and parse normally.
+- **A failed parse raises the class; it does not block the query.** A parser can refuse
+  statements the server runs (`node-sql-parser` knows no `DROP DATABASE`, `VACUUM`, or
+  `ALTER SYSTEM`), and blocking them outright made the
   archetypal destructive statement unapprovable in the very mode built to gate it. Such a
   statement is classed destructive, so it still needs Destructive mode armed plus the
   confirmation where the human types the database name, and its card carries a standing
@@ -79,11 +91,14 @@ comments it can delimit, a `;` inside a string or a comment is refused too.
 **Where the parser and the engine end a comment differently.** `node-sql-parser` ends a
 `--` comment, and MySQL's `#` one, at a lone carriage return, where MySQL and SQLite run on
 to the line feed, and reads MySQL's `--1` as a comment where MySQL reads minus minus one. Its tree is
-then not the statement the engine runs. A carriage return not followed by a line feed, or on
-MySQL and MariaDB a `--` followed by any character above U+0020, therefore makes the
-statement unread and destructive wherever it appears, strings and comments included (on
-MySQL, `SELECT '--'` needs Destructive mode). The text check still decides whether it is
-blocked. This is a stopgap until these engines are read by their own grammar.
+then not the statement the engine runs. On an engine `node-sql-parser` reads, a carriage
+return not followed by a line feed, or on MySQL and MariaDB a `--` followed by any character
+above U+0020, therefore makes the statement unread and destructive wherever it appears,
+strings and comments included (on MySQL, `SELECT '--'` needs Destructive mode). Nothing is
+taken from its tree then: no flags, no tables, no load check reading. The text check and the
+parser's statement count still decide whether it is blocked. PostgreSQL's own grammar ends
+its comments where the server does. This is a stopgap until these engines are read by their
+own grammar.
 
 **SQL Server batches.** SQL Server runs a batch whose statements need no `;` between them,
 so the text check cannot count them: a SQL Server statement no parser read is never classed
@@ -98,10 +113,13 @@ procedure of that name and runs what follows, so a SQL Server `EXPLAIN` is never
 plan. SQL Server is not an officially tested engine.
 
 **MySQL executable comments.** MySQL and MariaDB run the body of a `/*! ... */` comment,
-and MariaDB also runs `/*M! ... */`, unlike an ordinary comment. Both classifiers keep that
-body when scanning, and the plugin never lets a modifying keyword hidden inside such a
-comment ride in under a read verdict; it escalates to destructive so a human must arm and
-confirm it explicitly. A `;` inside one starts a second statement, so it blocks.
+unlike an ordinary comment, and MariaDB also runs `/*M! ... */`. `node-sql-parser` drops
+that body, so the plugin does not trust its parse of a statement containing `/*!` on a
+MySQL connection, or `/*!` or `/*M!` on a MariaDB connection, even inside a string: the
+statement is classed destructive, approvable like any statement Gatekeeper cannot read,
+and blocked when either the parser or the text check sees more than one statement. A
+human must arm Destructive mode and confirm it explicitly, even when the comment only
+holds a hint such as `/*!40001 SQL_NO_CACHE */`.
 
 **Trojan-source text.** Unicode bidirectional overrides and other invisible formatting
 characters can make submitted SQL render in an order the reviewer never approved. The
@@ -156,7 +174,10 @@ connection in Beekeeper's pool.
 
 Before approval, the plugin estimates whether a proposal could load or lock the database and
 shows a Heavy query alert on its card. It is a warning, not a guarantee. A read filtered on an
-indexed column can still scan most of a table and shows no alert.
+indexed column can still scan most of a table and shows no alert. The other way round, two
+shapes alert where PostgreSQL may read little: a small `LIMIT` over a sort that an index serves,
+when a subquery that only copies the table sits between them, and a CTE used twice whose every
+use returns nothing (`WHERE false`). Both alert as a full read of the table.
 
 - **The proposal is never run, planned or explained before approval.** The PostgreSQL planner
   evaluates IMMUTABLE and STABLE functions while it plans, and `EXPLAIN` takes the locks of the
@@ -169,8 +190,10 @@ indexed column can still scan most of a table and shows no alert.
   `track_counts` is on.
   Relation names travel as escaped literals, and none of these reads locks a user table. Index
   lists come from Beekeeper's `getTableIndexes` (Beekeeper 5.5 and later), for large tables only.
-- PostgreSQL gets every rule. Other engines get only the rules that read the SQL alone, which
-  flag `UPDATE` or `DELETE` without `WHERE` and sources that no join condition links.
+- PostgreSQL gets every rule, read on PostgreSQL's own parse tree. Other engines get only the
+  rules that read the SQL alone, which flag `UPDATE` or `DELETE` without `WHERE` and sources that
+  no join condition links. An engine read with node-sql-parser's PostgreSQL grammar (Redshift,
+  CockroachDB, DuckDB) counts as another engine: no catalog read, no size or lock rule.
 - **Auto mode** holds a query with an alert before anything is sent to TypeSafe. History keeps
   the fixed reason `Heavy query`, never a table name. A check that could not finish (a view, an
   unknown size, a late catalog read) blocks nothing, with or without Auto mode, and shows
@@ -318,11 +341,19 @@ itself is in neither the URL nor the prompt.
   of a `@>` literal but not its values) counts when the statement returns a document of that
   same table column, since the key may reach the agent inside it. A read on another row of
   that column counts too (a self-join, a semijoin); a part of the document
-  (`profile->'contact'`) or one with a key removed does not. Tables are matched by the name as
+  (`profile->'contact'`) or one with a key removed does not. Known limit: a key read inside such
+  a part (`profile->'contact'->>'ssn'`) is not attached to it either when the statement returns
+  that part, and the output still counts as traced. Tables are matched by the name as
   written, not by catalog identity. Functions are not interpreted: an ordinary one passes on
   the columns it receives, and a JSON function (its name contains `json`) never has its
   literals read, so its result, and a document it reads that the statement returns, are
-  untraced. The plugin posts them with the decision as three booleans
+  untraced; on PostgreSQL so are the SQL/JSON expressions (`JSON_VALUE`, `JSON_TABLE`...), the
+  `JSON_EXISTS` and `IS JSON` tests aside, which return a boolean. A write to part of a column
+  (`SET profile['note'] = ...`), or any of `MERGE`'s alternative actions, leaves what the column
+  held among what RETURNING hands back. A name that no column of a fully known relation answers
+  to (an implicit name the plugin got wrong, say) leaves its value untraced rather than empty,
+  and where names compare without case two CTEs that differ only by case count as both.
+  The plugin posts them with the decision as three booleans
   (`policy_json.sensitivity`), never a table, column or value. When the output could not be
   fully traced, it records the flags it did find and records nothing if it found none, so the
   trail never stores an all-clear it could not vouch for. The third boolean, Value, is always false since literals

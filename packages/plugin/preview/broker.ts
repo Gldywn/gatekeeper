@@ -115,7 +115,10 @@ async function route(url: URL, init?: RequestInit): Promise<Response> {
 
 export function installBroker(): void {
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
+    const url = new URL(
+      typeof input === "string" || input instanceof URL ? input : input.url,
+      location.href,
+    );
     if (url.origin !== BROKER) {
       throw new Error(`[preview broker] blocked ${url.href}`);
     }

@@ -26,7 +26,7 @@ import {
   xCircleIcon,
 } from "../icons";
 import { classifyQuery, type RiskClass } from "../sql/classify";
-import { countsRows } from "../sql/schema";
+import { countsRows } from "../sql/inspect";
 import type { ActivityEntry, Card, HistItem, Presence, SessionRoster } from "../types";
 import { autoIcon } from "./auto";
 import { CANCELLED_NOTE, EXECUTION_UNKNOWN, NOT_DELIVERED_NOTE } from "./detail";
@@ -99,18 +99,18 @@ function unconfirmed(item: HistItem): boolean {
 
 // The one fact a decided row states, from a closed vocabulary: the outcome before any count,
 // the affected count before the returned one. The note stays whole for the detail.
-export function rowFact(item: HistItem, dialect: string): string {
+export function rowFact(item: HistItem, databaseType: string): string {
   if (item.status === "rejected") return item.declinedBy === "gate" ? "Not run" : "Declined";
   if (item.status === "failed") return unconfirmed(item) ? "Unconfirmed" : "Failed";
   if (item.status === "expired") return item.note === CANCELLED_NOTE ? "Cancelled" : "Expired";
   const r = item.result;
-  if (r?.affectedRows != null && countsRows(item.sql, dialect)) {
+  if (r?.affectedRows != null && countsRows(item.sql, databaseType)) {
     return `${formatCount(r.affectedRows)} affected`;
   }
   // A write's empty result set says nothing about what it did.
   if (
     r?.rowCount != null &&
-    (classifyQuery(item.sql, dialect).class === "read" || r.rowCount > 0)
+    (classifyQuery(item.sql, databaseType).class === "read" || r.rowCount > 0)
   ) {
     return `${formatCount(r.rowCount)} ${r.rowCount === 1 ? "row" : "rows"}`;
   }
@@ -179,12 +179,12 @@ export function doneRowHtml(
   selected: boolean,
   select: "hist" | "audit",
   time: string,
-  dialect = "postgresql",
+  databaseType = "postgresql",
   flags: SensitivityRecord | null = null,
   grouped = false,
 ): string {
   const title = item.intent ? capitalize(item.intent) : previewSql(item.sql);
-  const cls = classifyQuery(item.sql, dialect).class;
+  const cls = classifyQuery(item.sql, databaseType).class;
   // The class and the sensitivity marks only where the query ran (or may have): a declined,
   // expired, cancelled, blocked or failed one touched nothing worth marking. The detail keeps all.
   const ran = item.status === "approved" || unconfirmed(item);
@@ -197,17 +197,21 @@ export function doneRowHtml(
       <span class="ix-mark">${rowGlyph(item)}</span>
       <span class="ix-title">${escapeHtml(title)}</span>
       <span class="ix-top">${ran ? riskIcon(cls) : ""}${autoFlag(item)}${flagsHtml}${time}</span>
-      ${meta}<span class="ix-fact">${escapeHtml(rowFact(item, dialect))}</span>
+      ${meta}<span class="ix-fact">${escapeHtml(rowFact(item, databaseType))}</span>
     </button>`;
 }
 
-export function recentRowHtml(item: HistItem, selected: boolean, dialect = "postgresql"): string {
+export function recentRowHtml(
+  item: HistItem,
+  selected: boolean,
+  databaseType = "postgresql",
+): string {
   return doneRowHtml(
     item,
     selected,
     "hist",
     `<span class="hage" data-age="${item.resolvedAt}">${relAge(item.resolvedAt)}</span>`,
-    dialect,
+    databaseType,
     item.sensitivity ?? null,
   );
 }

@@ -13,10 +13,11 @@ import {
 import { classifyQuery, type RiskClass, rank } from "../sql/classify";
 import { formatSql } from "../sql/format";
 import { highlight } from "../sql/highlight";
+import { analyzeTableOps } from "../sql/inspect";
 import type { Line, LoadResult, Segment } from "../sql/load";
 import { modeRank, type RiskMode } from "../sql/mode";
 import { visibleControls } from "../sql/sanitize";
-import { analyzeTableOps, type SchemaContext } from "../sql/schema";
+import type { SchemaContext } from "../sql/schema";
 import type { Card, CardState, RunState } from "../types";
 import { AUTO_APPROVED, AUTO_LEADS, autoIcon, holdText } from "./auto";
 
@@ -50,11 +51,11 @@ function approveLabelFor(cls: RiskClass): string {
 
 export function cardGate(
   sql: string,
-  dialect: string,
+  databaseType: string,
   mode: RiskMode,
   connReadOnly: boolean,
 ): CardGate {
-  const v = classifyQuery(sql, dialect);
+  const v = classifyQuery(sql, databaseType);
   const cls = v.class;
   const approvable = !v.blocked && rank(cls) <= modeRank(mode);
   // A write/destructive the armed mode would allow, but the connection is definitely
@@ -129,11 +130,11 @@ function executionNote(card: Card): string {
 // Reject stays open. Shared with the app, so an action row rebuilt in place matches the card.
 export function cardGateFor(
   card: Card,
-  dialect: string,
+  databaseType: string,
   mode: RiskMode,
   connReadOnly: boolean,
 ): CardGate {
-  const gate = cardGate(card.sql, dialect, mode, connReadOnly);
+  const gate = cardGate(card.sql, databaseType, mode, connReadOnly);
   return card.state === "ready" && card.autoStatus === AUTO_EVALUATING
     ? { ...gate, approveEnabled: false, note: EVAL_NOTE }
     : gate;
@@ -141,13 +142,13 @@ export function cardGateFor(
 
 export function cardHtml(
   card: Card,
-  dialect: string,
+  databaseType: string,
   denyDrafts: Map<string, string>,
   mode: RiskMode = "read",
   connReadOnly = false,
 ): string {
   const evaluating = card.state === "ready" && card.autoStatus === AUTO_EVALUATING;
-  const gate = cardGateFor(card, dialect, mode, connReadOnly);
+  const gate = cardGateFor(card, databaseType, mode, connReadOnly);
   const run = card.state === "executing" ? card.run : undefined;
   let bar: string;
   if (run) {
@@ -164,7 +165,7 @@ export function cardHtml(
   // While Auto mode evaluates, the ring the card frame used to carry runs round the SQL.
   const sqlBlock = evaluating ? `<div class="sql-ring">${sql}</div>` : sql;
   const load = { id: card.id, result: card.loadResult };
-  const matrix = accessMatrix(card.sql, dialect, gate.cls, card.schema, load);
+  const matrix = accessMatrix(card.sql, databaseType, gate.cls, card.schema, load);
   return `
       <div class="card ${cardClassFor(gate)}${run ? runClass(run) : ""}" data-card="${card.id}">
         <div class="top">
@@ -204,12 +205,12 @@ export function riskBadge(cls: RiskClass): string {
 // With the pending card's load view, a table's name opens its estimated rows.
 export function accessMatrix(
   sql: string,
-  dialect: string,
+  databaseType: string,
   cls: RiskClass,
   schema?: SchemaContext | null,
   load?: LoadView,
 ): string {
-  const ops = analyzeTableOps(sql, dialect);
+  const ops = analyzeTableOps(sql, databaseType);
   const roles = new Map<string, Set<Role>>();
   const add = (table: string, role: Role) =>
     roles.set(table, (roles.get(table) ?? new Set()).add(role));
