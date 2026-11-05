@@ -25,10 +25,12 @@ describe("settings/normalizeSettings", () => {
     expect(normalizeSettings(undefined)).toEqual(defaultSettings());
   });
 
-  it("turns auto-deny of heavy queries on unless explicitly turned off", () => {
-    expect(defaultSettings().autoDenyHeavy).toBe(true);
-    expect(normalizeSettings({ autoDenyHeavy: "nope" }).autoDenyHeavy).toBe(true);
-    expect(normalizeSettings({ autoDenyHeavy: false }).autoDenyHeavy).toBe(false);
+  // A blob saved before the setting existed holds no autoDenyHeavy; a stored true is kept.
+  it("defaults auto-deny of heavy queries off and keeps a stored value", () => {
+    expect(defaultSettings().autoDenyHeavy).toBe(false);
+    expect(normalizeSettings({ confirmWrites: true }).autoDenyHeavy).toBe(false);
+    expect(normalizeSettings({ autoDenyHeavy: "nope" }).autoDenyHeavy).toBe(false);
+    expect(normalizeSettings({ autoDenyHeavy: true }).autoDenyHeavy).toBe(true);
   });
 
   it("keeps a valid recentlyResolved option and an explicit false", () => {

@@ -1,15 +1,16 @@
 import { appStorage } from "@beekeeperstudio/plugin";
 import type { SchemaContext } from "./sql/schema";
 
-// Per-connection host-side preferences. Every field defaults on; recentlyResolved is
-// how many of the latest decisions the Queue shows. None of this ever reaches the broker.
+// Per-connection host-side preferences; recentlyResolved is how many of the latest
+// decisions the Queue shows. None of this ever reaches the broker.
 export interface Settings {
   piiFlagging: boolean;
   clientFlagging: boolean;
   // Require a second one-click confirmation before an approved write or destructive
   // statement runs. On by default; a read never prompts.
   confirmWrites: boolean;
-  // Reject a query the load check flags as heavy as soon as its card arrives. On by default.
+  // Reject a query the load check flags as heavy as soon as its card arrives. Off by default:
+  // the human opts in per connection.
   autoDenyHeavy: boolean;
   // Let connected agents read the database's table/column/type structure (never data)
   // through the get_schema tool. Off by default; the human opts in per connection.
@@ -29,7 +30,7 @@ export function defaultSettings(): Settings {
     piiFlagging: true,
     clientFlagging: true,
     confirmWrites: true,
-    autoDenyHeavy: true,
+    autoDenyHeavy: false,
     schemaAccess: false,
     recentlyResolved: RECENTLY_RESOLVED_DEFAULT,
     autoStopMinutes: 0,
@@ -50,7 +51,7 @@ export function normalizeSettings(raw: unknown): Settings {
     piiFlagging: asBool(r.piiFlagging, true),
     clientFlagging: asBool(r.clientFlagging, true),
     confirmWrites: asBool(r.confirmWrites, true),
-    autoDenyHeavy: asBool(r.autoDenyHeavy, true),
+    autoDenyHeavy: asBool(r.autoDenyHeavy, false),
     schemaAccess: asBool(r.schemaAccess, false),
     recentlyResolved: (RECENTLY_RESOLVED_OPTIONS as readonly number[]).includes(resolved)
       ? resolved

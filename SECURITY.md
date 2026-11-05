@@ -198,12 +198,12 @@ use returns nothing (`WHERE false`). Both alert as a full read of the table.
   the fixed reason `Heavy query`, never a table name. A check that could not finish (a view, an
   unknown size, a late catalog read) blocks nothing, with or without Auto mode, and shows
   nothing on the card.
-- **Auto-deny heavy queries** (Settings, on by default) rejects a flagged query as soon as its
-  card arrives, without a human in the loop. A finding that depends on a missing row estimate
-  never auto-denies. The automatic rejection itself tells the agent that its query was judged
-  heavy, so by trying variants an agent can learn whether a table holds over a million rows or
-  whether a filtered column has no index. Turn the setting off to keep that signal behind a
-  human decision.
+- **Auto-deny heavy queries** (Settings, off by default, per connection) rejects a flagged
+  query as soon as its card arrives, without a human in the loop. A finding that depends on a
+  missing row estimate never auto-denies. The automatic rejection itself tells the agent that
+  its query was judged heavy, so by trying variants an agent can learn whether a table holds
+  over a million rows or whether a filtered column has no index. Leave the setting off to keep
+  that signal behind a human decision.
 - **On a rejection**, the agent receives the operator's note. When the card showed a Heavy
   query alert, hints computed from the SQL text alone follow (no `WHERE` clause, missing join
   condition, DDL without `CONCURRENTLY`). Their presence tells the agent the query was flagged,
