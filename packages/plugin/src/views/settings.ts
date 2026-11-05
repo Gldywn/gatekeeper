@@ -30,13 +30,13 @@ export const DETECTION_TOGGLES: ToggleSpec[] = [
   {
     key: "piiFlagging",
     name: "PII flagging",
-    desc: "Highlight person-data columns the agent will receive, on the approval card.",
+    desc: "Highlight person-data columns the agent will receive.",
     example: { text: "email", cls: "pii" },
   },
   {
     key: "clientFlagging",
     name: "Client-data flagging",
-    desc: "Highlight company and commercial columns the agent will receive, with a separate accent.",
+    desc: "Highlight company and commercial columns the agent will receive.",
     example: { text: "company", cls: "client" },
   },
 ];
