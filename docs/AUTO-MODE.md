@@ -378,12 +378,12 @@ descriptions on secret disclosure, provider request paths on personal and organi
 disclosure, and a campaign template name on organization disclosure. Each case was observed
 once, so this is not a stability measurement: a borderline case can change decision from
 one run to the next. These authored, correlated synthetic cases informed the choice of
-questions and cutoffs and do not establish a general privacy error rate. They cover only
-part of the supported SQL: window functions, CASE, COALESCE, concatenation, DISTINCT,
-HAVING, `EXISTS`, aggregates with ORDER BY or FILTER and derived tables are absent from
-them, so those shapes, the first example under "Supported SQL" included, have deterministic
-and mocked coverage only. Full provenance and method are in the evaluation bench
-documentation.
+questions and cutoffs and do not establish a general privacy error rate. They are mostly
+single-table projections with a LIMIT, plus a few filters, orderings, joins, GROUP BY,
+count, sum, min and max, UNION and INTERSECT, uncorrelated `IN` subqueries, one CTE and JSON
+key reads. Live evidence covers only the exact SQL forms in these corpora: the rest of the
+supported subset, the first example under "Supported SQL" included, has deterministic and
+mocked coverage only. Full provenance and method are in the evaluation bench documentation.
 
 The export cases are synthetic versions of 15 distinct exported investigations, with
 inferred catalog types that have not been checked against a real database. One of them
