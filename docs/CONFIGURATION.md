@@ -22,18 +22,18 @@ burst is collapsed into a single alert, and a retried submission raises none.
 
 **Only what needs you rings.** With the plugin not running, a proposal alerts the moment it
 arrives. While it runs, the plugin decides when a proposal needs you, and the alert rings then.
-With neither of the checks below on, that is as soon as the plugin shows it, about a second
-after it arrived. A proposal first waits for the plugin's [load check](../SECURITY.md#load-check)
-when Auto-deny heavy queries is on, as it is by default: a heavy query the plugin rejects on
-its own never rings, and any other rings once the check is done, at most about 7 seconds
-after it arrived (the check stops waiting at 5 seconds). With [Auto mode](AUTO-MODE.md) on,
+With Auto mode and Auto-deny heavy queries both off, as they are by default, that is as soon as
+the plugin shows it, about a second after it arrived. With Auto-deny heavy queries on, a
+proposal first waits for the plugin's [load check](../SECURITY.md#load-check): a heavy query
+the plugin rejects on its own never rings, and any other rings once the check is done, at most
+about 7 seconds after it arrived (the check stops waiting at 5 seconds). With [Auto mode](AUTO-MODE.md) on,
 a read then waits silently for its evaluation: if Auto mode approves it, nothing rings; if Auto
 mode holds it, refuses it, or its evaluation fails or times out, the alert rings then. A write
 or destructive statement, which Auto mode never approves, rings as soon as nothing else can
-decide it. Switching Auto mode or auto-deny off rings for what they had not decided yet. If the
-plugin stops reporting for 15 seconds (Beekeeper closed, the tab unpaired or no longer
-polling), the server stops waiting and rings for them, so a read Auto mode approves after such
-a gap may still have rung.
+decide it. Switching Auto mode or auto-deny off rings for what they had not decided yet, once
+the other cannot decide it either. If the plugin stops reporting for 15 seconds (Beekeeper
+closed, the tab unpaired or no longer polling), the server stops waiting and rings for them, so
+a read Auto mode approves after such a gap may still have rung.
 
 **A query still waiting rings once more** when half its life has passed, about 7 minutes 30
 seconds after it arrived. The reminder is the alert sound played twice in quick succession,
