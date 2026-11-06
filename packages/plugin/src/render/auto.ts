@@ -55,7 +55,7 @@ export function autoSettingsHtml(enabled: boolean, keySaved = false): string {
             <div class="set-text">
               <span class="set-name"><span class="set-ico">${autoIcon}</span>Auto mode</span>
               <span class="set-desc">Run eligible reads without your approval and return their results to your agent.</span>
-              <span class="set-note">PostgreSQL only. TypeSafe sees the SQL structure and schema names, never result rows.</span>
+              <span class="set-note">PostgreSQL only. TypeSafe sees the SQL structure and the schema names and types it reads, never result rows.</span>
               <div class="auto-key"><label class="set-name" for="autoKey">TypeSafe API key</label><input id="autoKey" class="confirm-input" type="password" data-auto-key autocomplete="off" spellcheck="false" maxlength="4096" placeholder="apikey_0123456789"${keySaved ? ` value="${SAVED_KEY_MASK}"` : ""}></div>
               <p class="auto-message" data-auto-message role="status"></p>
               <span class="set-note">Stored in Beekeeper encrypted storage. Sent only to the local broker and TypeSafe.</span>

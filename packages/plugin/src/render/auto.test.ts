@@ -24,7 +24,7 @@ describe("Auto mode surfaces", () => {
     expect(disclosure.split(/\s+/).length).toBeLessThanOrEqual(40);
     expect(pop.slice(pop.indexOf("sa-on"))).toContain("Disable Auto mode");
     const settings = autoSettingsHtml(false);
-    expect(settings).toContain("TypeSafe sees the SQL structure and schema names");
+    expect(settings).toContain("TypeSafe sees the SQL structure and the schema names and types");
     expect(settings).toContain("never result rows");
     expect(settings).toContain("PostgreSQL only.");
     expect(pop + settings).not.toMatch(/beta/i);
