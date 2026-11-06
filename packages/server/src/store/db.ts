@@ -111,7 +111,6 @@ export function migrate(db: Database.Database): void {
         last_alert_at INTEGER NOT NULL DEFAULT 0,
         auto_seen_at INTEGER NOT NULL DEFAULT 0,
         auto_scope TEXT,
-        auto_covers TEXT NOT NULL DEFAULT 'read',
         last_remind_at INTEGER NOT NULL DEFAULT 0
       );
 
@@ -145,12 +144,11 @@ export function migrate(db: Database.Database): void {
     "ALTER TABLE sessions ADD COLUMN last_active INTEGER",
     "ALTER TABLE sessions ADD COLUMN connection TEXT",
     "ALTER TABLE sessions ADD COLUMN left_at INTEGER",
-    // 0: the alert waits for Auto mode, 1: alerted, 2: reminded. Rows inserted by an older
+    // 0: the alert waits for the plugin, 1: alerted, 2: reminded. Rows inserted by an older
     // server, which alerts at submission, read as alerted.
     "ALTER TABLE requests ADD COLUMN alert_stage INTEGER NOT NULL DEFAULT 1",
     "ALTER TABLE alerts ADD COLUMN auto_seen_at INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE alerts ADD COLUMN auto_scope TEXT",
-    "ALTER TABLE alerts ADD COLUMN auto_covers TEXT NOT NULL DEFAULT 'read'",
     "ALTER TABLE alerts ADD COLUMN last_remind_at INTEGER NOT NULL DEFAULT 0",
     // A fresh DB is already session_label, so this throws and is swallowed;
     // an existing DB still on session_intent is renamed in place.

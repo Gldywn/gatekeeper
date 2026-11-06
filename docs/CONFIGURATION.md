@@ -21,7 +21,9 @@ notification and plays a sound when a proposal needs you, wherever you are on yo
 burst is collapsed into a single alert, and a retried submission raises none.
 
 **Only what needs you rings.** With the plugin not running, a proposal alerts the moment it
-arrives. While it runs, a proposal first waits for the plugin's [load check](../SECURITY.md#load-check)
+arrives. While it runs, the plugin decides when a proposal needs you, and the alert rings then.
+With neither of the checks below on, that is as soon as the plugin shows it, about a second
+after it arrived. A proposal first waits for the plugin's [load check](../SECURITY.md#load-check)
 when Auto-deny heavy queries is on, as it is by default: a heavy query the plugin rejects on
 its own never rings, and any other rings once the check is done, at most about 7 seconds
 after it arrived (the check stops waiting at 5 seconds). With [Auto mode](AUTO-MODE.md) on,
@@ -34,18 +36,23 @@ polling), the server stops waiting and rings for them, so a read Auto mode appro
 a gap may still have rung.
 
 **A query still waiting rings once more** when half its life has passed, about 7 minutes 30
-seconds after it arrived. The reminder is the sound alone, never a second banner, and comes
-once per query; queries that come due together share one sound, and it never keeps a new
-query from raising its own alert. A read Auto mode still has at that point, for instance
-because long queries hold all its runs, rings then for the first time, and that alert is its
-reminder. `banner` mode has no reminder.
+seconds after it arrived. The reminder is the alert sound played twice in quick succession,
+never a second banner, and comes once per query; queries that come due together share one
+reminder. Within 10 seconds of another alert it waits, so it comes late rather than never, and
+it never keeps a new query from raising its own alert. A read Auto mode still has at that
+point, for instance because long queries hold all its runs, rings then for the first time, and
+that alert is its reminder: Auto mode may still approve it afterwards. `banner` mode has no
+reminder.
 
-The alerts raised after submission (a read Auto mode leaves to you, the 15-second fallback
-and the reminder) come from the one Gatekeeper process that serves the plugin, and follow its
-`GATEKEEPER_NOTIFY`, not the submitting agent's. They need that process up to date: restart
-the agent sessions still running an older server after an update. Until then, a proposal
-may alert at submission as before, and if an older server takes over the plugin while
-proposals wait on it, their alerts and reminders may never come.
+An alert held for the plugin, and every alert raised after submission (the 15-second fallback
+and the reminder included), comes from the one Gatekeeper process that serves the plugin, and
+follows that process's `GATEKEEPER_NOTIFY`. A proposal submitted while the plugin has not
+reported for its connection in the last 15 seconds (Beekeeper closed or silent, another
+connection) alerts at submission from the submitting agent's server, under its own setting.
+Both need an up-to-date server: restart the agent sessions still running an older one after
+an update. Until then, an agent on 0.3.1 or earlier alerts at every submission, whatever Auto
+mode then does, and if an older server takes over the plugin while proposals wait on it, their
+alerts and reminders may never come.
 
 **The first proposal asks for permission.** macOS shows "Gatekeeper would like to send you
 notifications" the first time, in the middle of an agent session. Allow it, and you never see

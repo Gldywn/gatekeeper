@@ -342,7 +342,7 @@ describe("plugin-only automatic evaluation", () => {
   });
 });
 
-describe("the poll's Auto mode report", () => {
+describe("the poll's report", () => {
   const conn = {
     connectionName: "test",
     databaseType: "postgresql",
@@ -351,8 +351,7 @@ describe("the poll's Auto mode report", () => {
     readOnly: false,
     mode: "read",
   };
-  const read = () =>
-    store.submitNew({ sessionId: "s1", sql: "SELECT 1", autoEligible: true }).deferred;
+  const waits = (sql = "SELECT 1") => store.submitNew({ sessionId: "s1", sql }).deferred;
   const poll = (query = "", opts: { token?: string } = { token: TOKEN }) =>
     call("GET", `/pending${query}`, opts);
 
@@ -360,62 +359,50 @@ describe("the poll's Auto mode report", () => {
     store.setConnection(conn);
   });
 
-  it("lets any query wait while heavy ones are auto-denied, and only reads for Auto mode", async () => {
-    const write = () =>
-      store.submitNew({ sessionId: "s1", sql: "DELETE FROM t", autoEligible: false }).deferred;
-    await poll("?heavy=1");
-    expect(write()).toBe(true);
-    await poll("?auto=1");
-    expect(write()).toBe(false);
-    expect(read()).toBe(true);
+  it("holds every submission's alert while the plugin names what it leaves to a human", async () => {
+    expect(waits()).toBe(false);
+    expect((await poll("?attention=")).status).toBe(200);
+    expect(waits("DELETE FROM t")).toBe(true);
+    expect(waits('SELECT 1 AS "into"')).toBe(true);
   });
 
-  it("lets a read submitted while Auto mode is on wait for it, until it is switched off", async () => {
-    expect(read()).toBe(false);
-    expect((await poll("?auto=1")).status).toBe(200);
-    expect(read()).toBe(true);
+  // An older plugin never names requests for a human, so nobody would ring for them.
+  it("leaves submissions ringing while the plugin sends no attention list", async () => {
+    await poll("?attention=");
+    expect(waits()).toBe(true);
     await poll();
-    expect(read()).toBe(false);
+    expect(waits("SELECT 2")).toBe(false);
   });
 
   it("takes no report from a poll that is not authenticated", async () => {
-    expect((await poll("?auto=1", {})).status).toBe(401);
-    expect(read()).toBe(false);
+    expect((await poll("?attention=", {})).status).toBe(401);
+    expect(waits()).toBe(false);
   });
 
   it("rings once for the requests handed to a human, however often they are reported", async () => {
-    await poll("?auto=1");
-    const { request } = store.submitNew({ sessionId: "s1", sql: "SELECT 2", autoEligible: true });
-    await poll(`?auto=1&attention=${request.id}`);
-    await poll(`?auto=1&attention=${request.id}`);
-    expect(notify).toHaveBeenCalledOnce();
-  });
-
-  it("takes a hand-off with Auto mode already off, the moment it was switched off", async () => {
-    await poll("?auto=1");
-    const { request } = store.submitNew({ sessionId: "s1", sql: "SELECT 2", autoEligible: true });
+    await poll("?attention=");
+    const { request } = store.submitNew({ sessionId: "s1", sql: "SELECT 2" });
+    await poll(`?attention=${request.id}`);
     await poll(`?attention=${request.id}`);
     expect(notify).toHaveBeenCalledOnce();
   });
 
   it("stays silent for a request that was alerted at submission", async () => {
-    const { request } = store.submitNew({ sessionId: "s1", sql: "SELECT 2", autoEligible: true });
-    await poll(`?auto=1&attention=${request.id}`);
+    const { request } = store.submitNew({ sessionId: "s1", sql: "SELECT 2" });
+    await poll(`?attention=${request.id}`);
     expect(notify).not.toHaveBeenCalled();
   });
 
   // The list is advice about alerts: whatever another version puts there, the claim goes on.
   it("takes what it can from an odd attention list and still claims", async () => {
-    await poll("?auto=1");
+    await poll("?attention=");
     const many = Array.from({ length: 300 }, (_, i) => `req_${i.toString(16).padStart(12, "0")}`);
     for (const query of ["?attention=", "?attention=nope", `?attention=${many.join(",")}`]) {
-      expect((await poll(`${query}&auto=1`)).status).toBe(204);
+      expect((await poll(query)).status).toBe(204);
     }
     expect(notify).not.toHaveBeenCalled();
-    const { request } = store.submitNew({ sessionId: "s1", sql: "SELECT 2", autoEligible: true });
-    expect(
-      (await poll(`?auto=1&attention=nope,${request.id}&attention=${request.id}`)).status,
-    ).toBe(200);
+    const { request } = store.submitNew({ sessionId: "s1", sql: "SELECT 2" });
+    expect((await poll(`?attention=nope,${request.id}&attention=${request.id}`)).status).toBe(200);
     expect(notify).toHaveBeenCalledOnce();
     expect(store.get(request.id)?.state).toBe("leased");
   });

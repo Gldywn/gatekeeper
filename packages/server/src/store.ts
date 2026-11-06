@@ -1,7 +1,6 @@
 import type { ConnectionSnapshot } from "./connection.js";
 import type { SchemaSnapshot } from "./schema.js";
 import {
-  type AutoCovers,
   claimAlert,
   handOffAlerts,
   releaseAlerts,
@@ -100,7 +99,6 @@ export class RequestStore {
     intent?: string;
     idempotencyKey?: string;
     policy?: unknown;
-    autoEligible?: boolean;
   }): SubmitOutcome {
     return submit(this.ctx, input);
   }
@@ -110,9 +108,9 @@ export class RequestStore {
     return claimAlert(this.ctx, cooldownMs);
   }
 
-  /** Record what the plugin decides for this connection scope, or that it decides nothing. */
-  stampAuto(scope: string | null, covers: AutoCovers = "read"): void {
-    stampAuto(this.ctx, scope, covers);
+  /** Record that the plugin reports in for this connection scope, or that none does. */
+  stampAuto(scope: string | null): void {
+    stampAuto(this.ctx, scope);
   }
 
   /** Hand these requests from the plugin to a human; the session to ring for, if this rings. */
@@ -120,7 +118,7 @@ export class RequestStore {
     return handOffAlerts(this.ctx, ids, cooldownMs);
   }
 
-  /** Alert the requests Auto mode no longer covers; the session to ring for, if this rings. */
+  /** Alert the requests the plugin no longer covers; the session to ring for, if this rings. */
   releaseAlerts(cooldownMs: number): string | null {
     return releaseAlerts(this.ctx, cooldownMs);
   }

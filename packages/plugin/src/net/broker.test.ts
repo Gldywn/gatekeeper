@@ -120,6 +120,24 @@ describe("exchanging a pairing code", () => {
 });
 
 describe("endpoint requests", () => {
+  // Sent even empty: an absent list is how the broker recognises a plugin that never calls a
+  // human, whose submissions must keep ringing.
+  it("pending always sends its attention list, with the connection header", async () => {
+    const c = client();
+    await c.setToken("secret");
+    fetchMock.mockResolvedValue({ ok: true, status: 204 });
+    await c.pending("app");
+    await c.pending(undefined, ["req_a", "req_b"]);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      `${URL}/pending?attention=`,
+      `${URL}/pending?attention=req_a%2Creq_b`,
+    ]);
+    expect(fetchMock.mock.calls[0][1].headers).toEqual({
+      "X-Gatekeeper-Connection": "app",
+      Authorization: "Bearer secret",
+    });
+  });
+
   it("renew posts the lease id with the bearer header and returns the new expiry", async () => {
     const c = client();
     await c.setToken("secret");

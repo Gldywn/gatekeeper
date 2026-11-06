@@ -927,7 +927,7 @@ describe("alert cooldown", () => {
   });
 });
 
-describe("alerts owed to Auto mode", () => {
+describe("alerts owed to the plugin", () => {
   const CD = 10_000;
   function onAuto(name = "app") {
     const made = makeStore({ proposalTtlMs: 60_000 });
@@ -938,26 +938,23 @@ describe("alerts owed to Auto mode", () => {
       readOnly: false,
     });
     made.store.stampAuto(scopeOf(name));
-    const read = (sql = "SELECT 1") =>
-      made.store.submitNew({ sessionId: "s1", sql, autoEligible: true });
+    const read = (sql = "SELECT 1") => made.store.submitNew({ sessionId: "s1", sql });
     return { ...made, read };
   }
 
-  it("defers a write too while the load check may still reject it", () => {
-    const { store } = onAuto();
-    const write = (sql: string) => store.submitNew({ sessionId: "s1", sql }).deferred;
-    expect(write("DELETE FROM a")).toBe(false);
-    store.stampAuto(scopeOf("app"), "all");
-    expect(write("DELETE FROM b")).toBe(true);
-    // Released like any owed request once the plugin stops deciding.
+  // The plugin alone knows what Auto mode and its load check will decide, so the class the
+  // server guesses from the SQL never makes a submission ring on its own.
+  it("defers every query, whatever its class, while the plugin reports in", () => {
+    const { store, read } = onAuto();
+    expect(read("DELETE FROM a").deferred).toBe(true);
+    expect(read('SELECT 1 AS "into"').deferred).toBe(true);
     store.stampAuto(null);
-    expect(store.releaseAlerts(10_000)).toBe("s1");
+    expect(store.releaseAlerts(CD)).toBe("s1");
   });
 
-  it("defers a read only while Auto mode reports in for its connection", () => {
+  it("defers only while the plugin reports in for the request's connection", () => {
     const { store, clock, read } = onAuto();
     expect(read().deferred).toBe(true);
-    expect(store.submitNew({ sessionId: "s2", sql: "DELETE FROM t" }).deferred).toBe(false);
     store.stampAuto(scopeOf("other"));
     expect(read("SELECT 2").deferred).toBe(false);
     store.stampAuto(scopeOf("app"));
@@ -965,18 +962,16 @@ describe("alerts owed to Auto mode", () => {
     expect(read("SELECT 3").deferred).toBe(false);
   });
 
-  // claimNext offers a request with no connection to any plugin, so Auto mode covers it too.
-  it("defers a read submitted before any connection was reported", () => {
+  // claimNext offers a request with no connection to any plugin, so that plugin covers it too.
+  it("defers a request submitted before any connection was reported", () => {
     const { store } = makeStore();
     store.stampAuto(scopeOf("app"));
-    expect(store.submitNew({ sessionId: "s1", sql: "SELECT 1", autoEligible: true }).deferred).toBe(
-      true,
-    );
+    expect(store.submitNew({ sessionId: "s1", sql: "SELECT 1" }).deferred).toBe(true);
   });
 
   it("keeps the first submission's stage on an idempotent replay", () => {
     const { store, read } = onAuto();
-    const input = { sessionId: "s1", sql: "SELECT 1", idempotencyKey: "k", autoEligible: true };
+    const input = { sessionId: "s1", sql: "SELECT 1", idempotencyKey: "k" };
     expect(store.submitNew(input).deferred).toBe(true);
     store.stampAuto(null);
     expect(store.submitNew(input)).toMatchObject({ created: false, deferred: false });
@@ -1014,7 +1009,7 @@ describe("alerts owed to Auto mode", () => {
     expect(store.handOffAlerts([c.id], CD)).toBeNull();
   });
 
-  it("releases what Auto mode stops covering: switched off, gone quiet, elsewhere", () => {
+  it("releases what the plugin stops covering: an older plugin, gone quiet, elsewhere", () => {
     const { store, clock, read } = onAuto();
     read();
     expect(store.releaseAlerts(CD)).toBeNull();
@@ -1078,10 +1073,16 @@ describe("alerts owed to Auto mode", () => {
     expect(store.remindAlerts(CD)).toBe(true);
     clock.t += 3_000;
     expect(store.claimAlert(CD)).toBe(true);
-    // Next to a sound that just rang, a reminder stays quiet.
+    // Next to a sound that just rang, a reminder stays quiet, then comes once the window passed.
     store.submitNew({ sessionId: "s1", sql: "SELECT 2" });
     clock.t += 30_000;
     expect(store.claimAlert(CD)).toBe(true);
+    expect(store.remindAlerts(CD)).toBe(false);
+    clock.t += CD - 1;
+    expect(store.remindAlerts(CD)).toBe(false);
+    clock.t += 1;
+    expect(store.remindAlerts(CD)).toBe(true);
+    clock.t += CD;
     expect(store.remindAlerts(CD)).toBe(false);
   });
 
@@ -1102,11 +1103,7 @@ describe("alerts owed to Auto mode", () => {
     try {
       a.stampAuto(null);
       b.stampAuto(scopeOf("app"));
-      const { request, deferred } = a.submitNew({
-        sessionId: "s1",
-        sql: "SELECT 1",
-        autoEligible: true,
-      });
+      const { request, deferred } = a.submitNew({ sessionId: "s1", sql: "SELECT 1" });
       expect(deferred).toBe(true);
       expect(b.handOffAlerts([request.id], CD)).toBe("s1");
       b.stampAuto(null);
