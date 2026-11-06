@@ -72,35 +72,28 @@ function alerted(ctx: StoreContext, where: string, params: Record<string, unknow
   );
 }
 
-// What the plugin may still decide on its own, so a human is not needed yet: the reads, while
-// Auto mode is on, or every query, while its load check rejects heavy ones on arrival.
-export type AutoCovers = "read" | "all";
-
-/** Whether a request submitted now for this connection can wait for the plugin to decide. */
-export function autoCovers(ctx: StoreContext, connection: string | null, read: boolean): boolean {
-  const row = ctx.db
-    .prepare("SELECT auto_seen_at, auto_scope, auto_covers FROM alerts WHERE id = 1")
-    .get() as { auto_seen_at: number; auto_scope: string | null; auto_covers: string } | undefined;
+// Blind to the query on purpose: only the plugin knows what Auto mode and its load check will
+// decide, and a submitting process may run an older server than the one serving the plugin.
+/** Whether a request submitted now for this connection waits for the plugin to call a human. */
+export function autoCovers(ctx: StoreContext, connection: string | null): boolean {
+  const row = ctx.db.prepare("SELECT auto_seen_at, auto_scope FROM alerts WHERE id = 1").get() as
+    | { auto_seen_at: number; auto_scope: string | null }
+    | undefined;
   return (
     row !== undefined &&
     row.auto_seen_at > ctx.now() - AUTO_LIVE_MS &&
-    (connection === null || connection === row.auto_scope) &&
-    (row.auto_covers === "all" || (read && row.auto_covers === "read"))
+    (connection === null || connection === row.auto_scope)
   );
 }
 
-/** The plugin deciding `covers` for this connection scope, or nothing (`null`). */
-export function stampAuto(
-  ctx: StoreContext,
-  scope: string | null,
-  covers: AutoCovers = "read",
-): void {
+/** The plugin reporting in for this connection scope, or no plugin to wait for (`null`). */
+export function stampAuto(ctx: StoreContext, scope: string | null): void {
   ctx.db
     .prepare(
-      `INSERT INTO alerts (id, auto_seen_at, auto_scope, auto_covers) VALUES (1, @at, @scope, @covers)
-         ON CONFLICT (id) DO UPDATE SET auto_seen_at = @at, auto_scope = @scope, auto_covers = @covers`,
+      `INSERT INTO alerts (id, auto_seen_at, auto_scope) VALUES (1, @at, @scope)
+         ON CONFLICT (id) DO UPDATE SET auto_seen_at = @at, auto_scope = @scope`,
     )
-    .run({ at: scope === null ? 0 : ctx.now(), scope, covers });
+    .run({ at: scope === null ? 0 : ctx.now(), scope });
 }
 
 /** Requests the plugin leaves to a human, once nothing else will decide them. */
@@ -111,11 +104,9 @@ export function handOffAlerts(ctx: StoreContext, ids: string[], cooldownMs: numb
   return alerted(ctx, `alert_stage = 0 AND id IN (${list}) AND ${WAITING}`, params, cooldownMs);
 }
 
-/**
- * Requests the plugin no longer covers (deciding nothing, gone quiet, or elsewhere), and any
- * still owed at half their life: with every Auto mode run taken by long queries, it may never
- * get to them.
- */
+// Also any still owed at half their life: with every Auto mode run taken by long queries, the
+// plugin may never get to them.
+/** Requests the plugin no longer covers: gone quiet, an older plugin, or another connection. */
 export function releaseAlerts(ctx: StoreContext, cooldownMs: number): string | null {
   return alerted(
     ctx,
@@ -127,9 +118,15 @@ export function releaseAlerts(ctx: StoreContext, cooldownMs: number): string | n
 
 /** The one reminder a request a human was alerted to gets, once half its life has passed. */
 export function remindAlerts(ctx: StoreContext, cooldownMs: number): boolean {
-  return (
-    advance(ctx, "2", `alert_stage = 1 AND ${WAITING} AND ${PAST_HALF}`, {}, (now) =>
-      claimReminder(ctx, cooldownMs, now),
-    ) !== null
-  );
+  const due = `alert_stage = 1 AND ${WAITING} AND ${PAST_HALF}`;
+  const now = ctx.now();
+  // Claimed before any row moves: a reminder kept quiet next to a recent sound is due again on
+  // the next sweep, so it comes late rather than never.
+  const run = ctx.db.transaction((): boolean => {
+    if (!ctx.db.prepare(`SELECT 1 FROM requests WHERE ${due} LIMIT 1`).get({ now })) return false;
+    if (!claimReminder(ctx, cooldownMs, now)) return false;
+    ctx.db.prepare(`UPDATE requests SET alert_stage = 2 WHERE ${due}`).run({ now });
+    return true;
+  });
+  return run.immediate();
 }

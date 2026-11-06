@@ -1902,9 +1902,9 @@ describe("the poll's report to the broker", () => {
     app.autoCard = app.cards[2];
     app.autoAbort = new AbortController();
     await app.poll();
-    expect(sent()).toEqual({ auto: true, heavy: false, attention: ["req_0", "req_3"] });
+    expect(sent()).toEqual(["req_0", "req_3"]);
     await app.poll();
-    expect(sent(1)).toEqual({ auto: true, heavy: false, attention: [] });
+    expect(sent(1)).toEqual([]);
   });
 
   it("names a card whose evaluation timed out, before its calls settle", async () => {
@@ -1913,14 +1913,14 @@ describe("the poll's report to the broker", () => {
     app.autoAbort = new AbortController();
     app.autoAbort.abort();
     await app.poll();
-    expect(sent()).toEqual({ auto: true, heavy: false, attention: ["req_0"] });
+    expect(sent()).toEqual(["req_0"]);
   });
 
   it("still names waiting cards with Auto mode off, the moment it was switched off", async () => {
     const { app, sent } = polling([{}, {}]);
     app.autoEnabled = false;
     await app.poll();
-    expect(sent()).toEqual({ auto: false, heavy: false, attention: ["req_0", "req_1"] });
+    expect(sent()).toEqual(["req_0", "req_1"]);
   });
 
   it("names a card again unless the broker answered while it still waited under that lease", async () => {
@@ -1937,7 +1937,7 @@ describe("the poll's report to the broker", () => {
     await app.poll();
     app.cards[1].state = "ready";
     await app.poll();
-    expect(sent(1)).toEqual({ auto: true, heavy: false, attention: ["req_0", "req_1"] });
+    expect(sent(1)).toEqual(["req_0", "req_1"]);
   });
 
   it("names a card again after a failed answer", async () => {
@@ -1945,23 +1945,15 @@ describe("the poll's report to the broker", () => {
     pending.mockResolvedValueOnce(answer(500));
     await app.poll();
     await app.poll();
-    expect(sent(1)).toEqual({ auto: true, heavy: false, attention: ["req_0"] });
+    expect(sent(1)).toEqual(["req_0"]);
   });
 
   it("names at most 64 cards a poll, the rest on the next", async () => {
     const { app, sent } = polling(Array.from({ length: 70 }, () => ({ autoAttempt: 1 })));
     await app.poll();
     await app.poll();
-    expect(sent(0)).toEqual({
-      auto: true,
-      heavy: false,
-      attention: expect.toSatisfy((ids: string[]) => ids.length === 64),
-    });
-    expect(sent(1)).toEqual({
-      auto: true,
-      heavy: false,
-      attention: expect.toSatisfy((ids: string[]) => ids.length === 6),
-    });
+    expect(sent(0)).toHaveLength(64);
+    expect(sent(1)).toHaveLength(6);
   });
 
   // Auto-deny may still reject a card nobody needs to see: it is named once its check settled.
@@ -1970,10 +1962,10 @@ describe("the poll's report to the broker", () => {
     app.autoEnabled = false;
     settings.autoDenyHeavy = true;
     await app.poll();
-    expect(sent()).toEqual({ auto: false, heavy: true, attention: [] });
+    expect(sent()).toEqual([]);
     app.cards[0].loadChecked = true;
     await app.poll();
-    expect(sent(1)).toEqual({ auto: false, heavy: true, attention: ["req_0"] });
+    expect(sent(1)).toEqual(["req_0"]);
   });
 
   it("marks the card checked in the tick auto-deny reserves a heavy one", async () => {

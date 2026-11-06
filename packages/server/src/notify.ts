@@ -6,6 +6,9 @@ import { NOTIFY_PROMPT_TIMEOUT_MS, NOTIFY_TIMEOUT_MS } from "./config.js";
 export type NotifyMode = "both" | "banner" | "sound" | "off";
 
 const SOUND = "/System/Library/Sounds/Glass.aiff";
+// The reminder plays the alert sound twice, the second over the first's tail, so a human who
+// missed the first alert hears something new rather than one more request arriving.
+const REMIND_GAP_MS = 300;
 // UNUserNotificationCenter refuses an app LaunchServices has never seen, with no
 // prompt and no way to recover, so registration is a prerequisite and not a polish.
 const LSREGISTER =
@@ -198,10 +201,11 @@ export function createNotifier(deps: NotifyDeps = defaultDeps()) {
       }
     },
 
-    /** Ring again for a query still waiting: the same sound, never a second banner. Never throws. */
+    /** Ring again for a query still waiting: the sound twice, never a second banner. Never throws. */
     remind(): void {
       if (sounds) {
         swallow(deps.run("afplay", [SOUND], NOTIFY_TIMEOUT_MS));
+        setTimeout(() => swallow(deps.run("afplay", [SOUND], NOTIFY_TIMEOUT_MS)), REMIND_GAP_MS);
       }
     },
   };

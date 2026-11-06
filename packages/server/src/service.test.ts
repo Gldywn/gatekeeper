@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { MAX_WAIT_MS } from "./config.js";
+import { AUTO_LIVE_MS, MAX_WAIT_MS, NOTIFY_COOLDOWN_MS } from "./config.js";
+import { connectionScopeKey } from "./connection.js";
 import {
   cancelQuery,
   getQueryResult,
@@ -328,7 +329,7 @@ describe("submitQuery desktop alert", () => {
   });
 });
 
-describe("alerts once Auto mode is in play", () => {
+describe("alerts while the plugin reports in", () => {
   function recorder(sounds = true, active = true) {
     const calls: string[] = [];
     return {
@@ -343,13 +344,16 @@ describe("alerts once Auto mode is in play", () => {
     };
   }
 
-  it("leaves a read to Auto mode, and alerts a write at once", () => {
+  it("leaves every query to the plugin, and alerts at once when no plugin reports in", () => {
     const store = fresh();
     const { notifier, calls } = recorder();
     store.stampAuto("scope");
     submitQuery(store, { sessionId: "s1", sql: "SELECT 1" }, notifier);
-    expect(calls).toEqual([]);
     submitQuery(store, { sessionId: "s1", sql: "DELETE FROM t" }, notifier);
+    submitQuery(store, { sessionId: "s1", sql: 'SELECT 1 AS "into"' }, notifier);
+    expect(calls).toEqual([]);
+    const other = fresh();
+    submitQuery(other, { sessionId: "s1", sql: "SELECT 1" }, notifier);
     expect(calls).toEqual(["notify:audit"]);
   });
 
@@ -393,5 +397,101 @@ describe("alerts once Auto mode is in play", () => {
     expect(store.claimAlert(10_000)).toBe(true);
     store.close();
     expect(() => ringDue(store, recorder().notifier)).not.toThrow();
+  });
+});
+
+// The whole life of one request, from submission to its decision, with the broker's alerts
+// run at every step: only a request a human must decide ever rings.
+describe("a request through the plugin", () => {
+  const CONN = { connectionName: "app", databaseType: "postgresql", databaseName: "app" };
+  const SCOPE = connectionScopeKey(CONN);
+  const HALF_LIFE = 7.5 * 60_000;
+
+  function setup() {
+    const clock = { t: 1_000_000 };
+    const store = new RequestStore({ proposalTtlMs: 2 * HALF_LIFE, now: () => clock.t });
+    store.upsertSession({ sessionId: "s1" });
+    store.setSessionLabel("s1", "audit");
+    store.setConnection({ ...CONN, readOnly: false });
+    const calls: string[] = [];
+    const notifier = {
+      active: true,
+      sounds: true,
+      probe: () => {},
+      notify: () => calls.push("notify"),
+      remind: () => calls.push("remind"),
+    };
+    const submit = (sql = "SELECT 1") =>
+      submitQuery(store, { sessionId: "s1", sql }, notifier).requestId;
+    // One /pending poll: the plugin reports in, names what it leaves to a human, claims.
+    const poll = (attention: string[] = []) => {
+      store.stampAuto(SCOPE);
+      ringHandOff(store, notifier, attention);
+      return store.claimNext("p", 30_000, SCOPE);
+    };
+    const sweep = () => ringDue(store, notifier);
+    const approve = (lease: { id: string; leaseId: string | null }) => {
+      store.markExecuting(lease.id, lease.leaseId!, { source: "automatic" });
+      store.resolve(lease.id, lease.leaseId!, { status: "approved", rows: [], fields: [] });
+    };
+    return { clock, store, calls, submit, poll, sweep, approve };
+  }
+
+  it("never rings for a read Auto mode approves, then or later in its life", () => {
+    const { clock, calls, submit, poll, sweep, approve } = setup();
+    poll();
+    submit();
+    sweep();
+    poll();
+    clock.t += HALF_LIFE - 1;
+    // Its first lease lapsed meanwhile: re-offered, and claimed again.
+    const lease = poll()!;
+    sweep();
+    approve(lease);
+    clock.t += HALF_LIFE;
+    poll();
+    sweep();
+    expect(calls).toEqual([]);
+  });
+
+  it("rings once when the plugin leaves it to a human, then reminds once at half life", () => {
+    const { clock, calls, submit, poll, sweep } = setup();
+    poll();
+    const id = submit("DELETE FROM t");
+    poll();
+    poll([id]);
+    poll([id]);
+    sweep();
+    expect(calls).toEqual(["notify"]);
+    clock.t += HALF_LIFE;
+    poll();
+    sweep();
+    sweep();
+    expect(calls).toEqual(["notify", "remind"]);
+  });
+
+  it("rings from the sweep once the plugin stops reporting, and at once with no plugin", () => {
+    const { clock, calls, submit, poll, sweep } = setup();
+    poll();
+    submit();
+    clock.t += AUTO_LIVE_MS - 1;
+    sweep();
+    expect(calls).toEqual([]);
+    clock.t += 1;
+    sweep();
+    expect(calls).toEqual(["notify"]);
+    clock.t += NOTIFY_COOLDOWN_MS;
+    submit("SELECT 2");
+    expect(calls).toEqual(["notify", "notify"]);
+  });
+
+  // A plugin older than the hand-off never sends `attention`, and the broker then records no
+  // plugin to wait for (see broker.test.ts), so its submissions keep ringing at once.
+  it("rings at once while the plugin's report is cleared", () => {
+    const { store, calls, submit, poll } = setup();
+    poll();
+    store.stampAuto(null);
+    submit();
+    expect(calls).toEqual(["notify"]);
   });
 });

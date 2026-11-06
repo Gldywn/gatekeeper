@@ -8,7 +8,7 @@ import { type GatekeeperRequest, type Outcome, type RequestState, StoreError } f
 
 // `created` is false when an idempotency key replayed an existing proposal. The
 // desktop alert keys off it, so a retry never raises a second banner. `deferred` says the
-// alert of a new proposal waits for Auto mode, which may still approve it.
+// alert of a new proposal waits for the plugin, which raises it only if a human is needed.
 export interface SubmitOutcome {
   request: GatekeeperRequest;
   created: boolean;
@@ -24,9 +24,6 @@ export function submit(
     intent?: string;
     idempotencyKey?: string;
     policy?: unknown;
-    // The advisory class is a read: the one kind Auto mode can approve. Any query can still
-    // wait for the plugin while its load check may reject it on arrival.
-    autoEligible?: boolean;
   },
 ): SubmitOutcome {
   // IMMEDIATE so the idempotency check, the backpressure count, and the insert
@@ -68,7 +65,7 @@ export function submit(
     const now = ctx.now();
     const conn = getConnection(ctx);
     const connection = conn ? connectionScopeKey(conn) : null;
-    const deferred = autoCovers(ctx, connection, input.autoEligible === true);
+    const deferred = autoCovers(ctx, connection);
     const row: RawRow = {
       id: token("req"),
       created_at: now,

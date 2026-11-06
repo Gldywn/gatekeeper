@@ -151,7 +151,7 @@ async function main(): Promise<void> {
   scheduleRebind();
 
   // Only the broker owner sweeps, to avoid redundant cross-process writes. It also raises the
-  // alerts no submission can: Auto mode gone, and the reminder at half a proposal's life.
+  // alerts no submission can: the plugin gone, and the reminder at half a proposal's life.
   const sweep = setInterval(() => {
     if (brokerOwner) {
       // A throw here would exit the process, taking this agent's MCP session down, and the

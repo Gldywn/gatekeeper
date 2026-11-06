@@ -46,17 +46,19 @@ text.
 
 On macOS a proposal alerts only when a human is needed ([details](CONFIGURATION.md#desktop-notifications-macos)).
 Each request carries an alert stage in the shared SQLite file: owed to the plugin, alerted, or
-reminded. While the plugin can still decide on its own, its `/pending` poll says so: `auto=1`
-while Auto mode is on, `heavy=1` while Auto-deny heavy queries is on. The broker stamps that
-with the connection scope, and a read (Auto mode) or any query (auto-deny) submitted under a
-live stamp is stored as owed and stays silent. The same poll names the requests the plugin
-leaves to a human (`attention=`), once nothing else will decide them (the load check done
-while auto-deny is on, Auto mode done with them), and the broker alerts for those still owed.
-The broker owner's sweep alerts for owed requests the stamp no longer covers (the plugin
-deciding nothing, no report for 15 seconds, another connection) or still owed at half a
-proposal's life, and plays the one reminder at that point for those already alerted. First alerts share one 10-second cooldown, so requests due together
-ring once; a reminder stays quiet within 10 seconds of any sound but keeps a window of its own,
-so it never swallows a new request's alert.
+reminded. Every `/pending` poll names the requests the plugin leaves to a human
+(`attention=`, sent even empty), once nothing else will decide them (the load check done while
+auto-deny is on, Auto mode done with them). The broker stamps such a poll with the connection
+scope, and any request submitted under a live stamp is stored as owed and stays silent,
+whatever its SQL: the submitting process never judges what Auto mode will do, since it may run
+an older server than the one serving the plugin. The broker alerts for the named requests
+still owed. A submission with no live stamp (no plugin, one too old to send `attention`, or
+another connection) alerts at once from the submitting process. The broker owner's sweep
+alerts for owed requests the stamp no longer covers (no report for 15 seconds, another
+connection) or still owed at half a proposal's life, and plays the one reminder at that point
+for those already alerted. First alerts share one 10-second cooldown, so requests due together
+ring once; a reminder waits until 10 seconds after any sound but keeps a window of its own, so
+it never swallows a new request's alert.
 
 ## Access modes
 

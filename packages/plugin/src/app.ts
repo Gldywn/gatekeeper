@@ -2892,11 +2892,10 @@ export class Gatekeeper {
       .slice(0, ATTENTION_MAX);
     const leases = attention.map((c) => c.leaseId);
     try {
-      const res = await this.broker.pending(this.connScopeKey(), {
-        auto: this.autoEnabled,
-        heavy: this.autoDenying(),
-        attention: attention.map((c) => c.id),
-      });
+      const res = await this.broker.pending(
+        this.connScopeKey(),
+        attention.map((c) => c.id),
+      );
       if (connection !== this.connGeneration || active !== this.activeGen) return;
       if (res.status === 401) {
         this.polling = false;

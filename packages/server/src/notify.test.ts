@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NOTIFY_PROMPT_TIMEOUT_MS, NOTIFY_TIMEOUT_MS } from "./config.js";
 import {
   bannerArgs,
@@ -323,20 +323,54 @@ describe("notify", () => {
 });
 
 describe("remind", () => {
-  it("plays the alert sound alone, with no banner and no registration", async () => {
+  const glass = {
+    cmd: "afplay",
+    args: ["/System/Library/Sounds/Glass.aiff"],
+    timeoutMs: NOTIFY_TIMEOUT_MS,
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("plays the alert sound twice, 300 ms apart, with no banner and no registration", async () => {
     for (const mode of ["both", "sound"] as const) {
       const { calls, notifier } = harness({ mode });
       expect(notifier.sounds).toBe(true);
       notifier.remind();
       await settle();
-      expect(calls).toEqual([
-        {
-          cmd: "afplay",
-          args: ["/System/Library/Sounds/Glass.aiff"],
-          timeoutMs: NOTIFY_TIMEOUT_MS,
-        },
-      ]);
+      expect(calls).toEqual([glass]);
+      vi.advanceTimersByTime(299);
+      await settle();
+      expect(calls).toEqual([glass]);
+      vi.advanceTimersByTime(1);
+      await settle();
+      expect(calls).toEqual([glass, glass]);
     }
+  });
+
+  it("still plays the second sound when the first fails, and never throws", async () => {
+    const calls: string[] = [];
+    const notifier = createNotifier({
+      run: async (cmd) => {
+        calls.push(cmd);
+        throw new Error("afplay failed");
+      },
+      platform: "darwin",
+      mode: "sound",
+      bundle: "/pkg/Gatekeeper.app",
+      helper: "/pkg/Gatekeeper.app/Contents/MacOS/gatekeeper-notify",
+      exists: () => true,
+      log: () => {},
+    });
+    expect(() => notifier.remind()).not.toThrow();
+    vi.advanceTimersByTime(300);
+    await settle();
+    expect(calls).toEqual(["afplay", "afplay"]);
   });
 
   it("stays silent in banner mode, when switched off, and off macOS", async () => {
@@ -348,6 +382,7 @@ describe("remind", () => {
       const { calls, notifier } = harness(overrides);
       expect(notifier.sounds).toBe(false);
       notifier.remind();
+      vi.advanceTimersByTime(300);
       await settle();
       expect(calls).toEqual([]);
     }

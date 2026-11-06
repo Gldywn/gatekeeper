@@ -153,11 +153,10 @@ export function submitQuery(store: RequestStore, input: SubmitInput, notifier?: 
     idempotencyKey: input.idempotencyKey,
     // Stamp the risk class into the persisted policy for the audit trail.
     policy: { class: risk.class, ok: risk.ok },
-    autoEligible: risk.class === "read",
   });
   // Guarded because the claim is a synchronous write on an already-accepted proposal:
   // losing an alert is acceptable, losing the agent's request id is not. A deferred alert
-  // rings later, from the broker, once Auto mode leaves the request to a human.
+  // rings later, from the broker, once the plugin leaves the request to a human.
   if (created && !deferred && notifier?.active) {
     try {
       if (store.claimAlert(NOTIFY_COOLDOWN_MS)) {
@@ -176,15 +175,15 @@ function ring(store: RequestStore, notifier: Notifier, session: string | null): 
   if (session !== null) notifier.notify(store.getSession(session)?.sessionLabel);
 }
 
-/** Ring for requests the plugin's Auto mode leaves to a human. A failed write throws, so the
- * poll fails and the plugin reports them again. */
+/** Ring for requests the plugin leaves to a human. A failed write throws, so the poll fails
+ * and the plugin reports them again. */
 export function ringHandOff(store: RequestStore, notifier: Notifier, ids: string[]): void {
   if (notifier.active && ids.length) {
     ring(store, notifier, store.handOffAlerts(ids, NOTIFY_COOLDOWN_MS));
   }
 }
 
-/** The broker owner's periodic alerts: requests Auto mode stopped covering, then reminders. */
+/** The broker owner's periodic alerts: requests the plugin stopped covering, then reminders. */
 export function ringDue(store: RequestStore, notifier: Notifier): void {
   if (!notifier.active) return;
   try {
