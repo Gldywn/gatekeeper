@@ -382,8 +382,8 @@ questions and cutoffs and do not establish a general privacy error rate. They ar
 single-table projections with a LIMIT, plus a few filters, orderings, joins, GROUP BY,
 count, sum, min and max, UNION and INTERSECT, uncorrelated `IN` subqueries, one CTE and JSON
 key reads. Live evidence covers only the exact SQL forms in these corpora: the rest of the
-supported subset, the first example under "Supported SQL" included, has deterministic and
-mocked coverage only. Full provenance and method are in the evaluation bench documentation.
+supported subset, the first example under "Supported SQL" included, has no live evidence.
+Full provenance and method are in the evaluation bench documentation.
 
 The export cases are synthetic versions of 15 distinct exported investigations, with
 inferred catalog types that have not been checked against a real database. One of them
