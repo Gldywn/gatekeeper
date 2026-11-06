@@ -77,13 +77,10 @@ const sourceThresholds = JSON.parse(
 );
 const selected = (id: string): Case => corpus.find((c) => c.id === id)!;
 const currentQuestions = JSON.parse(
-  await readFile(new URL("auto-beta-7-questions.json", import.meta.url), "utf8"),
-);
-const beta6Questions = JSON.parse(
-  await readFile(new URL("auto-beta-6-questions.json", import.meta.url), "utf8"),
+  await readFile(new URL("auto-v10-questions.json", import.meta.url), "utf8"),
 );
 const productionThresholds = JSON.parse(
-  await readFile(new URL("auto-beta-7-thresholds.json", import.meta.url), "utf8"),
+  await readFile(new URL("auto-v10-thresholds.json", import.meta.url), "utf8"),
 );
 const probabilities = Object.fromEntries(
   Object.keys(questions).map((id) => [id, id === "read_only" ? 0.99 : 0.01]),
@@ -259,7 +256,7 @@ describe("Auto evaluation bench (synthetic, no calibration)", () => {
   it("refuses a live run of a report prepared under an older policy", async () => {
     const fetch = vi.fn(async () => answer());
     vi.stubGlobal("fetch", fetch);
-    const report = { ...prepare(allCases, questions, "validation"), baselinePolicy: "auto-beta-7" };
+    const report = { ...prepare(allCases, questions, "validation"), baselinePolicy: "auto-beta-8" };
     await expect(
       runLive(report, "synthetic-key", new AbortController().signal, async () => {}),
     ).rejects.toThrow("Prepared under another policy");
@@ -476,15 +473,13 @@ describe("Auto evaluation bench (synthetic, no calibration)", () => {
   it("pins production to the questions measured live, without the read-only question", () => {
     const report = prepare(corpus, evaluationQuestions, "development");
     expect(evaluationQuestions).toEqual(currentQuestions);
-    // Question digest recorded by the live candidate reports this profile was chosen from.
-    // Production asks the same questions verbatim, minus read_only: the local analysis
-    // decides read-only behavior.
-    expect(digest(beta6Questions)).toBe(
-      "efc206d53ee44979d566aeb605659ad8a9300cd446e7671befa333b11f726bee",
+    // Question digest recorded by the live reports this policy was measured with. No
+    // read_only question: the local analysis decides read-only behavior.
+    expect(report.questionDigest).toBe(
+      "6eb5f382f48fd13433ceefbfc1c73d2f23491e4b27bfc0bb0706683d75e8e230",
     );
-    const { read_only: _, ...measured } = beta6Questions;
-    expect(evaluationQuestions).toEqual(measured);
-    const { read_only: __, ...sourceCutoffs } = sourceThresholds;
+    expect(evaluationQuestions).not.toHaveProperty("read_only");
+    const { read_only: _, ...sourceCutoffs } = sourceThresholds;
     expect(productionThresholds).toEqual({ ...sourceCutoffs, personal_disclosure: 0.2 });
     expect(report.thresholds).toEqual(productionThresholds);
     expect(AUTO_THRESHOLDS).toEqual(productionThresholds);
@@ -492,7 +487,7 @@ describe("Auto evaluation bench (synthetic, no calibration)", () => {
     expect(PLUGIN_MODEL).toBe(AUTO_MODEL);
     expect(AUTO_MODEL).toBe("jev-1.13.0");
     expect(PLUGIN_POLICY).toBe(AUTO_POLICY);
-    expect(report.baselinePolicy).toBe("auto-beta-8");
+    expect(report.baselinePolicy).toBe("auto-v10");
   });
   it.each(Object.keys(productionThresholds))(
     "server and plugin enforce the retained %s cutoff independently",

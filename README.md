@@ -33,7 +33,7 @@ Shine by Swoop: https://uppbeat.io/t/swoop/shine
 </details>
 
 > [!TIP]
-> **Auto mode beta:** explicitly enable automatic approval for a narrow PostgreSQL read subset. Local checks and Jev must both pass. See [Auto mode](docs/AUTO-MODE.md) for setup, provider sharing and limitations.
+> **Auto mode:** explicitly enable automatic approval for a narrow PostgreSQL read subset. Local checks and Jev must both pass. See [Auto mode](docs/AUTO-MODE.md) for setup, provider sharing and limitations.
 
 ## The three pieces
 
