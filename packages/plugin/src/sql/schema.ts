@@ -227,7 +227,7 @@ export function sensitiveShape(value: string): boolean {
 
 /** Local sensitive-name screening for every source, alias and JSON key sent for evaluation. */
 export function sensitiveReference(name: string): boolean {
-  // ponytail: beta exempts ID names, stronger identifier checks need relation context.
+  // ponytail: ID names are exempt, stronger identifier checks need relation context.
   if (IDENTIFIER.test(name)) return false;
   // A bare `name` is a product's as often as a person's: Jev tells them apart from the
   // relation, while first_name, full_name or company_name still hold through the fragments.

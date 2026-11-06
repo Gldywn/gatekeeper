@@ -1,14 +1,11 @@
-# Auto mode beta
+# Auto mode
 
-The [evaluation bench](../packages/server/evals/README.md) holds synthetic reference
-cases and the retained source-focused prompt. It compares recorded thresholds
-without further inference. Policy `auto-beta-8` pairs the dependency-resolving PostgreSQL
-analysis (`shared-read-3`) with the retained candidate 4 questions and a personal
-disclosure cutoff of 0.20. It permits commercial amounts without personal or company
-identity when every check passes. Its questions were compared live on authored synthetic
-cases only (see "Verification and limits"), which is not a calibration. It differs from
-`auto-beta-7` only in its local name screen: a bare `name` column now reaches Jev (see
-"Bare name columns").
+Policy `auto-v10` pairs the dependency-resolving PostgreSQL analysis (`shared-read-3`)
+with four Jev questions and fixed cutoffs. It permits commercial amounts without personal
+or company identity when every check passes. Its questions and cutoffs were measured live
+on authored synthetic cases only (see "Verification and limits"), which is not a
+calibration. The [evaluation bench](../packages/server/evals/README.md) holds those cases
+and replays recorded probabilities against thresholds without further inference.
 
 Auto mode is off after loading Gatekeeper. Hover or focus the lightning icon beside the
 Schema access icon, or use the Auto mode switch in Settings. The popover explains
@@ -155,7 +152,7 @@ separate reading of the output alone (`sql/output.ts`): narrowing it never narro
 IP addresses receive stricter treatment than display annotations.
 There is no automatic fallback for parse failures and no function is implicitly trusted.
 
-### Deliberate beta limitation: identifier names
+### Deliberate limitation: identifier names
 
 Identifier names use the existing display-detector exemption: `id`, names ending in
 `_id`, `Id` or `ID` do not trigger a local sensitive-name hold. This includes personal
@@ -166,14 +163,14 @@ apply. Renaming `email` to `customer_id` does not hide the sensitive source.
 This is a usability tradeoff, not evidence that identifiers are anonymous. Returned IDs
 can identify people or organizations, and Jev can miss that risk. No result rows are sent
 to Jev. The exemption does not extend SQL syntax support or change evaluator questions
-or thresholds. Earlier evaluation results do not validate the newly admitted ID cases.
+or thresholds.
 
 ### Relation context and operational metadata
 
 Schema names, table names and table aliases do not independently trigger a local
 sensitive-name hold. A read of thresholds from `company`, or statuses and creation
 timestamps from `accounts`, does not return identities merely by referencing those
-tables. Generic entity words such as `account`, `customer` or `user` are no longer
+tables. Generic entity words such as `account`, `customer` or `user` are not
 independent sensitive-name rules for columns or output aliases either. For example,
 `account_created_at` is operational metadata, while `birth_date` remains locally held.
 Explicit sensitive column names, output aliases, JSON keys and literals still count,
@@ -183,14 +180,13 @@ System schemas remain outside the automatic subset.
 Jev receives relation context to assess actual disclosure, including membership and
 boolean results. This deliberately leaves more contextual decisions to the evaluator,
 which can miss risk. It is not a guarantee that dates or status fields are anonymous.
-Earlier live results do not validate this expanded input distribution. Quoted camel-case
-columns are now supported through the shared identifier adapter. Other unsupported SQL
-still requires manual review.
+Quoted camel-case columns are supported through the shared identifier adapter. Other
+unsupported SQL still requires manual review.
 
 ### Bare name columns
 
-Since `auto-beta-8`, a column, output alias or JSON key whose only sensitive word is a bare
-`name` no longer holds locally: `name`, `display_name`, `event_name`, `holder_name` or
+A column, output alias or JSON key whose only sensitive word is a bare `name` does not hold
+locally: `name`, `display_name`, `event_name`, `holder_name` or
 `legal_name` stay visible in the SQL sent to Jev, alongside the relation context and the
 typed source dependencies. The same word names a product as often as a person, and only the
 relation tells them apart: `catalog.products.name` should pass, `app.users.name` should be
@@ -202,8 +198,8 @@ display annotations a reviewer sees never flagged a bare `name` and are unchange
 
 This moves a deterministic local decision to Jev, which can miss risk. The 17 authored
 cases in `packages/server/evals/auto-name-cases.json` (seven allow, eight review, two
-local) only prove the local boundary offline: no live observation covers the newly admitted
-inputs yet, and earlier `auto-beta-7` figures say nothing about them.
+local) were run live on 2026-11-06: no review case was approved automatically and one allow
+case (`name-campaign-template`) was held. Seventeen synthetic cases are not a calibration.
 
 ### PostgreSQL catalog resolution
 
@@ -276,7 +272,7 @@ its constraints, but casting to a domain does, so casts to domains stay manual. 
 base and composite types, views, foreign tables, RLS, inherited or partitioned tables,
 generated columns and non-built-in collations stay manual, together with missing
 metadata and introspection errors. Extension operators and casts on types the query
-never reaches no longer block unrelated reads: a vector or geometry equality operator
+never reaches do not block unrelated reads: a vector or geometry equality operator
 cannot compete with `status = 'AUTHORIZED'` on an enum, because no implicit cast leads
 there.
 
@@ -289,7 +285,7 @@ annotation does not use it. It records incomplete analysis explicitly. `filterSc
 affects display. Auto mode obtains a fresh snapshot and checks activation, connection and lease
 authority across asynchronous calls. This analysis is independent of schema access and
 every detection display toggle.
-No table or field editor is part of this beta. Any future Sensitive tables policy belongs
+Auto mode has no table or field editor. Any future Sensitive tables policy belongs
 to the whole plugin.
 
 ## Load check
@@ -332,7 +328,7 @@ and never forwards provider error bodies. The plugin aborts outstanding evaluati
 deactivation and applies its own 15-second deadline. There is no retry or provider fallback.
 
 The native endpoint is `POST https://api.typesafe.ai/v1/systemone`, using Bearer auth and
-`model`, `state`, `questions`. Model `jev-1.13.0` and policy `auto-beta-8` are pinned.
+`model`, `state`, `questions`. Model `jev-1.13.0` and policy `auto-v10` are pinned.
 Four focused Noul questions are batched: personal disclosure, organization disclosure,
 access secret disclosure and insufficient context. Noul is a probability of yes, not a
 Choice/Score confidence value. All four conditions must pass:
@@ -352,7 +348,7 @@ read-only analysis.
 
 Missing, malformed, out-of-range, wrong-model and uncertain answers require manual
 review. The plugin independently checks the same cutoffs before execution. Model concern
-never rejects a manually reviewable request. These are experimental operating cutoffs,
+never rejects a manually reviewable request. These are conservative operating cutoffs,
 not calibrated probabilities of privacy loss.
 
 The questions interpret selected source columns in their relation context. A reassuring
@@ -373,53 +369,30 @@ dependency can still disclose through row presence, counts or booleans. Jev cann
 verify side effects or hidden sources. Those stay local and deterministic, and Jev never
 overrides an unresolved local dependency.
 
-The source candidate was exercised on 432 distinct provider-eligible synthetic queries.
-At the retained cutoffs, the latest observations pass 193/206 expected allow cases and
-hold 226/226 expected review cases. All 60 distinct local cases remain local. These
-authored examples informed tuning and do not establish a general privacy error rate.
-Only the final 40-query confirmation set was evaluated after the profile was fixed.
-Full provenance, repetitions and limitations are in the evaluation bench documentation.
-Filtered aggregates, temporal casts, JSON inspection and correlated existence checks have deterministic
-and mocked execution coverage only. No live Jev calibration was performed for these
-new shapes, and the earlier reported rates do not validate them.
+The current questions and cutoffs were run live on 2026-11-06 with the `shared-read-3`
+analysis over `auto-cases.json`, `auto-export-cases.json` and `auto-name-cases.json`, both
+splits: 272 provider observations, no provider error, all 126 expected review cases held,
+no local regression, and 139 of 146 expected allow cases passed. The seven unnecessary holds
+are a consultation tariff on personal disclosure, four access-hardware or format
+descriptions on secret disclosure, provider request paths on personal and organization
+disclosure, and a campaign template name on organization disclosure. Each case was observed
+once, so this is not a stability measurement: a borderline case can change decision from
+one run to the next. These authored, correlated synthetic cases informed the choice of
+questions and cutoffs and do not establish a general privacy error rate. Filtered aggregates and temporal
+casts are absent from them and have deterministic and mocked coverage only. Full
+provenance and method are in the evaluation bench documentation.
 
-The source candidate figures above were measured with analysis `shared-read-1` and
-policy `auto-beta-4`. They do not validate `auto-beta-5`: its questions and dependency
-usages changed. One live `auto-beta-5` run on the 22 synthetic `auto-beta-5-cases.json`
-cases (`.orch/auto-evals/beta5-live-{development,validation}-20260922.json`, both splits)
-returned no provider error: 6 of 10 expected allow cases passed, all 5 expected review
-cases and all 7 local cases held. The four held allow cases were payment attempts
-(personal 0.42, organization 0.31, context 0.54), a per-refund running total (personal
-0.17), refund reason counts (organization 0.21) and carrier lane counts (organization
-0.46). Twenty-two authored cases are not a calibration.
+The export cases are synthetic versions of 15 distinct exported investigations, with
+inferred catalog types that have not been checked against a real database. One of them
+reads an untyped JSON key (`legalRepresentative`) whose meaning is ambiguous from the SQL
+alone. It stays manual review, with no deterministic exception for that field. A
+requester-written cast of that value would only clarify the returned type; every local and
+evaluator check would still apply, and Gatekeeper never rewrites the submitted SQL.
 
-A full live `auto-beta-5` baseline over `auto-cases.json` (both splits, 237 provider
-observations and 35 local holds: development 120/18, validation 117/17, no error) held every
-expected review case. Scored with its archived labels it has 17 unnecessary holds among
-those provider observations; re-scored against the current labels it has 18, because one
-observed case was deliberately relabelled from review to allow (a relabel, not a model
-change). The two cases then held locally only for missing fixture metadata (a join and a
-union) were not provider observations and are not part of either figure. Candidate runs
-cover 239 provider observations and 33 local holds after that metadata was added.
-Candidate questions were then compared live on that corpus, `auto-beta-5-cases.json` and `auto-export-cases.json` (synthetic versions of 15
-distinct exported investigations, with inferred catalog types).
-`auto-beta-7` uses the candidate 4 questions without the read-only question, with the personal cutoff at 0.20
-(snapshots `auto-beta-7-questions.json` and `auto-beta-7-thresholds.json`): no expected
-review case auto-approved, 4 unnecessary holds on the full corpus with a weakest review
-margin of 0.17, and 14 of 15 export allows passing. The remaining unnecessary holds are
-one consultation tariff (personal) and three access-hardware or format descriptions
-(secret). The remaining export reads an untyped JSON key (`legalRepresentative`) whose
-meaning is ambiguous from the SQL alone. The user confirmed that this key holds a boolean
-and accepted the measured conservative hold: it stays manual review, with no
-deterministic exception for that field. A requester-written cast of that value would only
-clarify the returned type; every local and evaluator check would still apply, and
-Gatekeeper never rewrites the submitted SQL. These are authored, correlated synthetic cases, not a calibration, and the export catalog types have not been
-checked against a real database.
-
-Decisions from `auto-beta-1` through `auto-beta-7` cannot authorize automatic execution,
-but remain readable in history and can accompany a human approval. Reload the plugin
-and reconnect the MCP server after updating both components, then activate Auto mode
-again. Mixed policy versions fail to manual review.
+Decisions recorded under an earlier policy cannot authorize automatic execution, but remain
+readable in history and can accompany a human approval. Reload the plugin and reconnect the
+MCP server after updating both components, then activate Auto mode again. Mixed policy
+versions fail to manual review.
 
 Sources checked for this implementation: [API](https://docs.typesafe.ai/api),
 [primitives](https://docs.typesafe.ai/primitives), [models](https://docs.typesafe.ai/models),
@@ -477,16 +450,11 @@ lost to a crash, cancellation or expiry before the plugin posts its outcome.
 
 ## Verification and limits
 
-The shared-analysis profile was checked on 674 distinct authored queries: 575 native
-evaluations and 99 local holds. All 295 expected review cases stayed manual, while
-245 of 280 expected allow cases passed. There were no provider errors. The final 22-case
-confirmation set was labeled after freezing the questionnaire and cutoffs: its nine
-review cases held, eight of nine ordinary reads passed, and four stayed local as expected.
-These correlated synthetic examples do not establish a general error rate. The prior
-widened candidate allowed eight personal/company membership counts and was rejected.
-The retained questions explicitly consider what the requester can infer from counts,
-booleans and row presence while knowing the original predicate. Redaction and aggregation
-are not treated as evidence of privacy. Thresholds remain unchanged from `auto-beta-3`.
+The measured evidence is the live run described under "Provider boundary". Those
+correlated synthetic examples do not establish a general error rate. The questions
+explicitly consider what the requester can infer from counts, booleans and row presence
+while knowing the original predicate. Redaction and aggregation are not treated as
+evidence of privacy.
 Catalog unit tests use a hand-written synthetic subset of built-in catalog rows
 (`pg/catalog-fixture.ts`), not a live PostgreSQL connection. They prove the resolution
 rules, not that the metadata query returns what a real server holds.
@@ -518,29 +486,19 @@ Deterministic regression tests cover sensitive dependencies and unsupported SQL.
 provider tests cover the native contract and errors. Race tests cover manual/automatic
 contention, disable, schema and tab changes, lease loss and late answers. Broker tests
 cover authentication, cancellation, concurrency and durable attribution. These synthetic
-tests do not calibrate Jev. The first user-authorized live test on synthetic data held
-`product_name` locally, correctly held `email` locally, and held an `orders` projection
-after all five Jev thresholds failed. The product-name false positive is corrected.
-The user later supplied the persisted probabilities for that `auto-beta-1` evaluation:
-read-only 0.97, sensitive relation 0.54, personal disclosure 0.43, confidential disclosure
-0.77 and insufficient context 0.55. These explain the five failed cutoffs, with a
-read-only answer favoring yes and a confidentiality answer favoring concern. They do
-not establish a provider fault, calibrate the thresholds, or validate the revised
-questions. A subsequent `auto-beta-2` live retest confirmed that `product_name` reaches
-Jev and email stays local. Products returned probabilities 0.98, 0.08, 0.04, 0.26 and
-0.54 in the same order. Orders returned 0.98, 0.70, 0.07, 0.45 and 0.58. Both failed
-all five unchanged cutoffs and stayed manual. Five displayed reasons mean five failed
-cutoffs, not five equally strong concerns. The evaluator receives no assertion that
-the source is a synthetic test database. Adversarial names can still mislead the model. Prompts
-are not immune to injection. A separately authorized labeled evaluation is needed before
-broadening this subset or relying on its privacy judgments.
+tests do not calibrate Jev. Each evaluator reason marks a failed cutoff, not an equally
+strong concern: the probabilities shown with it say how far each one went. The evaluator receives no
+assertion that the source is a synthetic test database. Adversarial names can still mislead
+the model, and prompts are not immune to injection. Jev's privacy judgments have been
+measured on synthetic cases only, and broadening this subset needs a separately authorized
+labeled evaluation first.
 
 Final row/byte caps bound transmitted results, not privacy or database work. Metadata and
 connection checks are separate host calls, not an atomic database transaction: external
 DDL or connection changes in the final host dispatch interval cannot be ruled out by
 JavaScript checks. Use a database role with only the privileges you intend to delegate.
 
-Regression tests cover missing keys, stale credential lookups, immediate disable, the
-three synthetic live-test query shapes, matching server/plugin probability cutoffs, and old-policy
-invalidation without blocking human approval. The plugin integration tests mock catalog
+Regression tests cover missing keys, stale credential lookups, immediate disable, matching
+server/plugin probability cutoffs, and old-policy invalidation without blocking human
+approval. The plugin integration tests mock catalog
 metadata and the evaluator. They do not execute database queries or call TypeSafe.

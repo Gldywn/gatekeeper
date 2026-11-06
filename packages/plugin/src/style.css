@@ -3715,10 +3715,6 @@ code.tool,
   background: color-mix(in oklch, var(--text) 8%, transparent);
   font-weight: 500;
 }
-.set-rec.auto {
-  color: var(--auto);
-  border-color: color-mix(in oklch, var(--auto) 45%, transparent);
-}
 p.auto-message {
   margin: 4px 0 0;
   font-size: 11.5px;

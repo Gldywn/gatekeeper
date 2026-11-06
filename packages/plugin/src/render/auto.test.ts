@@ -1,5 +1,6 @@
 import type { ApprovalAttribution } from "@gatekeeper/shared";
 import { describe, expect, it } from "vitest";
+import { AUTO_POLICY } from "../sql/auto";
 import { activityEntryHtml } from "./activity";
 import { approvalHtml, autoPopHtml, autoSettingsHtml } from "./auto";
 import { modeDropdown } from "./controls";
@@ -23,8 +24,10 @@ describe("Auto mode surfaces", () => {
     expect(disclosure.split(/\s+/).length).toBeLessThanOrEqual(40);
     expect(pop.slice(pop.indexOf("sa-on"))).toContain("Disable Auto mode");
     const settings = autoSettingsHtml(false);
-    expect(settings).toContain("TypeSafe receives SQL structure");
-    expect(settings).toContain("No result rows are sent");
+    expect(settings).toContain("TypeSafe sees the SQL structure and schema names");
+    expect(settings).toContain("never result rows");
+    expect(settings).toContain("PostgreSQL only.");
+    expect(pop + settings).not.toMatch(/beta/i);
     expect(settings).toContain('type="password"');
     // The key stays replaceable while Auto mode runs.
     expect(autoSettingsHtml(true)).toContain('type="password"');
@@ -37,14 +40,12 @@ describe("Auto mode surfaces", () => {
       const html = modeDropdown("read", compact, true);
       expect(html).not.toContain("aria-disabled");
       // The menu keeps its ordinary labels; what a switch costs is explained in the
-      // popover and in Settings, not repeated under every option.
+      // popover and in the arm confirm, not repeated under every option.
       expect(html).toContain('adds <code class="kw">INSERT</code>, <code class="kw">UPDATE</code>');
       expect(html).not.toContain("Auto mode");
       expect(html).toContain('data-mode-opt="write"');
       expect(html).toContain('data-mode-opt="destructive"');
-      expect(autoSettingsHtml(true)).toContain(
-        "Confirming Write or Destructive turns off Auto mode",
-      );
+      expect(autoPopHtml()).toContain("confirming Write or Destructive turns off Auto mode");
       expect(autoPopHtml()).not.toContain("stay unavailable");
     },
   );
@@ -157,6 +158,18 @@ describe("the resolved Auto trace", () => {
     eligible: false,
     reasons,
     probabilities: { personal_disclosure: 0.9 },
+  });
+
+  it("grades only the current policy and keeps an older record's numbers as stored", () => {
+    const current = { ...refusal([]), policy: AUTO_POLICY };
+    expect(approvalHtml({ source: "human", evaluation: current })).toContain("metric over");
+    const older = approvalHtml({
+      source: "human",
+      evaluation: { ...current, policy: "auto-beta-8" },
+    });
+    expect(older).toContain("policy auto-beta-8");
+    expect(older).toContain("personal_disclosure 0.9");
+    expect(older).not.toContain("metric over");
   });
 
   it("says Jev did not clear a refused read, without the evaluator's labels", () => {

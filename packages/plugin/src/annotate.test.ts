@@ -44,7 +44,7 @@ describe("SchemaAnnotator.schemaFor", () => {
       });
       expect(await annotator.inspectRead("SELECT quantity FROM public.products")).toEqual({
         complete: false,
-        reasons: ["Auto mode beta supports PostgreSQL only"],
+        reasons: ["Auto mode supports PostgreSQL only"],
       });
       await annotator.schemaFor("SELECT quantity FROM public.products");
       expect(getMetadata).not.toHaveBeenCalled();

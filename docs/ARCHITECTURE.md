@@ -76,7 +76,7 @@ execution, so arming and disarming take effect immediately. Read is not a guaran
 side effects: a `SELECT` can call a volatile function, so the human approval on the visible
 SQL is the real backstop. See [`SECURITY.md`](../SECURITY.md).
 
-Auto mode beta is a separate ephemeral toggle that forces Read only. Confirming a switch
+Auto mode is a separate ephemeral toggle that forces Read only. Confirming a switch
 to Write or Destructive disables Auto mode before arming the selected mode. Cancelling
 the confirmation leaves Auto mode active. Its PostgreSQL-only subset requires successful parsing, complete catalog
 metadata, local sensitivity checks and a pinned Jev evaluation. Provider errors or concerns

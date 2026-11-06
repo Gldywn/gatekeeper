@@ -6,7 +6,7 @@ version: 0.3.1 # x-release-please-version
 
 # Gatekeeper
 
-Gatekeeper is a bridge to a live database with manual approval by default. You **propose** SQL; the plugin runs approved queries in Beekeeper Studio and returns rows to you. You never hold credentials, connect to the database or run SQL yourself. Only the human can enable Auto mode beta for restricted reads. Never enable or configure it on their behalf, ask for its provider key, or treat agent intent as authorization. Writes always require human approval.
+Gatekeeper is a bridge to a live database with manual approval by default. You **propose** SQL; the plugin runs approved queries in Beekeeper Studio and returns rows to you. You never hold credentials, connect to the database or run SQL yourself. Only the human can enable Auto mode for restricted reads. Never enable or configure it on their behalf, ask for its provider key, or treat agent intent as authorization. Writes always require human approval.
 
 Use Gatekeeper whenever your task touches the database at all: reading data, exploring a schema, checking analytics, verifying a migration, debugging against real data, or making an approved change. It is the default path to the database, not a special case. If you are tempted to reach for a direct connection or your own credentials, use Gatekeeper instead.
 

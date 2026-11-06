@@ -112,7 +112,7 @@ describe("plugin-only automatic evaluation", () => {
       scope: connectionScopeKey(conn),
       key: "synthetic-key",
       model: "jev-1.13.0",
-      policy: "auto-beta-8",
+      policy: "auto-v10",
       input: {
         dialect: "postgresql",
         sql: "SELECT quantity FROM public.products LIMIT 10",
@@ -132,7 +132,7 @@ describe("plugin-only automatic evaluation", () => {
     return {
       provider: "typesafe",
       model: "jev-1.13.0",
-      policy: "auto-beta-8",
+      policy: "auto-v10",
       sqlDigest: digest,
       evaluatedAt: Date.now(),
       eligible: true,
@@ -160,7 +160,7 @@ describe("plugin-only automatic evaluation", () => {
         .status,
     ).toBe(400);
     expect(
-      (await call("POST", "/evaluate", { token: TOKEN, body: { ...body, policy: "auto-beta-7" } }))
+      (await call("POST", "/evaluate", { token: TOKEN, body: { ...body, policy: "auto-beta-8" } }))
         .status,
     ).toBe(400);
     expect(evaluator).not.toHaveBeenCalled();
@@ -198,7 +198,7 @@ describe("plugin-only automatic evaluation", () => {
     expect(store.listActivity(body.scope)[0].approval).toEqual(approval);
     expect(JSON.stringify(store.get(body.id))).not.toContain("synthetic-key");
   });
-  it.each(["auto-beta-1", "auto-beta-2", "auto-beta-3"])(
+  it.each(["auto-beta-1", "auto-beta-2", "auto-beta-3", "auto-beta-8"])(
     "preserves %s attribution for human approval without granting automatic authority",
     async (policy) => {
       const body = payload();

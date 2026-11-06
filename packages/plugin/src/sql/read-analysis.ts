@@ -17,7 +17,7 @@ export interface ReadSnapshot {
 /** Shared read analysis, independent of activation and display preferences. */
 export function planRead(sql: string, databaseType: string): ReadPlan | string {
   // Auto mode is PostgreSQL only: other engines, look-alikes included, never reach catalog SQL.
-  if (databaseType !== "postgresql") return "Auto mode beta supports PostgreSQL only";
+  if (databaseType !== "postgresql") return "Auto mode supports PostgreSQL only";
   if (sql.length > 12000) return "Query exceeds the automatic evaluation budget";
   const verdict = classifyQuery(sql, databaseType);
   const text = readPg(sql);

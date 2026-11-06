@@ -19,7 +19,7 @@ rejects it. On approval the query runs on the connection Beekeeper already holds
 flow back to the agent.
 
 The agent never holds database credentials. Approval is manual by default. A human can
-explicitly enable Auto mode beta in the plugin for a restricted PostgreSQL read subset,
+explicitly enable Auto mode in the plugin for a restricted PostgreSQL read subset,
 using local checks and TypeSafe's pinned Jev evaluator. The API key and evaluator controls
 are plugin-only, never MCP tools. Writes always require a human to arm the corresponding
 ephemeral Execution mode and approve the query.

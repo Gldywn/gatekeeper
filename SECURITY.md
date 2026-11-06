@@ -8,7 +8,7 @@ trust boundaries are, and the limitations worth knowing before you rely on it.
 ## Threat model
 
 Agents propose SQL on a connection the human controls. The agent is treated as untrusted
-input. Explicitly enabled Auto mode beta delegates approval of a restricted read subset
+input. Explicitly enabled Auto mode delegates approval of a restricted read subset
 to deterministic checks and an additional evaluator. See [Auto mode](docs/AUTO-MODE.md).
 
 - **Human approval is the default boundary.** Auto mode is an explicit, ephemeral

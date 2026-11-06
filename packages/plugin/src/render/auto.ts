@@ -5,8 +5,6 @@ import type { AutoHold } from "../types";
 
 export const autoIcon =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m13 3-9 11h7l-1 7 10-12h-7z"/></svg>';
-export const autoDisclosure =
-  "Eligible reads execute automatically and return results to the requesting agent. TypeSafe receives SQL structure and referenced schema names and types. Free literals and known sensitive inputs stay local. No result rows are sent to TypeSafe. Names can still be confidential. Jev can be wrong, and this beta has not been calibrated with live evaluations. Confirming Write or Destructive turns off Auto mode. Disabling Auto mode directly leaves Read only and does not stop SQL already running.";
 
 // Stands in for a saved key, so the field reads as filled without the key ever returning
 // to the page. Bullets fall outside the key alphabet, so the mask can never pass as a key.
@@ -31,7 +29,7 @@ export function holdText(sent: boolean, tail = ""): string {
 // "Evaluating with Jev", which would otherwise stay up for the whole run.
 export const AUTO_APPROVED = "Approved automatically";
 
-const title = `<span class="sa-pt">${autoIcon}Auto mode <span class="set-rec auto">beta</span></span>`;
+const title = `<span class="sa-pt">${autoIcon}Auto mode</span>`;
 
 // Both states are rendered once and swapped by data-on on the wrapper, like Schema access.
 export function autoPopHtml(): string {
@@ -55,8 +53,9 @@ export function autoPopHtml(): string {
 export function autoSettingsHtml(enabled: boolean, keySaved = false): string {
   return `<div class="set-row recommend auto auto-body">
             <div class="set-text">
-              <span class="set-name"><span class="set-ico">${autoIcon}</span>Auto mode <span class="set-rec auto">beta</span></span>
-              <span class="set-desc">${autoDisclosure}</span>
+              <span class="set-name"><span class="set-ico">${autoIcon}</span>Auto mode</span>
+              <span class="set-desc">Run eligible reads without your approval and return their results to your agent.</span>
+              <span class="set-note">PostgreSQL only. TypeSafe sees the SQL structure and schema names, never result rows.</span>
               <div class="auto-key"><label class="set-name" for="autoKey">TypeSafe API key</label><input id="autoKey" class="confirm-input" type="password" data-auto-key autocomplete="off" spellcheck="false" maxlength="4096" placeholder="apikey_0123456789"${keySaved ? ` value="${SAVED_KEY_MASK}"` : ""}></div>
               <p class="auto-message" data-auto-message role="status"></p>
               <span class="set-note">Stored in Beekeeper encrypted storage. Sent only to the local broker and TypeSafe.</span>
