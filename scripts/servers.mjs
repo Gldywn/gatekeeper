@@ -6,8 +6,9 @@ import { readFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 
 const REPO_BUILD = /gatekeeper[^\s]*[/\\]server[/\\](?:dist[/\\]index\.js|src[/\\]index\.ts)/;
-// opencode.jsonc starts the build by a path relative to the checkout it runs in.
-const RELATIVE_BUILD = /\spackages[/\\]server[/\\]dist[/\\]index\.js\b/;
+// opencode.jsonc and .mcp.json (`${CLAUDE_PROJECT_DIR:-.}/...`) start the build by a path relative
+// to the checkout the session runs in, spelled with or without `./`.
+const RELATIVE_BUILD = /\s(?:\.[/\\])?packages[/\\]server[/\\]dist[/\\]index\.js\b/;
 const HARNESSES = { claude: "Claude Code", codex: "Codex", opencode: "OpenCode" };
 
 export function cwdOf(pid) {

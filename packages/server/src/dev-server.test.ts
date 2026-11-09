@@ -66,21 +66,26 @@ it("takes over compiled and watched servers, then watches this checkout's source
   );
 });
 
-it("also takes over a build an OpenCode session started by a relative path", async () => {
+it("also takes over a build a session started by a relative path, with or without ./", async () => {
   scan.mockImplementation((cmd: string, args: string[]) => {
     if (cmd === "ps") {
       return {
         status: 0,
-        stdout:
-          "900004 1 node packages/server/dist/index.js\n900005 1 node packages/server/dist/index.js",
+        stdout: [
+          "900004 1 node packages/server/dist/index.js",
+          "900005 1 node packages/server/dist/index.js",
+          "900006 1 node ./packages/server/dist/index.js",
+          "900007 1 node ../another-app/packages/server/dist/index.js",
+        ].join("\n"),
       };
     }
-    const cwd = args.includes("900004") ? "/work/gatekeeper-wt" : "/work/another-app";
+    const cwd = args.includes("900005") ? "/work/another-app" : "/work/gatekeeper-wt";
     return { status: 0, stdout: `p0\nfcwd\nn${cwd}\n` };
   });
   await import(launcher);
-  expect(process.kill).toHaveBeenCalledTimes(1);
+  expect(process.kill).toHaveBeenCalledTimes(2);
   expect(process.kill).toHaveBeenCalledWith(900004, "SIGTERM");
+  expect(process.kill).toHaveBeenCalledWith(900006, "SIGTERM");
 });
 
 it("holds the broker port before the server starts, and points the server at its relay", async () => {
