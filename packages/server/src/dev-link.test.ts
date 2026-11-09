@@ -175,6 +175,13 @@ describe("dev:link agent entries", () => {
     expect(logs.join("\n")).toMatch(/Claude Code: claude mcp add-json failed: boom; the previous/);
   });
 
+  it("keeps the original when the entry put back after a failed add-json reads differently", () => {
+    const run = claudeCli({ failAdds: 1, dropEnv: true });
+    expect(switchAgents(NODE, at("/wt/a"), ctx({ run }))).toBe(false);
+    const { env: _, ...withoutEnv } = PUBLISHED;
+    expect(backup().claude).toMatchObject({ original: PUBLISHED, written: withoutEnv });
+  });
+
   it("keeps the original when Claude's entry cannot be put back, so unlink restores it", () => {
     expect(switchAgents(NODE, at("/wt/a"), ctx({ run: claudeCli({ failAdds: 2 }) }))).toBe(false);
     expect(JSON.parse(readFileSync(claudeFile(), "utf8")).mcpServers.gatekeeper).toBeUndefined();
@@ -213,6 +220,15 @@ describe("dev:link agent entries", () => {
     expect(readFileSync(codexFile, "utf8")).toBe(last);
   });
 
+  it("round-trips a command-only entry that ends the file without a newline", () => {
+    const last = 'model = "gpt"\r\n[mcp_servers.gatekeeper]\r\ncommand = "gatekeeper-mcp-server"';
+    writeFileSync(codexFile, last);
+    expect(switchAgents(NODE, at("/wt/a"), ctx())).toBe(true);
+    expect(codexEntry()).toMatchObject({ command: NODE, args: at("/wt/a") });
+    expect(restoreAgents(ctx())).toBe(true);
+    expect(readFileSync(codexFile, "utf8")).toBe(last);
+  });
+
   it("adds an args line to a command-only Codex entry, and unlink removes it", () => {
     const bare = CODEX.replace(/args = .*\r\n/, "");
     writeFileSync(codexFile, bare);
@@ -222,15 +238,19 @@ describe("dev:link agent entries", () => {
     expect(readFileSync(codexFile, "utf8")).toBe(bare);
   });
 
-  it("saves, before touching an entry, a record a cut-off run leaves acceptable", () => {
-    let saved: unknown;
+  it("keeps the record matching the entry before every step, so a cut-off run recovers", () => {
+    const steps: unknown[][] = [];
     const cli = claudeCli();
     const run: Run = (cmd, args) => {
-      if (args[1] === "remove") saved = backup().claude;
+      const entry = JSON.parse(readFileSync(claudeFile(), "utf8")).mcpServers.gatekeeper;
+      steps.push([args[1], entry ?? null, backup().claude.written ?? null]);
       return cli(cmd, args);
     };
     switchAgents(NODE, at("/wt/a"), ctx({ run }));
-    expect(saved).toEqual({ path: claudeFile(), original: PUBLISHED, written: PUBLISHED });
+    restoreAgents(ctx({ run }));
+    expect(steps.map(([step]) => step)).toEqual(["remove", "add-json", "remove", "add-json"]);
+    for (const [, entry, written] of steps) expect(written).toEqual(entry);
+    expect(claudeEntry()).toEqual(PUBLISHED);
   });
 
   it("keeps the record as it was when a re-link fails without changing the entry", () => {

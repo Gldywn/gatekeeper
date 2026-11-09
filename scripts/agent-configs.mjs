@@ -1,6 +1,6 @@
 // The agents' user-level gatekeeper MCP entries, which dev:link points at a checkout's build and
-// dev:unlink puts back. Sessions inside a checkout already run its build through the project
-// config (.mcp.json, opencode.jsonc), which outranks these entries.
+// dev:unlink puts back. A project config (.mcp.json, opencode.jsonc) outranks them inside a
+// checkout; Codex has none in this repo, so its sessions there follow these entries too.
 
 import { spawnSync } from "node:child_process";
 import {
@@ -38,38 +38,44 @@ function writeAtomic(path, text, mode) {
 
 const claudeEntry = (path) => JSON.parse(readFileSync(path, "utf8")).mcpServers?.gatekeeper;
 
-// `claude mcp` rather than a file edit: running sessions rewrite ~/.claude.json themselves. A
-// failure that changed the entry says what it left (`left`), so the backup tracks only our writes.
-function setClaude(ctx, { path, entry }, next, exact) {
+// `claude mcp` rather than a file edit: running sessions rewrite ~/.claude.json themselves. Each
+// step that changes the entry is marked before the next one, so a run cut off anywhere leaves a
+// backup that matches the entry and the next link or unlink carries on from there.
+function setClaude(ctx, { path, entry }, next, exact, mark) {
   const cli = (...args) => ctx.run("claude", ["mcp", ...args, "--scope", "user"]);
   if (entry) {
     const removed = cli("remove", "gatekeeper");
     if (!removed.ok) throw new Error(`claude mcp remove failed: ${removed.err}`);
+    mark(undefined);
   }
   const added = cli("add-json", "gatekeeper", JSON.stringify(next));
   if (!added.ok) {
     const back = entry && cli("add-json", "gatekeeper", JSON.stringify(entry)).ok;
-    const err = new Error(
+    // Read back, not assumed: an entry Claude stored differently must keep its original.
+    if (back) {
+      try {
+        mark(claudeEntry(path));
+      } catch {}
+    }
+    throw new Error(
       `claude mcp add-json failed: ${added.err}${back ? "; the previous entry is back" : ""}`,
     );
-    throw entry && !back ? Object.assign(err, { left: undefined }) : err;
   }
+  // add-json says it stored `next`: take its word until the file reads back.
+  mark(next);
   let now;
   try {
     now = claudeEntry(path);
   } catch (err) {
-    // add-json said it stored `next`: take its word, unlink's conflict check covers the rest.
-    throw Object.assign(new Error(`could not read ${path} back: ${err.message}`), { left: next });
+    throw new Error(`could not read ${path} back: ${err.message}`);
   }
+  mark(now);
   const stored = exact
     ? same(now, next)
     : now?.command === next.command && same(now?.args, next.args);
   if (!stored)
-    throw Object.assign(
-      new Error(
-        "claude mcp stored another entry than asked; compare `claude mcp get gatekeeper` with ~/.gatekeeper/dev-link.json",
-      ),
-      { left: now },
+    throw new Error(
+      "claude mcp stored another entry than asked; compare `claude mcp get gatekeeper` with ~/.gatekeeper/dev-link.json",
     );
   return now;
 }
@@ -84,9 +90,9 @@ const claude = {
     return { path, entry: claudeEntry(path) };
   },
   original: ({ entry }) => entry,
-  swap: (ctx, loaded, command, args) =>
-    setClaude(ctx, loaded, { ...loaded.entry, command, args }, false),
-  restore: (ctx, loaded, record) => setClaude(ctx, loaded, record.original, true),
+  swap: (ctx, loaded, command, args, mark) =>
+    setClaude(ctx, loaded, { ...loaded.entry, command, args }, false, mark),
+  restore: (ctx, loaded, record, mark) => setClaude(ctx, loaded, record.original, true, mark),
 };
 
 const TABLE = /^\s*\[\s*mcp_servers\s*\.\s*(?:gatekeeper|"gatekeeper"|'gatekeeper')\s*\]/;
@@ -111,20 +117,22 @@ function editToml(text, lineFor) {
   const at = keyLines(lines);
   if (at.command === undefined)
     throw new Error("no command line under [mcp_servers.gatekeeper]; switch it by hand");
-  const eol = lines[at.command].match(/\r?\n$/)?.[0] ?? "\n";
-  // A globally installed binary has no args line: one goes in after command, restore removes it.
+  const ending = (line) => line.match(/\r?\n$/)?.[0] ?? "";
+  const end = { command: ending(lines[at.command]) };
+  // A globally installed binary has no args line: one goes in right after command and takes over
+  // its line ending (none at the end of the file); restore hands it back when it removes the line.
   if (at.args === undefined) {
     at.args = at.command + 1;
     lines.splice(at.args, 0, "");
-  }
+    end.args = end.command;
+    end.command = text.match(/\r?\n/)?.[0] ?? "\n";
+  } else end.args = ending(lines[at.args]);
   const fresh = {};
-  for (const key of ["command", "args"]) {
-    const old = lines[at[key]];
-    fresh[key] = lineFor(key, old.replace(/\r?\n$/, ""));
-    // Only an inserted line takes command's line ending: a last line without one keeps none.
-    const end = old === "" ? eol : (old.match(/\r?\n$/)?.[0] ?? "");
-    lines[at[key]] = fresh[key] === undefined ? "" : fresh[key] + end;
-  }
+  for (const key of ["command", "args"])
+    fresh[key] = lineFor(key, lines[at[key]].replace(/\r?\n$/, ""));
+  if (fresh.args === undefined && at.args === at.command + 1) end.command = end.args;
+  for (const key of ["command", "args"])
+    lines[at[key]] = fresh[key] === undefined ? "" : fresh[key] + end[key];
   const next = lines.join("");
   const expected = parse(text);
   const table = expected.mcp_servers.gatekeeper;
@@ -143,12 +151,12 @@ function editToml(text, lineFor) {
   return next;
 }
 
-function setToml(loaded, lineFor) {
+function setToml(loaded, lineFor, mark) {
   const next = editToml(loaded.text, lineFor);
   if (readFileSync(loaded.path, "utf8") !== loaded.text)
     throw new Error(`${loaded.path} changed while being edited; re-run`);
   writeAtomic(loaded.path, next, statSync(loaded.path).mode & 0o777);
-  return parse(next).mcp_servers.gatekeeper;
+  mark(parse(next).mcp_servers.gatekeeper);
 }
 
 const codex = {
@@ -166,12 +174,16 @@ const codex = {
     const at = keyLines(lines);
     return { command: lines[at.command], args: lines[at.args] };
   },
-  swap: (_ctx, loaded, command, args) =>
-    setToml(loaded, (key, old) => {
-      const value = JSON.stringify(key === "command" ? command : args);
-      return `${old.match(/^[ \t]*/)[0]}${key} = ${value}`;
-    }),
-  restore: (_ctx, loaded, record) => setToml(loaded, (key) => record.original[key]),
+  swap: (_ctx, loaded, command, args, mark) =>
+    setToml(
+      loaded,
+      (key, old) => {
+        const value = JSON.stringify(key === "command" ? command : args);
+        return `${old.match(/^[ \t]*/)[0]}${key} = ${value}`;
+      },
+      mark,
+    ),
+  restore: (_ctx, loaded, record, mark) => setToml(loaded, (key) => record.original[key], mark),
 };
 
 const CLIENTS = { claude, codex };
@@ -246,15 +258,20 @@ export function switchAgents(command, args, ctx) {
           };
           save();
         }
-        try {
-          backup[key].written = client.swap(ctx, loaded, command, args);
-        } catch (err) {
-          if ("left" in err) backup[key].written = err.left;
-          else if (fresh) delete backup[key];
+        const mark = (entry) => {
+          backup[key].written = entry;
           save();
+        };
+        try {
+          client.swap(ctx, loaded, command, args, mark);
+        } catch (err) {
+          // A first link that changed nothing has no original worth keeping.
+          if (fresh && same(backup[key].written, loaded.entry)) {
+            delete backup[key];
+            save();
+          }
           throw err;
         }
-        save();
         ctx.log(`· pointed ${client.name} (${loaded.path}) at ${args[0]}`);
       } catch (err) {
         ok = false;
@@ -283,15 +300,10 @@ export function restoreAgents(ctx) {
           ctx.log(`· would restore ${client.name}'s gatekeeper entry (${record.path})`);
           continue;
         }
-        try {
-          client.restore(ctx, loaded, record);
-        } catch (err) {
-          if ("left" in err) {
-            record.written = err.left;
-            save();
-          }
-          throw err;
-        }
+        client.restore(ctx, loaded, record, (entry) => {
+          record.written = entry;
+          save();
+        });
         delete backup[key];
         save();
         ctx.log(`· restored ${client.name}'s gatekeeper entry (${record.path})`);
