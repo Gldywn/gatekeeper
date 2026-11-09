@@ -39,8 +39,8 @@ function writeAtomic(path, text, mode) {
 const claudeEntry = (path) => JSON.parse(readFileSync(path, "utf8")).mcpServers?.gatekeeper;
 
 // `claude mcp` rather than a file edit: running sessions rewrite ~/.claude.json themselves. Each
-// step that changes the entry is marked before the next one, so a run cut off anywhere leaves a
-// backup that matches the entry and the next link or unlink carries on from there.
+// step that changes the entry is marked before the next one, so a run cut off between steps
+// leaves a backup that matches the entry, which unlink restores from.
 function setClaude(ctx, { path, entry }, next, exact, mark) {
   const cli = (...args) => ctx.run("claude", ["mcp", ...args, "--scope", "user"]);
   if (entry) {
@@ -229,6 +229,11 @@ export function switchAgents(command, args, ctx) {
           continue;
         }
         if (!loaded.entry) {
+          // A link cut off between remove and add leaves this state: unlink puts the original back.
+          if (backup[key])
+            throw new Error(
+              "no gatekeeper entry while ~/.gatekeeper/dev-link.json holds its original: run pnpm dev:unlink first",
+            );
           ctx.log(`· ${client.name}: no gatekeeper entry in ${loaded.path}, left as is`);
           continue;
         }
@@ -265,8 +270,13 @@ export function switchAgents(command, args, ctx) {
         try {
           client.swap(ctx, loaded, command, args, mark);
         } catch (err) {
-          // A first link that changed nothing has no original worth keeping.
-          if (fresh && same(backup[key].written, loaded.entry)) {
+          // A first link that changed nothing has no original worth keeping. Checked on disk: a
+          // CLI can fail after it saved.
+          let unchanged = false;
+          try {
+            unchanged = same(client.load(ctx, loaded.path).entry, loaded.entry);
+          } catch {}
+          if (fresh && unchanged && same(backup[key].written, loaded.entry)) {
             delete backup[key];
             save();
           }

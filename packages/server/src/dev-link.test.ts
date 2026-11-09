@@ -63,10 +63,11 @@ const backup = () => JSON.parse(readFileSync(backupFile(), "utf8"));
 
 // Stands in for the claude CLI: edits the temp ~/.claude.json as `claude mcp` does. failAdds
 // makes that many add-json calls fail first; dropEnv stores entries without their env; garble
-// leaves the file unreadable after a successful add-json.
+// leaves the file unreadable after a successful add-json; removeThenFail saves, then fails.
 function claudeCli({
   failAdds = 0,
   failRemove = false,
+  removeThenFail = false,
   dropEnv = false,
   garble = false,
 } = {}): Run {
@@ -76,6 +77,10 @@ function claudeCli({
     if (args[1] === "remove") {
       if (failRemove) return { ok: false, err: "nope" };
       delete config.mcpServers.gatekeeper;
+      if (removeThenFail) {
+        writeFileSync(claudeFile(), JSON.stringify(config));
+        return { ok: false, err: "late" };
+      }
     }
     if (args[1] === "add-json") {
       if (failAdds-- > 0) return { ok: false, err: "boom" };
@@ -186,8 +191,19 @@ describe("dev:link agent entries", () => {
     expect(switchAgents(NODE, at("/wt/a"), ctx({ run: claudeCli({ failAdds: 2 }) }))).toBe(false);
     expect(JSON.parse(readFileSync(claudeFile(), "utf8")).mcpServers.gatekeeper).toBeUndefined();
     expect(backup().claude.original).toEqual(PUBLISHED);
+    // Linking again from there would report success with no entry at all.
+    expect(switchAgents(NODE, at("/wt/a"), ctx())).toBe(false);
+    expect(logs.join("\n")).toMatch(
+      /Claude Code: no gatekeeper entry while .* run pnpm dev:unlink/,
+    );
     restoreAgents(ctx());
     expect(claudeEntry()).toEqual(PUBLISHED);
+  });
+
+  it("keeps the original when the CLI fails after it already removed the entry", () => {
+    const run = claudeCli({ removeThenFail: true });
+    expect(switchAgents(NODE, at("/wt/a"), ctx({ run }))).toBe(false);
+    expect(backup().claude.original).toEqual(PUBLISHED);
   });
 
   it("leaves an entry edited since link, and keeps its original", () => {
