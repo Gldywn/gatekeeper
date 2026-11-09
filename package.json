@@ -21,7 +21,8 @@
     "dev:reset": "node scripts/dev.mjs reset"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.4"
+    "@biomejs/biome": "2.5.4",
+    "smol-toml": "1.9.1"
   },
   "packageManager": "pnpm@11.9.0",
   "engines": {

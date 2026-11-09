@@ -45,9 +45,9 @@ it("takes over compiled and watched servers, then watches this checkout's source
   scan.mockReturnValue({
     status: 0,
     stdout: [
-      "900001 node /work/gatekeeper/packages/server/dist/index.js",
-      "900002 node /deps/tsx/cli.mjs watch /work/gatekeeper/packages/server/src/index.ts",
-      "900003 node /work/another-app/server/src/index.ts",
+      "900001 1 node /work/gatekeeper/packages/server/dist/index.js",
+      "900002 1 node /deps/tsx/cli.mjs watch /work/gatekeeper/packages/server/src/index.ts",
+      "900003 1 node /work/another-app/server/src/index.ts",
     ].join("\n"),
   });
   await import(launcher);
@@ -72,7 +72,7 @@ it("also takes over a build an OpenCode session started by a relative path", asy
       return {
         status: 0,
         stdout:
-          "900004 node packages/server/dist/index.js\n900005 node packages/server/dist/index.js",
+          "900004 1 node packages/server/dist/index.js\n900005 1 node packages/server/dist/index.js",
       };
     }
     const cwd = args.includes("900004") ? "/work/gatekeeper-wt" : "/work/another-app";
