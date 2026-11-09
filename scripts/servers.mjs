@@ -109,16 +109,16 @@ export function identify(command, cwd) {
   };
 }
 
-// Sessions outside a checkout that run its build, other than `root`'s: most likely started from a
-// user-level entry an earlier dev:link wrote. A session inside a checkout runs its own build.
+// Sessions on another checkout's build by an absolute path, i.e. a user-level entry an earlier
+// dev:link wrote: project configs start their build by a relative one. Codex has none, so its
+// sessions inside that checkout count too.
 export function sessionsOnOtherBuilds(list, root, cwdOf) {
   const sessions = new Map();
   for (const server of findServers({ published: false }, list)) {
     const build = checkoutOf(scriptOf(server.cmd) ?? "");
     if (!build || !isAbsolute(build) || build === root) continue;
     const [session] = sessionsOf([server], list);
-    const cwd = session.harness ? cwdOf(session.pid) : "";
-    if (cwd && !`${cwd}/`.startsWith(`${build}/`)) sessions.set(session.pid, { ...session, cwd });
+    if (session.harness) sessions.set(session.pid, { ...session, cwd: cwdOf(session.pid) || "?" });
   }
   return [...sessions.values()];
 }

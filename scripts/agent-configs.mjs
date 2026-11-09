@@ -121,7 +121,9 @@ function editToml(text, lineFor) {
   for (const key of ["command", "args"]) {
     const old = lines[at[key]];
     fresh[key] = lineFor(key, old.replace(/\r?\n$/, ""));
-    lines[at[key]] = fresh[key] === undefined ? "" : fresh[key] + (old.match(/\r?\n$/)?.[0] ?? eol);
+    // Only an inserted line takes command's line ending: a last line without one keeps none.
+    const end = old === "" ? eol : (old.match(/\r?\n$/)?.[0] ?? "");
+    lines[at[key]] = fresh[key] === undefined ? "" : fresh[key] + end;
   }
   const next = lines.join("");
   const expected = parse(text);
@@ -235,7 +237,13 @@ export function switchAgents(command, args, ctx) {
         }
         const fresh = !backup[key];
         if (fresh) {
-          backup[key] = { path: loaded.path, original: client.original(loaded) };
+          // written starts as the untouched entry: a run cut off before the swap leaves a record
+          // that the next link or unlink still accepts.
+          backup[key] = {
+            path: loaded.path,
+            original: client.original(loaded),
+            written: loaded.entry,
+          };
           save();
         }
         try {

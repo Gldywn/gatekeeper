@@ -80,10 +80,11 @@ The repo ships its dev wiring, so a clone is ready without hand-editing config:
   when the file does not parse back to the same config with only those changed. `CODEX_HOME`
   is honoured; with `CLAUDE_CONFIG_DIR` set, Claude Code is left to you. A client with no
   entry gets none. OpenCode is reported only: its global config is JSONC, edit it by hand.
-  Sessions inside a checkout keep its build, since the project config outranks the user one.
+  Claude Code and OpenCode sessions inside a checkout keep its build, since its project config
+  outranks the user one; Codex has no project config here, so its sessions follow the link too.
 - **Agent sessions to restart:** `dev:link` then stops the published servers still running
   and lists the sessions they belonged to, read from their parent processes, plus the sessions
-  outside a checkout still running its build after an earlier link (listed, not stopped);
+  still on another checkout's build from an earlier link's entry (listed, not stopped);
   `dev:unlink` stops and lists repo builds. Restart those sessions (`claude --continue`, `codex resume`): a
   stopped server does not come back on the new entry by itself. Claude Code marks it failed
   ([docs](https://code.claude.com/docs/en/mcp)); Codex does not restart it at once but may

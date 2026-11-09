@@ -205,6 +205,14 @@ describe("dev:link agent entries", () => {
     expect(readFileSync(codexFile, "utf8")).toBe(edited);
   });
 
+  it("restores a config whose args line ends the file without a newline byte for byte", () => {
+    const last = 'model = "gpt"\n[mcp_servers.gatekeeper]\ncommand = "npx"\nargs = ["-y", "x"]';
+    writeFileSync(codexFile, last);
+    switchAgents(NODE, at("/wt/a"), ctx());
+    expect(restoreAgents(ctx())).toBe(true);
+    expect(readFileSync(codexFile, "utf8")).toBe(last);
+  });
+
   it("adds an args line to a command-only Codex entry, and unlink removes it", () => {
     const bare = CODEX.replace(/args = .*\r\n/, "");
     writeFileSync(codexFile, bare);
@@ -214,17 +222,26 @@ describe("dev:link agent entries", () => {
     expect(readFileSync(codexFile, "utf8")).toBe(bare);
   });
 
-  it("never takes an entry it did not write as its own after a failed switch", () => {
+  it("saves, before touching an entry, a record a cut-off run leaves acceptable", () => {
+    let saved: unknown;
+    const cli = claudeCli();
+    const run: Run = (cmd, args) => {
+      if (args[1] === "remove") saved = backup().claude;
+      return cli(cmd, args);
+    };
+    switchAgents(NODE, at("/wt/a"), ctx({ run }));
+    expect(saved).toEqual({ path: claudeFile(), original: PUBLISHED, written: PUBLISHED });
+  });
+
+  it("keeps the record as it was when a re-link fails without changing the entry", () => {
     switchAgents(NODE, at("/wt/a"), ctx());
-    const custom = { command: "/my/own/server", args: [] };
-    const config = JSON.parse(readFileSync(claudeFile(), "utf8"));
-    writeFileSync(claudeFile(), JSON.stringify({ ...config, mcpServers: { gatekeeper: custom } }));
+    const linked = backup().claude;
     expect(switchAgents(NODE, at("/wt/b"), ctx({ run: claudeCli({ failRemove: true }) }))).toBe(
       false,
     );
-    expect(restoreAgents(ctx())).toBe(false);
-    expect(claudeEntry()).toEqual(custom);
-    expect(backup().claude.original).toEqual(PUBLISHED);
+    expect(backup().claude).toEqual(linked);
+    expect(restoreAgents(ctx())).toBe(true);
+    expect(claudeEntry()).toEqual(PUBLISHED);
   });
 
   it("refuses a second link through another Codex config, which has no original saved", () => {
@@ -341,7 +358,7 @@ describe("dev:link servers and sessions", () => {
     ]);
   });
 
-  it("lists sessions on another checkout's build only when they run outside it", () => {
+  it("lists every session on another checkout's build by an absolute path", () => {
     const build = (root: string) => `node /wt/${root}/packages/server/dist/index.js`;
     const procs = [
       { pid: 60, ppid: 1, cmd: "claude" },
@@ -353,15 +370,11 @@ describe("dev:link servers and sessions", () => {
       { pid: 66, ppid: 1, cmd: "claude" },
       { pid: 67, ppid: 66, cmd: build("gatekeeper-b") },
     ];
-    const cwds: Record<number, string> = {
-      60: "/proj",
-      62: "/wt/gatekeeper-a/packages",
-      64: "/wt/gatekeeper-ab",
-      66: "/proj",
-    };
+    const cwds: Record<number, string> = { 60: "/proj", 64: "/wt/gatekeeper-a", 66: "/proj" };
     expect(sessionsOnOtherBuilds(procs, "/wt/gatekeeper-b", (pid: number) => cwds[pid])).toEqual([
       { harness: "Claude Code", pid: 60, cwd: "/proj" },
-      { harness: "Codex", pid: 64, cwd: "/wt/gatekeeper-ab" },
+      { harness: "Claude Code", pid: 62, cwd: "?" },
+      { harness: "Codex", pid: 64, cwd: "/wt/gatekeeper-a" },
     ]);
   });
 
