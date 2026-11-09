@@ -109,17 +109,29 @@ function keyLines(lines) {
 function editToml(text, lineFor) {
   const lines = text.split(/(?<=\n)/);
   const at = keyLines(lines);
-  if (at.command === undefined || at.args === undefined)
-    throw new Error("no command and args lines under [mcp_servers.gatekeeper]; switch it by hand");
+  if (at.command === undefined)
+    throw new Error("no command line under [mcp_servers.gatekeeper]; switch it by hand");
+  const eol = lines[at.command].match(/\r?\n$/)?.[0] ?? "\n";
+  // A globally installed binary has no args line: one goes in after command, restore removes it.
+  if (at.args === undefined) {
+    at.args = at.command + 1;
+    lines.splice(at.args, 0, "");
+  }
   const fresh = {};
   for (const key of ["command", "args"]) {
     const old = lines[at[key]];
     fresh[key] = lineFor(key, old.replace(/\r?\n$/, ""));
-    lines[at[key]] = fresh[key] + (old.match(/\r?\n$/)?.[0] ?? "");
+    lines[at[key]] = fresh[key] === undefined ? "" : fresh[key] + (old.match(/\r?\n$/)?.[0] ?? eol);
   }
   const next = lines.join("");
   const expected = parse(text);
-  Object.assign(expected.mcp_servers.gatekeeper, parse(`${fresh.command}\n${fresh.args}`));
+  const table = expected.mcp_servers.gatekeeper;
+  delete table.command;
+  delete table.args;
+  Object.assign(
+    table,
+    parse([fresh.command, fresh.args].filter((l) => l !== undefined).join("\n")),
+  );
   let actual;
   try {
     actual = parse(next);
@@ -161,6 +173,8 @@ const codex = {
 };
 
 const CLIENTS = { claude, codex };
+const CHANGED =
+  'entry changed since dev:link, left as is. To undo by hand, put back its "original" from ~/.gatekeeper/dev-link.json, then delete that record';
 
 // One lock for link and unlink together: two runs racing on the backup could record a dev entry
 // as the original and lose the published one.
@@ -209,6 +223,8 @@ export function switchAgents(command, args, ctx) {
         // The backup holds one original per client: a second file has nowhere to keep its own.
         if (backup[key] && backup[key].path !== loaded.path)
           throw new Error(`linked earlier through ${backup[key].path}; run pnpm dev:unlink first`);
+        // Same rule as unlink: an entry edited since the last link is not ours to rewrite.
+        if (backup[key] && !same(loaded.entry, backup[key].written)) throw new Error(CHANGED);
         if (loaded.entry.command === command && same(loaded.entry.args, args)) {
           ctx.log(`· ${client.name}: already runs ${args[0]}`);
           continue;
@@ -252,9 +268,7 @@ export function restoreAgents(ctx) {
         const loaded = client.load(ctx, record.path);
         if (loaded.skip || !same(loaded.entry, record.written)) {
           ok = false;
-          ctx.log(
-            `! ${client.name}: entry changed since dev:link, left as is; its original stays in ~/.gatekeeper/dev-link.json`,
-          );
+          ctx.log(`! ${client.name}: ${CHANGED}`);
           continue;
         }
         if (ctx.dry) {

@@ -71,17 +71,20 @@ The repo ships its dev wiring, so a clone is ready without hand-editing config:
   `gatekeeper` entry at this checkout's `packages/server/dist/index.js`, run by the Node that
   ran `dev:link` (an absolute path, so a client's version manager cannot pick another one). It
   changes the command and its arguments only, and keeps the original in
-  `~/.gatekeeper/dev-link.json` (owner-only) until `pnpm dev:unlink` puts it back, which it
-  refuses for an entry edited in between. Claude Code is changed through
+  `~/.gatekeeper/dev-link.json` (owner-only) until `pnpm dev:unlink` puts it back. An entry
+  edited by hand since the last link is left alone by both, which then say how to undo it by
+  hand. Claude Code is changed through
   `claude mcp remove/add-json --scope user`, since running sessions rewrite `~/.claude.json`;
-  Codex by rewriting the `command` and `args` lines of `[mcp_servers.gatekeeper]`, refused
+  Codex by rewriting the `command` and `args` lines of `[mcp_servers.gatekeeper]` (adding an
+  `args` line a global binary has none of), refused
   when the file does not parse back to the same config with only those changed. `CODEX_HOME`
   is honoured; with `CLAUDE_CONFIG_DIR` set, Claude Code is left to you. A client with no
   entry gets none. OpenCode is reported only: its global config is JSONC, edit it by hand.
   Sessions inside a checkout keep its build, since the project config outranks the user one.
 - **Agent sessions to restart:** `dev:link` then stops the published servers still running
-  and lists the sessions they belonged to, read from their parent processes; `dev:unlink` does
-  the same for repo builds. Restart those sessions (`claude --continue`, `codex resume`): a
+  and lists the sessions they belonged to, read from their parent processes, plus the sessions
+  outside a checkout still running its build after an earlier link (listed, not stopped);
+  `dev:unlink` stops and lists repo builds. Restart those sessions (`claude --continue`, `codex resume`): a
   stopped server does not come back on the new entry by itself. Claude Code marks it failed
   ([docs](https://code.claude.com/docs/en/mcp)); Codex does not restart it at once but may
   recreate it later from the session's old config.

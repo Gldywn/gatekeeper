@@ -2,14 +2,24 @@
 // watcher matches too, otherwise it could restart a server after takeover.
 
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { readFileSync, realpathSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 const REPO_BUILD = /gatekeeper[^\s]*[/\\]server[/\\](?:dist[/\\]index\.js|src[/\\]index\.ts)/;
 // opencode.jsonc and .mcp.json (`${CLAUDE_PROJECT_DIR:-.}/...`) start the build by a path relative
 // to the checkout the session runs in, spelled with or without `./`.
 const RELATIVE_BUILD = /\s(?:\.[/\\])?packages[/\\]server[/\\]dist[/\\]index\.js\b/;
+// The package's bin (npx) or its entry (pnpm's .bin shim, a global install).
+const PUBLISHED = /(?:^|[/\\])gatekeeper-mcp-server(?:[/\\]dist[/\\]index\.js)?$/;
 const HARNESSES = { claude: "Claude Code", codex: "Codex", opencode: "OpenCode" };
+
+// The script node runs, or null for anything else: a command line that only mentions the package
+// (a pnpm filter, an agent's prompt) must never read as a server.
+function scriptOf(cmd) {
+  const [program, ...rest] = cmd.split(/\s+/);
+  if (!/^node(?:\.exe)?$/.test(basename(program))) return null;
+  return rest.find((w) => !w.startsWith("-")) ?? "";
+}
 
 export function cwdOf(pid) {
   const args = ["-a", "-p", String(pid), "-d", "cwd", "-Fn"];
@@ -34,11 +44,13 @@ export function processes() {
 export function findServers({ published }, list = processes()) {
   const hits = [];
   for (const { pid, ppid, cmd } of list) {
-    // Requiring node avoids matching a stray shell command.
-    if (pid === process.pid || pid === process.ppid || !/\bnode\b/.test(cmd)) continue;
+    const script = scriptOf(cmd);
+    if (pid === process.pid || pid === process.ppid || script === null) continue;
+    // The tsx watcher's script is tsx itself, so builds still match on the whole command line.
     const build =
       REPO_BUILD.test(cmd) || (RELATIVE_BUILD.test(cmd) && /gatekeeper/.test(cwdOf(pid)));
-    const release = !build && /gatekeeper-mcp-server/.test(cmd);
+    // A pnpm dlx wrapper is left alone: its server child is the one stopped, and it exits with it.
+    const release = !build && PUBLISHED.test(script);
     if (build || (published && release)) hits.push({ pid, ppid, cmd, published: release });
   }
   return hits;
@@ -71,9 +83,15 @@ export function identify(command, cwd) {
   const words = command.split(/\s+/);
   const launcher = words.find((w) => /scripts[/\\]dev-server\.mjs$/.test(w));
   if (launcher) return { root: resolve(cwd, launcher, "../.."), label: "dev launcher (sources)" };
-  const entry = words.find((w) => /dist[/\\]index\.js$/.test(w));
-  if (!entry) return null;
-  const dist = dirname(resolve(cwd, entry));
+  const script = scriptOf(command);
+  if (!script) return null;
+  let entry = resolve(cwd, script);
+  try {
+    // npx runs the package's .bin symlink, which leads to its dist/index.js.
+    entry = realpathSync(entry);
+  } catch {}
+  if (!/dist[/\\]index\.js$/.test(entry)) return null;
+  const dist = dirname(entry);
   const read = (file) => {
     try {
       return JSON.parse(readFileSync(join(dist, file), "utf8"));
@@ -86,9 +104,23 @@ export function identify(command, cwd) {
   const branch = stamp?.dev?.branch ? ` on ${stamp.dev.branch}` : "";
   const dev = stamp?.dev ? ` dev ${stamp.dev.sha ?? "?"}${branch}` : "";
   return {
-    root: checkoutOf(resolve(cwd, entry)),
+    root: checkoutOf(entry),
     label: `${pkg?.name ?? "?"} ${stamp?.version ?? pkg?.version ?? "?"}${dev} (on disk)`,
   };
+}
+
+// Sessions outside a checkout that run its build, other than `root`'s: most likely started from a
+// user-level entry an earlier dev:link wrote. A session inside a checkout runs its own build.
+export function sessionsOnOtherBuilds(list, root, cwdOf) {
+  const sessions = new Map();
+  for (const server of findServers({ published: false }, list)) {
+    const build = checkoutOf(scriptOf(server.cmd) ?? "");
+    if (!build || !isAbsolute(build) || build === root) continue;
+    const [session] = sessionsOf([server], list);
+    const cwd = session.harness ? cwdOf(session.pid) : "";
+    if (cwd && !`${cwd}/`.startsWith(`${build}/`)) sessions.set(session.pid, { ...session, cwd });
+  }
+  return [...sessions.values()];
 }
 
 // A checkout build is any .../packages/server/dist/index.js: its root is the checkout.

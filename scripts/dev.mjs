@@ -20,7 +20,14 @@ import { homedir, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describeAgents, restoreAgents, runCli, switchAgents } from "./agent-configs.mjs";
-import { cwdOf, findServers, identify, processes, sessionsOf } from "./servers.mjs";
+import {
+  cwdOf,
+  findServers,
+  identify,
+  processes,
+  sessionsOf,
+  sessionsOnOtherBuilds,
+} from "./servers.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const thisRoot = resolve(scriptDir, "..");
@@ -224,7 +231,14 @@ function link() {
   const holder = owner && identify(owner.command, owner.cwd);
   if (holder?.label.startsWith("dev launcher") && holder.root !== thisRoot)
     console.log(`! pnpm dev of ${holder.root} holds the broker port: stop it to test this one.`);
-  stopServers({ published: true });
+  const list = stopServers({ published: true });
+  const others = sessionsOnOtherBuilds(list, thisRoot, cwdOf);
+  if (others.length) {
+    console.log(
+      "  Sessions on another checkout's build, likely from an earlier dev:link, to restart:",
+    );
+    for (const s of others) console.log(`  · ${s.harness} pid ${s.pid} in ${s.cwd}`);
+  }
   console.log(`\n✓ Gatekeeper dev target: ${thisRoot}`);
   console.log("  Restart Beekeeper, then the agent sessions listed above.");
   console.log(
@@ -257,10 +271,10 @@ function stopServers({ published }) {
       console.log(`· could not stop ${label} ${pid}: ${err.message}`);
     }
   }
-  if (!sessions.length) return;
-  console.log(
-    "  Agent sessions that lose their Gatekeeper tools, to restart (claude --continue, codex resume):",
-  );
+  if (sessions.length)
+    console.log(
+      "  Agent sessions that lose their Gatekeeper tools, to restart (claude --continue, codex resume):",
+    );
   for (const s of sessions) {
     console.log(
       s.harness
@@ -268,6 +282,7 @@ function stopServers({ published }) {
         : `  · server ${s.pid}: no agent session found above it`,
     );
   }
+  return list;
 }
 
 function unlink() {
@@ -359,6 +374,8 @@ async function status() {
     console.log(`  runs ${holder.label}`);
     if (holder.root !== pluginRoot)
       mismatches.push(`the broker runs ${holder.root ?? holder.label}, not ${expected}`);
+  } else if (held && pluginRoot) {
+    mismatches.push(`the broker holder could not be identified as ${expected}`);
   }
   console.log(
     `~/.gatekeeper/broker-token : ${existsSync(join(stateDir(), "broker-token")) ? "present" : "absent"}`,

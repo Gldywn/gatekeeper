@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -15,7 +16,12 @@ import { beforeEach, describe, expect, it } from "vitest";
 // @ts-expect-error plain JS dev script
 import { describeEntry, restoreAgents, switchAgents } from "../../../scripts/agent-configs.mjs";
 // @ts-expect-error plain JS dev script
-import { findServers, identify, sessionsOf } from "../../../scripts/servers.mjs";
+import {
+  findServers,
+  identify,
+  sessionsOf,
+  sessionsOnOtherBuilds,
+} from "../../../scripts/servers.mjs";
 
 type Run = (cmd: string, args: string[]) => { ok: boolean; err: string };
 
@@ -187,6 +193,27 @@ describe("dev:link agent entries", () => {
     expect(claudeEntry()).toEqual(PUBLISHED);
   });
 
+  it("refuses to re-link an entry edited since the last link, from any checkout", () => {
+    switchAgents(NODE, at("/wt/a"), ctx());
+    const edited = readFileSync(codexFile, "utf8").replace("an env value", "edited");
+    writeFileSync(codexFile, edited);
+    expect(switchAgents(NODE, at("/wt/a"), ctx())).toBe(false);
+    expect(switchAgents(NODE, at("/wt/b"), ctx())).toBe(false);
+    expect(readFileSync(codexFile, "utf8")).toBe(edited);
+    expect(logs.join("\n")).toMatch(/Codex: entry changed since dev:link, left as is\. To undo/);
+    expect(restoreAgents(ctx())).toBe(false);
+    expect(readFileSync(codexFile, "utf8")).toBe(edited);
+  });
+
+  it("adds an args line to a command-only Codex entry, and unlink removes it", () => {
+    const bare = CODEX.replace(/args = .*\r\n/, "");
+    writeFileSync(codexFile, bare);
+    expect(switchAgents(NODE, at("/wt/a"), ctx())).toBe(true);
+    expect(codexEntry()).toMatchObject({ command: NODE, args: at("/wt/a") });
+    expect(restoreAgents(ctx())).toBe(true);
+    expect(readFileSync(codexFile, "utf8")).toBe(bare);
+  });
+
   it("never takes an entry it did not write as its own after a failed switch", () => {
     switchAgents(NODE, at("/wt/a"), ctx());
     const custom = { command: "/my/own/server", args: [] };
@@ -278,23 +305,30 @@ describe("dev:link servers and sessions", () => {
   const list = [
     { pid: 10, ppid: 1, cmd: "/opt/homebrew/bin/claude --resume" },
     { pid: 11, ppid: 10, cmd: "node /shims/pnpm.cjs dlx @gldywn/gatekeeper-mcp-server@0.3.1" },
-    { pid: 12, ppid: 11, cmd: "node /cache/@gldywn/gatekeeper-mcp-server/dist/index.js" },
+    {
+      pid: 12,
+      ppid: 11,
+      cmd: "node /dlx/node_modules/@gldywn/gatekeeper-mcp-server/dist/index.js",
+    },
+    { pid: 13, ppid: 10, cmd: "node /home/.npm/_npx/1/node_modules/.bin/gatekeeper-mcp-server" },
     { pid: 20, ppid: 1, cmd: "/Caskroom/codex/0.166.0/bin/codex" },
     { pid: 21, ppid: 20, cmd: "/bin/sh /work/wrap.sh" },
     { pid: 22, ppid: 21, cmd: "node /work/gatekeeper/packages/server/dist/index.js" },
     { pid: 30, ppid: 31, cmd: "node /other/gatekeeper-mcp-server/dist/index.js" },
     { pid: 31, ppid: 30, cmd: "/bin/sh loop" },
     { pid: 40, ppid: 999, cmd: "node /orphan/gatekeeper-mcp-server/dist/index.js" },
+    // Mentioning the package is not running it.
+    { pid: 50, ppid: 1, cmd: "node /pnpm.cjs --filter @gldywn/gatekeeper-mcp-server test" },
+    { pid: 51, ppid: 1, cmd: "/opt/homebrew/bin/claude fix node gatekeeper-mcp-server" },
   ];
+  const pids = (servers: { pid: number }[]) => servers.map((s) => s.pid);
 
-  it("tells published servers from repo builds", () => {
+  it("tells published servers from repo builds by the script node runs", () => {
     const servers = findServers({ published: true }, list);
-    expect(
-      servers.filter((s: { published: boolean }) => s.published).map((s: { pid: number }) => s.pid),
-    ).toEqual([11, 12, 30, 40]);
-    expect(findServers({ published: false }, list).map((s: { pid: number }) => s.pid)).toEqual([
-      22,
+    expect(pids(servers.filter((s: { published: boolean }) => s.published))).toEqual([
+      12, 13, 30, 40,
     ]);
+    expect(pids(findServers({ published: false }, list))).toEqual([22]);
   });
 
   it("finds the session above each server through wrappers, once per session", () => {
@@ -305,6 +339,42 @@ describe("dev:link servers and sessions", () => {
       { harness: null, pid: 30 },
       { harness: null, pid: 40 },
     ]);
+  });
+
+  it("lists sessions on another checkout's build only when they run outside it", () => {
+    const build = (root: string) => `node /wt/${root}/packages/server/dist/index.js`;
+    const procs = [
+      { pid: 60, ppid: 1, cmd: "claude" },
+      { pid: 61, ppid: 60, cmd: build("gatekeeper-a") },
+      { pid: 62, ppid: 1, cmd: "claude" },
+      { pid: 63, ppid: 62, cmd: build("gatekeeper-a") },
+      { pid: 64, ppid: 1, cmd: "codex" },
+      { pid: 65, ppid: 64, cmd: build("gatekeeper-a") },
+      { pid: 66, ppid: 1, cmd: "claude" },
+      { pid: 67, ppid: 66, cmd: build("gatekeeper-b") },
+    ];
+    const cwds: Record<number, string> = {
+      60: "/proj",
+      62: "/wt/gatekeeper-a/packages",
+      64: "/wt/gatekeeper-ab",
+      66: "/proj",
+    };
+    expect(sessionsOnOtherBuilds(procs, "/wt/gatekeeper-b", (pid: number) => cwds[pid])).toEqual([
+      { harness: "Claude Code", pid: 60, cwd: "/proj" },
+      { harness: "Codex", pid: 64, cwd: "/wt/gatekeeper-ab" },
+    ]);
+  });
+
+  it("follows npx's bin link to the package it runs", () => {
+    const pkg = join(home, "npx", "node_modules", "@gldywn", "gatekeeper-mcp-server");
+    mkdirSync(join(pkg, "dist"), { recursive: true });
+    writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "gk", version: "0.3.1" }));
+    writeFileSync(join(pkg, "dist", "index.js"), "");
+    writeFileSync(join(pkg, "dist", "build.json"), JSON.stringify({ version: "0.3.1" }));
+    mkdirSync(join(home, "npx", "node_modules", ".bin"));
+    const bin = join(home, "npx", "node_modules", ".bin", "gatekeeper-mcp-server");
+    symlinkSync("../@gldywn/gatekeeper-mcp-server/dist/index.js", bin);
+    expect(identify(`node ${bin}`, "/")).toEqual({ root: null, label: "gk 0.3.1 (on disk)" });
   });
 
   it("reads a broker holder's version from its files on disk", () => {
@@ -318,8 +388,9 @@ describe("dev:link servers and sessions", () => {
       join(dist, "build.json"),
       JSON.stringify({ version: "0.4.0", dev: { sha: "abc" } }),
     );
+    writeFileSync(join(dist, "index.js"), "");
     expect(identify("node packages/server/dist/index.js", join(home, "wt"))).toEqual({
-      root: join(home, "wt"),
+      root: join(realpathSync(home), "wt"),
       label: "srv 0.4.0 dev abc (on disk)",
     });
     expect(identify("node ../../scripts/dev-server.mjs", "/wt/packages/server")).toEqual({
