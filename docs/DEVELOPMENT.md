@@ -24,9 +24,9 @@ pnpm format      # biome format --write
 pnpm ci          # typecheck + build + test
 pnpm dev         # test databases + Vite hot reload + Gatekeeper server with watch
 pnpm dev:server  # take over the broker and restart the server on source changes
-pnpm dev:link    # symlink Beekeeper's plugin + the agent skill at this checkout (builds first)
-pnpm dev:unlink  # remove those dev symlinks and stop repo-build servers
-pnpm dev:status  # show what points where (plugin, skill, broker port owner, token)
+pnpm dev:link    # point Beekeeper's plugin, the skill and the agents' MCP entries here (builds first)
+pnpm dev:unlink  # undo dev:link and stop repo-build servers
+pnpm dev:status  # show what points where (plugin, skill, agents, broker port owner, token)
 pnpm dev:reset   # clear the pairing token (add -- --all to also wipe the results DB)
 pnpm db:up       # start the Postgres and MySQL test containers
 pnpm db:down     # stop them (add -- -v to wipe the data)
@@ -66,9 +66,34 @@ The repo ships its dev wiring, so a clone is ready without hand-editing config:
   an MCP change needs `pnpm build` and a reconnect; a worktree with no build has no
   Gatekeeper tools. Builds share the database on purpose; a build that changes its schema
   incompatibly needs every other server stopped.
-- **Codex** has no project-local config; add the server by hand to `~/.codex/config.toml`
-  under `[mcp_servers.gatekeeper]` with `command = "node"` and an absolute `args` path to
-  `packages/server/dist/index.js`.
+- **Agents in other projects** run the server of their user-level config (`~/.claude.json`,
+  `~/.codex/config.toml`), usually a published version. `pnpm dev:link` points each
+  `gatekeeper` entry at this checkout's `packages/server/dist/index.js`, run by the Node that
+  ran `dev:link` (an absolute path, so a client's version manager cannot pick another one). It
+  changes the command and its arguments only, and keeps the original in
+  `~/.gatekeeper/dev-link.json` (owner-only) until `pnpm dev:unlink` puts it back. An entry
+  edited by hand since the last link is left alone by both, which then say how to undo it by
+  hand. Claude Code is changed through
+  `claude mcp remove/add-json --scope user`, since running sessions rewrite `~/.claude.json`;
+  Codex by rewriting the `command` and `args` lines of `[mcp_servers.gatekeeper]` (adding an
+  `args` line a global binary has none of), refused
+  when the file does not parse back to the same config with only those changed. `CODEX_HOME`
+  is honoured; with `CLAUDE_CONFIG_DIR` set, Claude Code is left to you. A client with no
+  entry gets none. OpenCode is reported only: its global config is JSONC, edit it by hand.
+  Claude Code and OpenCode sessions inside a checkout keep its build, since its project config
+  outranks the user one; Codex has no project config here, so its sessions follow the link too.
+- **Agent sessions to restart:** `dev:link` then stops the published servers still running
+  and lists the sessions they belonged to, read from their parent processes, plus the sessions
+  still on another checkout's build from an earlier link's entry (listed, not stopped);
+  `dev:unlink` stops and lists repo builds. Restart those sessions (`claude --continue`, `codex resume`): a
+  stopped server does not come back on the new entry by itself. Claude Code marks it failed
+  ([docs](https://code.claude.com/docs/en/mcp)); Codex does not restart it at once but may
+  recreate it later from the session's old config.
+- **Order:** `pnpm dev:link`, then `pnpm dev` (or `pnpm dev:server`) in the same checkout if
+  the broker must stay on it, then restart the agent sessions, then `pnpm dev:status`. Started
+  after the sessions, `pnpm dev` stops their new servers again. Without it the broker goes to
+  whichever surviving server takes the port first, possibly another worktree's build;
+  `dev:status` names it and warns.
 - **Plugin:** `pnpm dev:link` symlinks `packages/plugin/` into Beekeeper's plugins folder, so
   a rebuild is picked up without reinstalling. Run it from any checkout or worktree; it
   targets that one. An installed release in the slot is moved to

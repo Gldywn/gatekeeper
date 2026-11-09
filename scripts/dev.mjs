@@ -19,7 +19,15 @@ import { createConnection } from "node:net";
 import { homedir, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { findServers } from "./servers.mjs";
+import { describeAgents, restoreAgents, runCli, switchAgents } from "./agent-configs.mjs";
+import {
+  cwdOf,
+  findServers,
+  identify,
+  processes,
+  sessionsOf,
+  sessionsOnOtherBuilds,
+} from "./servers.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const thisRoot = resolve(scriptDir, "..");
@@ -79,6 +87,8 @@ const skillBackup = (link) => `${link}.pre-dev`;
 const pluginSrc = (root) => join(root, "packages", "plugin");
 const pluginDist = (root) => join(pluginSrc(root), "dist", "index.html");
 const skillSrc = (root) => join(root, "skills", "gatekeeper");
+const serverEntry = (root) => join(root, "packages", "server", "dist", "index.js");
+const agentCtx = () => ({ home: homedir(), env: process.env, dry, log: console.log, run: runCli });
 
 // Primary repo = parent of the shared git dir, resolvable from any worktree.
 function primaryRoot() {
@@ -198,10 +208,8 @@ function build(root) {
 
 function link() {
   if (!dry && !has("--no-build")) build(thisRoot);
-  if (!existsSync(pluginDist(thisRoot))) {
-    fail(
-      `${pluginDist(thisRoot)} is missing; build first (pnpm build) so Beekeeper can load the plugin.`,
-    );
+  for (const built of [pluginDist(thisRoot), serverEntry(thisRoot)]) {
+    if (!existsSync(built)) fail(`${built} is missing; build first (pnpm build).`);
   }
   linkOne("plugin", pluginSrc(thisRoot), pluginSlot(), pluginBackup());
   for (const dir of skillDirs())
@@ -211,47 +219,89 @@ function link() {
       join(dir, "gatekeeper"),
       skillBackup(join(dir, "gatekeeper")),
     );
+  let switched;
+  try {
+    switched = switchAgents(process.execPath, [serverEntry(thisRoot)], agentCtx());
+  } catch (err) {
+    fail(err.message);
+  }
+  if (!switched) fail("an agent entry was not switched (see above): fix it and re-run.");
+  // Published servers die below, but a dev launcher keeps the port whatever link does.
+  const owner = portOwner(Number(process.env.GATEKEEPER_BROKER_PORT ?? 9999));
+  const holder = owner && identify(owner.command, owner.cwd);
+  if (holder?.label.startsWith("dev launcher") && holder.root !== thisRoot)
+    console.log(`! pnpm dev of ${holder.root} holds the broker port: stop it to test this one.`);
+  const list = stopServers({ published: true });
+  const others = sessionsOnOtherBuilds(list, thisRoot, cwdOf);
+  if (others.length) {
+    console.log(
+      "  Sessions on another checkout's build, likely from an earlier dev:link, to restart:",
+    );
+    for (const s of others) console.log(`  · ${s.harness} pid ${s.pid} in ${s.cwd}`);
+  }
   console.log(`\n✓ Gatekeeper dev target: ${thisRoot}`);
+  console.log("  Restart Beekeeper, then the agent sessions listed above.");
   console.log(
-    skillDirs().length
-      ? "  Restart Beekeeper (plugin) and the agent session (skill) to pick this up."
-      : "  Restart Beekeeper to pick up the plugin.",
+    "  To keep the broker on this checkout, run pnpm dev here before restarting them: it stops every other Gatekeeper server. Check with pnpm dev:status.",
   );
 }
 
-// A repo-build server outlives unlink and keeps the broker port, so a published
-// plugin keeps talking to dev code. Published servers (gatekeeper-mcp-server) are
-// left alone: a non-owner retries the port and takes over once the dev one exits.
-function stopDevServers() {
-  let stopped = 0;
-  for (const { pid, cmd } of findServers({ published: false })) {
+// Old servers keep the broker port, so the plugin would keep talking to them: link stops the
+// published ones, unlink the repo builds. The sessions are read first: a stopped server has no
+// parent left to read.
+function stopServers({ published }) {
+  const label = published ? "published server" : "dev server";
+  let list;
+  try {
+    list = processes();
+  } catch (err) {
+    fail(err.message);
+  }
+  const servers = findServers({ published: true }, list).filter((s) => s.published === published);
+  const sessions = sessionsOf(servers, list);
+  for (const { pid } of servers) {
     if (dry) {
-      console.log(`· would stop dev server ${pid}: ${cmd}`);
+      console.log(`· would stop ${label} ${pid}`);
       continue;
     }
     try {
       process.kill(pid, "SIGTERM");
-      stopped++;
-      console.log(`· stopped dev server ${pid}: ${cmd}`);
+      console.log(`· stopped ${label} ${pid}`);
     } catch (err) {
-      console.log(`· could not stop dev server ${pid}: ${err.message}`);
+      console.log(`· could not stop ${label} ${pid}: ${err.message}`);
     }
   }
-  if (stopped) {
+  if (sessions.length)
     console.log(
-      "  The agent sessions that launched them lost their Gatekeeper tools: restart them.",
+      "  Agent sessions that lose their Gatekeeper tools, to restart (claude --continue, codex resume):",
+    );
+  for (const s of sessions) {
+    console.log(
+      s.harness
+        ? `  · ${s.harness} pid ${s.pid} in ${cwdOf(s.pid) || "?"}`
+        : `  · server ${s.pid}: no agent session found above it`,
     );
   }
+  return list;
 }
 
 function unlink() {
   unlinkOne("plugin", pluginSlot(), pluginBackup());
   for (const dir of skillDirs())
     unlinkOne("skill", join(dir, "gatekeeper"), skillBackup(join(dir, "gatekeeper")));
-  stopDevServers();
-  console.log("\n✓ Dev symlinks removed. Restart Beekeeper and the agent session.");
+  let restored;
+  try {
+    restored = restoreAgents(agentCtx());
+  } catch (err) {
+    fail(err.message);
+  }
+  stopServers({ published: false });
+  if (!restored) {
+    process.exitCode = 1;
+    console.log("\n✗ Some agent entries were not restored (see above); the rest is undone.");
+  } else console.log("\n✓ Dev links removed. Restart Beekeeper and the agent sessions.");
   console.log(
-    "  A slot with no stashed copy stays empty: re-install from published (Plugin Manager / npx skills add). MCP config is committed, nothing to undo.",
+    "  A slot with no stashed copy stays empty: re-install from published (Plugin Manager / npx skills add).",
   );
 }
 
@@ -285,8 +335,14 @@ async function status() {
   console.log(`primary repo  : ${primary}`);
 
   console.log(`\nplugin slot: ${pluginSlot()}`);
-  printSlot(inspectLink(pluginSlot()), primary, "plugin");
+  const plugin = inspectLink(pluginSlot());
+  printSlot(plugin, primary, "plugin");
   if (existsSync(pluginBackup())) console.log(`  stashed real folder: ${pluginBackup()}`);
+  // Everything that serves the plugin should come from the checkout it runs, or none at all.
+  const pluginRoot =
+    plugin.kind === "symlink" && plugin.target ? resolve(plugin.target, "../..") : null;
+  const expected = pluginRoot ? `the plugin's checkout ${pluginRoot}` : "a published server";
+  const mismatches = [];
 
   for (const dir of skillDirs()) {
     const link = join(dir, "gatekeeper");
@@ -295,6 +351,17 @@ async function status() {
     if (existsSync(skillBackup(link))) console.log(`  stashed real folder: ${skillBackup(link)}`);
   }
 
+  console.log("\nagents' user-level gatekeeper entry:");
+  for (const row of describeAgents(agentCtx())) {
+    console.log(
+      `  ${row.name.padEnd(11)} : ${row.label ? `${row.label} (${row.path})` : row.note}`,
+    );
+    if (row.label && row.root !== pluginRoot)
+      mismatches.push(`${row.name} runs ${row.label}, not ${expected}`);
+  }
+  if (existsSync(join(stateDir(), "dev-link.json")))
+    console.log("  originals kept in ~/.gatekeeper/dev-link.json until dev:unlink");
+
   const port = Number(process.env.GATEKEEPER_BROKER_PORT ?? 9999);
   // Held, not healthy: the dev launcher keeps the port even while its server restarts.
   const held = await brokerAlive(port);
@@ -302,12 +369,21 @@ async function status() {
   const owner = held && portOwner(port);
   if (owner) console.log(`  by pid ${owner.pid}: ${owner.command} (cwd ${owner.cwd})`);
   else if (held) console.log("  by an unknown process (no lsof, or it exited meanwhile)");
+  const holder = owner && identify(owner.command, owner.cwd);
+  if (holder) {
+    console.log(`  runs ${holder.label}`);
+    if (holder.root !== pluginRoot)
+      mismatches.push(`the broker runs ${holder.root ?? holder.label}, not ${expected}`);
+  } else if (held && pluginRoot) {
+    mismatches.push(`the broker holder could not be identified as ${expected}`);
+  }
   console.log(
     `~/.gatekeeper/broker-token : ${existsSync(join(stateDir(), "broker-token")) ? "present" : "absent"}`,
   );
   console.log(
     `~/.gatekeeper/requests.db  : ${existsSync(join(stateDir(), "requests.db")) ? "present" : "absent"}`,
   );
+  for (const m of mismatches) console.log(`! ${m}`);
 }
 
 async function reset() {

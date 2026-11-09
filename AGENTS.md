@@ -73,12 +73,15 @@ worktree adds `--port 5200` (any free port) and uses that port in its URLs.
 
 The human checks the real plugin inside Beekeeper Studio once before merging:
 
-1. `pnpm dev:link` builds, then points Beekeeper's plugin slot at this checkout. An installed
-   release is moved aside and `pnpm dev:unlink` puts it back. `pnpm dev:status` shows what
-   points where.
+1. `pnpm dev:link` builds, then points Beekeeper's plugin slot and the agents' user-level
+   `gatekeeper` MCP entries (Claude Code, Codex) at this checkout, stops the published servers
+   and lists the agent sessions to restart. The installed release and the original entries are
+   set aside and `pnpm dev:unlink` puts them back. `pnpm dev:status` shows what points where
+   and warns when the broker or an agent runs something else than the plugin's checkout.
 2. `pnpm --filter @gatekeeper/plugin dev` starts Vite with hot reload inside Beekeeper
    (`pnpm dev` also starts the Docker test databases first). Restart Beekeeper once after
-   linking.
+   linking. `pnpm dev` stops every other Gatekeeper server, so start it before restarting the
+   agent sessions `dev:link` listed.
 3. Connect Beekeeper to the test databases from `pnpm db:up` (synthetic data), never to a
    real database.
 
