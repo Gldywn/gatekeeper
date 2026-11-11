@@ -199,11 +199,12 @@ export class BrokerClient {
     leaseId: string,
     approval?: ApprovalAttribution,
     sensitivity?: SensitivityRecord,
+    heavy?: true,
   ): Promise<boolean> {
     const res = await this.request("/executing", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, leaseId, approval, sensitivity }),
+      body: JSON.stringify({ id, leaseId, approval, sensitivity, heavy }),
     });
     return res.ok;
   }

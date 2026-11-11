@@ -293,6 +293,49 @@ describe("render/detail", () => {
     expect(hintsOnly).toContain(`<div class="dt-msg"><span class="q">Message</span>${hints}</div>`);
   });
 
+  it("keeps the load check's alert on a decided request, once, whoever decided", () => {
+    const line = "Flagged heavy by the load check";
+    const badge = '<span class="risk-badge heavy">';
+    const auto = detailHtml(
+      { ...item, approval: { source: "automatic" }, heavy: true },
+      "audit",
+      pg,
+      true,
+    );
+    expect(auto).toContain('<div class="dt-sub">Approved automatically &middot; Recorded');
+    expect(auto).toMatch(/<div class="dt-sub dt-heavy"><svg[^>]*>.*<\/svg><span>Flagged heavy/);
+    // The request line carries the card's badge after the class badge.
+    expect(auto).toMatch(
+      /<div class="top">.*<span class="risk-badge heavy">.*<span class="intent">/,
+    );
+    const declined = detailHtml(
+      { ...item, status: "rejected", declinedBy: "human", result: undefined, heavy: true },
+      "hist",
+      pg,
+    );
+    expect(declined).toContain(line);
+    expect(declined).toContain(badge);
+    // An auto-denied request already names the load check as who declined it.
+    const denied = detailHtml(
+      {
+        ...item,
+        status: "rejected",
+        result: undefined,
+        declinedBy: "load",
+        autoDenied: true,
+        heavy: true,
+      },
+      "hist",
+      pg,
+    );
+    expect(denied).toContain("Declined by the load check");
+    expect(denied).not.toContain(line);
+    expect(denied).toContain(badge);
+    const light = detailHtml(item, "hist", pg, true);
+    expect(light).not.toContain(line);
+    expect(light).not.toContain(badge);
+  });
+
   it("tells an agent cancellation apart from an expiry, and both ran nothing", () => {
     const cancelled = detailHtml(
       { ...item, status: "expired", note: CANCELLED_NOTE, result: undefined },

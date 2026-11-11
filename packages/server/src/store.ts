@@ -145,8 +145,9 @@ export class RequestStore {
     leaseId: string,
     approval?: import("@gatekeeper/shared").ApprovalAttribution,
     sensitivity?: import("@gatekeeper/shared").SensitivityRecord,
+    heavy = false,
   ): GatekeeperRequest {
-    return markExecuting(this.ctx, id, leaseId, approval, sensitivity);
+    return markExecuting(this.ctx, id, leaseId, approval, sensitivity, heavy);
   }
 
   withdrawExecution(id: string, leaseId: string): void {
@@ -167,8 +168,9 @@ export class RequestStore {
     outcome: Outcome,
     autoHold?: import("@gatekeeper/shared").AutoHold,
     sensitivity?: import("@gatekeeper/shared").SensitivityRecord,
+    heavy = false,
   ): GatekeeperRequest {
-    return resolve(this.ctx, id, leaseId, outcome, autoHold, sensitivity);
+    return resolve(this.ctx, id, leaseId, outcome, autoHold, sensitivity, heavy);
   }
 
   cancel(id: string, sessionId: string): GatekeeperRequest {

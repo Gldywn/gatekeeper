@@ -194,13 +194,20 @@ use returns nothing (`WHERE false`). Both alert as a full read of the table.
   rules that read the SQL alone, which flag `UPDATE` or `DELETE` without `WHERE` and sources that
   no join condition links. An engine read with node-sql-parser's PostgreSQL grammar (Redshift,
   CockroachDB, DuckDB) counts as another engine: no catalog read, no size or lock rule.
-- **Auto mode** holds a query with an alert before anything is sent to TypeSafe. History keeps
-  the fixed reason `Heavy query`, never a table name. A check that could not finish (a view, an
-  unknown size, a late catalog read) blocks nothing, with or without Auto mode, and shows
-  nothing on the card.
+- **Auto mode** waits for the load check before anything is sent to TypeSafe, so Auto-deny
+  heavy queries decides first. An alert alone does not hold a read: with Auto mode on and
+  Auto-deny heavy queries off, a read the load check flags runs without a human whenever the
+  read analysis and Jev clear it. Turn Auto-deny heavy queries on to stop that. A check that
+  could not finish (a view, an unknown size, a late catalog read) blocks nothing, with or
+  without Auto mode, and shows nothing on the card.
+- **The decision records** that the query was flagged (`heavy` in the broker's audit record),
+  never a table name or an estimate, and never in what the agent reads back. Recently resolved,
+  the Audit Trail and its exports show it, Auto mode's approvals included.
 - **Auto-deny heavy queries** (Settings, off by default, per connection) rejects a flagged
-  query as soon as its card arrives, without a human in the loop. A finding that depends on a
-  missing row estimate never auto-denies. The automatic rejection itself tells the agent that
+  query as soon as its card arrives, without a human in the loop. It is the only setting that
+  keeps a flagged read from running in Auto mode, so Auto mode cannot be enabled until the
+  connection's own settings have loaded. A finding that depends on a missing row estimate never
+  auto-denies. The automatic rejection itself tells the agent that
   its query was judged heavy, so by trying variants an agent can learn whether a table holds
   over a million rows or whether a filtered column has no index. Leave the setting off to keep
   that signal behind a human decision.

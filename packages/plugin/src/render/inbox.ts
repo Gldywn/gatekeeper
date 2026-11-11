@@ -51,6 +51,9 @@ function riskIcon(cls: RiskClass): string {
   return `<span class="ix-risk ${cls}" title="${word}">${icon}<span class="sr-only">${word}</span></span>`;
 }
 
+// The load check's gauge after the class icon, as the card's Heavy query badge follows its class.
+const HEAVY_MARK = `<span class="ix-risk heavy" title="Heavy query">${gaugeIcon}<span class="sr-only">Heavy query</span></span>`;
+
 function who(session: Card["session"], fallback: string): string {
   return escapeHtml(sessionDisplayName(session, fallback));
 }
@@ -185,9 +188,10 @@ export function doneRowHtml(
 ): string {
   const title = item.intent ? capitalize(item.intent) : previewSql(item.sql);
   const cls = classifyQuery(item.sql, databaseType).class;
-  // The class and the sensitivity marks only where the query ran (or may have): a declined,
+  // The class, load and sensitivity marks only where the query ran (or may have): a declined,
   // expired, cancelled, blocked or failed one touched nothing worth marking. The detail keeps all.
   const ran = item.status === "approved" || unconfirmed(item);
+  const marks = ran ? `${riskIcon(cls)}${item.heavy ? HEAVY_MARK : ""}` : "";
   const flagsHtml =
     flags && ran ? `<span class="act-flags">${activityFlagsHtml(flags)}</span>` : "";
   const meta = grouped
@@ -196,7 +200,7 @@ export function doneRowHtml(
   return `<button class="ix-row done${grouped ? " grouped" : ""}" type="button" data-row="${escapeHtml(item.id)}" data-select="${select}" aria-current="${selected}">
       <span class="ix-mark">${rowGlyph(item)}</span>
       <span class="ix-title">${escapeHtml(title)}</span>
-      <span class="ix-top">${ran ? riskIcon(cls) : ""}${autoFlag(item)}${flagsHtml}${time}</span>
+      <span class="ix-top">${marks}${autoFlag(item)}${flagsHtml}${time}</span>
       ${meta}<span class="ix-fact">${escapeHtml(rowFact(item, databaseType))}</span>
     </button>`;
 }
@@ -274,6 +278,7 @@ export function auditItem(e: ActivityEntry, connection: string | null): HistItem
     ...(e.state === "rejected" && e.declinedBy ? { declinedBy: e.declinedBy } : {}),
     ...(e.state === "rejected" && e.declinedBy === "load" ? { autoDenied: true } : {}),
     ...(e.kept ? { kept: true } : {}),
+    ...(e.heavy === true ? { heavy: true } : {}),
     approval: e.approval,
     evaluation: e.evaluation,
     autoHold: e.autoHold,

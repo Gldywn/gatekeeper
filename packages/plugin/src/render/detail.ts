@@ -7,6 +7,7 @@ import {
   clockIcon,
   copyIcon,
   downloadIcon,
+  gaugeIcon,
   jsonIcon,
   markdownIcon,
   maximizeIcon,
@@ -23,7 +24,7 @@ import { parseStopNote } from "../sql/stop";
 import type { HistItem } from "../types";
 import { approvalHtml } from "./auto";
 import { flyoutMenu } from "./controls";
-import { accessMatrix, riskBadge } from "./queue";
+import { accessMatrix, heavyBadge, riskBadge } from "./queue";
 
 // An agent cancellation is stored as an expiry; this note is what tells the two apart.
 export const CANCELLED_NOTE = "cancelled by the agent";
@@ -189,7 +190,12 @@ function statusHtml(item: HistItem, source: DetailSource): string {
   const message = o.message
     ? `<div class="dt-msg${o.message.tone ? ` ${o.message.tone}` : ""}"><span class="q">Message</span>${escapeHtml(o.message.text)}</div>`
     : "";
-  return `<div class="dt-status ${o.cls}"><span class="dt-st">${o.icon}${o.label}</span></div><div class="dt-sub">${sub}</div>${o.line ? `<div class="dt-sub">${escapeHtml(o.line)}</div>` : ""}${message}`;
+  // An auto-denied request's attribution already names the load check.
+  const heavy =
+    item.heavy && !item.autoDenied
+      ? `<div class="dt-sub dt-heavy">${gaugeIcon}<span>Flagged heavy by the load check</span></div>`
+      : "";
+  return `<div class="dt-status ${o.cls}"><span class="dt-st">${o.icon}${o.label}</span></div><div class="dt-sub">${sub}</div>${heavy}${o.line ? `<div class="dt-sub">${escapeHtml(o.line)}</div>` : ""}${message}`;
 }
 
 const rowsHtml = (n: number) => `<b>${formatCount(n)}</b> ${n === 1 ? "row" : "rows"}`;
@@ -283,7 +289,7 @@ function requestHtml(item: HistItem, databaseType: string, cls: RiskClass): stri
     item.connection ? `on ${escapeHtml(item.connection)}` : "",
   ].filter(Boolean);
   return `<div class="pd-who">${agentBadge(harness)}<span class="pd-name">${escapeHtml(sessionDisplayName(item.session, item.id))}</span>${task ? `<span class="pd-task" title="${escapeHtml(capitalize(task))}">${escapeHtml(capitalize(task))}</span>` : ""}</div>
-        <div class="top">${riskBadge(cls)}<span class="intent">${escapeHtml(item.intent ? capitalize(item.intent) : previewSql(item.sql))}</span></div>
+        <div class="top">${riskBadge(cls)}${heavyBadge(item.heavy)}<span class="intent">${escapeHtml(item.intent ? capitalize(item.intent) : previewSql(item.sql))}</span></div>
         <div class="meta">${meta.join(" &middot; ")}</div>
         <div class="cs-matrix" id="detail-cm">${accessMatrix(item.sql, databaseType, cls)}</div>
         <div class="cs-legend" id="detail-cs"></div>

@@ -104,6 +104,31 @@ describe("auditItem", () => {
     });
   });
 
+  it("keeps the load check's flag whatever the outcome, and invents none", () => {
+    expect(auditItem(entry({ heavy: true }), null).heavy).toBe(true);
+    expect(auditItem(entry({ state: "rejected", heavy: true }), null).heavy).toBe(true);
+    expect("heavy" in auditItem(entry({}), null)).toBe(false);
+  });
+
+  it("puts the gauge after the class icon on a heavy write that ran", () => {
+    const html = recentRowHtml(
+      {
+        id: "q_ef56",
+        status: "approved",
+        note: "",
+        sql: "UPDATE public.invoices SET total = 0",
+        resolvedAt: T,
+        connection: null,
+        session: null,
+        heavy: true,
+      },
+      false,
+    );
+    expect(html).toMatch(
+      /<span class="ix-top"><span class="ix-risk write"[^>]*>.*?<\/span><\/span><span class="ix-risk heavy"/,
+    );
+  });
+
   it("dates an undecided entry by its creation", () => {
     expect(auditItem(entry({ state: "expired", decidedAt: null }), null).resolvedAt).toBe(T - 5000);
   });
