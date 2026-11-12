@@ -70,6 +70,7 @@ import {
   recentRowHtml,
 } from "./render/inbox";
 import {
+  AUTO_EVALUATING,
   accessMatrix,
   type CardGate,
   cardGateFor,
@@ -2428,7 +2429,7 @@ export class Gatekeeper {
     this.autoDeferred.clear();
     for (const card of this.cards) {
       // Reset authority without overwriting an already established review reason.
-      if (card.autoStatus === "Evaluating with Jev" && !card.evaluation) {
+      if (card.autoStatus === AUTO_EVALUATING && !card.evaluation) {
         card.autoStatus = `Needs review: ${reason === "Auto mode disabled" ? "Auto mode disabled while evaluating" : reason}`;
       }
     }
@@ -2482,8 +2483,7 @@ export class Gatekeeper {
       }
     };
     if (message) {
-      message.textContent =
-        toggle instanceof HTMLInputElement ? "Checking the key with TypeSafe…" : "";
+      message.textContent = toggle instanceof HTMLInputElement ? "Checking the connection…" : "";
       message.dataset.tone = "busy";
     }
     toggle.setAttribute("aria-busy", "true");
@@ -2491,7 +2491,7 @@ export class Gatekeeper {
       const key = entered || (await appStorage.getItem<string>(AUTO_KEY, { encrypted: true }));
       if (stale()) return;
       if (!key) {
-        keyProblem("Paste your TypeSafe API key first.");
+        keyProblem("Paste your API key first.");
         return;
       }
       if (!API_KEY_FORMAT.test(key)) {
@@ -2502,7 +2502,7 @@ export class Gatekeeper {
       const verdict = await this.broker.checkKey(key);
       if (stale()) return;
       if (verdict === "invalid") {
-        keyProblem("TypeSafe refused this API key.");
+        keyProblem("The evaluator refused this API key.");
         return;
       }
       if (verdict === "outdated") {
@@ -2510,7 +2510,7 @@ export class Gatekeeper {
         return;
       }
       if (verdict === "unavailable") {
-        fail("TypeSafe could not be reached. Try again.");
+        fail("The evaluator could not be reached. Try again.");
         return;
       }
       if (!(await this.checkConnection())) {
@@ -2656,7 +2656,7 @@ export class Gatekeeper {
     }, 15000);
     let run: Promise<void> | undefined;
     try {
-      card.autoStatus = "Evaluating with Jev";
+      card.autoStatus = AUTO_EVALUATING;
       this.renderQueue();
       if (!(await this.checkConnection()) || !valid() || controller.signal.aborted) return;
       // Checked before anything leaves for the provider. Only a finding holds the read, so a
@@ -2707,7 +2707,7 @@ export class Gatekeeper {
     } finally {
       window.clearTimeout(timer);
       free();
-      if (card.state === "ready" && card.autoStatus === "Evaluating with Jev")
+      if (card.state === "ready" && card.autoStatus === AUTO_EVALUATING)
         this.reviewCard(card, "Evaluation cancelled or authority changed");
       void this.evaluateNext();
     }
@@ -3192,8 +3192,7 @@ export class Gatekeeper {
       return;
     if (this.autoCard === card) this.autoAbort?.abort();
     // The audit row and history record why Auto mode stopped, never the evaluation it cut short.
-    if (card.autoStatus === "Evaluating with Jev")
-      card.autoStatus = `Needs review: ${HEAVY_REASON}`;
+    if (card.autoStatus === AUTO_EVALUATING) card.autoStatus = `Needs review: ${HEAVY_REASON}`;
     // Reserved before the await, like a click on Reject, so nothing else can take the card.
     this.setCardState(card.id, "rejecting");
     const sent = agentMessage(AUTO_DENY_MESSAGE, planLoad(card.sql, this.databaseType).hints);

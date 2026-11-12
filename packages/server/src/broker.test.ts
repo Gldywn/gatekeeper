@@ -198,6 +198,50 @@ describe("plugin-only automatic evaluation", () => {
     expect(store.listActivity(body.scope)[0].approval).toEqual(approval);
     expect(JSON.stringify(store.get(body.id))).not.toContain("synthetic-key");
   });
+  it.each([
+    ["an evaluation that records its cutoffs", true],
+    ["an evaluation from before cutoffs were recorded", false],
+  ])("authorizes %s only exactly as issued", async (_label, recorded) => {
+    const thresholds = {
+      personal_disclosure: 0.2,
+      organization_disclosure: 0.15,
+      secret_disclosure: 0.15,
+      insufficient_context: 0.45,
+    };
+    evaluator.mockImplementation(async (_input, _key, _signal, digest) => ({
+      ...answer(digest),
+      ...(recorded ? { thresholds } : {}),
+    }));
+    // A fresh request and issued decision per attempt, its JSON optionally changed in transit.
+    const attempt = async (change: (e: Record<string, unknown>) => void = () => {}) => {
+      const body = payload();
+      const issued = JSON.parse((await call("POST", "/evaluate", { token: TOKEN, body })).body);
+      change(issued);
+      const approval = { source: "automatic", evaluation: issued };
+      return (
+        await call("POST", "/executing", {
+          token: TOKEN,
+          body: { id: body.id, leaseId: body.leaseId, approval },
+        })
+      ).status;
+    };
+    // The plugin forwards the broker's JSON untouched, whichever version made it.
+    expect(await attempt()).toBe(200);
+    if (recorded) {
+      expect(await attempt((e) => delete e.thresholds)).toBe(409);
+      expect(
+        await attempt((e) => {
+          e.thresholds = { ...thresholds, personal_disclosure: 0.9 };
+        }),
+      ).toBe(409);
+    } else {
+      expect(
+        await attempt((e) => {
+          e.thresholds = thresholds;
+        }),
+      ).toBe(409);
+    }
+  });
   it.each(["auto-beta-1", "auto-beta-2", "auto-beta-3", "auto-beta-8"])(
     "preserves %s attribution for human approval without granting automatic authority",
     async (policy) => {

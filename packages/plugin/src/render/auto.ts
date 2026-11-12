@@ -1,6 +1,6 @@
 import type { ApprovalAttribution, AutoEvaluation } from "@gatekeeper/shared";
 import { escapeHtml } from "../html";
-import { AUTO_POLICY, AUTO_THRESHOLDS } from "../sql/auto";
+import { AUTO_MODEL, AUTO_POLICY, AUTO_THRESHOLDS, recordedCutoffs } from "../sql/auto";
 import type { AutoHold } from "../types";
 
 export const autoIcon =
@@ -10,23 +10,30 @@ export const autoIcon =
 // to the page. Bullets fall outside the key alphabet, so the mask can never pass as a key.
 export const SAVED_KEY_MASK = "\u2022".repeat(24);
 
-// The same sentences on the pending card and on the kept record: a hold says only where it
-// happened, on this machine before anything left, or at Jev, the model that evaluates reads.
+// The same sentences on the pending card and on the kept record, for every evaluator: a hold
+// says only where it happened, on this machine before anything left, or at the evaluator.
 export const AUTO_LEADS = {
   held: "Held on this machine before evaluation",
-  refused: "Jev did not clear this read",
   cleared: "The evaluation cleared this read",
   automatic: "This read was approved automatically",
 } as const;
-export const NOTHING_SENT = '<b class="auto-strong">Nothing was sent to TypeSafe.</b>';
+export const NOTHING_SENT = '<b class="auto-strong">Nothing was sent to the evaluator.</b>';
 
-// A hold says where it happened, and a local one that nothing left the machine.
-export function holdText(sent: boolean, tail = ""): string {
-  return `${sent ? AUTO_LEADS.refused : AUTO_LEADS.held}.${tail}${sent ? "" : ` ${NOTHING_SENT}`}`;
+// Names the model only when an answer from it is on record; a timeout or an error has none.
+function refusedLead(model?: string): string {
+  return `${model ? escapeHtml(model) : "The evaluator"} did not clear this read`;
 }
 
-// Card status once Jev cleared a read and Gatekeeper took it to execution; it replaces
-// "Evaluating with Jev", which would otherwise stay up for the whole run.
+// A hold says where it happened, and a local one that nothing left the machine.
+export function holdText(sent: boolean, tail = "", model?: string): string {
+  return `${sent ? refusedLead(model) : AUTO_LEADS.held}.${tail}${sent ? "" : ` ${NOTHING_SENT}`}`;
+}
+
+// The products behind the provider ids a record can carry.
+const PROVIDER_NAMES: Record<string, string> = { typesafe: "TypeSafe" };
+
+// Card status once the evaluator cleared a read and Gatekeeper took it to execution; it
+// replaces the evaluating state, which would otherwise stay up for the whole run.
 export const AUTO_APPROVED = "Approved automatically";
 
 const title = `<span class="sa-pt">${autoIcon}Auto mode</span>`;
@@ -56,9 +63,9 @@ export function autoSettingsHtml(enabled: boolean, keySaved = false): string {
               <span class="set-name"><span class="set-ico">${autoIcon}</span>Auto mode</span>
               <span class="set-desc">Run eligible reads without your approval and return their results to your agent.</span>
               <span class="set-note">PostgreSQL only. TypeSafe sees the SQL structure and the schema names and types it reads, never result rows.</span>
-              <div class="auto-key"><label class="set-name" for="autoKey">TypeSafe API key</label><input id="autoKey" class="confirm-input" type="password" data-auto-key autocomplete="off" spellcheck="false" maxlength="4096" placeholder="apikey_0123456789"${keySaved ? ` value="${SAVED_KEY_MASK}"` : ""}></div>
+              <div class="auto-key"><label class="set-name" for="autoKey">API key</label><input id="autoKey" class="confirm-input" type="password" data-auto-key autocomplete="off" spellcheck="false" maxlength="4096" placeholder="apikey_0123456789"${keySaved ? ` value="${SAVED_KEY_MASK}"` : ""}></div>
               <p class="auto-message" data-auto-message role="status"></p>
-              <span class="set-note">Stored in Beekeeper encrypted storage. Sent only to the local broker and TypeSafe.</span>
+              <span class="set-note">Stored in Beekeeper encrypted storage. Sent only to the local broker and the evaluator.</span>
             </div>
             <span class="set-control"><input class="switch" type="checkbox" role="switch" data-auto-toggle aria-label="Auto mode"${enabled ? " checked" : ""} /></span>
           </div>`;
@@ -90,21 +97,30 @@ export function approvalHtml(
       ? `${AUTO_LEADS.automatic}.`
       : e.eligible && !e.reasons.length
         ? `${AUTO_LEADS.cleared}.`
-        : `${AUTO_LEADS.refused}.`;
-  // Cutoffs only mean something for the policy they were written for; an older
-  // evaluation keeps its numbers without a verdict painted on them.
-  const graded = e.policy === AUTO_POLICY;
+        : `${refusedLead(e.model)}.`;
+  // Cutoffs only mean something for the rule they were recorded with: the record's own, else
+  // the built-in ones for the exact evaluator and policy they were written for. Anything else,
+  // malformed recorded cutoffs included, keeps its numbers without a verdict painted on them.
+  const cutoffs =
+    e.thresholds !== undefined
+      ? recordedCutoffs(e.thresholds)
+      : e.provider === "typesafe" && e.model === AUTO_MODEL && e.policy === AUTO_POLICY
+        ? (AUTO_THRESHOLDS as Record<string, number>)
+        : undefined;
   const axes = Object.entries(e.probabilities)
     .map(([id, value]) => {
-      const cutoff = AUTO_THRESHOLDS[id as keyof typeof AUTO_THRESHOLDS];
-      const over = graded && cutoff !== undefined && value > cutoff;
+      const cutoff = cutoffs?.[id];
+      const over = cutoff !== undefined && value > cutoff;
       return `<span class="auto-reason metric${over ? " over" : ""}">${escapeHtml(id)} ${escapeHtml(String(value))}</span>`;
     })
     .join("");
+  const provider = Object.hasOwn(PROVIDER_NAMES, e.provider)
+    ? PROVIDER_NAMES[e.provider]
+    : e.provider;
   return `<div class="auto-trace">
-      <div class="auto-trace-line">${autoIcon}<span><b>Auto mode:</b> ${lead}</span></div>
+      <div class="auto-trace-line">${autoIcon}<span><b>Auto mode:</b> ${lead} <span class="auto-who">Evaluated by ${escapeHtml(e.model)} on ${escapeHtml(provider)}.</span></span></div>
       <div class="auto-reasons">${axes}</div>
-      <div class="auto-trace-meta">${escapeHtml(e.provider)} &middot; ${escapeHtml(e.model)} &middot; policy ${escapeHtml(e.policy)} &middot; ${escapeHtml(new Date(e.evaluatedAt).toISOString())} &middot; ${escapeHtml(e.sqlDigest)}</div>
+      <div class="auto-trace-meta"><span>policy ${escapeHtml(e.policy)}</span><span>${escapeHtml(new Date(e.evaluatedAt).toISOString())}</span><span>${escapeHtml(e.sqlDigest)}</span></div>
     </div>`;
 }
 

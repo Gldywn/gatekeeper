@@ -384,7 +384,31 @@ export function seededHistory(): HistItem[] {
       session: session(1),
       intent: "active customers per week since August",
       result: capResult(weeks, fieldsOf(weeks)),
-      approval: { source: "automatic" },
+      // Synthetic evaluation, so the decided detail shows which evaluator decided and how.
+      approval: {
+        source: "automatic",
+        evaluation: {
+          provider: "typesafe",
+          model: "jev-1.13.0",
+          policy: "auto-v10",
+          evaluatedAt: NOW - 5 * MIN - 2_000,
+          sqlDigest: "4b1d9c0e7f3a2b6d8e1f0a9c5b7d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8be07a",
+          eligible: true,
+          reasons: [],
+          probabilities: {
+            personal_disclosure: 0.03,
+            organization_disclosure: 0.04,
+            secret_disclosure: 0.01,
+            insufficient_context: 0.12,
+          },
+          thresholds: {
+            personal_disclosure: 0.2,
+            organization_disclosure: 0.15,
+            secret_disclosure: 0.15,
+            insufficient_context: 0.45,
+          },
+        },
+      },
     },
     {
       ...base,

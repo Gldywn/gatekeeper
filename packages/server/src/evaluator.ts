@@ -171,21 +171,46 @@ export async function evaluateProbabilities(
   }
 }
 
-// Fixed cutoffs are conservative candidates, not empirically calibrated guarantees.
+export type Cutoffs = Record<keyof typeof AUTO_THRESHOLDS, number>;
+
+const inUnitRange = (v: unknown): v is number =>
+  typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1;
+
+// The one decision every evaluator goes through. Exactly the four axes, each with its own
+// probability and cutoff in [0,1]: a missing, extra or invalid one never reads as a pass,
+// whatever produced the numbers.
+export function decide(
+  probabilities: Record<string, number>,
+  cutoffs: Cutoffs,
+): { eligible: boolean; reasons: string[] } {
+  const axes = Object.keys(reasonsByAxis) as (keyof Cutoffs)[];
+  const exact = (o: object) =>
+    Object.keys(o).length === axes.length && axes.every((id) => Object.hasOwn(o, id));
+  if (
+    !exact(probabilities) ||
+    !exact(cutoffs) ||
+    !axes.every((id) => inUnitRange(probabilities[id]) && inUnitRange(cutoffs[id]))
+  )
+    return { eligible: false, reasons: ["Invalid evaluator response or stale policy/model"] };
+  const reasons = axes
+    .filter((id) => probabilities[id] > cutoffs[id])
+    .map((id) => reasonsByAxis[id]);
+  return { eligible: reasons.length === 0, reasons };
+}
+
+// Fixed cutoffs are conservative candidates, not empirically calibrated guarantees. The record
+// keeps the cutoffs in force, so history grades each decision by its own rule.
 export const evaluate: Evaluator = async (input, key, signal, sqlDigest) => {
   const probabilities = await evaluateProbabilities(input, key, signal);
-  const reasons = (Object.keys(AUTO_THRESHOLDS) as (keyof typeof AUTO_THRESHOLDS)[])
-    .filter((id) => probabilities[id] > AUTO_THRESHOLDS[id])
-    .map((id) => reasonsByAxis[id]);
   return {
     provider: "typesafe",
     model: AUTO_MODEL,
     policy: AUTO_POLICY,
     evaluatedAt: Date.now(),
     sqlDigest,
-    eligible: reasons.length === 0,
-    reasons,
+    ...decide(probabilities, AUTO_THRESHOLDS),
     probabilities,
+    thresholds: { ...AUTO_THRESHOLDS },
   };
 };
 
@@ -297,6 +322,17 @@ export const autoHoldRecord = z
   })
   .strict();
 
+const probability = z.number().finite().min(0).max(1);
+// Exactly the four axes: a record cannot carry a looser rule by leaving one out.
+const recordedCutoffs = z
+  .object({
+    personal_disclosure: probability,
+    organization_disclosure: probability,
+    secret_disclosure: probability,
+    insufficient_context: probability,
+  })
+  .strict();
+
 export const approvalAttribution = z
   .object({
     source: z.enum(["human", "automatic"]),
@@ -319,7 +355,9 @@ export const approvalAttribution = z
         sqlDigest: z.string().regex(/^[a-f0-9]{64}$/),
         eligible: z.boolean(),
         reasons: z.array(z.string().max(200)).max(10),
-        probabilities: z.record(z.number().finite().min(0).max(1)),
+        probabilities: z.record(probability),
+        // Absent from records made before cutoffs were recorded.
+        thresholds: recordedCutoffs.optional(),
       })
       .strict()
       .optional(),

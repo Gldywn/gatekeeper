@@ -4,8 +4,10 @@ import {
   AUTO_MODEL,
   AUTO_POLICY,
   AUTO_THRESHOLDS,
+  approvalAttribution,
   autoHoldRecord,
   checkKey,
+  decide,
   evaluate,
 } from "./evaluator.js";
 
@@ -95,6 +97,77 @@ it("keeps every hold reason the plugin can record", () => {
     expect(autoHoldRecord.parse({ sent: false, reason }).reason, reason).toBe(reason);
 });
 
+describe("decide", () => {
+  const passing = { ...AUTO_THRESHOLDS };
+  it("passes at every cutoff and names each axis over it", () => {
+    expect(decide(passing, AUTO_THRESHOLDS)).toEqual({ eligible: true, reasons: [] });
+    expect(decide({ ...passing, secret_disclosure: 0.16 }, AUTO_THRESHOLDS)).toEqual({
+      eligible: false,
+      reasons: ["Potential access secret disclosure"],
+    });
+  });
+  it("keeps the axis order of today's reasons", () => {
+    expect(
+      decide({ ...passing, insufficient_context: 0.9, personal_disclosure: 0.9 }, AUTO_THRESHOLDS),
+    ).toEqual({
+      eligible: false,
+      reasons: ["Potential personal disclosure", "Insufficient evaluation context"],
+    });
+  });
+  const invalid = {
+    eligible: false,
+    reasons: ["Invalid evaluator response or stale policy/model"],
+  };
+  it.each([
+    { personal_disclosure: undefined },
+    { organization_disclosure: Number.NaN },
+    { secret_disclosure: -0.1 },
+    { insufficient_context: 1.5 },
+    { read_only: 0.01 },
+  ])("never reads a missing, extra or invalid probability as a pass: %o", (bad) => {
+    const probabilities = { ...passing, ...bad } as Record<string, number>;
+    if ("personal_disclosure" in bad) delete probabilities.personal_disclosure;
+    expect(decide(probabilities, AUTO_THRESHOLDS)).toEqual(invalid);
+  });
+  it.each([
+    {},
+    { ...AUTO_THRESHOLDS, insufficient_context: Number.POSITIVE_INFINITY },
+    { ...AUTO_THRESHOLDS, read_only: 1 },
+  ])("never decides against empty, extra or invalid cutoffs: %o", (cutoffs) => {
+    expect(decide(passing, cutoffs as typeof AUTO_THRESHOLDS)).toEqual(invalid);
+  });
+});
+
+describe("recorded cutoffs", () => {
+  const evaluation = {
+    provider: "typesafe",
+    model: AUTO_MODEL,
+    policy: AUTO_POLICY,
+    evaluatedAt: 1,
+    sqlDigest: "a".repeat(64),
+    eligible: true,
+    reasons: [],
+    probabilities: { ...AUTO_THRESHOLDS },
+  };
+  const parse = (thresholds?: unknown) =>
+    approvalAttribution.safeParse({
+      source: "automatic",
+      evaluation: { ...evaluation, thresholds },
+    }).success;
+  it("accepts a record with exactly the four axes, or none from before they were kept", () => {
+    expect(parse({ ...AUTO_THRESHOLDS })).toBe(true);
+    expect(parse(undefined)).toBe(true);
+  });
+  it.each([
+    { personal_disclosure: 0.2, organization_disclosure: 0.15, secret_disclosure: 0.15 },
+    { ...AUTO_THRESHOLDS, read_only: 0.5 },
+    { ...AUTO_THRESHOLDS, insufficient_context: 1.5 },
+    { ...AUTO_THRESHOLDS, insufficient_context: "0.45" },
+  ])("refuses cutoffs that leave out, add or bend an axis: %o", (thresholds) => {
+    expect(parse(thresholds)).toBe(false);
+  });
+});
+
 describe("native Jev contract (mocked, not calibration)", () => {
   it("batches independent questions and never sends result rows or agent prose", async () => {
     const fetch = vi.fn(async () => new Response(JSON.stringify(response())));
@@ -135,6 +208,7 @@ describe("native Jev contract (mocked, not calibration)", () => {
     );
     expect(accepted.eligible).toBe(true);
     expect(accepted.probabilities).toEqual(AUTO_THRESHOLDS);
+    expect(accepted.thresholds).toEqual(AUTO_THRESHOLDS);
     for (const [id, cutoff] of Object.entries(AUTO_THRESHOLDS))
       body.answers[id].noul = cutoff + 0.001;
     const held = await evaluate(

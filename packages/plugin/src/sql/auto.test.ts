@@ -150,4 +150,28 @@ describe("Auto policy pin", () => {
       validEvaluation({ ...current, probabilities: { ...current.probabilities, read_only: 1 } }),
     ).toBe(false);
   });
+
+  it("authorizes only under the very cutoffs it enforces, or none from an older broker", () => {
+    const current = {
+      provider: "typesafe" as const,
+      model: "jev-1.13.0" as const,
+      policy: "auto-v10" as const,
+      evaluatedAt: Date.now(),
+      sqlDigest: "a".repeat(64),
+      eligible: true,
+      reasons: [],
+      probabilities: { ...AUTO_THRESHOLDS },
+    };
+    expect(validEvaluation(current)).toBe(true);
+    expect(validEvaluation({ ...current, thresholds: { ...AUTO_THRESHOLDS } })).toBe(true);
+    for (const thresholds of [
+      { ...AUTO_THRESHOLDS, personal_disclosure: 0.5 },
+      { ...AUTO_THRESHOLDS, read_only: 0.5 },
+      { personal_disclosure: 0.2 },
+      null,
+      [],
+      { ...AUTO_THRESHOLDS, insufficient_context: "0.45" },
+    ])
+      expect(validEvaluation({ ...current, thresholds } as never)).toBe(false);
+  });
 });

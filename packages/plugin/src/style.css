@@ -3784,11 +3784,22 @@ p.auto-message:empty {
   margin-top: 1px;
   color: var(--auto);
 }
+/* Policy, time and digest, set apart by position rather than chained with dots. */
 .auto-trace-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
   font-family: var(--font-mono);
   font-size: 10.5px;
   color: var(--muted);
   overflow-wrap: anywhere;
+}
+.auto-trace-meta > span {
+  min-width: 0;
+}
+/* Which evaluator decided: a fact after the verdict, quieter than it. */
+.auto-who {
+  color: var(--muted);
 }
 /* An axis past its cutoff, and the reason it produced: amber, the held state. */
 .auto-reason.over {

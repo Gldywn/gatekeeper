@@ -318,7 +318,7 @@ to this sharing and to returning automatically approved results to the requestin
 Each activation first checks the key with `GET /v1/models`, which lists the models
 available to the account and evaluates nothing, so it carries only the key. A 401 or 403
 opens the Auto mode section of Settings with the reason under the key field. Any other
-failure leaves Auto mode off and says TypeSafe could not be reached. The route and the
+failure leaves Auto mode off and says the evaluator could not be reached. The route and the
 meaning of 401/403 come from TypeSafe's JavaScript SDK (v0.6.0), not from a live call.
 
 Inference uses the authenticated local plugin channel and native `fetch` in the broker.
@@ -420,9 +420,14 @@ own work can still take the remaining connections.
 
 History records Approved automatically or Approved by you. Available evaluator output,
 provider, pinned model, policy, evaluation time and SQL digest are retained in `policy_json`
-and shown in details and Audit Trail. They survive result-row purging and remain indefinitely
-with the decided request. Older records without attribution are
-not retroactively labelled as human approvals.
+and shown in details and Audit Trail, together with the cutoffs in force, which grade the
+displayed probabilities rather than appear as numbers. They survive result-row purging and
+remain indefinitely with the decided request. Older records without attribution
+are not retroactively labelled as human approvals. A detail grades each probability against
+the cutoffs its record carries; a record from before cutoffs were kept is graded against
+`auto-v10`'s only when it names that exact provider, model and policy, and malformed recorded
+cutoffs leave the numbers ungraded. Recorded cutoffs never grant authority: the plugin and the
+broker still require the issued evaluation and the cutoffs they enforce themselves.
 
 On macOS, a read submitted while Auto mode is on raises no alert until Auto mode leaves it to
 you: a hold, a refusal, a failed or timed-out evaluation, or Auto mode switched off. The plugin

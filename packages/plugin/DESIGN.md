@@ -94,6 +94,13 @@ Inside prose, things are named in their own style:
   the agent to avoid context pollution.").
 - On a card or a detail, timers say what they measure ("Expires in 4:26", "Requested 40s
   ago"). A list row keeps its compact clock, which its place in the row explains.
+- Auto mode's evaluator gets one generic label per field and one generic sentence per
+  situation, the same for every provider and model, with only the model id filled in ("API
+  key", "The evaluator refused this API key.", "jev-1.13.0 did not clear this read."). The
+  one sentence that names the recipient is the sharing disclosure, since enabling Auto mode
+  consents to it. A server the user points Auto mode at is a "Custom server"; cutoffs read
+  "Built-in cutoffs", "Your cutoffs" or "Cutoffs needed". A message never repeats a state the
+  screen already shows (operator decisions, 2026-11-12).
 
 ## Shell and context
 
@@ -208,9 +215,12 @@ first line, the tables, what the SQL marks, the SQL, then the decision.
   tables and columns stand out on the faint ground of tool names, unlike plain `code.name`. A
   table's estimated rows open on hover or focus of its name in the matrix, or in the reason when
   the card has no matrix. What the check could not establish is not shown: no estimate, no claim.
-- An Auto mode hold says where it happened, on this machine before evaluation or at Jev, then
-  "Waiting for your review."; a hold on this machine adds "Nothing was sent to TypeSafe." No
-  reason chips.
+- An Auto mode hold says where it happened, on this machine before evaluation or at the
+  evaluator (named by its model when its answer is on record), then "Waiting for your
+  review."; a hold on this machine adds "Nothing was sent to the evaluator." No reason chips.
+- A decided Auto mode trace names who evaluated it ("Evaluated by jev-1.13.0 on TypeSafe."),
+  from the record, never from today's settings, and grades each probability against the
+  cutoffs the record carries.
 - A blocking reason sits above the actions, tied to the disabled action it blocks
   (`aria-describedby`), not only in a tooltip. Nothing ever says "nothing blocks".
 - While Auto mode evaluates, the row's dot turns `--auto` and pulses, with no word, and a ring

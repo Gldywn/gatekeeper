@@ -140,6 +140,8 @@ export interface AutoEvaluation {
   eligible: boolean;
   reasons: string[];
   probabilities: Record<string, number>;
+  /** The cutoffs in force when it was decided; absent from records made before they were kept. */
+  thresholds?: Record<string, number>;
 }
 
 export interface ApprovalAttribution {

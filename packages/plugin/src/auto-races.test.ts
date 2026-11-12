@@ -27,7 +27,7 @@ import { SchemaAnnotator } from "./annotate";
 import { Gatekeeper } from "./app";
 import { AUTO_APPROVED, SAVED_KEY_MASK } from "./render/auto";
 import { ConfirmModal } from "./render/confirm";
-import { cardHtml } from "./render/queue";
+import { AUTO_EVALUATING, cardHtml } from "./render/queue";
 import type { LoadResult } from "./sql/load";
 import { catalogRows } from "./sql/pg/catalog-fixture";
 import { planRead } from "./sql/read-analysis";
@@ -761,7 +761,7 @@ describe("Auto mode queue while an approved read executes", () => {
     expect(card.state).toBe("executing");
     expect(card.autoStatus).toBe(AUTO_APPROVED);
     const html = cardHtml(card, "postgresql", new Map());
-    expect(html).not.toContain("Evaluating with Jev");
+    expect(html).not.toContain("Auto mode is evaluating");
     expect(html).toContain("This read was approved automatically");
     first.resolve(empty);
     await pending;
@@ -917,7 +917,7 @@ describe("Auto mode queue while an approved read executes", () => {
       await vi.advanceTimersByTimeAsync(15_000);
       expect(card.autoStatus).toBe("Needs review: Evaluation timed out. Approve manually");
       await vi.waitFor(() => expect(inspect).toHaveBeenCalledTimes(2));
-      expect(queued.autoStatus).toBe("Evaluating with Jev");
+      expect(queued.autoStatus).toBe(AUTO_EVALUATING);
       // The first evaluation settling late leaves the one now running alone.
       stuck.resolve(null);
       await first;
@@ -1702,7 +1702,7 @@ describe("load check binding", () => {
     const { app, card } = harness();
     app.broker.result.mockResolvedValueOnce(false);
     const { settled } = start(app, card);
-    card.autoStatus = "Evaluating with Jev";
+    card.autoStatus = AUTO_EVALUATING;
     settled.resolve(HEAVY);
     await flush();
     expect(card.state).toBe("ready");
@@ -1896,7 +1896,7 @@ describe("the poll's report to the broker", () => {
     const { app, sent } = polling([
       { autoAttempt: 1, autoStatus: "Needs review: Sensitive source or alias: email" },
       {},
-      { autoAttempt: 1, autoStatus: "Evaluating with Jev" },
+      { autoAttempt: 1, autoStatus: AUTO_EVALUATING },
       { sql: "DELETE FROM public.products" },
     ]);
     app.autoCard = app.cards[2];
@@ -1908,7 +1908,7 @@ describe("the poll's report to the broker", () => {
   });
 
   it("names a card whose evaluation timed out, before its calls settle", async () => {
-    const { app, sent } = polling([{ autoAttempt: 1, autoStatus: "Evaluating with Jev" }]);
+    const { app, sent } = polling([{ autoAttempt: 1, autoStatus: AUTO_EVALUATING }]);
     app.autoCard = app.cards[0];
     app.autoAbort = new AbortController();
     app.autoAbort.abort();

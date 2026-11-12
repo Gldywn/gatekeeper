@@ -10,6 +10,7 @@ import {
   warnIcon,
   xCircleIcon,
 } from "../icons";
+import { AUTO_MODEL } from "../sql/auto";
 import { classifyQuery, type RiskClass, rank } from "../sql/classify";
 import { formatSql } from "../sql/format";
 import { highlight } from "../sql/highlight";
@@ -92,8 +93,10 @@ function unparsedNote(gate: CardGate): string {
   return `<div class="cs-unparsed">${warnIcon}This statement could not be parsed. The ${gate.cls} classification is a guess. Waiting for your review.</div>`;
 }
 
-export const AUTO_EVALUATING = "Evaluating with Jev";
-const EVAL_NOTE = "Auto mode is evaluating this read with Jev.";
+// A state, never shown: the sentence below is what a reader sees and hears. Posted as a hold
+// reason it is no known diagnostic, so the server keeps "Automatic review required".
+export const AUTO_EVALUATING = "Evaluating";
+export const EVAL_NOTE = `Auto mode is evaluating this read with ${AUTO_MODEL}.`;
 
 // One line that names Auto mode first and says where the read was held. Whether the query
 // ever left the machine is the part a human must not guess.
@@ -108,7 +111,7 @@ function autoNote(card: Card): string {
   if (card.autoStatus === AUTO_APPROVED) {
     return `<div class="cs-unparsed auto" role="status">${autoIcon}<span><b>Auto mode:</b> ${AUTO_LEADS.automatic}.</span></div>`;
   }
-  return `<div class="cs-unparsed auto" role="status">${autoIcon}<span><b>Auto mode:</b> ${holdText(Boolean(card.autoSent), " Waiting for your review.")}</span></div>`;
+  return `<div class="cs-unparsed auto" role="status">${autoIcon}<span><b>Auto mode:</b> ${holdText(Boolean(card.autoSent), " Waiting for your review.", card.evaluation?.model)}</span></div>`;
 }
 
 // Why the last human approval did not run, in its own words: never an Auto mode fact.

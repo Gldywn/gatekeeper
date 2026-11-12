@@ -6,7 +6,7 @@ import { approvalHtml, autoPopHtml, autoSettingsHtml } from "./auto";
 import { modeDropdown } from "./controls";
 import { detailHtml } from "./detail";
 import { auditItem, recentRowHtml } from "./inbox";
-import { cardHtml } from "./queue";
+import { AUTO_EVALUATING, cardHtml } from "./queue";
 
 describe("Auto mode surfaces", () => {
   it("discloses provider sharing before either activation entry point", () => {
@@ -61,14 +61,10 @@ describe("Auto mode surfaces", () => {
       sessionId: "s1",
       session: null,
     };
-    const evaluating = cardHtml(
-      { ...card, autoStatus: "Evaluating with Jev" },
-      "postgresql",
-      new Map(),
-    );
+    const evaluating = cardHtml({ ...card, autoStatus: AUTO_EVALUATING }, "postgresql", new Map());
     // The evaluation speaks from the decision bar, as what blocks Approve, and the SQL wears the ring.
     expect(evaluating).toContain('<div class="nb-msg auto" id="gate-r1" role="status">');
-    expect(evaluating).toContain("Auto mode is evaluating this read with Jev.");
+    expect(evaluating).toContain("Auto mode is evaluating this read with jev-1.13.0.");
     expect(evaluating).toContain('<div class="sql-ring">');
     expect(evaluating).toContain('data-approve="r1"');
     expect(evaluating).toContain('data-reject="r1"');
@@ -79,7 +75,7 @@ describe("Auto mode surfaces", () => {
       new Map(),
     );
     expect(local).toContain(
-      'Held on this machine before evaluation. Waiting for your review. <b class="auto-strong">Nothing was sent to TypeSafe.</b>',
+      'Held on this machine before evaluation. Waiting for your review. <b class="auto-strong">Nothing was sent to the evaluator.</b>',
     );
     expect(local).not.toContain("email");
     const sent = cardHtml(
@@ -91,8 +87,29 @@ describe("Auto mode surfaces", () => {
       "postgresql",
       new Map(),
     );
-    expect(sent).toContain("Jev did not clear this read. Waiting for your review.");
+    expect(sent).toContain("The evaluator did not clear this read. Waiting for your review.");
     expect(sent).not.toContain("Nothing was sent");
+    // An answer on record names the model that gave it, escaped like any recorded text.
+    const refused = cardHtml(
+      {
+        ...card,
+        autoStatus: "Needs review: Potential personal disclosure",
+        autoSent: true,
+        evaluation: {
+          provider: "typesafe",
+          model: "jev-<1>",
+          policy: AUTO_POLICY,
+          evaluatedAt: 1,
+          sqlDigest: "a".repeat(64),
+          eligible: false,
+          reasons: ["Potential personal disclosure"],
+          probabilities: { personal_disclosure: 0.9 },
+        },
+      },
+      "postgresql",
+      new Map(),
+    );
+    expect(refused).toContain("jev-&lt;1&gt; did not clear this read. Waiting for your review.");
   });
   it("distinguishes human and automatic history and includes durable details", () => {
     const approval: ApprovalAttribution = {
@@ -159,6 +176,13 @@ describe("the resolved Auto trace", () => {
     reasons,
     probabilities: { personal_disclosure: 0.9 },
   });
+  const cutoffs = (over: Record<string, number>) => ({
+    personal_disclosure: 0.2,
+    organization_disclosure: 0.15,
+    secret_disclosure: 0.15,
+    insufficient_context: 0.45,
+    ...over,
+  });
 
   it("grades only the current policy and keeps an older record's numbers as stored", () => {
     const current = { ...refusal([]), policy: AUTO_POLICY };
@@ -172,24 +196,55 @@ describe("the resolved Auto trace", () => {
     expect(older).not.toContain("metric over");
   });
 
-  it("says Jev did not clear a refused read, without the evaluator's labels", () => {
+  it("grades by the cutoffs the record carries, even when they differ from today's", () => {
+    const own = {
+      ...refusal([]),
+      policy: AUTO_POLICY,
+      thresholds: cutoffs({ personal_disclosure: 0.95 }),
+    };
+    expect(approvalHtml({ source: "human", evaluation: own })).not.toContain("metric over");
+    const tighter = { ...own, thresholds: cutoffs({ personal_disclosure: 0.5 }) };
+    expect(approvalHtml({ source: "human", evaluation: tighter })).toContain("metric over");
+  });
+
+  it.each([
+    null,
+    [],
+    { personal_disclosure: 0.5 },
+    { ...cutoffs({}), read_only: 0.5 },
+    cutoffs({ personal_disclosure: Number.NaN }),
+    cutoffs({ personal_disclosure: "0.5" as unknown as number }),
+  ])("leaves malformed recorded cutoffs ungraded, never today's: %o", (thresholds) => {
+    const html = approvalHtml({
+      source: "human",
+      evaluation: { ...refusal([]), policy: AUTO_POLICY, thresholds } as never,
+    });
+    expect(html).toContain("personal_disclosure 0.9");
+    expect(html).not.toContain("metric over");
+  });
+
+  it("names the model that refused and the evaluator, without the evaluator's labels", () => {
     const html = approvalHtml({ source: "human", evaluation: refusal(["A <brand> new label"]) });
-    expect(html).toContain("Jev did not clear this read.");
+    expect(html).toContain("jev-1.13.0 did not clear this read.");
+    expect(html).toContain('<span class="auto-who">Evaluated by jev-1.13.0 on TypeSafe.</span>');
     expect(html).not.toContain("brand");
+    // Facts sit apart by position, never chained with dots.
+    expect(html).toContain("<span>policy auto-beta-7</span>");
+    expect(html).not.toContain("&middot;");
   });
 
   it("says where a hold happened, and lets a cleared evaluation speak for itself", () => {
     expect(
       approvalHtml(undefined, undefined, { sent: false, reason: "Unsupported projection" }),
     ).toContain(
-      'Held on this machine before evaluation. <b class="auto-strong">Nothing was sent to TypeSafe.</b>',
+      'Held on this machine before evaluation. <b class="auto-strong">Nothing was sent to the evaluator.</b>',
     );
     expect(
       approvalHtml(undefined, undefined, {
         sent: true,
         reason: "Evaluation timed out. Approve manually",
       }),
-    ).toContain("Jev did not clear this read.");
+    ).toContain("The evaluator did not clear this read.");
     const both = approvalHtml(
       { source: "human", evaluation: { ...refusal([]), eligible: true } },
       undefined,
