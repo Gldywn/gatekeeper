@@ -30,7 +30,7 @@ import { countsRows } from "../sql/inspect";
 import type { ActivityEntry, Card, HistItem, Presence, SessionRoster } from "../types";
 import { autoIcon } from "./auto";
 import { CANCELLED_NOTE, EXECUTION_UNKNOWN, NOT_DELIVERED_NOTE } from "./detail";
-import { AUTO_EVALUATING, busyLabel, EVAL_NOTE } from "./queue";
+import { AUTO_EVALUATING, busyLabel, evalNote } from "./queue";
 import { rosterRow } from "./roster";
 import { statusIcon } from "./status";
 
@@ -70,7 +70,7 @@ export function queueRowHtml(
     card.state !== "ready"
       ? '<span class="spin" aria-hidden="true"></span>'
       : evaluating
-        ? `<span class="ix-dot eval" aria-hidden="true"></span><span class="sr-only">${EVAL_NOTE}</span>`
+        ? `<span class="ix-dot eval" aria-hidden="true"></span><span class="sr-only">${escapeHtml(evalNote(card.autoModel))}</span>`
         : '<span class="ix-dot" aria-hidden="true"></span>';
   let side: string;
   if (card.state === "executing" && card.run) {

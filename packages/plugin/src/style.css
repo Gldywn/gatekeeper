@@ -3801,6 +3801,196 @@ p.auto-message:empty {
 .auto-who {
   color: var(--muted);
 }
+
+/* ---- Auto mode's evaluator ---- */
+/* The evaluator line: one well, the whole of it a button. Under 340px the facts stack and the
+   divider leaves, so Change never wraps onto a line of its own. */
+.ev-label {
+  margin-top: var(--s2);
+}
+.ev-row {
+  container-type: inline-size;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  max-width: 28rem;
+  margin-top: 4px;
+  padding: 8px 10px 8px 12px;
+  font: inherit;
+  text-align: left;
+  color: var(--text);
+  background: var(--sunken);
+  border: 1px solid var(--edge);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: border-color var(--dur) var(--ease);
+}
+.ev-row:hover {
+  border-color: var(--edge-strong);
+}
+.ev-row:focus-visible {
+  outline: 2px solid var(--auto);
+  outline-offset: 1px;
+}
+/* One line height for every fact and for Change, so their baselines share the row's centre; a
+   larger mono model name would sit higher than the prose. */
+.ev-facts {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px 10px;
+  min-width: 0;
+  line-height: 16px;
+}
+.ev-who,
+.ev-state,
+.ev-go {
+  font-size: 12px;
+  color: var(--muted);
+}
+.ev-model {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text);
+}
+.ev-facts .dsep {
+  height: 14px;
+}
+.ev-state.need {
+  color: var(--amber);
+}
+.ev-go {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  line-height: 16px;
+}
+.ev-row:hover .ev-go {
+  color: var(--text);
+}
+.ev-go svg {
+  width: 13px;
+  height: 13px;
+}
+@container (max-width: 340px) {
+  .ev-facts {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+  }
+  .ev-facts .dsep {
+    display: none;
+  }
+}
+/* The evaluator page, in the Settings dialog: the panel head's back arrow, then sections. */
+.ev-back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.ev-back svg {
+  width: 18px;
+  height: 18px;
+}
+.ev-back:hover {
+  background: var(--hi);
+  color: var(--text);
+}
+.ev-back:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 1px;
+}
+.ev-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+.ev-page .set-desc {
+  font-size: 12px;
+}
+.ev-sec {
+  display: grid;
+  gap: 6px;
+}
+.ev-sec + .ev-sec {
+  padding-top: var(--s3);
+  border-top: 1px solid var(--hi);
+}
+.ev-sec .set-select {
+  justify-self: start;
+  min-width: 12rem;
+}
+.ev-page .auto-key {
+  margin-top: 0;
+}
+.ev-pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr));
+  gap: 6px 12px;
+}
+.ev-test {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.ev-test p.auto-message {
+  margin: 0;
+}
+.ev-remove {
+  justify-self: start;
+}
+.ev-preset {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ev-preset label {
+  font-size: 12.5px;
+  font-weight: 560;
+}
+.ev-cuts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 9.5rem), 1fr));
+  gap: 8px 12px;
+}
+.ev-cut {
+  display: grid;
+  gap: 3px;
+}
+.ev-cut label {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.ev-cut .confirm-input {
+  width: 100%;
+  font-variant-numeric: tabular-nums;
+}
+.ev-cut .confirm-input:disabled {
+  opacity: 0.7;
+}
+.ev-cut .confirm-input:focus-visible,
+.ev-page .confirm-input:focus-visible {
+  outline-color: var(--auto);
+}
+.sa-enable.tonal.ev-copy {
+  justify-self: start;
+  margin-top: 2px;
+  gap: 6px;
+}
+.ev-copy svg {
+  width: 12px;
+  height: 12px;
+}
 /* An axis past its cutoff, and the reason it produced: amber, the held state. */
 .auto-reason.over {
   color: var(--amber);

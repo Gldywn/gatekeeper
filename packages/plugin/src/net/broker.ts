@@ -5,11 +5,13 @@ import type {
   AutoEvaluation,
   ConnectionInput,
   EvaluationInput,
-  KeyStatus,
+  EvaluatorConfig,
+  EvaluatorStatus,
   RequestState,
   SensitivityRecord,
 } from "@gatekeeper/shared";
-import { AUTO_MODEL, AUTO_POLICY } from "../sql/auto";
+import type { ActiveEvaluator } from "../evaluator";
+import { AUTO_POLICY } from "../sql/auto";
 import type { ActivityEntry, Proposal, SessionRoster } from "../types";
 
 export interface BrokerConfig {
@@ -225,6 +227,7 @@ export class BrokerClient {
     key: string,
     input: EvaluationInput,
     signal: AbortSignal,
+    active: ActiveEvaluator,
   ): Promise<AutoEvaluation> {
     const res = await this.request("/evaluate", {
       method: "POST",
@@ -234,10 +237,13 @@ export class BrokerClient {
         id,
         leaseId,
         scope,
-        key,
+        // A keyless Custom server gets no key field at all.
+        ...(key ? { key } : {}),
         input,
-        model: AUTO_MODEL,
         policy: AUTO_POLICY,
+        evaluator: active.config,
+        cutoffs: active.cutoffs,
+        builtIn: active.builtIn,
       }),
     });
     if (!res.ok) throw new Error("Evaluator unavailable or lease lost");
@@ -246,16 +252,21 @@ export class BrokerClient {
 
   // "outdated" is a broker predating the route (plugin and server update separately);
   // anything else short of a clear verdict reads as unreachable.
-  async checkKey(key: string): Promise<KeyStatus | "outdated"> {
+  async checkEvaluator(
+    evaluator: EvaluatorConfig,
+    key: string,
+  ): Promise<EvaluatorStatus | "outdated"> {
     try {
-      const res = await this.request("/evaluate/key", {
+      const res = await this.request("/evaluate/check", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key }),
+        body: JSON.stringify({ evaluator, ...(key ? { key } : {}) }),
       });
       if (res.status === 404) return "outdated";
       const status = res.ok ? ((await res.json()) as { status?: unknown }).status : null;
-      return status === "valid" || status === "invalid" ? status : "unavailable";
+      return status === "valid" || status === "invalid" || status === "model-missing"
+        ? status
+        : "unavailable";
     } catch {
       return "unavailable";
     }

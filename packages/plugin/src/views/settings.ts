@@ -1,7 +1,8 @@
+import type { EvaluatorSettings } from "../evaluator";
 import { escapeHtml, withSqlKeywords } from "../html";
 import { gearIcon, schemaIcon, xIcon } from "../icons";
 import { takeOver } from "../modal";
-import { autoSettingsHtml } from "../render/auto";
+import { autoSettingsHtml, evaluatorPageHtml } from "../render/auto";
 import { modeDropdown, switchInput } from "../render/controls";
 import { AUTO_STOP_OPTIONS, RECENTLY_RESOLVED_OPTIONS, type Settings } from "../settings";
 import type { RiskMode } from "../sql/mode";
@@ -12,6 +13,7 @@ interface SettingsViewDeps {
   mode: () => RiskMode;
   auto?: () => boolean;
   keySaved?: () => boolean;
+  evaluator?: () => EvaluatorSettings | undefined;
   version?: () => string;
 }
 
@@ -50,8 +52,11 @@ export class SettingsView {
   private readonly mode: () => RiskMode;
   private readonly auto: () => boolean;
   private readonly keySaved: () => boolean;
+  private readonly evaluator: () => EvaluatorSettings | undefined;
   private readonly version: () => string;
   private release: (() => void) | undefined;
+  // The evaluator page replaces Settings in the same dialog rather than opening a second one.
+  private page: "main" | "evaluator" = "main";
 
   constructor(deps: SettingsViewDeps) {
     this.root = deps.root;
@@ -59,6 +64,7 @@ export class SettingsView {
     this.mode = deps.mode;
     this.auto = deps.auto ?? (() => false);
     this.keySaved = deps.keySaved ?? (() => false);
+    this.evaluator = deps.evaluator ?? (() => undefined);
     this.version = deps.version ?? (() => "");
   }
 
@@ -73,11 +79,63 @@ export class SettingsView {
     if (panel.hidden) {
       // Opened from the gear's menu, whose button hides at once: the gear takes the focus back.
       this.release = takeOver(panel, () => this.root.querySelector<HTMLElement>("#settingsGear"));
+      this.page = "main";
     }
     const fresh = panel.hidden || inside;
-    panel.innerHTML = this.html();
+    panel.innerHTML = this.render();
     panel.hidden = false;
     if (fresh) panel.querySelector<HTMLElement>("[data-close]")?.focus({ preventScroll: true });
+  }
+
+  // Opens Settings on the evaluator page, on one of its controls or on its back button.
+  openEvaluator(focusId?: string): void {
+    const panel = this.root.querySelector<HTMLDivElement>("#settings");
+    if (!panel) return;
+    if (panel.hidden) this.open();
+    this.page = "evaluator";
+    panel.innerHTML = this.render();
+    this.focus(focusId);
+  }
+
+  // Back from the evaluator page to Settings, on the evaluator line. False when Settings was
+  // already showing, so Escape closes it instead.
+  back(): boolean {
+    const panel = this.root.querySelector<HTMLDivElement>("#settings");
+    if (!panel || panel.hidden || this.page !== "evaluator") return false;
+    this.page = "main";
+    panel.innerHTML = this.render();
+    panel.querySelector<HTMLElement>("[data-evaluator-open]")?.focus({ preventScroll: true });
+    return true;
+  }
+
+  // Redraws the open page after a change, the focus back on the control that had it.
+  refresh(focusId = this.root.ownerDocument.activeElement?.id): void {
+    const panel = this.root.querySelector<HTMLDivElement>("#settings");
+    if (!panel || panel.hidden) return;
+    const message = panel.querySelector<HTMLElement>("[data-ev-message]");
+    const kept = message
+      ? { text: message.textContent ?? "", tone: message.dataset.tone ?? "" }
+      : null;
+    panel.innerHTML = this.render();
+    const note = panel.querySelector<HTMLElement>("[data-ev-message]");
+    if (note && kept) {
+      note.textContent = kept.text;
+      note.dataset.tone = kept.tone;
+    }
+    if (focusId) this.focus(focusId);
+  }
+
+  focus(id?: string): void {
+    const panel = this.root.querySelector<HTMLDivElement>("#settings");
+    // The provider radios share one name: the checked one, or the first, takes the focus.
+    const target =
+      id === "evProvider"
+        ? (panel?.querySelector<HTMLElement>('[data-ev-field="provider"]:checked') ??
+          panel?.querySelector<HTMLElement>('[data-ev-field="provider"]'))
+        : id
+          ? panel?.querySelector<HTMLElement>(`#${CSS.escape(id)}`)
+          : panel?.querySelector<HTMLElement>("[data-evaluator-back]");
+    target?.focus({ preventScroll: false });
   }
 
   close(): void {
@@ -85,9 +143,16 @@ export class SettingsView {
     if (panel && !panel.hidden) {
       panel.hidden = true;
       panel.innerHTML = "";
+      this.page = "main";
       this.release?.();
       this.release = undefined;
     }
+  }
+
+  private render(): string {
+    return this.page === "evaluator"
+      ? evaluatorPageHtml(this.evaluator(), this.keySaved())
+      : this.html();
   }
 
   private html(): string {
@@ -142,7 +207,7 @@ export class SettingsView {
             </div>
             <span class="set-control">${switchInput("autoDenyHeavy", "Auto-deny heavy queries", s.autoDenyHeavy)}</span>
           </div>
-          <div id="autoSettings" data-on="${this.auto()}">${autoSettingsHtml(this.auto(), this.keySaved())}</div>
+          <div id="autoSettings" data-on="${this.auto()}">${autoSettingsHtml(this.auto(), this.evaluator())}</div>
           <div class="set-row recommend">
             <div class="set-text">
               <span class="set-name"><span class="set-ico">${schemaIcon}</span>Schema access <span class="set-rec">recommended</span></span>

@@ -1,8 +1,9 @@
 import type { ApprovalAttribution } from "@gatekeeper/shared";
 import { describe, expect, it } from "vitest";
-import { AUTO_POLICY } from "../sql/auto";
+import { DEFAULT_SETTINGS, settingsFor } from "../evaluator";
+import { AUTO_POLICY, AUTO_THRESHOLDS } from "../sql/auto";
 import { activityEntryHtml } from "./activity";
-import { approvalHtml, autoPopHtml, autoSettingsHtml } from "./auto";
+import { approvalHtml, autoPopHtml, autoSettingsHtml, evaluatorPageHtml } from "./auto";
 import { modeDropdown } from "./controls";
 import { detailHtml } from "./detail";
 import { auditItem, recentRowHtml } from "./inbox";
@@ -10,9 +11,9 @@ import { AUTO_EVALUATING, cardHtml } from "./queue";
 
 describe("Auto mode surfaces", () => {
   it("discloses provider sharing before either activation entry point", () => {
-    const pop = autoPopHtml();
+    const pop = autoPopHtml(DEFAULT_SETTINGS);
     const off = pop.slice(pop.indexOf("sa-off"), pop.indexOf("sa-on"));
-    expect(off).toContain("TypeSafe receives the SQL structure");
+    expect(off).toContain("<span data-auto-recipient>TypeSafe</span> receives the SQL structure");
     expect(off).toContain("never result rows");
     expect(off).toContain("Enable Auto mode");
     expect(pop).not.toContain('type="password"');
@@ -23,16 +24,73 @@ describe("Auto mode surfaces", () => {
     expect(disclosure).toContain("Write and Destructive always need your approval");
     expect(disclosure.split(/\s+/).length).toBeLessThanOrEqual(40);
     expect(pop.slice(pop.indexOf("sa-on"))).toContain("Disable Auto mode");
-    const settings = autoSettingsHtml(false);
-    expect(settings).toContain("TypeSafe sees the SQL structure and the schema names and types");
+    const settings = autoSettingsHtml(false, DEFAULT_SETTINGS);
+    expect(settings).toContain(
+      "<span data-auto-recipient>TypeSafe</span> sees the SQL structure and the schema names and types",
+    );
     expect(settings).toContain("never result rows");
     expect(settings).toContain("PostgreSQL only.");
     expect(pop + settings).not.toMatch(/beta/i);
-    expect(settings).toContain('type="password"');
-    // The key stays replaceable while Auto mode runs.
-    expect(autoSettingsHtml(true)).toContain('type="password"');
-    expect(autoSettingsHtml(true)).toContain('aria-label="Auto mode" checked');
+    // The key lives on the evaluator page now; the box names the evaluator and opens it.
+    expect(settings).not.toContain('type="password"');
+    expect(settings).toContain("data-evaluator-open");
+    expect(autoSettingsHtml(true, DEFAULT_SETTINGS)).toContain('aria-label="Auto mode" checked');
     expect(pop + settings).not.toContain("Pause");
+  });
+  it.each([
+    [DEFAULT_SETTINGS, "jev-1.13.0", "TypeSafe", "Built-in cutoffs", false],
+    [
+      {
+        ...settingsFor("custom", "kev-4b"),
+        baseUrl: "http://127.0.0.1:8080",
+        cutoffs: { ...AUTO_THRESHOLDS },
+      },
+      "kev-4b",
+      "Custom server",
+      "Your cutoffs",
+      false,
+    ],
+    [settingsFor("cloudflare", "clef-flash"), "clef-flash", "Cloudflare", "Setup needed", true],
+    [
+      { ...settingsFor("cloudflare", "clef-flash"), accountId: "abc123" },
+      "clef-flash",
+      "Cloudflare",
+      "Cutoffs needed",
+      true,
+    ],
+  ])(
+    "names the evaluator and the state of its cutoffs in one line",
+    (s, model, where, state, need) => {
+      const html = autoSettingsHtml(false, s);
+      expect(html).toContain(`<span class="ev-model">${model}</span> on ${where}</span>`);
+      expect(html).toContain(`<span class="ev-state${need ? " need" : ""}">${state}</span>`);
+      expect(html).toContain('<span class="dsep" aria-hidden="true"></span>');
+    },
+  );
+  it("names a Custom server by its address, escaped, and a damaged choice as none", () => {
+    const s = { ...settingsFor("custom", "<kev>"), baseUrl: "https://kev.example.test/tenant" };
+    expect(autoPopHtml(s)).toContain("Custom server at kev.example.test");
+    expect(autoSettingsHtml(false, s)).toContain("&lt;kev&gt;");
+    expect(autoSettingsHtml(false, undefined)).toContain("No evaluator chosen");
+  });
+  it("offers the built-in cutoffs only for jev-1.13.0, and a prompt otherwise", () => {
+    const builtIn = evaluatorPageHtml(DEFAULT_SETTINGS, true);
+    expect(builtIn).toContain("Use the built-in cutoffs");
+    expect(builtIn).toContain('id="evCut-personal_disclosure"');
+    expect(builtIn).toMatch(/data-ev-cut="personal_disclosure" value="0.2" disabled/);
+    expect(builtIn).not.toContain("data-copy-prompt");
+    expect(builtIn).not.toContain("data-key-remove");
+    const custom = evaluatorPageHtml(
+      { ...settingsFor("custom", "kev-4b"), baseUrl: "http://127.0.0.1:8080" },
+      true,
+    );
+    expect(custom).toContain("No built-in cutoffs for this model.");
+    expect(custom).toMatch(/data-ev-cut="personal_disclosure" value=""(?! disabled)/);
+    expect(custom).toContain("data-copy-prompt");
+    // Only a Custom server goes keyless, so only it offers to remove its key.
+    expect(custom).toContain("data-key-remove");
+    expect(custom).toContain("Plain http is accepted for 127.0.0.1 only.");
+    expect(evaluatorPageHtml(settingsFor("cloudflare"), false)).toContain('id="evAccountId"');
   });
   it.each([false, true])(
     "offers a confirmed switch out of Auto mode in the compact=%s menu",
@@ -45,8 +103,10 @@ describe("Auto mode surfaces", () => {
       expect(html).not.toContain("Auto mode");
       expect(html).toContain('data-mode-opt="write"');
       expect(html).toContain('data-mode-opt="destructive"');
-      expect(autoPopHtml()).toContain("confirming Write or Destructive turns off Auto mode");
-      expect(autoPopHtml()).not.toContain("stay unavailable");
+      expect(autoPopHtml(DEFAULT_SETTINGS)).toContain(
+        "confirming Write or Destructive turns off Auto mode",
+      );
+      expect(autoPopHtml(DEFAULT_SETTINGS)).not.toContain("stay unavailable");
     },
   );
   it("keeps manual actions during evaluation and says only where a read was held", () => {
@@ -61,7 +121,11 @@ describe("Auto mode surfaces", () => {
       sessionId: "s1",
       session: null,
     };
-    const evaluating = cardHtml({ ...card, autoStatus: AUTO_EVALUATING }, "postgresql", new Map());
+    const evaluating = cardHtml(
+      { ...card, autoStatus: AUTO_EVALUATING, autoModel: "jev-1.13.0" },
+      "postgresql",
+      new Map(),
+    );
     // The evaluation speaks from the decision bar, as what blocks Approve, and the SQL wears the ring.
     expect(evaluating).toContain('<div class="nb-msg auto" id="gate-r1" role="status">');
     expect(evaluating).toContain("Auto mode is evaluating this read with jev-1.13.0.");

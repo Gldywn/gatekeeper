@@ -121,7 +121,12 @@ describe("queueRowHtml", () => {
 
   it("marks a held proposal with the dot, cyan and spoken while the evaluator works", () => {
     expect(queueRowHtml(card({}), "read", false, T)).toContain('class="ix-dot"');
-    const evaluating = queueRowHtml(card({ autoStatus: AUTO_EVALUATING }), "read", false, T);
+    const evaluating = queueRowHtml(
+      card({ autoStatus: AUTO_EVALUATING, autoModel: "jev-1.13.0" }),
+      "read",
+      false,
+      T,
+    );
     expect(evaluating).toContain('<span class="ix-dot eval" aria-hidden="true"></span>');
     // The decorative dot is hidden; the sentence is not.
     expect(evaluating).toContain(

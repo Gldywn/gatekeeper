@@ -26,17 +26,35 @@ export function recordedCutoffs(t: unknown): Record<string, number> | undefined 
   return valid ? (r as Record<string, number>) : undefined;
 }
 
-export function validEvaluation(e: AutoEvaluation): boolean {
+// What Auto mode compares an answer with: the evaluator and cutoffs it was switched on with.
+export interface AutoRule {
+  readonly config: { readonly provider: string; readonly model: string };
+  readonly cutoffs: Readonly<Record<string, number>>;
+  readonly builtIn: boolean;
+  readonly endpoint?: string;
+}
+export const BUILT_IN_RULE: AutoRule = {
+  config: { provider: "typesafe", model: AUTO_MODEL },
+  cutoffs: AUTO_THRESHOLDS,
+  builtIn: true,
+};
+
+export function validEvaluation(e: AutoEvaluation, rule: AutoRule = BUILT_IN_RULE): boolean {
   const recorded = e?.thresholds === undefined ? undefined : recordedCutoffs(e.thresholds);
   return (
     e !== null &&
     typeof e === "object" &&
-    e.provider === "typesafe" &&
-    e.model === AUTO_MODEL &&
+    e.provider === rule.config.provider &&
+    e.model === rule.config.model &&
     e.policy === AUTO_POLICY &&
-    // Absent from an older broker; present, it must be the very rule this plugin enforces.
-    (e.thresholds === undefined ||
-      (recorded !== undefined && AXES.every((id) => recorded[id] === AUTO_THRESHOLDS[id]))) &&
+    e.endpoint === rule.endpoint &&
+    // An older broker records no cutoffs: only the built-in ones can be what it applied.
+    // Recorded, they must be the very rule Auto mode was switched on with.
+    (e.thresholds === undefined
+      ? rule.builtIn && e.builtIn === undefined
+      : recorded !== undefined &&
+        e.builtIn === rule.builtIn &&
+        AXES.every((id) => recorded[id] === rule.cutoffs[id])) &&
     typeof e.eligible === "boolean" &&
     Array.isArray(e.reasons) &&
     e.reasons.every((reason) => typeof reason === "string") &&
@@ -53,11 +71,11 @@ export function validEvaluation(e: AutoEvaluation): boolean {
   );
 }
 
-export function currentEvaluation(e: AutoEvaluation): boolean {
+export function currentEvaluation(e: AutoEvaluation, rule: AutoRule = BUILT_IN_RULE): boolean {
   return (
-    validEvaluation(e) &&
+    validEvaluation(e, rule) &&
     e.eligible &&
     e.reasons.length === 0 &&
-    Object.entries(AUTO_THRESHOLDS).every(([id, cutoff]) => e.probabilities[id] <= cutoff)
+    AXES.every((id) => e.probabilities[id] <= rule.cutoffs[id])
   );
 }

@@ -10,7 +10,7 @@ import {
   warnIcon,
   xCircleIcon,
 } from "../icons";
-import { AUTO_MODEL } from "../sql/auto";
+
 import { classifyQuery, type RiskClass, rank } from "../sql/classify";
 import { formatSql } from "../sql/format";
 import { highlight } from "../sql/highlight";
@@ -96,7 +96,9 @@ function unparsedNote(gate: CardGate): string {
 // A state, never shown: the sentence below is what a reader sees and hears. Posted as a hold
 // reason it is no known diagnostic, so the server keeps "Automatic review required".
 export const AUTO_EVALUATING = "Evaluating";
-export const EVAL_NOTE = `Auto mode is evaluating this read with ${AUTO_MODEL}.`;
+// Plain text: every place that shows it escapes it, since the model comes from settings.
+export const evalNote = (model?: string) =>
+  `Auto mode is evaluating this read with ${model || "the evaluator"}.`;
 
 // One line that names Auto mode first and says where the read was held. Whether the query
 // ever left the machine is the part a human must not guess.
@@ -139,7 +141,7 @@ export function cardGateFor(
 ): CardGate {
   const gate = cardGate(card.sql, databaseType, mode, connReadOnly);
   return card.state === "ready" && card.autoStatus === AUTO_EVALUATING
-    ? { ...gate, approveEnabled: false, note: EVAL_NOTE }
+    ? { ...gate, approveEnabled: false, note: evalNote(card.autoModel) }
     : gate;
 }
 
