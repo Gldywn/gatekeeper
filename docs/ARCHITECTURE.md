@@ -79,7 +79,7 @@ SQL is the real backstop. See [`SECURITY.md`](../SECURITY.md).
 Auto mode is a separate ephemeral toggle that forces Read only. Confirming a switch
 to Write or Destructive disables Auto mode before arming the selected mode. Cancelling
 the confirmation leaves Auto mode active. Its PostgreSQL-only subset requires successful parsing, complete catalog
-metadata, local sensitivity checks and a pinned Jev evaluation. Provider errors or concerns
+metadata, local sensitivity checks and an evaluation by the chosen evaluator. Provider errors or concerns
 leave manual controls available. The plugin and broker revalidate authority after awaited
 operations. See [Auto mode](AUTO-MODE.md) for the supported subset and sharing boundary.
 

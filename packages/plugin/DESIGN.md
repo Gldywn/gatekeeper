@@ -292,7 +292,22 @@ own buttons: Escape does not dismiss it. Their frame reads solid over the Inbox'
 outer line, a light inner line, a shadow, and an engraved Settings head (`.detail > .detail-card`).
 
 Escape removes one layer per press: an open confirm first, then the export, then an open menu or
-popover, then the enlarged rows, then Settings, then the Queue's open item.
+popover, then the enlarged rows, then Settings' evaluator page (back to Settings), then
+Settings, then the Queue's open item.
+
+**The evaluator page** (operator's direction C, 2026-11-12). Settings' Auto mode box keeps its
+switch and one evaluator line instead of a key field: a sunken well, the whole of it a button,
+with the model id in mono, "on" its provider, the header's hairline divider (`.dsep`), the state
+of the cutoffs ("Built-in cutoffs", "Your cutoffs", or "Cutoffs needed" in amber) and "Change"
+at the right. Under 340px the facts stack and the divider leaves, so Change never wraps alone.
+Change replaces Settings' content in the same dialog with the evaluator page: a back arrow
+before the title, then the provider as the export dialog's rows (TypeSafe and Cloudflare
+"Hosted", Custom server "Self-hosted"), the model, the provider's own fields, the API key, Test
+connection with its answer on the status line, and the cutoffs. jev-1.13.0 shows "Use the
+built-in cutoffs", checked by default, its fields filled and disabled; any other model shows
+"No built-in cutoffs for this model.", empty fields, one note and "Copy prompt for your agent".
+Back or Escape returns to Settings with the focus on the evaluator line. A redraw after a change
+waits for the focus to land, and a later key update touches only the key's own controls.
 
 **Enlarged rows.** Enlarge moves the decided request's own result bar and grid into a dialog
 over the whole tab, past the shell's width cap: the grid keeps its sort, page, page size and

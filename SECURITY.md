@@ -194,7 +194,7 @@ use returns nothing (`WHERE false`). Both alert as a full read of the table.
   rules that read the SQL alone, which flag `UPDATE` or `DELETE` without `WHERE` and sources that
   no join condition links. An engine read with node-sql-parser's PostgreSQL grammar (Redshift,
   CockroachDB, DuckDB) counts as another engine: no catalog read, no size or lock rule.
-- **Auto mode** holds a query with an alert before anything is sent to TypeSafe. History keeps
+- **Auto mode** holds a query with an alert before anything is sent to the evaluator. History keeps
   the fixed reason `Heavy query`, never a table name. A check that could not finish (a view, an
   unknown size, a late catalog read) blocks nothing, with or without Auto mode, and shows
   nothing on the card.
@@ -209,6 +209,36 @@ use returns nothing (`WHERE false`). Both alert as a full read of the table.
   condition, DDL without `CONCURRENTLY`). Their presence tells the agent the query was flagged,
   the same signal as an automatic rejection. Row estimates, index facts and sensitive-data
   flags never leave the plugin. The history detail shows the exact text sent.
+
+## Auto mode's evaluator
+
+Auto mode sends the same minimized input (SQL structure with literals withheld, and the
+schema, table, column names, types and usages it reads) to the evaluator the user chose:
+TypeSafe, Cloudflare (Clef) or a Custom server. See [Evaluator](docs/AUTO-MODE.md#evaluator).
+
+- **Destination.** The sharing sentence names the recipient before activation; enabling
+  consents to it. A Custom server's URL is https, or plain http only to `127.0.0.1` or `[::1]`,
+  with no credentials, query or fragment, checked by the plugin and again by the broker.
+  Requests never follow redirects and provider bodies are never relayed or logged.
+- **Keys.** Each key is stored in Beekeeper's encrypted storage for the destination it was
+  typed for (TypeSafe, a Cloudflare account, a Custom server's full URL) and is never sent to
+  another one. A Custom server may go without a key, and then receives no Authorization.
+- **Cutoffs.** Only `jev-1.13.0` has Gatekeeper's built-in cutoffs. Cutoffs the user sets are a
+  delegation by that user, not a Gatekeeper measurement; permissive cutoffs let more reads run
+  without review. The local read-only analysis and sensitive-input checks apply whatever the
+  cutoffs. Any change to the evaluator or its cutoffs turns Auto mode off.
+- **A Custom server on this machine is not authenticated.** Plain http to `127.0.0.1` proves
+  nothing about who answers: while your model server is stopped, any other process, including
+  one run by another OS user of the machine, can listen on its port and answer that every read
+  is harmless. A key authenticates Gatekeeper to an honest server, not the server to
+  Gatekeeper. Such an answer can only approve reads that already passed the local analysis.
+  If other users share the machine, run the model server behind https with a certificate you
+  trust, or use a hosted evaluator (operator decision, 2026-11-12).
+- **What Gatekeeper cannot verify.** That a Custom server runs the model it names, with the
+  weights and precision its cutoffs were measured on, and reads the whole input instead of
+  cutting it. Choosing a model is the user's statement about their own server.
+- **Clef.** Clef cuts a state longer than its window instead of refusing it. Its reads stay for
+  manual review until a live bench run confirms the bound the broker applies.
 
 ## Same-user trust boundary
 
