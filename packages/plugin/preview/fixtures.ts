@@ -385,6 +385,8 @@ export function seededHistory(): HistItem[] {
       intent: "active customers per week since August",
       result: capResult(weeks, fieldsOf(weeks)),
       approval: { source: "automatic" },
+      // A heavy read Auto mode ran: the load check flagged it, Jev cleared it.
+      heavy: true,
     },
     {
       ...base,
@@ -397,6 +399,7 @@ export function seededHistory(): HistItem[] {
       resolvedAt: NOW - 8 * MIN,
       session: session(0),
       intent: "void the duplicate invoices",
+      heavy: true,
     },
     {
       ...base,
@@ -464,6 +467,7 @@ export function seededHistory(): HistItem[] {
       result: capResult(orders, fieldsOf(orders)),
       sensitivity: { pii: true, value: false, client: true },
       approval: { source: "human" },
+      heavy: true,
     },
   ];
   return items.slice(0, scenario.history);
@@ -499,6 +503,7 @@ export function activity(): ActivityEntry[] {
     sensitivity: h.sensitivity,
     kept: Boolean(h.result?.rows.length),
     ...(h.declinedBy ? { declinedBy: h.declinedBy } : {}),
+    ...(h.heavy ? { heavy: true } : {}),
   }));
   const s0 = session(0);
   const extra = (id: string, at: number, patch: Partial<ActivityEntry>): ActivityEntry => ({

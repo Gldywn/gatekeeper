@@ -4618,7 +4618,8 @@ p.auto-message[data-tone="busy"] {
   width: 13px;
   height: 13px;
 }
-.ix-risk.write {
+.ix-risk.write,
+.ix-risk.heavy {
   color: var(--amber);
 }
 .ix-risk.destructive {
@@ -4769,6 +4770,18 @@ p.auto-message[data-tone="busy"] {
 }
 .dt-sub + .dt-sub {
   margin-top: 1px;
+}
+/* The load check's alert, kept once decided: the row's gauge in its amber, the words muted. */
+.dt-sub.dt-heavy {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.dt-heavy svg {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  color: var(--amber);
 }
 /* The one explanation box, a reason or an error, under one header whatever it holds. */
 .dt-msg {

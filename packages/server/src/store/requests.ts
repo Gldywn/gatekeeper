@@ -223,6 +223,8 @@ export function markExecuting(
   // Replaces any earlier attempt's record, even with none: a withdrawn attempt's analysis
   // does not describe this approval.
   sensitivity?: import("@gatekeeper/shared").SensitivityRecord,
+  // Unlike the flags, never replaced: an earlier attempt's load check alert still happened.
+  heavy = false,
 ): GatekeeperRequest {
   const row = requireLease(ctx, id, leaseId);
   if (row.state !== "leased") {
@@ -240,6 +242,7 @@ export function markExecuting(
           ...((row.policy as object) ?? {}),
           approval: approval ?? { source: "human" },
           sensitivity,
+          ...(heavy ? { heavy: true } : {}),
         }),
         id,
         leaseId,
@@ -283,6 +286,7 @@ export function resolve(
   outcome: Outcome,
   autoHold?: import("@gatekeeper/shared").AutoHold,
   sensitivity?: import("@gatekeeper/shared").SensitivityRecord,
+  heavy = false,
 ): GatekeeperRequest {
   const row = requireLease(ctx, id, leaseId);
   const prior = row.policy as { sensitivity?: unknown } | null;
@@ -292,13 +296,14 @@ export function resolve(
   const declinedBy = outcome.status === "rejected" ? outcome.declinedBy : undefined;
   const reasonTyped = outcome.status === "rejected" && outcome.reasonTyped === true;
   const policy =
-    autoHold || replace || declinedBy
+    autoHold || replace || declinedBy || heavy
       ? {
           ...(prior ?? {}),
           ...(autoHold ? { autoHold } : {}),
           ...(replace ? { sensitivity } : {}),
           ...(declinedBy ? { declinedBy } : {}),
           ...(reasonTyped ? { reasonTyped } : {}),
+          ...(heavy ? { heavy: true } : {}),
         }
       : row.policy;
   const state: RequestState =

@@ -6,6 +6,7 @@ import { createBroker } from "./broker.js";
 import { PAIRING_CODE_TTL_MS, PAIRING_IDLE_MS } from "./config.js";
 import { connectionScopeKey } from "./connection.js";
 import { EvaluationError } from "./evaluator.js";
+import { getQueryResult, pollResults } from "./service.js";
 import { RequestStore } from "./store.js";
 
 const TOKEN = "test-capability-token";
@@ -670,6 +671,81 @@ describe("sensitivity record on decisions", () => {
     expect(store.get(c.id)?.policy).toEqual({
       sensitivity: { pii: true, value: false, client: false },
     });
+  });
+});
+
+describe("load check flag on decisions", () => {
+  function claimed() {
+    store.submit({ sessionId: "s1", sql: "SELECT * FROM events" });
+    return store.claimNext("plug_test", 30000)!;
+  }
+  // By id: two decisions in the same millisecond list in an order their random ids decide.
+  const activity = async (id: string) =>
+    JSON.parse((await call("GET", "/activity", { token: TOKEN })).body).activity.find(
+      (e: { id: string }) => e.id === id,
+    );
+
+  it("keeps the flag posted with /executing through a result without it, never in the result", async () => {
+    const c = claimed();
+    await call("POST", "/executing", {
+      token: TOKEN,
+      body: { id: c.id, leaseId: c.leaseId, heavy: true },
+    });
+    await call("POST", "/result", {
+      token: TOKEN,
+      body: { id: c.id, leaseId: c.leaseId, status: "approved", rows: [{ n: 1 }], fields: [] },
+    });
+    expect((await activity(c.id)).heavy).toBe(true);
+    // Host-side only: neither the ticket nor the session poll the agent reads carries it.
+    const ticket = await getQueryResult(store, "s1", c.id);
+    expect(ticket).toMatchObject({ state: "approved", terminal: { rows: [{ n: 1 }] } });
+    expect(JSON.stringify(ticket)).not.toContain("heavy");
+    expect(JSON.stringify(await pollResults(store, "s1"))).not.toContain("heavy");
+  });
+
+  it("records it on a rejection alone, and nothing for a value that is not exactly true", async () => {
+    const c = claimed();
+    await call("POST", "/result", {
+      token: TOKEN,
+      body: { id: c.id, leaseId: c.leaseId, status: "rejected", declinedBy: "load", heavy: true },
+    });
+    expect(store.get(c.id)?.policy).toMatchObject({ heavy: true, declinedBy: "load" });
+    const d = claimed();
+    await call("POST", "/result", {
+      token: TOKEN,
+      body: { id: d.id, leaseId: d.leaseId, status: "rejected", heavy: "true" },
+    });
+    expect(store.get(d.id)?.policy ?? {}).not.toHaveProperty("heavy");
+    expect(await activity(d.id)).not.toHaveProperty("heavy");
+  });
+
+  it("survives a withdrawn attempt while the flags follow the next decision", async () => {
+    const c = claimed();
+    await call("POST", "/executing", {
+      token: TOKEN,
+      body: {
+        id: c.id,
+        leaseId: c.leaseId,
+        heavy: true,
+        sensitivity: { pii: false, value: false, client: false },
+      },
+    });
+    await call("POST", "/execution/withdraw", {
+      token: TOKEN,
+      body: { id: c.id, leaseId: c.leaseId },
+    });
+    await call("POST", "/result", {
+      token: TOKEN,
+      body: {
+        id: c.id,
+        leaseId: c.leaseId,
+        status: "rejected",
+        sensitivity: { pii: true, value: false, client: false },
+      },
+    });
+    const entry = await activity(c.id);
+    expect(entry.heavy).toBe(true);
+    expect(entry.sensitivity).toEqual({ pii: true, value: false, client: false });
   });
 });
 

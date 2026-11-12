@@ -147,6 +147,46 @@ const DONE: DoneState[] = [
     session(1),
   ),
   done(
+    "Read · approved automatically · flagged heavy",
+    SQL_MORE.big,
+    {
+      note: "12,400 rows returned (agent received 10,000)",
+      intent: "events since October 1",
+      result: bigResult,
+      approval: { source: "automatic", evaluation: evaluation(true) },
+      heavy: true,
+    },
+    {
+      rowCount: 12_400,
+      intent: "events since October 1",
+      approval: { source: "automatic", evaluation: evaluation(true) },
+      heavy: true,
+    },
+    session(1),
+  ),
+  done(
+    "Read · declined by the load check",
+    SQL_MORE.big,
+    {
+      status: "rejected",
+      note: "heavy query, auto-denied",
+      declinedBy: "load",
+      autoDenied: true,
+      sent: "Rejected automatically by the load check. The query reads a table without a WHERE clause.",
+      intent: "events since October 1",
+      heavy: true,
+    },
+    {
+      state: "rejected",
+      reason:
+        "Rejected automatically by the load check. The query reads a table without a WHERE clause.",
+      declinedBy: "load",
+      intent: "events since October 1",
+      heavy: true,
+    },
+    session(1),
+  ),
+  done(
     "Read · approved after Auto mode held it",
     SQL.dup,
     {

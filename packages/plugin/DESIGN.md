@@ -208,6 +208,14 @@ first line, the tables, what the SQL marks, the SQL, then the decision.
   tables and columns stand out on the faint ground of tool names, unlike plain `code.name`. A
   table's estimated rows open on hover or focus of its name in the matrix, or in the reason when
   the card has no matrix. What the check could not establish is not shown: no estimate, no claim.
+- **Heavy query once decided** (operator decision, 2026-11-11): a decided row, in Recently
+  resolved and the Audit Trail alike, shows the load check's gauge in amber right after the
+  class icon (Write's pencil, Destructive's bin), titled "Heavy query", only where the query
+  ran, like the class and sensitivity marks. Not a chip beside PII and Client: those say what
+  the query returned, the gauge what it cost. A row the load check declined keeps its gauge as
+  the row's glyph instead. The detail adds "Flagged heavy by the load check" under who decided,
+  except when the load check is who declined it, and its request line carries the card's Heavy
+  query badge. No reason or estimate: they never leave the plugin.
 - An Auto mode hold says where it happened, on this machine before evaluation or at Jev, then
   "Waiting for your review."; a hold on this machine adds "Nothing was sent to TypeSafe." No
   reason chips.
