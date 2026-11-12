@@ -8,13 +8,17 @@ import { analyzeWithFixture, type FixtureOptions } from "../../plugin/src/sql/pg
 import { loadPgParser } from "../../plugin/src/sql/pg/parse";
 import { planRead } from "../../plugin/src/sql/read-analysis";
 import {
-  AUTO_MODEL,
   AUTO_POLICY,
   AUTO_THRESHOLDS,
+  canonicalBaseUrl,
+  DEFAULT_EVALUATOR,
   EvaluationError,
+  type EvaluatorConfig,
+  endpointOf,
   evaluateProbabilities,
   evaluationInput,
   evaluationQuestions,
+  evaluatorConfig,
 } from "../src/evaluator.js";
 
 const probability = z.number().finite().min(0).max(1);
@@ -115,6 +119,9 @@ const resultSchema = z
     localReason: z.string().optional(),
     probabilities: z.record(probability).optional(),
     elapsedMs: z.number().nonnegative().optional(),
+    // Clef only: the request's bytes and the tokens it reported, kept from complete answers.
+    bodyBytes: z.number().int().nonnegative().optional(),
+    inputTokens: z.number().int().nonnegative().optional(),
     error: z
       .object({
         stage: z.enum(["input", "network", "http", "response", "cancelled", "internal"]),
@@ -128,7 +135,9 @@ export const reportSchema = z
   .object({
     version: z.literal(1),
     createdAt: z.string().datetime(),
-    model: z.literal(AUTO_MODEL),
+    model: z.string().min(1).max(100),
+    // Absent from reports made before the evaluator choice: TypeSafe, jev-1.13.0.
+    evaluator: evaluatorConfig.optional(),
     baselinePolicy: z.string().min(1),
     analysis: z.enum(["shared-read-1", "shared-read-2", ANALYSIS]).optional(),
     mode: z.enum(["dry", "live"]),
@@ -212,6 +221,8 @@ export function validateReport(raw: unknown): Report {
   )
     throw new Error("Corpus or question digest mismatch");
   if (!sameKeys(report.thresholds, report.questions)) throw new Error("Threshold axes mismatch");
+  if (report.evaluator && report.evaluator.model !== report.model)
+    throw new Error("Report model and evaluator disagree");
   if (
     report.analysis === ANALYSIS &&
     report.results.some((r) => r.input && !evaluationInput.safeParse(r.input).success)
@@ -239,11 +250,15 @@ export function prepare(
   questions: Report["questions"],
   split: Report["split"],
   thresholds?: Record<string, number>,
+  evaluator: EvaluatorConfig = DEFAULT_EVALUATOR,
 ): Report {
+  const builtIn =
+    evaluator.provider === "typesafe" && digest(questions) === digest(evaluationQuestions);
   return validateReport({
     version: 1,
     createdAt: new Date().toISOString(),
-    model: AUTO_MODEL,
+    model: evaluator.model,
+    evaluator,
     baselinePolicy: AUTO_POLICY,
     analysis: ANALYSIS,
     mode: "dry",
@@ -252,12 +267,17 @@ export function prepare(
     corpusDigest: digest(corpus),
     questions,
     questionDigest: digest(questions),
+    // Only jev-1.13.0 has cutoffs to start from; another model holds everything until --propose
+    // measures its own, so no inherited number passes for its policy.
     thresholds:
       thresholds ??
-      (digest(questions) === digest(evaluationQuestions)
+      (builtIn
         ? AUTO_THRESHOLDS
         : Object.fromEntries(
-            Object.keys(questions).map((id) => [id, id === "read_only" ? 0.99 : 0.01]),
+            Object.keys(questions).map((id) => [
+              id,
+              id === "read_only" ? 0.99 : evaluator.provider === "typesafe" ? 0.01 : 0,
+            ]),
           )),
     results: corpus
       .filter((c) => c.split === split)
@@ -288,17 +308,29 @@ export async function runLive(
     throw new Error("Local boundary regression: no provider calls permitted");
   if (report.mode !== "dry")
     throw new Error("Start a fresh run instead of overwriting observations");
+  const config = report.evaluator ?? DEFAULT_EVALUATOR;
+  // Clef's runs are also the evidence its input bound waits for, so they measure it.
+  const measures = Boolean(endpointOf(config)?.window);
   report.mode = "live";
   for (const r of report.results) {
     if (!r.input || signal.aborted) continue;
     const started = performance.now();
+    let observed: { bodyBytes: number; inputTokens: number } | undefined;
     try {
       r.probabilities = await evaluateProbabilities(
         evaluationInput.parse(r.input),
         key,
         AbortSignal.any([signal, AbortSignal.timeout(12000)]),
         report.questions,
+        config,
+        measures
+          ? (bodyBytes, inputTokens) => {
+              observed = { bodyBytes, inputTokens };
+            }
+          : undefined,
       );
+      // Kept only once the whole answer passed: a call that failed later is no evidence.
+      if (observed) Object.assign(r, observed);
     } catch (error) {
       r.error =
         error instanceof EvaluationError
@@ -312,9 +344,97 @@ export async function runLive(
   }
 }
 
-export function summarize(raw: unknown, thresholds?: Record<string, number>): string {
+// What --propose writes and --thresholds reads back: the cutoffs with what they were measured on,
+// so a validation replay cannot pair them with another evaluator, questionnaire or corpus.
+export const proposalSchema = z
+  .object({
+    cutoffs: z.record(probability),
+    evaluator: evaluatorConfig,
+    analysis: z.string(),
+    questionDigest: z.string(),
+    corpusDigest: z.string(),
+  })
+  .strict();
+export type Proposal = z.infer<typeof proposalSchema>;
+
+export interface ProposalResult {
+  status: "proposed" | "stalled" | "infeasible" | "no-evidence";
+  proposal?: Proposal;
+  allowAdmitted: number;
+  allowTotal: number;
+  reviewTotal: number;
+  minHoldingDistance?: number;
+}
+
+// Admits safe reads least risky first, raising every cutoff a read needs at once, and only while
+// every risky read stays held by one axis with a margin: safe on these cases, not optimal.
+export function propose(raw: unknown, margin = 0.02): ProposalResult {
   const report = validateReport(raw);
-  const cutoffs = z.record(probability).parse(thresholds ?? report.thresholds);
+  if (report.mode !== "live" || report.split !== "development" || report.analysis !== ANALYSIS)
+    throw new Error("Propose from a live development report for the current analysis");
+  if (report.corpus.some((c) => c.expected === "local" && typeof localInput(c) !== "string"))
+    throw new Error("Local boundary regression: no proposal");
+  const cases = report.corpus.filter((c) => c.split === report.split);
+  const observed = report.results.flatMap((r, i) => (r.input ? [{ r, c: cases[i] }] : []));
+  if (observed.some(({ r }) => r.error || !r.probabilities))
+    throw new Error("Incomplete observations: rerun the split, an interrupted run is no evidence");
+  const axes = Object.keys(report.questions);
+  const allow = observed.filter(({ c }) => c.expected === "allow").map(({ r }) => r.probabilities!);
+  const review = observed
+    .filter(({ c }) => c.expected === "review")
+    .map(({ r }) => r.probabilities!);
+  const result = { allowAdmitted: 0, allowTotal: allow.length, reviewTotal: review.length };
+  if (!allow.length || !review.length) return { status: "no-evidence", ...result };
+  const zero = Object.fromEntries(axes.map((a) => [a, 0]));
+  const held = (c: Record<string, number>, p: Record<string, number>) =>
+    axes.some((a) => p[a] > c[a] + margin);
+  if (!review.every((p) => held(zero, p))) return { status: "infeasible", ...result };
+  const admitted = (c: Record<string, number>) =>
+    allow.filter((p) => axes.every((a) => p[a] <= c[a])).length;
+  // Cutoffs only grow, so a read skipped once stays out of reach: one pass is enough.
+  const worst = (p: Record<string, number>) => Math.max(...axes.map((a) => p[a]));
+  const total = (p: Record<string, number>) => axes.reduce((sum, a) => sum + p[a], 0);
+  const order = allow
+    .map((p, i) => ({ p, i }))
+    .sort((x, y) => worst(x.p) - worst(y.p) || total(x.p) - total(y.p) || x.i - y.i);
+  let cutoffs = zero;
+  for (const { p } of order) {
+    const next = Object.fromEntries(axes.map((a) => [a, Math.max(cutoffs[a], p[a])]));
+    if (review.every((r) => held(next, r))) cutoffs = next;
+  }
+  const distances = review.map((p) => Math.max(...axes.map((a) => p[a] - cutoffs[a])));
+  return {
+    status: admitted(cutoffs) ? "proposed" : "stalled",
+    proposal: {
+      cutoffs,
+      evaluator: report.evaluator ?? DEFAULT_EVALUATOR,
+      analysis: ANALYSIS,
+      questionDigest: report.questionDigest,
+      corpusDigest: report.corpusDigest,
+    },
+    ...result,
+    allowAdmitted: admitted(cutoffs),
+    minHoldingDistance: Math.min(...distances),
+  };
+}
+
+// Plain cutoffs replay as before; a proposal replays only on what it was measured on.
+function cutoffsFor(report: Report, thresholds: unknown): Record<string, number> {
+  const proposal = proposalSchema.safeParse(thresholds);
+  if (!proposal.success) return z.record(probability).parse(thresholds ?? report.thresholds);
+  const p = proposal.data;
+  const same =
+    JSON.stringify(p.evaluator) === JSON.stringify(report.evaluator ?? DEFAULT_EVALUATOR) &&
+    p.analysis === report.analysis &&
+    p.questionDigest === report.questionDigest &&
+    p.corpusDigest === report.corpusDigest;
+  if (!same) throw new Error("Proposal measured on another evaluator, questions or corpus");
+  return p.cutoffs;
+}
+
+export function summarize(raw: unknown, thresholds?: unknown): string {
+  const report = validateReport(raw);
+  const cutoffs = cutoffsFor(report, thresholds);
   if (!sameKeys(cutoffs, report.questions)) throw new Error("Threshold axes mismatch");
   const cases = report.corpus.filter((c) => c.split === report.split);
   const evaluatedCases = cases.filter((c) =>
@@ -361,10 +481,20 @@ export function summarize(raw: unknown, thresholds?: Record<string, number>): st
     }
     return `| ${c.id} | ${c.expected} | ${outcome} |`;
   });
+  const evaluator = report.evaluator ?? DEFAULT_EVALUATOR;
+  const measured = report.results.flatMap((r) =>
+    r.bodyBytes !== undefined && r.inputTokens !== undefined ? [r] : [],
+  );
   return [
     `# Auto evaluation (${report.split}, ${report.mode})`,
     "",
-    `Model: ${report.model}. Baseline policy: ${report.baselinePolicy}.`,
+    `Evaluator: ${JSON.stringify(evaluator)}. Baseline policy: ${report.baselinePolicy}.`,
+    // The evidence CLEF_BOUND_VERIFIED waits for: tokens never above the request's bytes.
+    ...(measured.length
+      ? [
+          `Input bound over ${measured.length} complete answers: largest tokens minus bytes ${Math.max(...measured.map((r) => r.inputTokens! - r.bodyBytes!))}, largest request ${Math.max(...measured.map((r) => r.bodyBytes!))} bytes.`,
+        ]
+      : []),
     ...(report.analysis === ANALYSIS
       ? []
       : [
@@ -407,6 +537,30 @@ export function summarize(raw: unknown, thresholds?: Record<string, number>): st
   ].join("\n");
 }
 
+// The same evaluator shapes and URL rules as the broker, so the bench measures what runs.
+export function evaluatorFromFlags(values: {
+  provider?: string;
+  model?: string;
+  "base-url"?: string;
+  "account-id"?: string;
+}): EvaluatorConfig {
+  if (!values.provider) return DEFAULT_EVALUATOR;
+  const extra =
+    values.provider === "custom"
+      ? { baseUrl: canonicalBaseUrl(values["base-url"] ?? "") ?? values["base-url"] ?? "" }
+      : values.provider === "cloudflare"
+        ? { accountId: values["account-id"] ?? "" }
+        : {};
+  const config = evaluatorConfig.parse({
+    provider: values.provider,
+    model: values.model,
+    ...extra,
+  });
+  if (!endpointOf(config))
+    throw new Error("A Custom server URL is https, or plain http to 127.0.0.1 or [::1]");
+  return config;
+}
+
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 const load = async (path: string) => JSON.parse(await readFile(resolve(root, path), "utf8"));
 
@@ -421,13 +575,46 @@ async function main() {
       thresholds: { type: "string" },
       split: { type: "string", default: "development" },
       out: { type: "string" },
+      provider: { type: "string" },
+      model: { type: "string" },
+      "base-url": { type: "string" },
+      "account-id": { type: "string" },
+      propose: { type: "string" },
       help: { type: "boolean" },
     },
   });
   if (values.help) {
     console.log(
-      "eval:auto [--live] [--corpus <json>] [--questions <json>] [--thresholds <json>] [--split development|validation] [--out <json>]\neval:auto --replay <json> [--thresholds <json>]\nPaths are repository-relative. Live runs require TYPESAFE_API_KEY in the operator's environment.",
+      [
+        "eval:auto [--live] [--provider typesafe|cloudflare|custom --model <m> [--account-id <id>] [--base-url <url>]] [--corpus <json>] [--questions <json>] [--thresholds <json>] [--split development|validation] [--out <json>]",
+        "eval:auto --propose <live development report> [--out <proposal json>]",
+        "eval:auto --replay <json> [--thresholds <json or proposal>]",
+        "Paths are repository-relative. Live runs read the key from GATEKEEPER_EVALUATOR_KEY (TYPESAFE_API_KEY still works for TypeSafe), provisioned by the operator; a Custom server may go without one.",
+      ].join("\n"),
     );
+    return;
+  }
+  if (values.propose) {
+    if (values.live || values.replay || values.corpus || values.questions)
+      throw new Error("Propose reads one development report and calls no provider");
+    const result = propose(await load(values.propose));
+    console.log(
+      [
+        `Proposal: ${result.status}.`,
+        `Safe reads let through: ${result.allowAdmitted}/${result.allowTotal}. Risky reads held: ${result.reviewTotal}/${result.reviewTotal}.`,
+        ...(result.minHoldingDistance !== undefined
+          ? [`Smallest margin holding a risky read: ${result.minHoldingDistance.toFixed(3)}.`]
+          : []),
+        ...(result.proposal ? [`Cutoffs: ${JSON.stringify(result.proposal.cutoffs)}.`] : []),
+        "Synthetic development cases: replay validation once with these cutoffs, never retune on it.",
+      ].join("\n"),
+    );
+    if (result.proposal && result.status === "proposed" && values.out) {
+      const path = resolve(root, values.out);
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, JSON.stringify(result.proposal, null, 2), { flag: "wx" });
+      console.log(`Proposal: ${path}`);
+    }
     return;
   }
   if (values.replay) {
@@ -450,11 +637,13 @@ async function main() {
     values.questions ? await load(values.questions) : evaluationQuestions,
   );
   const split = z.enum(["development", "validation"]).parse(values.split);
+  const evaluator = evaluatorFromFlags(values);
   const report = prepare(
     corpus,
     questions,
     split,
     values.thresholds ? await load(values.thresholds) : undefined,
+    evaluator,
   );
   if (!values.live && !values.out) {
     console.log(summarize(report));
@@ -466,8 +655,12 @@ async function main() {
   const save = () => writeFile(path, JSON.stringify(report, null, 2));
   if (values.live) {
     // Never load .env, plugin storage or broker credentials. Only the operator provisions this process.
-    const key = process.env.TYPESAFE_API_KEY;
-    if (!key) throw new Error("The operator must provision TYPESAFE_API_KEY for --live");
+    const key =
+      process.env.GATEKEEPER_EVALUATOR_KEY ??
+      (evaluator.provider === "typesafe" ? process.env.TYPESAFE_API_KEY : undefined) ??
+      "";
+    if (!key && evaluator.provider !== "custom")
+      throw new Error("The operator must provision GATEKEEPER_EVALUATOR_KEY for --live");
     const controller = new AbortController();
     const cancel = () => controller.abort();
     process.once("SIGINT", cancel);

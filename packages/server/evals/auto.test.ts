@@ -23,8 +23,10 @@ import {
   type Case,
   corpusSchema,
   digest,
+  evaluatorFromFlags,
   localInput,
   prepare,
+  propose,
   runLive,
   summarize,
   validateReport,
@@ -646,5 +648,134 @@ describe("exported investigation shapes (synthetic, literals and names replaced)
       sent += report.results.filter((r) => r.probabilities).length;
     }
     expect(sent).toBe(exportCases.filter((c) => c.expected !== "local").length);
+  });
+});
+
+describe("measuring another evaluator", () => {
+  const questions = evaluationQuestions;
+  const clef = {
+    provider: "cloudflare" as const,
+    model: "clef-flash" as const,
+    accountId: "abc123",
+  };
+  const axes = Object.keys(questions);
+  // A live development report whose answers are set per expected label, no provider called.
+  const live = (answer: (expected: string, id: string) => Record<string, number>) => {
+    const report = prepare(allCases, questions, "development", undefined, clef);
+    report.mode = "live";
+    const cases = report.corpus.filter((c) => c.split === "development");
+    report.results.forEach((r, i) => {
+      if (r.input) r.probabilities = answer(cases[i].expected, cases[i].id);
+    });
+    return report;
+  };
+  const flat = (v: number) => Object.fromEntries(axes.map((a) => [a, v]));
+
+  it("starts another model with every read held, never with jev-1.13.0's cutoffs", () => {
+    const report = prepare(allCases, questions, "development", undefined, clef);
+    expect(report.evaluator).toEqual(clef);
+    expect(report.model).toBe("clef-flash");
+    expect(report.thresholds).toEqual(flat(0));
+  });
+
+  it("lets safe reads through with every risky read held by a margin", () => {
+    const report = live((expected) =>
+      expected === "allow" ? flat(0.05) : { ...flat(0.01), personal_disclosure: 0.9 },
+    );
+    const result = propose(report);
+    expect(result.status).toBe("proposed");
+    expect(result.allowAdmitted).toBe(result.allowTotal);
+    expect(result.proposal?.cutoffs).toEqual(flat(0.05));
+    expect(result.minHoldingDistance).toBeCloseTo(0.85);
+    expect(result.proposal?.evaluator).toEqual(clef);
+  });
+
+  it("keeps out a safe read that would let a risky one through, and the margin counts", () => {
+    // The second safe read sits at the risky read's level on every axis but one.
+    let n = 0;
+    const report = live((expected) => {
+      if (expected === "review") return { ...flat(0.3), personal_disclosure: 0.31 };
+      return n++ % 2 ? flat(0.02) : { ...flat(0.3), personal_disclosure: 0.3 };
+    });
+    const result = propose(report);
+    expect(result.status).toBe("proposed");
+    expect(result.proposal?.cutoffs).toEqual(flat(0.02));
+    expect(result.allowAdmitted).toBe(Math.floor(result.allowTotal / 2));
+  });
+
+  it("says so when no cutoffs can hold a risky read, or when nothing safe gets through", () => {
+    expect(propose(live((e) => (e === "review" ? flat(0.01) : flat(0.5)))).status).toBe(
+      "infeasible",
+    );
+    expect(propose(live((e) => (e === "review" ? flat(0.3) : flat(0.4)))).status).toBe("stalled");
+  });
+
+  it("refuses an interrupted run, a dry report or a validation report", () => {
+    const report = live(() => flat(0.1));
+    const broken = structuredClone(report);
+    const first = broken.results.find((r) => r.input)!;
+    delete first.probabilities;
+    first.error = { stage: "network" };
+    expect(() => propose(broken)).toThrow(/Incomplete observations/);
+    expect(() => propose(prepare(allCases, questions, "development", undefined, clef))).toThrow();
+    const validation = prepare(allCases, questions, "validation", undefined, clef);
+    validation.mode = "live";
+    expect(() => propose(validation)).toThrow();
+  });
+
+  it("replays a proposal only on the evaluator, questions and corpus it was measured on", () => {
+    const report = live((e) => (e === "allow" ? flat(0.05) : flat(0.9)));
+    const { proposal } = propose(report);
+    expect(summarize(report, proposal)).toContain("Unsafe automatic approvals: 0.");
+    const other = { ...clef, model: "clef" as const };
+    expect(() => summarize({ ...report, model: "clef", evaluator: other }, proposal)).toThrow(
+      /another evaluator/,
+    );
+  });
+
+  it("measures Clef's input bound from complete answers only", async () => {
+    const report = prepare(allCases, questions, "development", undefined, clef);
+    let calls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init: RequestInit) => {
+        calls++;
+        const body = JSON.parse(init.body as string);
+        const answers = Object.fromEntries(
+          Object.keys(body.questions).map((id) => [id, { type: "noul", noul: 0.01 }]),
+        );
+        // The third answer misses an axis: no bound is kept for it.
+        if (calls === 3) delete answers.insufficient_context;
+        return new Response(
+          JSON.stringify({
+            success: true,
+            result: { model: "clef-flash", answers, usage: { input_tokens: 4000 } },
+          }),
+        );
+      }),
+    );
+    await runLive(report, "synthetic-key", new AbortController().signal, async () => {});
+    const evaluated = report.results.filter((r) => r.input);
+    expect(evaluated[0]).toMatchObject({ inputTokens: 4000, bodyBytes: expect.any(Number) });
+    expect(evaluated[2].inputTokens).toBeUndefined();
+    expect(evaluated[2].error).toEqual({ stage: "response" });
+    expect(summarize(report)).toMatch(/Input bound over 2 complete answers/);
+  });
+
+  it("reads the evaluator from the flags with the broker's URL rules", () => {
+    expect(evaluatorFromFlags({})).toEqual({ provider: "typesafe", model: AUTO_MODEL });
+    expect(
+      evaluatorFromFlags({
+        provider: "custom",
+        model: "kev-4b",
+        "base-url": "http://127.0.0.1:8080/",
+      }),
+    ).toEqual({ provider: "custom", model: "kev-4b", baseUrl: "http://127.0.0.1:8080" });
+    // As at the broker, a hostname for plain http is refused rather than resolved.
+    for (const url of ["http://localhost:8080", "http://10.0.0.5"])
+      expect(() =>
+        evaluatorFromFlags({ provider: "custom", model: "kev-4b", "base-url": url }),
+      ).toThrow();
+    expect(() => evaluatorFromFlags({ provider: "cloudflare", model: "clef" })).toThrow();
   });
 });
