@@ -671,7 +671,7 @@ describe("measuring another evaluator", () => {
   };
   const flat = (v: number) => Object.fromEntries(axes.map((a) => [a, v]));
 
-  it("starts another model with every read held, never with jev-1.13.0's cutoffs", () => {
+  it("starts another model at zero, never with jev-1.13.0's cutoffs", () => {
     const report = prepare(allCases, questions, "development", undefined, clef);
     expect(report.evaluator).toEqual(clef);
     expect(report.model).toBe("clef-flash");
@@ -777,5 +777,36 @@ describe("measuring another evaluator", () => {
         evaluatorFromFlags({ provider: "custom", model: "kev-4b", "base-url": url }),
       ).toThrow();
     expect(() => evaluatorFromFlags({ provider: "cloudflare", model: "clef" })).toThrow();
+  });
+
+  it.each([
+    { "base-url": "https://kev.example.test" },
+    { "account-id": "abc123" },
+    { model: "kev-4b" },
+    { provider: "typesafe", model: AUTO_MODEL, "base-url": "https://kev.example.test" },
+    {
+      provider: "custom",
+      model: "kev-4b",
+      "base-url": "https://kev.example.test",
+      "account-id": "x",
+    },
+    { provider: "cloudflare", model: "clef", "account-id": "abc", "base-url": "https://a.test" },
+  ])("refuses a flag its evaluator does not take, before any key is used: %o", (flags) => {
+    expect(() => evaluatorFromFlags(flags)).toThrow();
+  });
+
+  it("proposes only from the production questions and policy", () => {
+    const report = live((e) => (e === "allow" ? flat(0.05) : flat(0.9)));
+    expect(propose(report).status).toBe("proposed");
+    // Same axis names, other wording: the cutoffs would be for questions that never run.
+    const reworded = structuredClone(evaluationQuestions);
+    reworded.personal_disclosure.instructions += " Reworded.";
+    const other = prepare(allCases, reworded, "development", undefined, clef);
+    other.mode = "live";
+    for (const r of other.results) if (r.input) r.probabilities = flat(0.1);
+    expect(() => propose(other)).toThrow(/production questions/);
+    expect(() => propose({ ...report, baselinePolicy: "auto-beta-8" })).toThrow(
+      /production questions/,
+    );
   });
 });

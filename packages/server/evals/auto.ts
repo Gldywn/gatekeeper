@@ -267,8 +267,8 @@ export function prepare(
     corpusDigest: digest(corpus),
     questions,
     questionDigest: digest(questions),
-    // Only jev-1.13.0 has cutoffs to start from; another model holds everything until --propose
-    // measures its own, so no inherited number passes for its policy.
+    // Only jev-1.13.0 has cutoffs to start from; another model starts at zero, which passes only
+    // an exact zero, until --propose measures its own, so no inherited number passes for it.
     thresholds:
       thresholds ??
       (builtIn
@@ -372,6 +372,13 @@ export function propose(raw: unknown, margin = 0.02): ProposalResult {
   const report = validateReport(raw);
   if (report.mode !== "live" || report.split !== "development" || report.analysis !== ANALYSIS)
     throw new Error("Propose from a live development report for the current analysis");
+  // Cutoffs are for the questions that run, where a higher probability always means review:
+  // another questionnaire, or one with an inverted axis such as read_only, proposes nothing.
+  if (
+    report.baselinePolicy !== AUTO_POLICY ||
+    report.questionDigest !== digest(evaluationQuestions)
+  )
+    throw new Error("Propose only from the production questions and policy");
   if (report.corpus.some((c) => c.expected === "local" && typeof localInput(c) !== "string"))
     throw new Error("Local boundary regression: no proposal");
   const cases = report.corpus.filter((c) => c.split === report.split);
@@ -544,12 +551,24 @@ export function evaluatorFromFlags(values: {
   "base-url"?: string;
   "account-id"?: string;
 }): EvaluatorConfig {
-  if (!values.provider) return DEFAULT_EVALUATOR;
+  const url = values["base-url"];
+  const account = values["account-id"];
+  // A flag the evaluator does not take is a mistake, and the key meant for one destination must
+  // not reach the default: refuse rather than ignore.
+  if (!values.provider) {
+    if (values.model !== undefined || url !== undefined || account !== undefined)
+      throw new Error("Name the evaluator with --provider");
+    return DEFAULT_EVALUATOR;
+  }
+  if (url !== undefined && values.provider !== "custom")
+    throw new Error("--base-url is for --provider custom");
+  if (account !== undefined && values.provider !== "cloudflare")
+    throw new Error("--account-id is for --provider cloudflare");
   const extra =
     values.provider === "custom"
-      ? { baseUrl: canonicalBaseUrl(values["base-url"] ?? "") ?? values["base-url"] ?? "" }
+      ? { baseUrl: canonicalBaseUrl(url ?? "") ?? url ?? "" }
       : values.provider === "cloudflare"
-        ? { accountId: values["account-id"] ?? "" }
+        ? { accountId: account ?? "" }
         : {};
   const config = evaluatorConfig.parse({
     provider: values.provider,
@@ -601,7 +620,11 @@ async function main() {
     console.log(
       [
         `Proposal: ${result.status}.`,
-        `Safe reads let through: ${result.allowAdmitted}/${result.allowTotal}. Risky reads held: ${result.reviewTotal}/${result.reviewTotal}.`,
+        `Safe reads let through: ${result.allowAdmitted}/${result.allowTotal}.`,
+        // Only a vector that exists holds anything; infeasible means some risky read is not held.
+        ...(result.proposal
+          ? [`Risky reads held by a margin: ${result.reviewTotal}/${result.reviewTotal}.`]
+          : []),
         ...(result.minHoldingDistance !== undefined
           ? [`Smallest margin holding a risky read: ${result.minHoldingDistance.toFixed(3)}.`]
           : []),

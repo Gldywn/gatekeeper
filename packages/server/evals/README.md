@@ -169,8 +169,12 @@ TZ=UTC mise exec -- pnpm run eval:auto --live --provider cloudflare --model clef
 TZ=UTC mise exec -- pnpm run eval:auto --live --provider custom --model kev-4b --base-url http://127.0.0.1:8080 --out .orch/auto-evals/dev.json
 ```
 
-A model other than `jev-1.13.0` starts with every read held: no cutoff of another model
-passes for its own. Live Clef runs also keep, for each complete answer, the request's bytes
+A model other than `jev-1.13.0` starts with zero cutoffs, which pass only an exact zero: no
+cutoff of another model passes for its own. Evaluator flags must match the provider: a
+`--base-url` without `--provider custom`, or an `--account-id` without `--provider cloudflare`,
+is refused rather than sent to TypeSafe with another destination's key. `--propose` works only
+from the production questions and policy, where a higher probability always means review.
+Live Clef runs also keep, for each complete answer, the request's bytes
 and the input tokens Clef reported; the summary prints the largest gap, the evidence
 `CLEF_BOUND_VERIFIED` waits for before Clef can approve anything.
 

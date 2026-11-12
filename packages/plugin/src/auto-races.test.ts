@@ -29,6 +29,7 @@ import { activeEvaluator, DEFAULT_SETTINGS, settingsFor } from "./evaluator";
 import { AUTO_APPROVED } from "./render/auto";
 import { ConfirmModal } from "./render/confirm";
 import { AUTO_EVALUATING, cardHtml } from "./render/queue";
+import { AUTO_THRESHOLDS as PLUGIN_CUTOFFS } from "./sql/auto";
 import type { LoadResult } from "./sql/load";
 import { catalogRows } from "./sql/pg/catalog-fixture";
 import { planRead } from "./sql/read-analysis";
@@ -102,6 +103,7 @@ function harness() {
     },
     keyOps: Promise.resolve(true),
     keySeq: 0,
+    keyIssues: new Map(),
     setSettingsOpen: vi.fn(),
     autoDeferred: new Set<string>(),
     autoBusy: false,
@@ -471,6 +473,45 @@ describe("shared manual/automatic execution authority", () => {
     expect(app.autoEnabled).toBe(false);
     expect(app.broker.checkEvaluator).not.toHaveBeenCalled();
     expect(message.textContent).toBe("The key could not be saved to encrypted storage.");
+  });
+  it("never blames one destination's failed save on another", async () => {
+    const { app } = harness();
+    app.autoEnabled = false;
+    app.autoRule = undefined;
+    app.confirmModal = { cancel: vi.fn() };
+    storageWrite.mockReset().mockRejectedValueOnce(new Error("storage"));
+    app.pendingKey = { slot: "gatekeeper.typesafe-key", key: "new-key" };
+    expect(await app.flushKey("gatekeeper.typesafe-key")).toBe("failed");
+    // A keyless Custom server, cutoffs all set: its activation is judged on its own.
+    app.evaluator = {
+      ...settingsFor("custom", "kev-4b"),
+      baseUrl: "http://127.0.0.1:8080",
+      cutoffs: { ...PLUGIN_CUTOFFS },
+    };
+    storageRead.mockResolvedValue(null);
+    await app.toggleAuto({ ...control(), closest: () => null });
+    expect(app.broker.checkEvaluator).toHaveBeenCalledWith(
+      { provider: "custom", model: "kev-4b", baseUrl: "http://127.0.0.1:8080" },
+      "",
+    );
+    expect(app.autoEnabled).toBe(true);
+  });
+  it("remembers an invalid key the debounce already took, so activation stops on it", async () => {
+    const { app } = harness();
+    app.autoEnabled = false;
+    app.autoRule = undefined;
+    storageWrite.mockReset().mockResolvedValue(undefined);
+    storageRead.mockResolvedValue("old-key");
+    app.pendingKey = { slot: "gatekeeper.typesafe-key", key: "bad key" };
+    await app.flushKey();
+    expect(storageWrite).not.toHaveBeenCalled();
+    await app.toggleAuto({ ...control(), closest: () => null });
+    expect(app.autoEnabled).toBe(false);
+    expect(app.broker.checkEvaluator).not.toHaveBeenCalled();
+    expect(app.settingsView.openEvaluator).toHaveBeenCalledWith("autoKey");
+    // A valid key typed next clears it.
+    app.pendingKey = { slot: "gatekeeper.typesafe-key", key: "good-key" };
+    expect(await app.flushKey("gatekeeper.typesafe-key")).toBe("saved");
   });
   it("orders a removal after a save still running, so the key stays removed", async () => {
     const { app } = harness();

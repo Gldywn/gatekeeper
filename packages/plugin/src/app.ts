@@ -354,6 +354,8 @@ export class Gatekeeper {
   // The last key write, saves and removals chained in order, and its place in that order.
   private keyOps: Promise<boolean> = Promise.resolve(true);
   private keySeq = 0;
+  // A destination whose key on screen was invalid or could not be saved, until a write succeeds.
+  private keyIssues = new Map<string, "invalid" | "failed">();
   // Only whether the current evaluator's key exists, so Settings can show it is set without
   // the key itself.
   private keySaved = false;
@@ -2579,7 +2581,7 @@ export class Gatekeeper {
     toggle.setAttribute("aria-busy", "true");
     try {
       // A key still being typed is saved first, so activation reads the one on screen.
-      const flushed = await this.flushKey();
+      const flushed = await this.flushKey(slot);
       if (stale()) return;
       if (flushed === "invalid") {
         this.openEvaluator("autoKey", "This API key is not valid.");
@@ -2648,24 +2650,28 @@ export class Gatekeeper {
   // The outcome of a key typed and not yet saved, or of the last save still running: "saved"
   // when there was nothing to save. Activation and the test wait for it, so they read the key
   // on screen, and a failed save stops them instead of falling back on the previous key.
-  private async flushKey(): Promise<"saved" | "invalid" | "failed"> {
+  private async flushKey(slot?: string): Promise<"saved" | "invalid" | "failed"> {
     window.clearTimeout(this.keySaveTimer);
     const pending = this.pendingKey;
     this.pendingKey = undefined;
-    if (!pending?.key) return (await this.keyOps) ? "saved" : "failed";
-    const current = () => this.evaluator && keySlot(this.evaluator) === pending.slot;
-    if (!API_KEY_FORMAT.test(pending.key)) {
-      if (current()) this.evaluatorMessage("This API key is not valid.");
-      return "invalid";
+    if (pending?.key) {
+      const current = () => this.evaluator && keySlot(this.evaluator) === pending.slot;
+      if (!API_KEY_FORMAT.test(pending.key)) {
+        // Kept for its slot: an activation after the debounce must still see it.
+        this.keyIssues.set(pending.slot, "invalid");
+        if (current()) this.evaluatorMessage("This API key is not valid.");
+      } else
+        void this.writeKey(pending.slot, pending.key, (ok) => {
+          if (current())
+            this.evaluatorMessage(
+              ok ? "Key saved." : "The key could not be saved to encrypted storage.",
+              ok ? "ok" : "",
+            );
+        });
     }
-    const saved = await this.writeKey(pending.slot, pending.key, (ok) => {
-      if (current())
-        this.evaluatorMessage(
-          ok ? "Key saved." : "The key could not be saved to encrypted storage.",
-          ok ? "ok" : "",
-        );
-    });
-    return saved ? "saved" : "failed";
+    await this.keyOps;
+    // Judged for the destination asked about, never from another one's last write.
+    return (slot && this.keyIssues.get(slot)) || "saved";
   }
 
   // Saves and removals run one after another, in the order they were made, so the last one is
@@ -2679,6 +2685,9 @@ export class Gatekeeper {
       } catch {
         ok = false;
       }
+      // The slot's last write decides its state, whichever write is newest overall.
+      if (ok) this.keyIssues.delete(slot);
+      else this.keyIssues.set(slot, "failed");
       if (seq !== this.keySeq) return ok;
       if (ok && this.autoEnabled && this.autoSlot === slot) this.autoKey = value;
       if (ok && this.evaluator && keySlot(this.evaluator) === slot) {
@@ -2809,8 +2818,16 @@ export class Gatekeeper {
       );
       return;
     }
-    if ((await this.flushKey()) !== "saved") return;
     const slot = keySlot(settings);
+    const flushed = await this.flushKey(slot);
+    if (flushed !== "saved") {
+      this.evaluatorMessage(
+        flushed === "invalid"
+          ? "This API key is not valid."
+          : "The key could not be saved to encrypted storage.",
+      );
+      return;
+    }
     const key =
       (slot && (await appStorage.getItem<string>(slot, { encrypted: true }).catch(() => ""))) || "";
     if (settings !== this.evaluator) return;
