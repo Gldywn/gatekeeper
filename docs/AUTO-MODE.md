@@ -379,9 +379,10 @@ to this sharing and to returning automatically approved results to the requestin
 
 Each activation first runs the connection test described under "Evaluator", which evaluates
 nothing, so it carries only the key. A 401 or 403 opens the evaluator page with "The evaluator
-refused this API key." under the key. Any other failure leaves Auto mode off and says the
-evaluator could not be reached. For TypeSafe, the route and the meaning of 401/403 come from
-TypeSafe's JavaScript SDK (v0.6.0), not from a live call.
+refused this API key." under the key. A Custom server that does not list the model opens the
+page on the model with "<model> is not available with these settings." Any other failure leaves
+Auto mode off and says the evaluator could not be reached. For TypeSafe, the route and the
+meaning of 401/403 come from TypeSafe's JavaScript SDK (v0.6.0), not from a live call.
 
 Inference uses the authenticated local plugin channel and native `fetch` in the broker.
 The broker accepts one evaluation at a time, caps input size, uses a 12-second timeout,

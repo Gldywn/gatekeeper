@@ -356,6 +356,8 @@ export class Gatekeeper {
   private keySeq = 0;
   // A destination whose key on screen was invalid or could not be saved, until a write succeeds.
   private keyIssues = new Map<string, "invalid" | "failed">();
+  // Each slot's latest attempt, a save, a removal or an invalid draft, in keySeq order.
+  private keyLatest = new Map<string, number>();
   // Only whether the current evaluator's key exists, so Settings can show it is set without
   // the key itself.
   private keySaved = false;
@@ -2657,7 +2659,9 @@ export class Gatekeeper {
     if (pending?.key) {
       const current = () => this.evaluator && keySlot(this.evaluator) === pending.slot;
       if (!API_KEY_FORMAT.test(pending.key)) {
-        // Kept for its slot: an activation after the debounce must still see it.
+        // Kept for its slot, and newer than any write still running: an activation after the
+        // debounce must still see it.
+        this.keyLatest.set(pending.slot, ++this.keySeq);
         this.keyIssues.set(pending.slot, "invalid");
         if (current()) this.evaluatorMessage("This API key is not valid.");
       } else
@@ -2678,6 +2682,7 @@ export class Gatekeeper {
   // what storage keeps; only the newest updates the running key and what Settings shows.
   private writeKey(slot: string, value: string, done: (ok: boolean) => void): Promise<boolean> {
     const seq = ++this.keySeq;
+    this.keyLatest.set(slot, seq);
     const write = this.keyOps.then(async () => {
       let ok = true;
       try {
@@ -2685,9 +2690,12 @@ export class Gatekeeper {
       } catch {
         ok = false;
       }
-      // The slot's last write decides its state, whichever write is newest overall.
-      if (ok) this.keyIssues.delete(slot);
-      else this.keyIssues.set(slot, "failed");
+      // Only the slot's latest attempt decides its state: an older write settling late never
+      // clears an invalid key typed after it.
+      if (this.keyLatest.get(slot) === seq) {
+        if (ok) this.keyIssues.delete(slot);
+        else this.keyIssues.set(slot, "failed");
+      }
       if (seq !== this.keySeq) return ok;
       if (ok && this.autoEnabled && this.autoSlot === slot) this.autoKey = value;
       if (ok && this.evaluator && keySlot(this.evaluator) === slot) {

@@ -104,6 +104,7 @@ function harness() {
     keyOps: Promise.resolve(true),
     keySeq: 0,
     keyIssues: new Map(),
+    keyLatest: new Map(),
     setSettingsOpen: vi.fn(),
     autoDeferred: new Set<string>(),
     autoBusy: false,
@@ -512,6 +513,28 @@ describe("shared manual/automatic execution authority", () => {
     // A valid key typed next clears it.
     app.pendingKey = { slot: "gatekeeper.typesafe-key", key: "good-key" };
     expect(await app.flushKey("gatekeeper.typesafe-key")).toBe("saved");
+  });
+  it("keeps an invalid key typed during an older save, until a newer edit clears it", async () => {
+    const { app } = harness();
+    app.autoEnabled = false;
+    app.autoRule = undefined;
+    const slot = "gatekeeper.typesafe-key";
+    const older = deferred<void>();
+    storageWrite.mockReset().mockReturnValueOnce(older.promise).mockResolvedValue(undefined);
+    storageRead.mockResolvedValue("key-a");
+    app.pendingKey = { slot, key: "key-a" };
+    const saving = app.flushKey(slot);
+    app.pendingKey = { slot, key: "bad key" };
+    const invalid = app.flushKey(slot);
+    older.resolve();
+    await saving;
+    expect(await invalid).toBe("invalid");
+    await app.toggleAuto({ ...control(), closest: () => null });
+    expect(app.autoEnabled).toBe(false);
+    expect(app.broker.checkEvaluator).not.toHaveBeenCalled();
+    // A save started after the invalid draft is newer and clears it.
+    app.pendingKey = { slot, key: "key-c" };
+    expect(await app.flushKey(slot)).toBe("saved");
   });
   it("orders a removal after a save still running, so the key stays removed", async () => {
     const { app } = harness();

@@ -178,10 +178,10 @@ Live Clef runs also keep, for each complete answer, the request's bytes
 and the input tokens Clef reported; the summary prints the largest gap, the evidence
 `CLEF_BOUND_VERIFIED` waits for before Clef can approve anything.
 
-The default split is development. One native TypeSafe call batches the four production
-Noul questions per locally eligible case (a custom questions file sends its own). Calls
-are sequential with the production 12-second timeout and no retries. Only normalized
-SQL and referenced catalog names, types and usages are shared. Case IDs, expected
+The default split is development. One System One request to the chosen evaluator batches
+the four production Noul questions per locally eligible case (a custom questions file sends
+its own). Calls are sequential with the production 12-second timeout and no retries. Only
+normalized SQL and referenced catalog names, types and usages are shared. Case IDs, expected
 decisions, explanations, split names and an assertion of synthetic data are never sent.
 Review the SQL and metadata too, since names themselves can contain private information.
 
