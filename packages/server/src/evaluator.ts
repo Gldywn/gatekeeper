@@ -1,4 +1,9 @@
-import type { AutoEvaluation, EvaluationInput, KeyStatus } from "@gatekeeper/shared";
+import type {
+  AutoEvaluation,
+  EvaluationInput,
+  EvaluatorStatus,
+  KeyStatus,
+} from "@gatekeeper/shared";
 import { z } from "zod";
 
 export const AUTO_MODEL = "jev-1.13.0";
@@ -92,38 +97,163 @@ export const evaluationInput = z
   })
   .strict();
 
+// The evaluators Auto mode can ask. Model names are each provider's own; a Custom server is
+// any System One server the user points Auto mode at.
+const CUSTOM_MODEL = /^[A-Za-z0-9._:@/-]{1,100}$/;
+export const PROVIDERS = ["typesafe", "cloudflare", "custom"] as const;
+export const evaluatorConfig = z.discriminatedUnion("provider", [
+  z.object({ provider: z.literal("typesafe"), model: z.literal(AUTO_MODEL) }).strict(),
+  z
+    .object({
+      provider: z.literal("cloudflare"),
+      model: z.enum(["clef", "clef-flash"]),
+      // An account id goes into the request path: nothing that could change the route.
+      accountId: z.string().regex(/^[A-Za-z0-9]{1,64}$/),
+    })
+    .strict(),
+  z
+    .object({
+      provider: z.literal("custom"),
+      model: z.string().regex(CUSTOM_MODEL),
+      baseUrl: z.string().max(2048),
+    })
+    .strict(),
+]);
+export type EvaluatorConfig = z.infer<typeof evaluatorConfig>;
+export const DEFAULT_EVALUATOR: EvaluatorConfig = { provider: "typesafe", model: AUTO_MODEL };
+
+// Plain http only to a loopback literal: anywhere else, anyone on the path could read the input
+// or answer in the server's place. No credentials, query or fragment, since the URL identifies
+// the evaluator and its origin is kept with each decision.
+export function canonicalBaseUrl(raw: string): string | undefined {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return undefined;
+  }
+  if (url.username || url.password || url.search || url.hash) return undefined;
+  const loopback = url.hostname === "127.0.0.1" || url.hostname === "[::1]";
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) return undefined;
+  return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
+}
+
+const TYPESAFE_API = "https://api.typesafe.ai";
+const CLOUDFLARE_ACCOUNTS = "https://api.cloudflare.com/client/v4/accounts";
+// The context windows Cloudflare publishes for Clef, which cuts a longer text state silently
+// instead of refusing it (developers.cloudflare.com/workers-ai/models/clef, clef-flash).
+const CLEF_WINDOWS = { clef: 65_536, "clef-flash": 24_576 } as const;
+// Tokens kept free beyond the request's UTF-8 byte count, which bounds its tokens on a byte
+// level tokenizer. ponytail: a fixed reserve, an exact count needs Clef's own tokenizer.
+const CLEF_RESERVE = 2_048;
+// Closed until the operator's live bench run confirms the byte bound and reserve: until then a
+// read for Clef waits for a human rather than risk a cut state.
+export const CLEF_BOUND_VERIFIED = false;
+
+interface Endpoint {
+  infer: string;
+  check: string;
+  // Workers AI wraps a model's answer in its REST envelope.
+  envelope: boolean;
+  window?: number;
+}
+
+export function endpointOf(config: EvaluatorConfig): Endpoint | undefined {
+  if (config.provider === "typesafe")
+    return {
+      infer: `${TYPESAFE_API}/v1/systemone`,
+      check: `${TYPESAFE_API}/v1/models`,
+      envelope: false,
+    };
+  if (config.provider === "cloudflare") {
+    const ai = `${CLOUDFLARE_ACCOUNTS}/${config.accountId}/ai`;
+    const model = `@cf/cloudflare/${config.model}`;
+    return {
+      infer: `${ai}/run/${model}`,
+      check: `${ai}/models/schema?model=${encodeURIComponent(model)}`,
+      envelope: true,
+      window: CLEF_WINDOWS[config.model],
+    };
+  }
+  const base = canonicalBaseUrl(config.baseUrl);
+  return base && base === config.baseUrl
+    ? { infer: `${base}/v1/systemone`, check: `${base}/v1/models`, envelope: false }
+    : undefined;
+}
+
+export interface EvaluationRequest {
+  evaluator: EvaluatorConfig;
+  cutoffs: Cutoffs;
+  builtIn: boolean;
+}
+
 export type Evaluator = (
   input: EvaluationInput,
   key: string,
   signal: AbortSignal,
   sqlDigest: string,
+  request?: EvaluationRequest,
 ) => Promise<AutoEvaluation>;
 
 export class EvaluationError extends Error {
   constructor(
-    readonly stage: "network" | "http" | "response" | "cancelled",
+    readonly stage: "input" | "network" | "http" | "response" | "cancelled",
     readonly status?: number,
   ) {
     super(stage === "cancelled" ? "Evaluation cancelled" : "Evaluator unavailable");
   }
 }
 
+// Never relay provider bodies: they can echo the key or input.
+async function readBounded(response: Response, limit = 32000): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("Empty evaluator response");
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > limit) {
+      await reader.cancel();
+      throw new Error("Invalid evaluator response");
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+const workersAiEnvelope = z.object({ success: z.literal(true), result: z.record(z.unknown()) });
+const usage = z.object({ input_tokens: z.number().int().nonnegative() }).passthrough();
+
 export async function evaluateProbabilities(
   input: EvaluationInput,
   key: string,
   signal: AbortSignal,
   questions = evaluationQuestions,
+  config: EvaluatorConfig = DEFAULT_EVALUATOR,
+  // The bench's verification run only: it measures the bound the gate waits for.
+  verify?: (bodyBytes: number, inputTokens: number) => void,
 ): Promise<Record<string, number>> {
-  const response = await fetch("https://api.typesafe.ai/v1/systemone", {
+  const endpoint = endpointOf(config);
+  const body = JSON.stringify({ model: config.model, state: input, questions });
+  const bytes = Buffer.byteLength(body);
+  // A state past the window would be cut, and probabilities about a cut state are not about
+  // this read: hold it before anything leaves.
+  if (
+    !endpoint ||
+    (endpoint.window &&
+      ((!CLEF_BOUND_VERIFIED && !verify) || bytes > endpoint.window - CLEF_RESERVE))
+  )
+    throw new EvaluationError("input");
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (key) headers.Authorization = `Bearer ${key}`;
+  const response = await fetch(endpoint.infer, {
     method: "POST",
     redirect: "error",
     signal,
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: AUTO_MODEL,
-      state: input,
-      questions,
-    }),
+    headers,
+    body,
   }).catch(() => {
     throw new EvaluationError(signal.aborted ? "cancelled" : "network");
   });
@@ -132,30 +262,24 @@ export async function evaluateProbabilities(
     throw new EvaluationError("http", response.status);
   }
   try {
-    // Never relay provider bodies: they can echo the key or input.
-    const reader = response.body?.getReader();
-    if (!reader) throw new Error("Empty evaluator response");
-    const chunks: Uint8Array[] = [];
-    let size = 0;
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > 32000) {
-        await reader.cancel();
-        throw new Error("Invalid evaluator response");
-      }
-      chunks.push(value);
-    }
-    const body = Buffer.concat(chunks).toString("utf8");
+    let json: unknown = JSON.parse(await readBounded(response));
+    if (endpoint.envelope) json = workersAiEnvelope.parse(json).result;
     const result = z
       .object({
-        model: z.literal(AUTO_MODEL),
+        model: z.literal(config.model),
         answers: z.record(
           z.object({ type: z.literal("noul"), noul: z.number().finite().min(0).max(1) }).strict(),
         ),
+        usage: endpoint.window ? usage : z.unknown(),
       })
-      .parse(JSON.parse(body));
+      .parse(json);
+    if (endpoint.window) {
+      const tokens = usage.parse(result.usage).input_tokens;
+      verify?.(bytes, tokens);
+      // A count at the window's edge may be what was left after a cut.
+      if (tokens >= endpoint.window - CLEF_RESERVE)
+        throw new Error("Possibly truncated evaluator input");
+    }
     if (signal.aborted) throw new Error("Evaluation cancelled");
     const probabilities: Record<string, number> = {};
     for (const id of Object.keys(questions)) {
@@ -198,19 +322,34 @@ export function decide(
   return { eligible: reasons.length === 0, reasons };
 }
 
-// Fixed cutoffs are conservative candidates, not empirically calibrated guarantees. The record
-// keeps the cutoffs in force, so history grades each decision by its own rule.
-export const evaluate: Evaluator = async (input, key, signal, sqlDigest) => {
-  const probabilities = await evaluateProbabilities(input, key, signal);
+// The built-in cutoffs are conservative candidates measured for jev-1.13.0, not calibrated
+// guarantees; any other cutoffs are the user's. The record keeps the cutoffs in force and
+// whether they were the built-in ones, so history grades each decision by its own rule.
+export const evaluate: Evaluator = async (input, key, signal, sqlDigest, request) => {
+  const { evaluator, cutoffs, builtIn } = request ?? {
+    evaluator: DEFAULT_EVALUATOR,
+    cutoffs: AUTO_THRESHOLDS,
+    builtIn: true,
+  };
+  const probabilities = await evaluateProbabilities(
+    input,
+    key,
+    signal,
+    evaluationQuestions,
+    evaluator,
+  );
   return {
-    provider: "typesafe",
-    model: AUTO_MODEL,
+    provider: evaluator.provider,
+    model: evaluator.model,
     policy: AUTO_POLICY,
     evaluatedAt: Date.now(),
     sqlDigest,
-    ...decide(probabilities, AUTO_THRESHOLDS),
+    ...decide(probabilities, cutoffs),
     probabilities,
-    thresholds: { ...AUTO_THRESHOLDS },
+    thresholds: { ...cutoffs },
+    builtIn,
+    // The origin only: a path can carry what does not belong in a kept record.
+    ...(evaluator.provider === "custom" ? { endpoint: new URL(evaluator.baseUrl).origin } : {}),
   };
 };
 
@@ -236,6 +375,57 @@ export const checkKey: KeyChecker = async (key, signal) => {
   } catch (err) {
     const code = (err as { cause?: { code?: string } }).cause?.code;
     console.error(`[gatekeeper] TypeSafe key check failed: ${code ?? (err as Error).name}`);
+    return "unavailable";
+  }
+};
+
+export type EvaluatorChecker = (
+  config: EvaluatorConfig,
+  key: string,
+  signal: AbortSignal,
+) => Promise<EvaluatorStatus>;
+
+const modelList = z
+  .object({ models: z.array(z.object({ name: z.string() }).passthrough()) })
+  .passthrough();
+const modelSchema = z
+  .object({
+    success: z.literal(true),
+    result: z.object({ input: z.record(z.unknown()), output: z.record(z.unknown()) }).passthrough(),
+  })
+  .passthrough();
+
+// Metadata calls only, so a test sends no user data. TypeSafe keeps checkKey's any-2xx meaning:
+// whether its list names jev-1.13.0 exactly is unverified, so requiring it could lock users out.
+export const checkEvaluator: EvaluatorChecker = async (config, key, signal) => {
+  if (config.provider === "typesafe") return checkKey(key, signal);
+  const endpoint = endpointOf(config);
+  if (!endpoint) return "unavailable";
+  try {
+    const response = await fetch(endpoint.check, {
+      redirect: "error",
+      signal,
+      headers: key ? { Authorization: `Bearer ${key}` } : {},
+    });
+    if (response.status === 401 || response.status === 403) {
+      await response.body?.cancel();
+      return "invalid";
+    }
+    if (!response.ok) {
+      await response.body?.cancel();
+      console.error(`[gatekeeper] Evaluator check answered HTTP ${response.status}`);
+      return "unavailable";
+    }
+    const json: unknown = JSON.parse(await readBounded(response));
+    // Cloudflare's model schema proves the account reaches the model, not that the token may run
+    // it: a Read-only token passes here and its reads then wait for a human.
+    if (config.provider === "cloudflare")
+      return modelSchema.safeParse(json).success ? "valid" : "unavailable";
+    const { models } = modelList.parse(json);
+    return models.some((m) => m.name === config.model) ? "valid" : "model-missing";
+  } catch (err) {
+    const code = (err as { cause?: { code?: string } }).cause?.code;
+    console.error(`[gatekeeper] Evaluator check failed: ${code ?? (err as Error).name}`);
     return "unavailable";
   }
 };
@@ -324,7 +514,7 @@ export const autoHoldRecord = z
 
 const probability = z.number().finite().min(0).max(1);
 // Exactly the four axes: a record cannot carry a looser rule by leaving one out.
-const recordedCutoffs = z
+export const recordedCutoffs = z
   .object({
     personal_disclosure: probability,
     organization_disclosure: probability,
@@ -338,8 +528,8 @@ export const approvalAttribution = z
     source: z.enum(["human", "automatic"]),
     evaluation: z
       .object({
-        provider: z.literal("typesafe"),
-        model: z.literal(AUTO_MODEL),
+        provider: z.enum(PROVIDERS),
+        model: z.string().regex(CUSTOM_MODEL),
         policy: z.enum([
           "auto-beta-1",
           "auto-beta-2",
@@ -356,8 +546,10 @@ export const approvalAttribution = z
         eligible: z.boolean(),
         reasons: z.array(z.string().max(200)).max(10),
         probabilities: z.record(probability),
-        // Absent from records made before cutoffs were recorded.
+        // Absent from records made before cutoffs and evaluator choice were recorded.
         thresholds: recordedCutoffs.optional(),
+        builtIn: z.boolean().optional(),
+        endpoint: z.string().max(300).optional(),
       })
       .strict()
       .optional(),

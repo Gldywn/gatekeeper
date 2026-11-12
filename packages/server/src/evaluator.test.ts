@@ -6,9 +6,17 @@ import {
   AUTO_THRESHOLDS,
   approvalAttribution,
   autoHoldRecord,
+  CLEF_BOUND_VERIFIED,
+  canonicalBaseUrl,
+  checkEvaluator,
   checkKey,
+  DEFAULT_EVALUATOR,
   decide,
+  type EvaluatorConfig,
+  endpointOf,
   evaluate,
+  evaluateProbabilities,
+  evaluatorConfig,
 } from "./evaluator.js";
 
 const input = {
@@ -330,5 +338,237 @@ describe("API key check (mocked)", () => {
       }),
     );
     expect(await checkKey("synthetic-key", signal)).toBe("unavailable");
+  });
+});
+
+describe("evaluator choice", () => {
+  const signal = () => new AbortController().signal;
+  const custom = (baseUrl: string): EvaluatorConfig => ({
+    provider: "custom",
+    model: "kev-4b",
+    baseUrl,
+  });
+  const clef: EvaluatorConfig = {
+    provider: "cloudflare",
+    model: "clef-flash",
+    accountId: "abc123",
+  };
+
+  it.each([
+    ["https://kev.example.test/api/", "https://kev.example.test/api"],
+    ["https://KEV.example.test:443", "https://kev.example.test"],
+    ["http://127.0.0.1:8080", "http://127.0.0.1:8080"],
+    ["http://127.1:8080/", "http://127.0.0.1:8080"],
+    ["http://[::1]:8080/v", "http://[::1]:8080/v"],
+  ])("keeps %s as %s", (raw, canonical) => {
+    expect(canonicalBaseUrl(raw)).toBe(canonical);
+  });
+
+  it.each([
+    "http://localhost:8080",
+    "http://192.168.1.10:8080",
+    "http://kev.example.test",
+    "https://user:secret@kev.example.test",
+    "https://kev.example.test/?token=1",
+    "https://kev.example.test/#x",
+    "ftp://kev.example.test",
+    "not a url",
+  ])("refuses %s", (raw) => {
+    expect(canonicalBaseUrl(raw)).toBeUndefined();
+  });
+
+  it("asks each provider at its own address, keeping a Custom server's path", () => {
+    expect(endpointOf(custom("https://kev.example.test/api"))).toEqual({
+      infer: "https://kev.example.test/api/v1/systemone",
+      check: "https://kev.example.test/api/v1/models",
+      envelope: false,
+    });
+    expect(endpointOf(custom("https://kev.example.test/api/"))).toBeUndefined();
+    expect(endpointOf(clef)).toMatchObject({
+      infer:
+        "https://api.cloudflare.com/client/v4/accounts/abc123/ai/run/@cf/cloudflare/clef-flash",
+      check:
+        "https://api.cloudflare.com/client/v4/accounts/abc123/ai/models/schema?model=%40cf%2Fcloudflare%2Fclef-flash",
+      envelope: true,
+      window: 24_576,
+    });
+  });
+
+  it("refuses an account id that could change the route", () => {
+    expect(evaluatorConfig.safeParse({ ...clef, accountId: "abc/../x" }).success).toBe(false);
+    expect(
+      evaluatorConfig.safeParse({ ...custom("http://127.0.0.1:8080"), model: "a b" }).success,
+    ).toBe(false);
+  });
+
+  it("asks a Custom server without a key and records only its origin", async () => {
+    const fetch = vi.fn(
+      async () => new Response(JSON.stringify({ ...response(), model: "kev-4b" })),
+    );
+    vi.stubGlobal("fetch", fetch);
+    const cutoffs = { ...AUTO_THRESHOLDS, personal_disclosure: 0.1 };
+    const result = await evaluate(input, "", signal(), "a".repeat(64), {
+      evaluator: custom("https://kev.example.test/tenant-7"),
+      cutoffs,
+      builtIn: false,
+    });
+    const [url, options] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://kev.example.test/tenant-7/v1/systemone");
+    expect(options.headers).toEqual({ "Content-Type": "application/json" });
+    expect(JSON.parse(options.body as string).model).toBe("kev-4b");
+    expect(result).toMatchObject({
+      provider: "custom",
+      model: "kev-4b",
+      policy: AUTO_POLICY,
+      thresholds: cutoffs,
+      builtIn: false,
+      endpoint: "https://kev.example.test",
+      eligible: true,
+    });
+  });
+
+  it("holds every Clef read while its bound is unverified, before anything leaves", async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    expect(CLEF_BOUND_VERIFIED).toBe(false);
+    await expect(
+      evaluateProbabilities(input, "token", signal(), undefined, clef),
+    ).rejects.toMatchObject({ stage: "input" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  describe("Workers AI, as the bench's verification run calls it", () => {
+    const answer = (inner: object, envelope: object = {}) =>
+      new Response(
+        JSON.stringify({ success: true, result: inner, errors: [], messages: [], ...envelope }),
+      );
+    const clefAnswer = (tokens: number) => ({
+      ...response(),
+      model: "clef-flash",
+      usage: { input_tokens: tokens, output_tokens: 0 },
+    });
+    const run = (verify = vi.fn()) =>
+      evaluateProbabilities(input, "token", signal(), undefined, clef, verify);
+
+    it("unwraps the envelope and reports bytes and tokens", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => answer(clefAnswer(900))),
+      );
+      const verify = vi.fn();
+      expect(await run(verify)).toEqual(Object.fromEntries(ids.map((id) => [id, 0.001])));
+      expect(verify).toHaveBeenCalledWith(expect.any(Number), 900);
+    });
+
+    it.each([
+      ["a failed envelope", answer(clefAnswer(900), { success: false })],
+      ["a list result", new Response(JSON.stringify({ success: true, result: [] }))],
+      ["no usage", answer({ ...response(), model: "clef-flash" })],
+      ["a count at the window's edge", answer(clefAnswer(24_576 - 2_048))],
+      ["another model", answer({ ...clefAnswer(900), model: "clef" })],
+    ])("rejects %s", async (_label, body) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => body),
+      );
+      await expect(run()).rejects.toMatchObject({ stage: "response" });
+    });
+
+    it("holds a state too long for the window before sending it", async () => {
+      const fetch = vi.fn();
+      vi.stubGlobal("fetch", fetch);
+      const long = { ...input, sql: `SELECT ${"x".repeat(11_990)}` };
+      const many = Array.from({ length: 64 }, (_, i) => ({
+        ...input.dependencies[0],
+        column: `c${i}`.padEnd(63, "x"),
+        table: "t".repeat(63),
+        schema: "s".repeat(63),
+      }));
+      await expect(
+        evaluateProbabilities(
+          { ...long, dependencies: many },
+          "token",
+          signal(),
+          undefined,
+          clef,
+          vi.fn(),
+        ),
+      ).rejects.toMatchObject({ stage: "input" });
+      expect(fetch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("connection test", () => {
+    it("keeps TypeSafe's meaning: any 2xx", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => new Response("not json")),
+      );
+      expect(await checkEvaluator(DEFAULT_EVALUATOR, "key", signal())).toBe("valid");
+    });
+
+    it.each([
+      [200, { models: [{ name: "kev-4b" }, { name: "kev-9b" }] }, "valid"],
+      [200, { models: [{ name: "kev-9b" }] }, "model-missing"],
+      [200, { data: [] }, "unavailable"],
+      [401, {}, "invalid"],
+      [403, {}, "invalid"],
+      [503, {}, "unavailable"],
+    ])("reads a Custom server's model list: %s %o is %s", async (status, body, verdict) => {
+      const fetch = vi.fn(async () => new Response(JSON.stringify(body), { status }));
+      vi.stubGlobal("fetch", fetch);
+      expect(await checkEvaluator(custom("http://127.0.0.1:8080"), "", signal())).toBe(verdict);
+      expect(fetch).toHaveBeenCalledWith(
+        "http://127.0.0.1:8080/v1/models",
+        expect.objectContaining({ headers: {}, redirect: "error" }),
+      );
+    });
+
+    it("never reads an unbounded model list", async () => {
+      const huge = JSON.stringify({ models: [{ name: "x".repeat(40_000) }] });
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => new Response(huge)),
+      );
+      expect(await checkEvaluator(custom("http://127.0.0.1:8080"), "", signal())).toBe(
+        "unavailable",
+      );
+    });
+
+    it.each([
+      [200, { success: true, result: { input: {}, output: {} } }, "valid"],
+      [200, { success: false, result: { input: {}, output: {} } }, "unavailable"],
+      [200, { success: true }, "unavailable"],
+      [404, {}, "unavailable"],
+      [400, {}, "unavailable"],
+      [401, {}, "invalid"],
+    ])("reads Cloudflare's model schema: %s %o is %s", async (status, body, verdict) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => new Response(JSON.stringify(body), { status })),
+      );
+      expect(await checkEvaluator(clef, "token", signal())).toBe(verdict);
+    });
+  });
+
+  it("records which evaluator decided, and refuses an unknown one", () => {
+    const evaluation = {
+      provider: "custom",
+      model: "kev-4b",
+      policy: AUTO_POLICY,
+      evaluatedAt: 1,
+      sqlDigest: "a".repeat(64),
+      eligible: true,
+      reasons: [],
+      probabilities: { ...AUTO_THRESHOLDS },
+      thresholds: { ...AUTO_THRESHOLDS },
+      builtIn: false,
+      endpoint: "https://kev.example.test",
+    };
+    const parse = (e: object) =>
+      approvalAttribution.safeParse({ source: "automatic", evaluation: e }).success;
+    expect(parse(evaluation)).toBe(true);
+    expect(parse({ ...evaluation, provider: "openai" })).toBe(false);
+    expect(parse({ ...evaluation, model: "kev 4b" })).toBe(false);
   });
 });

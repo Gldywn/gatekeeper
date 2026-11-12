@@ -123,8 +123,8 @@ export interface EvaluationInput {
 }
 
 export interface AutoEvaluation {
-  provider: "typesafe";
-  model: "jev-1.13.0";
+  provider: "typesafe" | "cloudflare" | "custom";
+  model: string;
   policy:
     | "auto-beta-1"
     | "auto-beta-2"
@@ -142,7 +142,17 @@ export interface AutoEvaluation {
   probabilities: Record<string, number>;
   /** The cutoffs in force when it was decided; absent from records made before they were kept. */
   thresholds?: Record<string, number>;
+  /** Whether those were Gatekeeper's built-in cutoffs rather than the user's own. */
+  builtIn?: boolean;
+  /** A Custom server's origin, never its path. */
+  endpoint?: string;
 }
+
+/** Which evaluator Auto mode asks, as the plugin sends it to the broker. */
+export type EvaluatorConfig =
+  | { provider: "typesafe"; model: "jev-1.13.0" }
+  | { provider: "cloudflare"; model: "clef" | "clef-flash"; accountId: string }
+  | { provider: "custom"; model: string; baseUrl: string };
 
 export interface ApprovalAttribution {
   source: "human" | "automatic";
@@ -151,6 +161,8 @@ export interface ApprovalAttribution {
 
 /** What TypeSafe said about an API key: accepted, refused (401/403), or not reachable. */
 export type KeyStatus = "valid" | "invalid" | "unavailable";
+/** A connection test, which also says when the evaluator does not offer the chosen model. */
+export type EvaluatorStatus = KeyStatus | "model-missing";
 
 // The plugin POSTs ConnectionInput; the server stamps capturedAt and serves/stores the
 // ConnectionSnapshot. Never carries host, user, or credentials; informational only.

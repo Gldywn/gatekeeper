@@ -25,6 +25,7 @@ let server: ReturnType<typeof createBroker>;
 let port = 0;
 const evaluator = vi.fn();
 const keyChecker = vi.fn();
+const evaluatorChecker = vi.fn();
 const notify = vi.fn();
 const notifier = { active: true, sounds: true, probe: () => {}, notify, remind: vi.fn() };
 
@@ -70,8 +71,17 @@ beforeEach(async () => {
   store = new RequestStore();
   evaluator.mockReset();
   keyChecker.mockReset();
+  evaluatorChecker.mockReset();
   notify.mockReset();
-  server = createBroker(store, "plug_test", TOKEN, evaluator, keyChecker, notifier);
+  server = createBroker(
+    store,
+    "plug_test",
+    TOKEN,
+    evaluator,
+    keyChecker,
+    notifier,
+    evaluatorChecker,
+  );
   await new Promise<void>((resolve) => {
     server.listen(0, "127.0.0.1", resolve);
   });
@@ -241,6 +251,89 @@ describe("plugin-only automatic evaluation", () => {
         }),
       ).toBe(409);
     }
+  });
+  describe("the evaluator the plugin chose", () => {
+    const builtIn = {
+      personal_disclosure: 0.2,
+      organization_disclosure: 0.15,
+      secret_disclosure: 0.15,
+      insufficient_context: 0.45,
+    };
+    const custom = { provider: "custom", model: "kev-4b", baseUrl: "http://127.0.0.1:8080" };
+    const chosen = (over: Record<string, unknown>) => {
+      const { model: _model, key: _key, ...rest } = payload();
+      return { ...rest, evaluator: custom, cutoffs: builtIn, builtIn: false, ...over };
+    };
+    it("passes the choice and the user's cutoffs to the evaluator, a Custom server keyless", async () => {
+      evaluator.mockImplementation(async (_input, _key, _signal, digest) => answer(digest));
+      const cutoffs = { ...builtIn, personal_disclosure: 0.05 };
+      const body = chosen({ cutoffs });
+      expect((await call("POST", "/evaluate", { token: TOKEN, body })).status).toBe(200);
+      expect(evaluator).toHaveBeenCalledWith(
+        body.input,
+        "",
+        expect.any(AbortSignal),
+        expect.any(String),
+        { evaluator: custom, cutoffs, builtIn: false },
+      );
+    });
+    it("hands an older plugin's body to TypeSafe with the built-in cutoffs", async () => {
+      evaluator.mockImplementation(async (_input, _key, _signal, digest) => answer(digest));
+      expect((await call("POST", "/evaluate", { token: TOKEN, body: payload() })).status).toBe(200);
+      expect(evaluator.mock.calls[0][4]).toEqual({
+        evaluator: { provider: "typesafe", model: "jev-1.13.0" },
+        cutoffs: builtIn,
+        builtIn: true,
+      });
+    });
+    it.each([
+      ["built-in cutoffs for another evaluator", { builtIn: true }],
+      [
+        "built-in cutoffs that differ from Gatekeeper's",
+        {
+          evaluator: { provider: "typesafe", model: "jev-1.13.0" },
+          key: "synthetic-key",
+          builtIn: true,
+          cutoffs: { ...builtIn, personal_disclosure: 0.9 },
+        },
+      ],
+      [
+        "a hosted provider without a key",
+        { evaluator: { provider: "typesafe", model: "jev-1.13.0" } },
+      ],
+      [
+        "a Custom URL that is not canonical",
+        { evaluator: { ...custom, baseUrl: "http://localhost:8080" } },
+      ],
+      [
+        "plain http beyond this machine",
+        { evaluator: { ...custom, baseUrl: "http://10.0.0.5:8080" } },
+      ],
+      ["a missing axis", { cutoffs: { personal_disclosure: 0.2 } }],
+      ["a cutoff out of range", { cutoffs: { ...builtIn, secret_disclosure: 1.5 } }],
+      ["a body mixing the old and new shapes", { model: "jev-1.13.0", key: "synthetic-key" }],
+    ])("refuses %s before any inference", async (_label, over) => {
+      const reply = await call("POST", "/evaluate", { token: TOKEN, body: chosen(over) });
+      expect(reply.status).toBe(400);
+      expect(evaluator).not.toHaveBeenCalled();
+    });
+    it("tests a connection with metadata only, and refuses what it would refuse to evaluate", async () => {
+      evaluatorChecker.mockResolvedValue("model-missing");
+      const reply = await call("POST", "/evaluate/check", {
+        token: TOKEN,
+        body: { evaluator: custom },
+      });
+      expect(reply.status).toBe(200);
+      expect(JSON.parse(reply.body)).toEqual({ status: "model-missing" });
+      expect(evaluatorChecker).toHaveBeenCalledWith(custom, "", expect.any(AbortSignal));
+      for (const body of [
+        { evaluator: { ...custom, baseUrl: "http://10.0.0.5:8080" } },
+        { evaluator: { provider: "cloudflare", model: "clef", accountId: "abc" } },
+        { evaluator: custom, extra: true },
+      ])
+        expect((await call("POST", "/evaluate/check", { token: TOKEN, body })).status).toBe(400);
+      expect(evaluatorChecker).toHaveBeenCalledOnce();
+    });
   });
   it.each(["auto-beta-1", "auto-beta-2", "auto-beta-3", "auto-beta-8"])(
     "preserves %s attribution for human approval without granting automatic authority",

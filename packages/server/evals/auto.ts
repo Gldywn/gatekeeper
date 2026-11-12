@@ -117,7 +117,7 @@ const resultSchema = z
     elapsedMs: z.number().nonnegative().optional(),
     error: z
       .object({
-        stage: z.enum(["network", "http", "response", "cancelled", "internal"]),
+        stage: z.enum(["input", "network", "http", "response", "cancelled", "internal"]),
         status: z.number().int().min(100).max(599).optional(),
       })
       .strict()

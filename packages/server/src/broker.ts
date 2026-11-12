@@ -18,14 +18,23 @@ import { connectionScopeKey } from "./connection.js";
 import {
   AUTO_MODEL,
   AUTO_POLICY,
+  AUTO_THRESHOLDS,
   approvalAttribution,
   autoHoldRecord,
+  checkEvaluator,
   checkKey,
+  DEFAULT_EVALUATOR,
   EvaluationError,
+  type EvaluationRequest,
   type Evaluator,
+  type EvaluatorChecker,
+  type EvaluatorConfig,
+  endpointOf,
   evaluate,
   evaluationInput,
+  evaluatorConfig,
   type KeyChecker,
+  recordedCutoffs,
 } from "./evaluator.js";
 import type { Notifier } from "./notify.js";
 import { pairingPage } from "./pairing-page.js";
@@ -64,6 +73,9 @@ const apiKey = z
   .min(1)
   .max(4096)
   .regex(/^[\x21-\x7e]+$/);
+// A Custom URL must arrive canonical, and only a Custom server may be asked without a key.
+const usable = (evaluator: EvaluatorConfig, key?: string) =>
+  endpointOf(evaluator) !== undefined && (key !== undefined || evaluator.provider === "custom");
 
 interface Broker {
   store: RequestStore;
@@ -74,6 +86,7 @@ interface Broker {
   stampedAt: number;
   evaluator: Evaluator;
   keyChecker: KeyChecker;
+  evaluatorChecker: EvaluatorChecker;
   notifier?: Notifier;
   /** The plugin report last written to the shared row; `null` until this broker writes one. */
   autoStamp: { scope: string | null; at: number } | null;
@@ -96,6 +109,7 @@ export function createBroker(
   evaluator: Evaluator = evaluate,
   keyChecker: KeyChecker = checkKey,
   notifier?: Notifier,
+  evaluatorChecker: EvaluatorChecker = checkEvaluator,
 ): Server {
   const port = brokerPort();
   const broker: Broker = {
@@ -106,6 +120,7 @@ export function createBroker(
     stampedAt: 0,
     evaluator,
     keyChecker,
+    evaluatorChecker,
     notifier,
     autoStamp: null,
     evaluating: false,
@@ -345,20 +360,73 @@ async function handle(broker: Broker, req: IncomingMessage, res: ServerResponse)
     return;
   }
 
-  if (req.method === "POST" && url.pathname === "/evaluate") {
+  // Metadata only, before Auto mode turns on: nothing evaluated, no user data sent.
+  if (req.method === "POST" && url.pathname === "/evaluate/check") {
     const parsed = z
-      .object({
-        id: z.string().max(100),
-        leaseId: z.string().max(100),
-        scope: z.string().max(1000),
-        model: z.literal(AUTO_MODEL),
-        policy: z.literal(AUTO_POLICY),
-        key: apiKey,
-        input: evaluationInput,
-      })
+      .object({ evaluator: evaluatorConfig, key: apiKey.optional() })
       .strict()
+      .safeParse(await readJson(req, 8192));
+    if (!parsed.success || !usable(parsed.data.evaluator, parsed.data.key)) {
+      send(res, 400, { error: "Invalid evaluator" });
+      return;
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    const closed = () => controller.abort();
+    res.on("close", closed);
+    try {
+      const { evaluator, key } = parsed.data;
+      send(res, 200, {
+        status: await broker.evaluatorChecker(evaluator, key ?? "", controller.signal),
+      });
+    } finally {
+      clearTimeout(timer);
+      res.off("close", closed);
+    }
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/evaluate") {
+    const common = {
+      id: z.string().max(100),
+      leaseId: z.string().max(100),
+      scope: z.string().max(1000),
+      policy: z.literal(AUTO_POLICY),
+      input: evaluationInput,
+    };
+    const parsed = z
+      .union([
+        // A plugin from before the evaluator choice: TypeSafe with the built-in cutoffs.
+        z.object({ ...common, model: z.literal(AUTO_MODEL), key: apiKey }).strict(),
+        z
+          .object({
+            ...common,
+            evaluator: evaluatorConfig,
+            cutoffs: recordedCutoffs,
+            builtIn: z.boolean(),
+            key: apiKey.optional(),
+          })
+          .strict(),
+      ])
       .safeParse(await readJson(req, 32000));
-    if (!parsed.success) {
+    const request: EvaluationRequest | undefined = !parsed.success
+      ? undefined
+      : "evaluator" in parsed.data
+        ? {
+            evaluator: parsed.data.evaluator,
+            cutoffs: parsed.data.cutoffs,
+            builtIn: parsed.data.builtIn,
+          }
+        : { evaluator: DEFAULT_EVALUATOR, cutoffs: AUTO_THRESHOLDS, builtIn: true };
+    // Built-in cutoffs exist only for jev-1.13.0, and only as Gatekeeper ships them.
+    if (
+      !parsed.success ||
+      !request ||
+      !usable(request.evaluator, parsed.data.key) ||
+      (request.builtIn &&
+        (request.evaluator.provider !== "typesafe" ||
+          !isDeepStrictEqual({ ...request.cutoffs }, { ...AUTO_THRESHOLDS })))
+    ) {
       send(res, 400, {
         error: "Invalid evaluation input",
         diagnostic: { stage: "input", model: AUTO_MODEL, policy: AUTO_POLICY },
@@ -392,7 +460,13 @@ async function handle(broker: Broker, req: IncomingMessage, res: ServerResponse)
     res.on("close", closed);
     try {
       const digest = createHash("sha256").update(store.get(body.id)!.sql).digest("hex");
-      const evaluation = await broker.evaluator(body.input, body.key, controller.signal, digest);
+      const evaluation = await broker.evaluator(
+        body.input,
+        body.key ?? "",
+        controller.signal,
+        digest,
+        request,
+      );
       if (
         controller.signal.aborted ||
         !live() ||
