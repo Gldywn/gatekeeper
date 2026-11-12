@@ -153,7 +153,7 @@ export function evaluatorPageHtml(s: EvaluatorSettings | undefined, keySaved: bo
     "API key",
     "autoKey",
     `<input id="autoKey" class="confirm-input" type="password" data-auto-key autocomplete="off" spellcheck="false" maxlength="4096"${keySaved ? ` value="${SAVED_KEY_MASK}"` : ""}>`,
-  )}${!keyRequired(current) && keySaved ? '<button class="pair-link ev-remove" type="button" data-key-remove>Remove key</button>' : ""}`;
+  )}${!keyRequired(current) ? `<button class="pair-link ev-remove" type="button" data-key-remove${keySaved ? "" : " hidden"}>Remove key</button>` : ""}`;
   const builtIn = builtInAvailable(current);
   const cuts = AXES.map((id) => {
     const v = current.cutoffs[id];

@@ -351,6 +351,9 @@ export class Gatekeeper {
   private evaluator: EvaluatorSettings | undefined = DEFAULT_SETTINGS;
   private keySaveTimer?: number;
   private pendingKey?: { slot: string; key: string };
+  // The last key write, saves and removals chained in order, and its place in that order.
+  private keyOps: Promise<boolean> = Promise.resolve(true);
+  private keySeq = 0;
   // Only whether the current evaluator's key exists, so Settings can show it is set without
   // the key itself.
   private keySaved = false;
@@ -2576,8 +2579,16 @@ export class Gatekeeper {
     toggle.setAttribute("aria-busy", "true");
     try {
       // A key still being typed is saved first, so activation reads the one on screen.
-      await this.flushKey();
+      const flushed = await this.flushKey();
       if (stale()) return;
+      if (flushed === "invalid") {
+        this.openEvaluator("autoKey", "This API key is not valid.");
+        return;
+      }
+      if (flushed === "failed") {
+        fail("The key could not be saved to encrypted storage.");
+        return;
+      }
       const key = (await appStorage.getItem<string>(slot, { encrypted: true })) || "";
       if (stale()) return;
       if (keyRequired(settings) && !key) {
@@ -2634,26 +2645,51 @@ export class Gatekeeper {
   // Saved as typed, into the slot of the destination it was typed for: a key typed for one
   // evaluator never reaches another, however fast the provider changes. Replacing the key never
   // requires turning Auto mode off; a running Auto mode uses it from its next evaluation.
-  private async flushKey(): Promise<void> {
+  // The outcome of a key typed and not yet saved, or of the last save still running: "saved"
+  // when there was nothing to save. Activation and the test wait for it, so they read the key
+  // on screen, and a failed save stops them instead of falling back on the previous key.
+  private async flushKey(): Promise<"saved" | "invalid" | "failed"> {
     window.clearTimeout(this.keySaveTimer);
     const pending = this.pendingKey;
     this.pendingKey = undefined;
-    if (!pending?.key) return;
+    if (!pending?.key) return (await this.keyOps) ? "saved" : "failed";
     const current = () => this.evaluator && keySlot(this.evaluator) === pending.slot;
     if (!API_KEY_FORMAT.test(pending.key)) {
       if (current()) this.evaluatorMessage("This API key is not valid.");
-      return;
+      return "invalid";
     }
-    try {
-      await appStorage.setItem(pending.slot, pending.key, { encrypted: true });
-      if (this.autoEnabled && this.autoSlot === pending.slot) this.autoKey = pending.key;
-      if (current()) {
-        this.keySaved = true;
-        this.evaluatorMessage("Key saved.", "ok");
+    const saved = await this.writeKey(pending.slot, pending.key, (ok) => {
+      if (current())
+        this.evaluatorMessage(
+          ok ? "Key saved." : "The key could not be saved to encrypted storage.",
+          ok ? "ok" : "",
+        );
+    });
+    return saved ? "saved" : "failed";
+  }
+
+  // Saves and removals run one after another, in the order they were made, so the last one is
+  // what storage keeps; only the newest updates the running key and what Settings shows.
+  private writeKey(slot: string, value: string, done: (ok: boolean) => void): Promise<boolean> {
+    const seq = ++this.keySeq;
+    const write = this.keyOps.then(async () => {
+      let ok = true;
+      try {
+        await appStorage.setItem(slot, value, { encrypted: true });
+      } catch {
+        ok = false;
       }
-    } catch {
-      if (current()) this.evaluatorMessage("The key could not be saved to encrypted storage.");
-    }
+      if (seq !== this.keySeq) return ok;
+      if (ok && this.autoEnabled && this.autoSlot === slot) this.autoKey = value;
+      if (ok && this.evaluator && keySlot(this.evaluator) === slot) {
+        this.keySaved = Boolean(value);
+        this.settingsView.showKey(this.keySaved);
+      }
+      done(ok);
+      return ok;
+    });
+    this.keyOps = write;
+    return write;
   }
 
   // Only a Custom server goes without a key; removing it is a deliberate act, never an empty
@@ -2663,14 +2699,9 @@ export class Gatekeeper {
     if (!slot) return;
     this.pendingKey = undefined;
     window.clearTimeout(this.keySaveTimer);
-    try {
-      await appStorage.setItem(slot, "", { encrypted: true });
-      if (this.autoEnabled && this.autoSlot === slot) this.autoKey = "";
-      if (this.evaluator && keySlot(this.evaluator) === slot) this.keySaved = false;
-      this.settingsView.refresh("autoKey");
-    } catch {
-      this.evaluatorMessage("The key could not be removed from encrypted storage.");
-    }
+    await this.writeKey(slot, "", (ok) => {
+      if (!ok) this.evaluatorMessage("The key could not be removed from encrypted storage.");
+    });
   }
 
   private evaluatorMessage(text: string, tone = ""): void {
@@ -2766,7 +2797,7 @@ export class Gatekeeper {
     // A read that settles after another change must not paint its answer on the new choice.
     if (settings !== this.evaluator || saved === this.keySaved) return;
     this.keySaved = saved;
-    this.settingsView.refresh();
+    this.settingsView.showKey(saved);
   }
 
   private async testEvaluator(): Promise<void> {
@@ -2778,7 +2809,7 @@ export class Gatekeeper {
       );
       return;
     }
-    await this.flushKey();
+    if ((await this.flushKey()) !== "saved") return;
     const slot = keySlot(settings);
     const key =
       (slot && (await appStorage.getItem<string>(slot, { encrypted: true }).catch(() => ""))) || "";
@@ -2808,9 +2839,16 @@ export class Gatekeeper {
 
   private async copyAgentPrompt(button: HTMLElement): Promise<void> {
     const settings = this.evaluator;
-    if (!settings) return;
+    const prompt = settings && agentPrompt(settings);
+    // No runnable command for an evaluator not yet complete: the page opens on what it lacks.
+    if (!settings || !prompt) {
+      this.settingsView.focus(
+        fieldId(settings ? (firstMissing(settings) ?? "evModel") : "evProvider"),
+      );
+      return;
+    }
     try {
-      await clipboard.writeText(agentPrompt(settings));
+      await clipboard.writeText(prompt);
       this.evaluatorMessage("Prompt copied.", "ok");
     } catch {
       this.evaluatorMessage("The prompt could not be copied.");

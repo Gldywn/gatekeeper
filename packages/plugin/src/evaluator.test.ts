@@ -121,3 +121,24 @@ describe("keys and the choice in force", () => {
     expect(prompt).not.toMatch(/apikey_|Bearer/);
   });
 });
+
+describe("the commands the prompt hands to an agent", () => {
+  it.each([
+    ["https://kev.example.test/a&b", "'https://kev.example.test/a&b'"],
+    ["https://kev.example.test/$(id)", "'https://kev.example.test/$(id)'"],
+    ["https://kev.example.test/it's", "'https://kev.example.test/it'\\''s'"],
+  ])("quotes %s as one shell word", (url, quoted) => {
+    expect(canonicalBaseUrl(url)).toBe(url);
+    const prompt = agentPrompt({ ...custom(url), model: "kev-4b" }) ?? "";
+    expect(prompt).toContain(`--base-url ${quoted} --split development`);
+  });
+
+  it("writes no command for an evaluator not yet complete", () => {
+    expect(agentPrompt(custom(""))).toBeUndefined();
+    expect(agentPrompt(settingsFor("cloudflare", "clef"))).toBeUndefined();
+  });
+
+  it("refuses a stored hosted model its provider does not serve", () => {
+    expect(parseSettings({ ...settingsFor("cloudflare", "clef"), model: "gpt-6" })).toBeUndefined();
+  });
+});

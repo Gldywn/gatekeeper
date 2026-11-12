@@ -65,6 +65,9 @@ export function parseSettings(raw: unknown): EvaluatorSettings | undefined {
     return undefined;
   const text = (v: unknown, max: number) => typeof v === "string" && v.length <= max;
   if (!text(r.model, 100) || !text(r.baseUrl, 2048) || !text(r.accountId, 64)) return undefined;
+  // A hosted provider only serves the models it names.
+  if (provider !== "custom" && !(HOSTED_MODELS[provider] as string[]).includes(r.model as string))
+    return undefined;
   if (typeof r.builtIn !== "boolean") return undefined;
   const c = r.cutoffs as Record<string, unknown> | null;
   if (
@@ -183,25 +186,31 @@ export function activeEvaluator(s: EvaluatorSettings): ActiveEvaluator | undefin
 }
 
 // The bench flags that name this evaluator; nothing secret goes in them.
-function benchFlags(s: EvaluatorSettings): string {
-  const config = evaluatorConfig(s);
-  if (!config) return `--provider ${s.provider}`;
-  if (config.provider === "cloudflare")
-    return `--provider cloudflare --model ${config.model} --account-id ${config.accountId}`;
-  if (config.provider === "custom")
-    return `--provider custom --model ${config.model} --base-url ${config.baseUrl}`;
-  return `--provider typesafe --model ${config.model}`;
+// A URL path or a model name can hold anything a shell would act on: every value is one quoted
+// POSIX word, so a copied command runs the bench and nothing else.
+export function shellQuote(value: string): string {
+  return /^[A-Za-z0-9._:/@-]+$/.test(value) ? value : `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+function benchFlags(config: EvaluatorConfig): string {
+  const flags = ["--provider", config.provider, "--model", config.model];
+  if (config.provider === "cloudflare") flags.push("--account-id", config.accountId);
+  if (config.provider === "custom") flags.push("--base-url", config.baseUrl);
+  return flags.map(shellQuote).join(" ");
 }
 
 // What the user's agent needs to measure cutoffs: the bench, never a key, never their settings.
-export function agentPrompt(s: EvaluatorSettings): string {
+// Undefined while the evaluator is incomplete, rather than a command that would mislead.
+export function agentPrompt(s: EvaluatorSettings): string | undefined {
+  const config = evaluatorConfig(s);
+  if (!config) return undefined;
   const where =
-    s.provider === "cloudflare"
-      ? `Cloudflare Workers AI, model ${s.model}, account ${s.accountId}`
-      : s.provider === "custom"
-        ? `a Custom server at ${s.baseUrl}, model ${s.model}`
-        : `TypeSafe, model ${s.model}`;
-  const flags = benchFlags(s);
+    config.provider === "cloudflare"
+      ? `Cloudflare Workers AI, model ${config.model}, account ${config.accountId}`
+      : config.provider === "custom"
+        ? `a Custom server at ${config.baseUrl}, model ${config.model}`
+        : `TypeSafe, model ${config.model}`;
+  const flags = benchFlags(config);
   return [
     "Measure the four Gatekeeper Auto mode cutoffs for my evaluator.",
     "",

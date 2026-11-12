@@ -93,7 +93,15 @@ function harness() {
     evaluator: DEFAULT_SETTINGS,
     autoRule: activeEvaluator(DEFAULT_SETTINGS),
     autoSlot: "gatekeeper.typesafe-key",
-    settingsView: { openEvaluator: vi.fn(), refresh: vi.fn(), focus: vi.fn(), back: vi.fn() },
+    settingsView: {
+      openEvaluator: vi.fn(),
+      refresh: vi.fn(),
+      focus: vi.fn(),
+      back: vi.fn(),
+      showKey: vi.fn(),
+    },
+    keyOps: Promise.resolve(true),
+    keySeq: 0,
     setSettingsOpen: vi.fn(),
     autoDeferred: new Set<string>(),
     autoBusy: false,
@@ -426,6 +434,66 @@ describe("shared manual/automatic execution authority", () => {
     await app.flushKey();
     expect(storageWrite).not.toHaveBeenCalled();
     expect(app.autoKey).toBe("new-key");
+  });
+  it("activates with the key a timer-started save is still writing, never the previous one", async () => {
+    const { app } = harness();
+    app.autoEnabled = false;
+    app.autoRule = undefined;
+    app.confirmModal = { cancel: vi.fn() };
+    const write = deferred<void>();
+    storageWrite.mockReset().mockReturnValue(write.promise);
+    let stored = "old-key";
+    storageRead.mockImplementation(async () => stored);
+    app.pendingKey = { slot: "gatekeeper.typesafe-key", key: "new-key" };
+    const saving = app.flushKey();
+    const enabling = app.toggleAuto({ ...control(), closest: () => null });
+    await Promise.resolve();
+    expect(app.broker.checkEvaluator).not.toHaveBeenCalled();
+    stored = "new-key";
+    write.resolve();
+    await saving;
+    await enabling;
+    expect(app.broker.checkEvaluator).toHaveBeenCalledWith(expect.anything(), "new-key");
+    expect(app.autoKey).toBe("new-key");
+  });
+  it("stops activation when the key on screen could not be saved", async () => {
+    const { app } = harness();
+    app.autoEnabled = false;
+    app.autoRule = undefined;
+    storageWrite.mockReset().mockRejectedValue(new Error("storage"));
+    storageRead.mockResolvedValue("old-key");
+    app.pendingKey = { slot: "gatekeeper.typesafe-key", key: "new-key" };
+    const message = { textContent: "", dataset: {} as Record<string, string> };
+    await app.toggleAuto({
+      ...control(),
+      closest: () => ({ querySelector: () => message }),
+    });
+    expect(app.autoEnabled).toBe(false);
+    expect(app.broker.checkEvaluator).not.toHaveBeenCalled();
+    expect(message.textContent).toBe("The key could not be saved to encrypted storage.");
+  });
+  it("orders a removal after a save still running, so the key stays removed", async () => {
+    const { app } = harness();
+    const custom = { ...settingsFor("custom", "kev-4b"), baseUrl: "http://127.0.0.1:8080" };
+    const slot = "gatekeeper.evaluator-key.custom.http://127.0.0.1:8080";
+    app.evaluator = custom;
+    app.autoSlot = slot;
+    app.keySaved = true;
+    const first = deferred<void>();
+    const writes: string[] = [];
+    storageWrite.mockReset().mockImplementation(async (_slot: string, value: string) => {
+      writes.push(value);
+      if (value === "replacement") await first.promise;
+    });
+    app.pendingKey = { slot, key: "replacement" };
+    const saving = app.flushKey();
+    const removing = app.removeKey();
+    first.resolve();
+    await Promise.all([saving, removing]);
+    expect(writes).toEqual(["replacement", ""]);
+    expect(app.autoKey).toBe("");
+    expect(app.keySaved).toBe(false);
+    expect(app.settingsView.showKey).toHaveBeenLastCalledWith(false);
   });
   it("keeps a key in the slot it was typed for, whatever is chosen when it saves", async () => {
     const { app } = harness();

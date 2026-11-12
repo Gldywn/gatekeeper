@@ -2,7 +2,7 @@ import type { EvaluatorSettings } from "../evaluator";
 import { escapeHtml, withSqlKeywords } from "../html";
 import { gearIcon, schemaIcon, xIcon } from "../icons";
 import { takeOver } from "../modal";
-import { autoSettingsHtml, evaluatorPageHtml } from "../render/auto";
+import { autoSettingsHtml, evaluatorPageHtml, SAVED_KEY_MASK } from "../render/auto";
 import { modeDropdown, switchInput } from "../render/controls";
 import { AUTO_STOP_OPTIONS, RECENTLY_RESOLVED_OPTIONS, type Settings } from "../settings";
 import type { RiskMode } from "../sql/mode";
@@ -123,6 +123,22 @@ export class SettingsView {
       note.dataset.tone = kept.tone;
     }
     if (focusId) this.focus(focusId);
+  }
+
+  // A key saved or removed later updates only the key's own controls: a full redraw would wipe
+  // a field the user is still typing in, and the field being typed in keeps its draft.
+  showKey(saved: boolean): void {
+    const panel = this.root.querySelector<HTMLDivElement>("#settings");
+    if (!panel || panel.hidden) return;
+    const input = panel.querySelector<HTMLInputElement>("#autoKey");
+    if (
+      input &&
+      input !== panel.ownerDocument.activeElement &&
+      (input.value === "" || input.value === SAVED_KEY_MASK)
+    )
+      input.value = saved ? SAVED_KEY_MASK : "";
+    const remove = panel.querySelector<HTMLElement>("[data-key-remove]");
+    if (remove) remove.hidden = !saved;
   }
 
   focus(id?: string): void {
