@@ -194,12 +194,12 @@ use returns nothing (`WHERE false`). Both alert as a full read of the table.
   rules that read the SQL alone, which flag `UPDATE` or `DELETE` without `WHERE` and sources that
   no join condition links. An engine read with node-sql-parser's PostgreSQL grammar (Redshift,
   CockroachDB, DuckDB) counts as another engine: no catalog read, no size or lock rule.
-- **Auto mode** waits for the load check before anything is sent to TypeSafe, so Auto-deny
+- **Auto mode** waits for the load check before anything is sent to the evaluator, so Auto-deny
   heavy queries decides first. An alert alone does not hold a read: with Auto mode on and
   Auto-deny heavy queries off, a read the load check flags runs without a human whenever the
-  read analysis and Jev clear it. Turn Auto-deny heavy queries on to stop that. A check that
-  could not finish (a view, an unknown size, a late catalog read) blocks nothing, with or
-  without Auto mode, and shows nothing on the card.
+  read analysis and the evaluator clear it. Turn Auto-deny heavy queries on to stop that. A
+  check that could not finish (a view, an unknown size, a late catalog read) blocks nothing,
+  with or without Auto mode, and shows nothing on the card.
 - **The decision records** that the query was flagged (`heavy` in the broker's audit record),
   never a table name or an estimate, and never in what the agent reads back. Recently resolved,
   the Audit Trail and its exports show it, Auto mode's approvals included.
@@ -216,6 +216,38 @@ use returns nothing (`WHERE false`). Both alert as a full read of the table.
   condition, DDL without `CONCURRENTLY`). Their presence tells the agent the query was flagged,
   the same signal as an automatic rejection. Row estimates, index facts and sensitive-data
   flags never leave the plugin. The history detail shows the exact text sent.
+
+## Auto mode's evaluator
+
+Auto mode sends the same minimized input (SQL structure with literals withheld, and the
+schema, table, column names, types and usages it reads) to the evaluator the user chose:
+TypeSafe or a Custom server. See [Evaluator](docs/AUTO-MODE.md#evaluator).
+
+- **Destination.** The sharing sentence names the recipient before activation; enabling
+  consents to it. A Custom server's URL is https, or plain http only to `127.0.0.1` or `[::1]`,
+  with no credentials, query or fragment, checked by the plugin and again by the broker.
+  Requests never follow redirects and provider bodies are never relayed or logged. A failed
+  evaluation keeps only the broker's own stage, the provider's HTTP status and the model asked,
+  on the read's hold record.
+- **Keys.** Each key is stored in Beekeeper's encrypted storage for the destination it was
+  typed for (TypeSafe, a Custom server's full URL) and is never sent to another one. A Custom
+  server may go without a key, and then receives no Authorization.
+- **Cutoffs.** Only `jev-1.13.0` has Gatekeeper's built-in cutoffs. Cutoffs the user sets are a
+  delegation by that user, not a Gatekeeper measurement; permissive cutoffs let more reads run
+  without review. The local read-only analysis and sensitive-input checks apply whatever the
+  cutoffs. Any change to the evaluator or its cutoffs turns Auto mode off.
+- **A Custom server on this machine is not authenticated.** Plain http to `127.0.0.1` proves
+  nothing about who answers: while your model server is stopped, any other process, including
+  one run by another OS user of the machine, can listen on its port and answer that every read
+  is harmless. A key authenticates Gatekeeper to an honest server, not the server to
+  Gatekeeper. Such an answer can only approve reads that already passed the local analysis.
+  If other users share the machine, run the model server behind https with a certificate you
+  trust, or use a hosted evaluator (operator decision, 2026-11-12).
+- **What Gatekeeper cannot verify.** That a Custom server runs the model it names, with the
+  weights and precision its cutoffs were measured on, and reads the whole input instead of
+  cutting it. Choosing a model is the user's statement about their own server.
+- **No Clef.** Cloudflare's Clef cuts a long state instead of refusing it, and where it cuts could
+  not be established, so it is not offered. See [Evaluator](docs/AUTO-MODE.md#evaluator).
 
 ## Same-user trust boundary
 

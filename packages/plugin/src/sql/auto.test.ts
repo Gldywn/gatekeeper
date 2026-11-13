@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AUTO_POLICY, AUTO_THRESHOLDS, validEvaluation } from "./auto";
+import { AUTO_POLICY, AUTO_THRESHOLDS, currentEvaluation, validEvaluation } from "./auto";
 import { analyzeWithFixture } from "./pg/catalog-fixture";
 import { planRead, readMetadataSql, resolveRead } from "./read-analysis";
 
@@ -148,6 +148,73 @@ describe("Auto policy pin", () => {
     expect(validEvaluation({ ...current, policy: "auto-beta-8" })).toBe(false);
     expect(
       validEvaluation({ ...current, probabilities: { ...current.probabilities, read_only: 1 } }),
+    ).toBe(false);
+  });
+
+  it("authorizes only under the very cutoffs it enforces, or none from an older broker", () => {
+    const current = {
+      provider: "typesafe" as const,
+      model: "jev-1.13.0" as const,
+      policy: "auto-v10" as const,
+      evaluatedAt: Date.now(),
+      sqlDigest: "a".repeat(64),
+      eligible: true,
+      reasons: [],
+      probabilities: { ...AUTO_THRESHOLDS },
+    };
+    expect(validEvaluation(current)).toBe(true);
+    const recorded = { ...current, thresholds: { ...AUTO_THRESHOLDS }, builtIn: true };
+    expect(validEvaluation(recorded)).toBe(true);
+    // The same numbers set by the user are not the built-in rule, and the reverse.
+    expect(validEvaluation({ ...recorded, builtIn: false })).toBe(false);
+    for (const thresholds of [
+      { ...AUTO_THRESHOLDS, personal_disclosure: 0.5 },
+      { ...AUTO_THRESHOLDS, read_only: 0.5 },
+      { personal_disclosure: 0.2 },
+      null,
+      [],
+      { ...AUTO_THRESHOLDS, insufficient_context: "0.45" },
+    ])
+      expect(validEvaluation({ ...recorded, thresholds } as never)).toBe(false);
+  });
+
+  it("judges a Custom server's answer against the very choice Auto mode was switched on with", () => {
+    const cutoffs = { ...AUTO_THRESHOLDS, personal_disclosure: 0.05 };
+    const rule = {
+      config: { provider: "custom", model: "kev-4b" },
+      cutoffs,
+      builtIn: false,
+      endpoint: "https://kev.example.test",
+    };
+    const answer = {
+      provider: "custom" as const,
+      model: "kev-4b",
+      policy: "auto-v10" as const,
+      evaluatedAt: Date.now(),
+      sqlDigest: "a".repeat(64),
+      eligible: true,
+      reasons: [],
+      probabilities: { ...cutoffs },
+      thresholds: { ...cutoffs },
+      builtIn: false,
+      endpoint: "https://kev.example.test",
+    };
+    expect(currentEvaluation(answer, rule)).toBe(true);
+    // An older broker's record carries no cutoffs: never enough for a user's own rule.
+    const { thresholds: _t, builtIn: _b, ...legacy } = answer;
+    expect(validEvaluation(legacy, rule)).toBe(false);
+    for (const change of [
+      { model: "kev-9b" },
+      { endpoint: "https://other.example.test" },
+      { thresholds: { ...cutoffs, personal_disclosure: 0.2 } },
+      { builtIn: true },
+    ])
+      expect(validEvaluation({ ...answer, ...change }, rule)).toBe(false);
+    expect(
+      currentEvaluation(
+        { ...answer, probabilities: { ...cutoffs, personal_disclosure: 0.06 } },
+        rule,
+      ),
     ).toBe(false);
   });
 });

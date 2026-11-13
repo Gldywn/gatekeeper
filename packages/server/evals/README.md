@@ -2,8 +2,9 @@
 
 This development tool compares Jev questions and replays thresholds against recorded
 probabilities. It never executes SQL, connects to a database, reads result rows or
-changes the plugin's policy. It reuses `planRead`, `resolveRead` and the native TypeSafe
-transport without an additional dependency or service.
+changes the plugin's policy. It reuses `planRead`, `resolveRead` and the broker's own
+evaluator transport (TypeSafe or a Custom server) without an additional
+dependency or service.
 
 ## Reference cases
 
@@ -149,8 +150,9 @@ fresh one rather than passing an older dry report off as evidence.
 
 ## Operator-triggered inference
 
-After reviewing the cases, the operator provisions `TYPESAFE_API_KEY` in the command's
-environment using their credential workflow. Never put a key in an argument, fixture,
+After reviewing the cases, the operator provisions `GATEKEEPER_EVALUATOR_KEY` in the
+command's environment using their credential workflow (`TYPESAFE_API_KEY` still works for
+TypeSafe; a Custom server may need no key). Never put a key in an argument, fixture,
 tracked file, chat or agent output. This tool does not read `.env`, Beekeeper storage,
 the broker database or MCP credentials.
 
@@ -159,10 +161,23 @@ mise exec -- pnpm run eval:auto --live
 mise exec -- pnpm run eval:auto --live --split validation
 ```
 
-The default split is development. One native TypeSafe call batches the four production
-Noul questions per locally eligible case (a custom questions file sends its own). Calls
-are sequential with the production 12-second timeout and no retries. Only normalized
-SQL and referenced catalog names, types and usages are shared. Case IDs, expected
+Without flags the run asks TypeSafe's `jev-1.13.0`. Another evaluator is named with the
+broker's own shapes and URL rules, and the report records it:
+
+```bash
+TZ=UTC mise exec -- pnpm run eval:auto --live --provider custom --model kev-4b --base-url http://127.0.0.1:8080 --out .orch/auto-evals/dev.json
+```
+
+A model other than `jev-1.13.0` starts with zero cutoffs, which pass only an exact zero: no
+cutoff of another model passes for its own. Evaluator flags must match the provider: a
+`--base-url` without `--provider custom` is refused rather than sent to TypeSafe with another
+destination's key. `--propose` works only
+from the production questions and policy, where a higher probability always means review.
+
+The default split is development. One System One request to the chosen evaluator batches
+the four production Noul questions per locally eligible case (a custom questions file sends
+its own). Calls are sequential with the production 12-second timeout and no retries. Only
+normalized SQL and referenced catalog names, types and usages are shared. Case IDs, expected
 decisions, explanations, split names and an assertion of synthetic data are never sent.
 Review the SQL and metadata too, since names themselves can contain private information.
 
@@ -195,8 +210,31 @@ provider.
 When a question set includes `read_only`, it must be at least its cutoff. Every other
 probability must be at most its cutoff. All must pass. Noul is a probability of yes, not
 classification confidence. No averaging cancels a concern. Replay preserves the original
-observations and never reads a key or calls TypeSafe. Technical errors and unmeasured
+observations and never reads a key or calls an evaluator. Technical errors and unmeasured
 cases are separate, not successful safety decisions.
+
+## Proposing another model's cutoffs
+
+```bash
+TZ=UTC mise exec -- pnpm run eval:auto --propose .orch/auto-evals/dev.json --out .orch/auto-evals/cutoffs.json
+TZ=UTC mise exec -- pnpm run eval:auto --live <same evaluator flags> --split validation --out .orch/auto-evals/validation.json
+mise exec -- pnpm run eval:auto --replay .orch/auto-evals/validation.json --thresholds .orch/auto-evals/cutoffs.json
+```
+
+`--propose` reads one complete live development report: an interrupted run, a provider
+error or a local regression gives no proposal. It admits the expected allow cases least
+risky first (by their largest probability, then their sum, then corpus order), raising every
+cutoff a case needs at once, and keeps a raise only while every expected review case stays
+held by at least one axis with a probability above its cutoff plus 0.02. Cutoffs only grow,
+so one pass is enough. The result is safe on these development cases by construction and
+reproducible, not optimal. It reports `proposed`, `stalled` (nothing could be let through),
+`infeasible` (a review case sits within the margin on every axis) or `no-evidence`, the safe
+cases let through and the smallest margin holding a review case.
+
+The proposal file carries its evaluator, analysis, question and corpus digests, and
+`--thresholds` refuses to replay it on a report measured on anything else. Replay validation
+once with the cutoffs unchanged; retuning on validation consumes it. The user types the
+values into Settings; nothing promotes them automatically.
 
 ## Method
 

@@ -4,9 +4,17 @@ import {
   AUTO_MODEL,
   AUTO_POLICY,
   AUTO_THRESHOLDS,
+  approvalAttribution,
   autoHoldRecord,
+  canonicalBaseUrl,
+  checkEvaluator,
   checkKey,
+  DEFAULT_EVALUATOR,
+  decide,
+  type EvaluatorConfig,
+  endpointOf,
   evaluate,
+  evaluatorConfig,
 } from "./evaluator.js";
 
 const input = {
@@ -95,6 +103,77 @@ it("keeps every hold reason the plugin can record", () => {
     expect(autoHoldRecord.parse({ sent: false, reason }).reason, reason).toBe(reason);
 });
 
+describe("decide", () => {
+  const passing = { ...AUTO_THRESHOLDS };
+  it("passes at every cutoff and names each axis over it", () => {
+    expect(decide(passing, AUTO_THRESHOLDS)).toEqual({ eligible: true, reasons: [] });
+    expect(decide({ ...passing, secret_disclosure: 0.16 }, AUTO_THRESHOLDS)).toEqual({
+      eligible: false,
+      reasons: ["Potential access secret disclosure"],
+    });
+  });
+  it("keeps the axis order of today's reasons", () => {
+    expect(
+      decide({ ...passing, insufficient_context: 0.9, personal_disclosure: 0.9 }, AUTO_THRESHOLDS),
+    ).toEqual({
+      eligible: false,
+      reasons: ["Potential personal disclosure", "Insufficient evaluation context"],
+    });
+  });
+  const invalid = {
+    eligible: false,
+    reasons: ["Invalid evaluator response or stale policy/model"],
+  };
+  it.each([
+    { personal_disclosure: undefined },
+    { organization_disclosure: Number.NaN },
+    { secret_disclosure: -0.1 },
+    { insufficient_context: 1.5 },
+    { read_only: 0.01 },
+  ])("never reads a missing, extra or invalid probability as a pass: %o", (bad) => {
+    const probabilities = { ...passing, ...bad } as Record<string, number>;
+    if ("personal_disclosure" in bad) delete probabilities.personal_disclosure;
+    expect(decide(probabilities, AUTO_THRESHOLDS)).toEqual(invalid);
+  });
+  it.each([
+    {},
+    { ...AUTO_THRESHOLDS, insufficient_context: Number.POSITIVE_INFINITY },
+    { ...AUTO_THRESHOLDS, read_only: 1 },
+  ])("never decides against empty, extra or invalid cutoffs: %o", (cutoffs) => {
+    expect(decide(passing, cutoffs as typeof AUTO_THRESHOLDS)).toEqual(invalid);
+  });
+});
+
+describe("recorded cutoffs", () => {
+  const evaluation = {
+    provider: "typesafe",
+    model: AUTO_MODEL,
+    policy: AUTO_POLICY,
+    evaluatedAt: 1,
+    sqlDigest: "a".repeat(64),
+    eligible: true,
+    reasons: [],
+    probabilities: { ...AUTO_THRESHOLDS },
+  };
+  const parse = (thresholds?: unknown) =>
+    approvalAttribution.safeParse({
+      source: "automatic",
+      evaluation: { ...evaluation, thresholds },
+    }).success;
+  it("accepts a record with exactly the four axes, or none from before they were kept", () => {
+    expect(parse({ ...AUTO_THRESHOLDS })).toBe(true);
+    expect(parse(undefined)).toBe(true);
+  });
+  it.each([
+    { personal_disclosure: 0.2, organization_disclosure: 0.15, secret_disclosure: 0.15 },
+    { ...AUTO_THRESHOLDS, read_only: 0.5 },
+    { ...AUTO_THRESHOLDS, insufficient_context: 1.5 },
+    { ...AUTO_THRESHOLDS, insufficient_context: "0.45" },
+  ])("refuses cutoffs that leave out, add or bend an axis: %o", (thresholds) => {
+    expect(parse(thresholds)).toBe(false);
+  });
+});
+
 describe("native Jev contract (mocked, not calibration)", () => {
   it("batches independent questions and never sends result rows or agent prose", async () => {
     const fetch = vi.fn(async () => new Response(JSON.stringify(response())));
@@ -135,6 +214,7 @@ describe("native Jev contract (mocked, not calibration)", () => {
     );
     expect(accepted.eligible).toBe(true);
     expect(accepted.probabilities).toEqual(AUTO_THRESHOLDS);
+    expect(accepted.thresholds).toEqual(AUTO_THRESHOLDS);
     for (const [id, cutoff] of Object.entries(AUTO_THRESHOLDS))
       body.answers[id].noul = cutoff + 0.001;
     const held = await evaluate(
@@ -256,5 +336,140 @@ describe("API key check (mocked)", () => {
       }),
     );
     expect(await checkKey("synthetic-key", signal)).toBe("unavailable");
+  });
+});
+
+describe("evaluator choice", () => {
+  const signal = () => new AbortController().signal;
+  const custom = (baseUrl: string): EvaluatorConfig => ({
+    provider: "custom",
+    model: "kev-4b",
+    baseUrl,
+  });
+
+  it.each([
+    ["https://kev.example.test/api/", "https://kev.example.test/api"],
+    ["https://KEV.example.test:443", "https://kev.example.test"],
+    ["http://127.0.0.1:8080", "http://127.0.0.1:8080"],
+    ["http://127.1:8080/", "http://127.0.0.1:8080"],
+    ["http://[::1]:8080/v", "http://[::1]:8080/v"],
+  ])("keeps %s as %s", (raw, canonical) => {
+    expect(canonicalBaseUrl(raw)).toBe(canonical);
+  });
+
+  it.each([
+    "http://localhost:8080",
+    "http://192.168.1.10:8080",
+    "http://kev.example.test",
+    "https://user:secret@kev.example.test",
+    "https://kev.example.test/?token=1",
+    "https://kev.example.test/#x",
+    "ftp://kev.example.test",
+    "not a url",
+  ])("refuses %s", (raw) => {
+    expect(canonicalBaseUrl(raw)).toBeUndefined();
+  });
+
+  it("asks each provider at its own address, keeping a Custom server's path", () => {
+    expect(endpointOf(custom("https://kev.example.test/api"))).toEqual({
+      infer: "https://kev.example.test/api/v1/systemone",
+      check: "https://kev.example.test/api/v1/models",
+    });
+    expect(endpointOf(custom("https://kev.example.test/api/"))).toBeUndefined();
+  });
+
+  it("refuses a model name that is not one word, and Cloudflare", () => {
+    expect(
+      evaluatorConfig.safeParse({ provider: "cloudflare", model: "clef-flash", accountId: "a" })
+        .success,
+    ).toBe(false);
+    expect(
+      evaluatorConfig.safeParse({ ...custom("http://127.0.0.1:8080"), model: "a b" }).success,
+    ).toBe(false);
+  });
+
+  it("asks a Custom server without a key and records only its origin", async () => {
+    const fetch = vi.fn(
+      async () => new Response(JSON.stringify({ ...response(), model: "kev-4b" })),
+    );
+    vi.stubGlobal("fetch", fetch);
+    const cutoffs = { ...AUTO_THRESHOLDS, personal_disclosure: 0.1 };
+    const result = await evaluate(input, "", signal(), "a".repeat(64), {
+      evaluator: custom("https://kev.example.test/tenant-7"),
+      cutoffs,
+      builtIn: false,
+    });
+    const [url, options] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://kev.example.test/tenant-7/v1/systemone");
+    expect(options.headers).toEqual({ "Content-Type": "application/json" });
+    expect(JSON.parse(options.body as string).model).toBe("kev-4b");
+    expect(result).toMatchObject({
+      provider: "custom",
+      model: "kev-4b",
+      policy: AUTO_POLICY,
+      thresholds: cutoffs,
+      builtIn: false,
+      endpoint: "https://kev.example.test",
+      eligible: true,
+    });
+  });
+
+  describe("connection test", () => {
+    it("keeps TypeSafe's meaning: any 2xx", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => new Response("not json")),
+      );
+      expect(await checkEvaluator(DEFAULT_EVALUATOR, "key", signal())).toBe("valid");
+    });
+
+    it.each([
+      [200, { models: [{ name: "kev-4b" }, { name: "kev-9b" }] }, "valid"],
+      [200, { models: [{ name: "kev-9b" }] }, "model-missing"],
+      [200, { data: [] }, "unavailable"],
+      [401, {}, "invalid"],
+      [403, {}, "invalid"],
+      [503, {}, "unavailable"],
+    ])("reads a Custom server's model list: %s %o is %s", async (status, body, verdict) => {
+      const fetch = vi.fn(async () => new Response(JSON.stringify(body), { status }));
+      vi.stubGlobal("fetch", fetch);
+      expect(await checkEvaluator(custom("http://127.0.0.1:8080"), "", signal())).toBe(verdict);
+      expect(fetch).toHaveBeenCalledWith(
+        "http://127.0.0.1:8080/v1/models",
+        expect.objectContaining({ headers: {}, redirect: "error" }),
+      );
+    });
+
+    it("never reads an unbounded model list", async () => {
+      const huge = JSON.stringify({ models: [{ name: "x".repeat(40_000) }] });
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => new Response(huge)),
+      );
+      expect(await checkEvaluator(custom("http://127.0.0.1:8080"), "", signal())).toBe(
+        "unavailable",
+      );
+    });
+  });
+
+  it("records which evaluator decided, and refuses an unknown one", () => {
+    const evaluation = {
+      provider: "custom",
+      model: "kev-4b",
+      policy: AUTO_POLICY,
+      evaluatedAt: 1,
+      sqlDigest: "a".repeat(64),
+      eligible: true,
+      reasons: [],
+      probabilities: { ...AUTO_THRESHOLDS },
+      thresholds: { ...AUTO_THRESHOLDS },
+      builtIn: false,
+      endpoint: "https://kev.example.test",
+    };
+    const parse = (e: object) =>
+      approvalAttribution.safeParse({ source: "automatic", evaluation: e }).success;
+    expect(parse(evaluation)).toBe(true);
+    expect(parse({ ...evaluation, provider: "openai" })).toBe(false);
+    expect(parse({ ...evaluation, model: "kev 4b" })).toBe(false);
   });
 });

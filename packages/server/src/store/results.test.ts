@@ -160,6 +160,22 @@ describe("who declined", () => {
     expect(listActivity(ctx, null)[0].declinedBy).toBeUndefined();
   });
 
+  it("reads a malformed stored Auto mode hold as not recorded, and a bad diagnostic as none", () => {
+    const { id, leaseId } = claim();
+    resolve(ctx, id, leaseId, { status: "rejected" });
+    const store = (autoHold: unknown) =>
+      ctx.db
+        .prepare("UPDATE requests SET policy_json = ? WHERE id = ?")
+        .run(JSON.stringify({ autoHold }), id);
+    store({ sent: "yes", reason: "Metadata unavailable" });
+    expect(listActivity(ctx, null)[0].autoHold).toBeUndefined();
+    store({ sent: true, reason: "Metadata unavailable", failure: { stage: "http", status: "x" } });
+    expect(listActivity(ctx, null)[0].autoHold).toEqual({
+      sent: true,
+      reason: "Metadata unavailable",
+    });
+  });
+
   it("says a person's reason holds words they typed, and only for a person's decline", () => {
     const typed = claim();
     resolve(ctx, typed.id, typed.leaseId, {

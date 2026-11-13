@@ -406,7 +406,7 @@ describe("the pending card's order", () => {
       new Map(),
     );
     const sql = held.indexOf('<pre class="sql">');
-    const note = held.indexOf("Held on this machine before evaluation.");
+    const note = held.indexOf("Held on this machine before evaluation");
     expect(sql).toBeLessThan(note);
     expect(note).toBeLessThan(held.indexOf('<div class="dbar">'));
   });

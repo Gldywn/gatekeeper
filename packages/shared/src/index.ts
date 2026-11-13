@@ -107,6 +107,16 @@ export interface AutoHold {
   /** The plugin attempted provider submission, not proof of provider receipt. */
   sent: boolean;
   reason: string;
+  /** Why the evaluator gave no verdict, in the broker's diagnostic terms. */
+  failure?: EvaluationFailure;
+  /** The model that was asked. */
+  model?: string;
+}
+
+export interface EvaluationFailure {
+  stage: "timeout" | "network" | "http" | "response" | "input" | "cancelled" | "internal";
+  /** The provider's HTTP status, never the broker's own. */
+  status?: number;
 }
 
 export interface EvaluationInput {
@@ -126,8 +136,8 @@ export interface EvaluationInput {
 }
 
 export interface AutoEvaluation {
-  provider: "typesafe";
-  model: "jev-1.13.0";
+  provider: "typesafe" | "custom";
+  model: string;
   policy:
     | "auto-beta-1"
     | "auto-beta-2"
@@ -143,7 +153,18 @@ export interface AutoEvaluation {
   eligible: boolean;
   reasons: string[];
   probabilities: Record<string, number>;
+  /** The cutoffs in force when it was decided; absent from records made before they were kept. */
+  thresholds?: Record<string, number>;
+  /** Whether those were Gatekeeper's built-in cutoffs rather than the user's own. */
+  builtIn?: boolean;
+  /** A Custom server's origin, never its path. */
+  endpoint?: string;
 }
+
+/** Which evaluator Auto mode asks, as the plugin sends it to the broker. */
+export type EvaluatorConfig =
+  | { provider: "typesafe"; model: "jev-1.13.0" }
+  | { provider: "custom"; model: string; baseUrl: string };
 
 export interface ApprovalAttribution {
   source: "human" | "automatic";
@@ -152,6 +173,8 @@ export interface ApprovalAttribution {
 
 /** What TypeSafe said about an API key: accepted, refused (401/403), or not reachable. */
 export type KeyStatus = "valid" | "invalid" | "unavailable";
+/** A connection test, which also says when the evaluator does not offer the chosen model. */
+export type EvaluatorStatus = KeyStatus | "model-missing";
 
 // The plugin POSTs ConnectionInput; the server stamps capturedAt and serves/stores the
 // ConnectionSnapshot. Never carries host, user, or credentials; informational only.

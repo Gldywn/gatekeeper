@@ -115,6 +115,8 @@ async function route(url: URL, init?: RequestInit): Promise<Response> {
     return empty();
   }
   if (method === "POST" && path === "/evaluate/key") return json({ status: "invalid" });
+  // No evaluator is reached from the preview: a test always answers as a server that is down.
+  if (method === "POST" && path === "/evaluate/check") return json({ status: "unavailable" });
   throw new Error(`[preview broker] no fixture for ${method} ${path}`);
 }
 

@@ -23,8 +23,10 @@ import {
   type Case,
   corpusSchema,
   digest,
+  evaluatorFromFlags,
   localInput,
   prepare,
+  propose,
   runLive,
   summarize,
   validateReport,
@@ -646,5 +648,124 @@ describe("exported investigation shapes (synthetic, literals and names replaced)
       sent += report.results.filter((r) => r.probabilities).length;
     }
     expect(sent).toBe(exportCases.filter((c) => c.expected !== "local").length);
+  });
+});
+
+describe("measuring another evaluator", () => {
+  const questions = evaluationQuestions;
+  const kev = { provider: "custom" as const, model: "kev-4b", baseUrl: "http://127.0.0.1:8080" };
+  const axes = Object.keys(questions);
+  // A live development report whose answers are set per expected label, no provider called.
+  const live = (answer: (expected: string, id: string) => Record<string, number>) => {
+    const report = prepare(allCases, questions, "development", undefined, kev);
+    report.mode = "live";
+    const cases = report.corpus.filter((c) => c.split === "development");
+    report.results.forEach((r, i) => {
+      if (r.input) r.probabilities = answer(cases[i].expected, cases[i].id);
+    });
+    return report;
+  };
+  const flat = (v: number) => Object.fromEntries(axes.map((a) => [a, v]));
+
+  it("starts another model at zero, never with jev-1.13.0's cutoffs", () => {
+    const report = prepare(allCases, questions, "development", undefined, kev);
+    expect(report.evaluator).toEqual(kev);
+    expect(report.model).toBe("kev-4b");
+    expect(report.thresholds).toEqual(flat(0));
+  });
+
+  it("lets safe reads through with every risky read held by a margin", () => {
+    const report = live((expected) =>
+      expected === "allow" ? flat(0.05) : { ...flat(0.01), personal_disclosure: 0.9 },
+    );
+    const result = propose(report);
+    expect(result.status).toBe("proposed");
+    expect(result.allowAdmitted).toBe(result.allowTotal);
+    expect(result.proposal?.cutoffs).toEqual(flat(0.05));
+    expect(result.minHoldingDistance).toBeCloseTo(0.85);
+    expect(result.proposal?.evaluator).toEqual(kev);
+  });
+
+  it("keeps out a safe read that would let a risky one through, and the margin counts", () => {
+    // The second safe read sits at the risky read's level on every axis but one.
+    let n = 0;
+    const report = live((expected) => {
+      if (expected === "review") return { ...flat(0.3), personal_disclosure: 0.31 };
+      return n++ % 2 ? flat(0.02) : { ...flat(0.3), personal_disclosure: 0.3 };
+    });
+    const result = propose(report);
+    expect(result.status).toBe("proposed");
+    expect(result.proposal?.cutoffs).toEqual(flat(0.02));
+    expect(result.allowAdmitted).toBe(Math.floor(result.allowTotal / 2));
+  });
+
+  it("says so when no cutoffs can hold a risky read, or when nothing safe gets through", () => {
+    expect(propose(live((e) => (e === "review" ? flat(0.01) : flat(0.5)))).status).toBe(
+      "infeasible",
+    );
+    expect(propose(live((e) => (e === "review" ? flat(0.3) : flat(0.4)))).status).toBe("stalled");
+  });
+
+  it("refuses an interrupted run, a dry report or a validation report", () => {
+    const report = live(() => flat(0.1));
+    const broken = structuredClone(report);
+    const first = broken.results.find((r) => r.input)!;
+    delete first.probabilities;
+    first.error = { stage: "network" };
+    expect(() => propose(broken)).toThrow(/Incomplete observations/);
+    expect(() => propose(prepare(allCases, questions, "development", undefined, kev))).toThrow();
+    const validation = prepare(allCases, questions, "validation", undefined, kev);
+    validation.mode = "live";
+    expect(() => propose(validation)).toThrow();
+  });
+
+  it("replays a proposal only on the evaluator, questions and corpus it was measured on", () => {
+    const report = live((e) => (e === "allow" ? flat(0.05) : flat(0.9)));
+    const { proposal } = propose(report);
+    expect(summarize(report, proposal)).toContain("Unsafe automatic approvals: 0.");
+    const other = { ...kev, model: "kev-9b" };
+    expect(() => summarize({ ...report, model: "kev-9b", evaluator: other }, proposal)).toThrow(
+      /another evaluator/,
+    );
+  });
+
+  it("reads the evaluator from the flags with the broker's URL rules", () => {
+    expect(evaluatorFromFlags({})).toEqual({ provider: "typesafe", model: AUTO_MODEL });
+    expect(
+      evaluatorFromFlags({
+        provider: "custom",
+        model: "kev-4b",
+        "base-url": "http://127.0.0.1:8080/",
+      }),
+    ).toEqual({ provider: "custom", model: "kev-4b", baseUrl: "http://127.0.0.1:8080" });
+    // As at the broker, a hostname for plain http is refused rather than resolved.
+    for (const url of ["http://localhost:8080", "http://10.0.0.5"])
+      expect(() =>
+        evaluatorFromFlags({ provider: "custom", model: "kev-4b", "base-url": url }),
+      ).toThrow();
+    expect(() => evaluatorFromFlags({ provider: "cloudflare", model: "clef" })).toThrow();
+  });
+
+  it.each([
+    { "base-url": "https://kev.example.test" },
+    { model: "kev-4b" },
+    { provider: "typesafe", model: AUTO_MODEL, "base-url": "https://kev.example.test" },
+  ])("refuses a flag its evaluator does not take, before any key is used: %o", (flags) => {
+    expect(() => evaluatorFromFlags(flags)).toThrow();
+  });
+
+  it("proposes only from the production questions and policy", () => {
+    const report = live((e) => (e === "allow" ? flat(0.05) : flat(0.9)));
+    expect(propose(report).status).toBe("proposed");
+    // Same axis names, other wording: the cutoffs would be for questions that never run.
+    const reworded = structuredClone(evaluationQuestions);
+    reworded.personal_disclosure.instructions += " Reworded.";
+    const other = prepare(allCases, reworded, "development", undefined, kev);
+    other.mode = "live";
+    for (const r of other.results) if (r.input) r.probabilities = flat(0.1);
+    expect(() => propose(other)).toThrow(/production questions/);
+    expect(() => propose({ ...report, baselinePolicy: "auto-beta-8" })).toThrow(
+      /production questions/,
+    );
   });
 });

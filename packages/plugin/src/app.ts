@@ -23,6 +23,25 @@ import { enter, type Loop, pulse, reveal } from "./anim";
 import { SchemaAnnotator } from "./annotate";
 import { ResultArchive } from "./archive";
 import { canEncrypt } from "./archive-availability";
+import {
+  type ActiveEvaluator,
+  AXES,
+  type Axis,
+  activeEvaluator,
+  agentPrompt,
+  canonicalBaseUrl,
+  DEFAULT_SETTINGS,
+  EVALUATOR_STORAGE,
+  type EvaluatorSettings,
+  evaluatorConfig,
+  firstMissing,
+  keyRequired,
+  keySlot,
+  type Provider,
+  parseSettings,
+  recipient,
+  settingsFor,
+} from "./evaluator";
 import { capitalize, clock, countsLabel, escapeHtml, relAge } from "./html";
 import {
   agentBadge,
@@ -46,7 +65,7 @@ import {
   xIcon,
 } from "./icons";
 import { takeOver } from "./modal";
-import { BrokerClient } from "./net/broker";
+import { BrokerClient, EvaluatorFailure } from "./net/broker";
 import { connectionScopeKey } from "./net/scope";
 import { SingleInstance, type SingleInstanceWire } from "./net/singleinstance";
 import { overlayScroll } from "./overlay-scroll";
@@ -70,6 +89,7 @@ import {
   recentRowHtml,
 } from "./render/inbox";
 import {
+  AUTO_EVALUATING,
   accessMatrix,
   type CardGate,
   cardGateFor,
@@ -93,7 +113,7 @@ import {
 import { capResult, type Field, type HistResult } from "./result";
 import { collectSchema } from "./schema-collect";
 import { filterSchema, type Settings, SettingsStore } from "./settings";
-import { AUTO_KEY, currentEvaluation, validEvaluation } from "./sql/auto";
+import { AUTO_THRESHOLDS, currentEvaluation, validEvaluation } from "./sql/auto";
 import { classifyQuery, type RiskClass, rank } from "./sql/classify";
 import { engineFor } from "./sql/engine";
 import { formatSql } from "./sql/format";
@@ -158,6 +178,13 @@ const typedKey = (input?: HTMLInputElement | null): string => {
   const value = input?.value.trim() ?? "";
   return value.includes(SAVED_KEY_MASK[0]) ? "" : value;
 };
+// The evaluator page's control for what is still missing from the choice.
+const FIELD_IDS: Record<string, string> = {
+  baseUrl: "evBaseUrl",
+  model: "evModel",
+};
+const fieldId = (missing: string): string =>
+  FIELD_IDS[missing] ?? ((AXES as string[]).includes(missing) ? `evCut-${missing}` : missing);
 // Re-touch the reported schema this often so it stays inside the server's TTL while the tab
 // is active with schema access on; when the tab stops, the snapshot expires and is dropped.
 const SCHEMA_HEARTBEAT_MS = 60_000;
@@ -315,8 +342,23 @@ export class Gatekeeper {
   // Proposals already waiting when Auto mode was switched on. Enabling delegates the
   // approvals to come, never the ones a human may already be weighing up.
   private autoDeferred = new Set<string>();
+  // The evaluator and cutoffs Auto mode was switched on with, and the key slot it reads.
+  private autoRule?: ActiveEvaluator;
+  private autoSlot?: string;
+  // What Settings keeps; undefined when the stored choice is damaged, so Auto mode waits for a
+  // new one instead of falling back to TypeSafe.
+  private evaluator: EvaluatorSettings | undefined = DEFAULT_SETTINGS;
   private keySaveTimer?: number;
-  // Only whether a key exists, so Settings can show it is set without the key itself.
+  private pendingKey?: { slot: string; key: string };
+  // The last key write, saves and removals chained in order, and its place in that order.
+  private keyOps: Promise<boolean> = Promise.resolve(true);
+  private keySeq = 0;
+  // A destination whose key on screen was invalid or could not be saved, until a write succeeds.
+  private keyIssues = new Map<string, "invalid" | "failed">();
+  // Each slot's latest attempt, a save, a removal or an invalid draft, in keySeq order.
+  private keyLatest = new Map<string, number>();
+  // Only whether the current evaluator's key exists, so Settings can show it is set without
+  // the key itself.
   private keySaved = false;
   private conn: {
     id: number;
@@ -471,6 +513,7 @@ export class Gatekeeper {
       mode: () => this.mode,
       auto: () => this.autoEnabled,
       keySaved: () => this.keySaved,
+      evaluator: () => this.evaluator,
       version: () => versionGroupHtml(this.versionStatus()),
     });
     root.addEventListener("click", (e) => {
@@ -485,6 +528,28 @@ export class Gatekeeper {
       }
       if ((e.target as HTMLElement).closest("[data-auto-settings]")) {
         this.openAutoSettings();
+        return;
+      }
+      const target = e.target as HTMLElement;
+      if (target.closest("[data-evaluator-open]")) {
+        this.settingsView.openEvaluator();
+        return;
+      }
+      if (target.closest("[data-evaluator-back]")) {
+        this.settingsView.back();
+        return;
+      }
+      if (target.closest("[data-evaluator-test]")) {
+        void this.testEvaluator();
+        return;
+      }
+      if (target.closest("[data-key-remove]")) {
+        void this.removeKey();
+        return;
+      }
+      const copyPrompt = target.closest<HTMLElement>("[data-copy-prompt]");
+      if (copyPrompt) {
+        void this.copyAgentPrompt(copyPrompt);
         return;
       }
       if ((e.target as HTMLElement).closest("[data-export-open]")) {
@@ -508,10 +573,26 @@ export class Gatekeeper {
       if (input && !input.value && this.keySaved) input.value = SAVED_KEY_MASK;
     });
     root.addEventListener("input", (e) => {
-      const input = (e.target as HTMLElement).closest<HTMLInputElement>("[data-auto-key]");
-      if (!input) return;
+      const target = e.target as HTMLElement;
+      // A draft edit of the evaluator or a cutoff ends Auto mode at the first keystroke: the
+      // old choice must not stay in force while the new one cannot be read yet.
+      if (target.closest("[data-ev-field], [data-ev-cut]")) {
+        this.invalidateAuto();
+        return;
+      }
+      const input = target.closest<HTMLInputElement>("[data-auto-key]");
+      const slot = this.evaluator && keySlot(this.evaluator);
+      if (!input || !slot) return;
+      // The slot is the destination on screen as the key is typed, not when it saves.
+      this.pendingKey = { slot, key: typedKey(input) };
       window.clearTimeout(this.keySaveTimer);
-      this.keySaveTimer = window.setTimeout(() => void this.saveAutoKey(input), 400);
+      this.keySaveTimer = window.setTimeout(() => void this.flushKey(), 400);
+    });
+    root.addEventListener("change", (e) => {
+      const el = (e.target as HTMLElement).closest<HTMLInputElement | HTMLSelectElement>(
+        "[data-ev-field], [data-ev-cut]",
+      );
+      if (el) void this.changeEvaluator(el);
     });
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
@@ -543,7 +624,8 @@ export class Gatekeeper {
         }
         const settings = this.root.querySelector<HTMLElement>("#settings");
         if (settings && !settings.hidden) {
-          this.settingsView.close();
+          // The evaluator page first steps back to Settings, then Settings closes.
+          if (!this.settingsView.back()) this.settingsView.close();
           return;
         }
         const pop = this.root.querySelector<HTMLElement>("#settingsPop");
@@ -621,8 +703,18 @@ export class Gatekeeper {
     } catch {
       this.starred = false;
     }
+    // No stored choice is today's TypeSafe default; a damaged or unreadable one is no choice.
     try {
-      this.keySaved = Boolean(await appStorage.getItem<string>(AUTO_KEY, { encrypted: true }));
+      const raw = await appStorage.getItem<unknown>(EVALUATOR_STORAGE, { encrypted: true });
+      this.evaluator = raw === null ? DEFAULT_SETTINGS : parseSettings(raw);
+    } catch {
+      this.evaluator = undefined;
+    }
+    try {
+      const slot = this.evaluator && keySlot(this.evaluator);
+      this.keySaved = Boolean(
+        slot && (await appStorage.getItem<string>(slot, { encrypted: true })),
+      );
     } catch {
       this.keySaved = false;
     }
@@ -1477,7 +1569,7 @@ export class Gatekeeper {
     <span class="bar-right">
       <span class="sa-hint-wrap auto" id="autoHint" data-on="${this.autoEnabled}">
         <button class="sa-hint" type="button" data-auto-settings aria-label="Auto mode">${autoIcon}<span class="sa-dot"></span><span class="sa-check">${checkIcon}</span></button>
-        ${autoPopHtml()}
+        ${autoPopHtml(this.evaluator)}
       </span>
       <span class="sa-hint-wrap" id="schemaHint" data-on="${s.schemaAccess}">
         <button class="sa-hint" type="button" data-schema-settings aria-label="${schemaAccessLabel(s.schemaAccess)}">
@@ -2349,7 +2441,7 @@ export class Gatekeeper {
     const section = this.root.querySelector<HTMLElement>("#autoSettings");
     section?.scrollIntoView({ block: "center" });
     section
-      ?.querySelector<HTMLElement>("[data-auto-key], [data-auto-toggle]")
+      ?.querySelector<HTMLElement>("[data-evaluator-open], [data-auto-toggle]")
       ?.focus({ preventScroll: true });
   }
 
@@ -2425,10 +2517,12 @@ export class Gatekeeper {
     this.autoGeneration++;
     this.autoAbort?.abort();
     this.autoKey = "";
+    this.autoRule = undefined;
+    this.autoSlot = undefined;
     this.autoDeferred.clear();
     for (const card of this.cards) {
       // Reset authority without overwriting an already established review reason.
-      if (card.autoStatus === "Evaluating with Jev" && !card.evaluation) {
+      if (card.autoStatus === AUTO_EVALUATING && !card.evaluation) {
         card.autoStatus = `Needs review: ${reason === "Auto mode disabled" ? "Auto mode disabled while evaluating" : reason}`;
       }
     }
@@ -2448,69 +2542,82 @@ export class Gatekeeper {
     }
     // One check at a time per control, and the control shows it is working meanwhile.
     if (toggle.getAttribute("aria-busy") === "true") return;
+    // What is still missing is fixed on the evaluator page, which opens on it without a word:
+    // the evaluator line already says what it needs.
+    const settings = this.evaluator;
+    const missing = settings ? firstMissing(settings) : "evProvider";
+    if (!settings || missing) {
+      this.openEvaluator(missing ? fieldId(missing) : "evProvider");
+      return;
+    }
     const body = toggle.closest<HTMLElement>(".auto-body");
-    const input = body?.querySelector<HTMLInputElement>("[data-auto-key]");
-    const entered = typedKey(input);
+    // Captured before the first await, so a mode switch confirmed meanwhile wins.
     const generation = ++this.autoGeneration;
     const connection = this.connGeneration;
     const active = this.activeGen;
     const message = body?.querySelector<HTMLElement>("[data-auto-message]");
-    const fail = (text: string, keyField = false): void => {
+    const fail = (text: string): void => {
       if (message) {
         message.textContent = text;
         message.dataset.tone = "";
       }
       if (toggle instanceof HTMLInputElement) toggle.checked = false;
-      if (keyField) input?.focus();
     };
     const stale = () =>
       generation !== this.autoGeneration ||
       connection !== this.connGeneration ||
-      active !== this.activeGen;
-    // A missing or refused key is fixed in Settings, so the popover sends the user there
-    // and the reason shows under the key field.
-    const keyProblem = (text: string): void => {
-      if (input) {
-        fail(text, true);
-        return;
-      }
-      this.openAutoSettings();
-      const note = this.root.querySelector<HTMLElement>("#autoSettings [data-auto-message]");
-      if (note) {
-        note.textContent = text;
-        note.dataset.tone = "";
-      }
-    };
+      active !== this.activeGen ||
+      settings !== this.evaluator;
+    // Frozen now: the evaluation and its approval are judged against this very choice.
+    const rule = activeEvaluator(settings);
+    const slot = keySlot(settings);
+    if (!rule || !slot) {
+      this.openEvaluator(fieldId(firstMissing(settings) ?? "evProvider"));
+      return;
+    }
     if (message) {
-      message.textContent =
-        toggle instanceof HTMLInputElement ? "Checking the key with TypeSafe…" : "";
+      message.textContent = toggle instanceof HTMLInputElement ? "Checking the connection…" : "";
       message.dataset.tone = "busy";
     }
     toggle.setAttribute("aria-busy", "true");
     try {
-      const key = entered || (await appStorage.getItem<string>(AUTO_KEY, { encrypted: true }));
+      // A key still being typed is saved first, so activation reads the one on screen.
+      const flushed = await this.flushKey(slot);
       if (stale()) return;
-      if (!key) {
-        keyProblem("Paste your TypeSafe API key first.");
+      if (flushed === "invalid") {
+        this.openEvaluator("autoKey", "This API key is not valid.");
         return;
       }
-      if (!API_KEY_FORMAT.test(key)) {
-        keyProblem("This API key is not valid.");
+      if (flushed === "failed") {
+        fail("The key could not be saved to encrypted storage.");
         return;
       }
-      if (entered) await appStorage.setItem(AUTO_KEY, entered, { encrypted: true });
-      const verdict = await this.broker.checkKey(key);
+      const key = (await appStorage.getItem<string>(slot, { encrypted: true })) || "";
+      if (stale()) return;
+      if (keyRequired(settings) && !key) {
+        this.openEvaluator("autoKey");
+        return;
+      }
+      if (key && !API_KEY_FORMAT.test(key)) {
+        this.openEvaluator("autoKey", "This API key is not valid.");
+        return;
+      }
+      const verdict = await this.broker.checkEvaluator(rule.config, key);
       if (stale()) return;
       if (verdict === "invalid") {
-        keyProblem("TypeSafe refused this API key.");
+        this.openEvaluator("autoKey", "The evaluator refused this API key.");
+        return;
+      }
+      if (verdict === "model-missing") {
+        this.openEvaluator("evModel", `${rule.config.model} is not available with these settings.`);
         return;
       }
       if (verdict === "outdated") {
-        fail("Restart the Gatekeeper server to use Auto mode. It predates this plugin.");
+        fail("Restart the Gatekeeper server to choose an evaluator. It predates this plugin.");
         return;
       }
       if (verdict === "unavailable") {
-        fail("TypeSafe could not be reached. Try again.");
+        fail("The evaluator could not be reached. Try again.");
         return;
       }
       if (!(await this.checkConnection())) {
@@ -2527,6 +2634,8 @@ export class Gatekeeper {
       this.confirmModal.cancel();
       this.applyMode("read");
       this.autoKey = key;
+      this.autoRule = rule;
+      this.autoSlot = slot;
       this.autoDeferred = new Set(this.cards.map((c) => c.id));
       this.autoEnabled = true;
       this.renderAuto();
@@ -2542,29 +2651,233 @@ export class Gatekeeper {
     }
   }
 
-  // Saved as typed, so replacing the key never requires turning Auto mode off; a running
-  // Auto mode uses the new key from its next evaluation.
-  private async saveAutoKey(input: HTMLInputElement): Promise<void> {
-    const key = typedKey(input);
-    const message = input.closest(".auto-body")?.querySelector<HTMLElement>("[data-auto-message]");
-    const say = (text: string, ok = false): void => {
-      if (!message) return;
-      message.textContent = text;
-      message.dataset.tone = ok ? "ok" : "";
-    };
-    if (!key) return;
-    if (!API_KEY_FORMAT.test(key)) {
-      say("This API key is not valid.");
+  // Saved as typed, into the slot of the destination it was typed for: a key typed for one
+  // evaluator never reaches another, however fast the provider changes. Replacing the key never
+  // requires turning Auto mode off; a running Auto mode uses it from its next evaluation.
+  // The outcome of a key typed and not yet saved, or of the last save still running: "saved"
+  // when there was nothing to save. Activation and the test wait for it, so they read the key
+  // on screen, and a failed save stops them instead of falling back on the previous key.
+  private async flushKey(slot?: string): Promise<"saved" | "invalid" | "failed"> {
+    window.clearTimeout(this.keySaveTimer);
+    const pending = this.pendingKey;
+    this.pendingKey = undefined;
+    if (pending?.key) {
+      const current = () => this.evaluator && keySlot(this.evaluator) === pending.slot;
+      if (!API_KEY_FORMAT.test(pending.key)) {
+        // Kept for its slot, and newer than any write still running: an activation after the
+        // debounce must still see it.
+        this.keyLatest.set(pending.slot, ++this.keySeq);
+        this.keyIssues.set(pending.slot, "invalid");
+        if (current()) this.evaluatorMessage("This API key is not valid.");
+      } else
+        void this.writeKey(pending.slot, pending.key, (ok) => {
+          if (current())
+            this.evaluatorMessage(
+              ok ? "Key saved." : "The key could not be saved to encrypted storage.",
+              ok ? "ok" : "",
+            );
+        });
+    }
+    await this.keyOps;
+    // Judged for the destination asked about, never from another one's last write.
+    return (slot && this.keyIssues.get(slot)) || "saved";
+  }
+
+  // Saves and removals run one after another, in the order they were made, so the last one is
+  // what storage keeps; only the newest updates the running key and what Settings shows.
+  private writeKey(slot: string, value: string, done: (ok: boolean) => void): Promise<boolean> {
+    const seq = ++this.keySeq;
+    this.keyLatest.set(slot, seq);
+    const write = this.keyOps.then(async () => {
+      let ok = true;
+      try {
+        await appStorage.setItem(slot, value, { encrypted: true });
+      } catch {
+        ok = false;
+      }
+      // Only the slot's latest attempt decides its state: an older write settling late never
+      // clears an invalid key typed after it.
+      if (this.keyLatest.get(slot) === seq) {
+        if (ok) this.keyIssues.delete(slot);
+        else this.keyIssues.set(slot, "failed");
+      }
+      if (seq !== this.keySeq) return ok;
+      if (ok && this.autoEnabled && this.autoSlot === slot) this.autoKey = value;
+      if (ok && this.evaluator && keySlot(this.evaluator) === slot) {
+        this.keySaved = Boolean(value);
+        this.settingsView.showKey(this.keySaved);
+      }
+      done(ok);
+      return ok;
+    });
+    this.keyOps = write;
+    return write;
+  }
+
+  // Only a Custom server goes without a key; removing it is a deliberate act, never an empty
+  // field left behind by a paste.
+  private async removeKey(): Promise<void> {
+    const slot = this.evaluator && keySlot(this.evaluator);
+    if (!slot) return;
+    this.pendingKey = undefined;
+    window.clearTimeout(this.keySaveTimer);
+    await this.writeKey(slot, "", (ok) => {
+      if (!ok) this.evaluatorMessage("The key could not be removed from encrypted storage.");
+    });
+  }
+
+  private evaluatorMessage(text: string, tone = ""): void {
+    const note = this.root.querySelector<HTMLElement>("#settings [data-ev-message]");
+    if (!note) return;
+    note.textContent = text;
+    note.dataset.tone = tone;
+  }
+
+  private openEvaluator(focus: string, message?: string): void {
+    this.setSettingsOpen(false);
+    this.settingsView.openEvaluator(focus);
+    if (message) this.evaluatorMessage(message);
+  }
+
+  // Any change to the evaluator or its cutoffs turns Auto mode off before anything else, so no
+  // decision made under the old choice can be used once the new one is on screen.
+  private invalidateAuto(): void {
+    if (this.autoEnabled) {
+      this.resetAuto("Auto mode disabled");
+      this.pokePoll();
+    } else {
+      this.autoGeneration++;
+    }
+  }
+
+  private async changeEvaluator(el: HTMLInputElement | HTMLSelectElement): Promise<void> {
+    const prev = this.evaluator;
+    const name = el.dataset.evField;
+    const cut = el.dataset.evCut as Axis | undefined;
+    let next: EvaluatorSettings | undefined;
+    if (name === "provider") next = settingsFor(el.value as Provider);
+    else if (!prev) return;
+    // A different evaluator never inherits the cutoffs measured, or set, for another one.
+    else if (name === "model")
+      next = { ...settingsFor(prev.provider, el.value.trim()), baseUrl: prev.baseUrl };
+    else if (name === "baseUrl") {
+      const baseUrl = canonicalBaseUrl(el.value) ?? el.value.trim();
+      next =
+        baseUrl === prev.baseUrl ? prev : { ...settingsFor(prev.provider, prev.model), baseUrl };
+    } else if (name === "builtIn" && el instanceof HTMLInputElement)
+      next = el.checked
+        ? { ...prev, builtIn: true, cutoffs: { ...AUTO_THRESHOLDS } }
+        : { ...prev, builtIn: false };
+    else if (cut && AXES.includes(cut)) {
+      const text = el.value.trim();
+      const value = text === "" ? null : Number(text);
+      next = {
+        ...prev,
+        cutoffs: {
+          ...prev.cutoffs,
+          [cut]:
+            value !== null && Number.isFinite(value) && value >= 0 && value <= 1 ? value : null,
+        },
+      };
+    }
+    if (!next || next === prev) return;
+    this.invalidateAuto();
+    this.evaluator = next;
+    // Redrawn once the focus has landed: a change fired by Tab precedes the move to the next
+    // field, which a redraw in between would leave on the page's body.
+    window.setTimeout(() => this.settingsView.refresh(), 0);
+    this.renderRecipient();
+    try {
+      await appStorage.setItem(EVALUATOR_STORAGE, next, { encrypted: true });
+    } catch {
+      if (this.evaluator === next)
+        this.evaluatorMessage("The evaluator could not be saved to encrypted storage.");
+    }
+    await this.refreshKeySaved(next);
+  }
+
+  private async refreshKeySaved(settings = this.evaluator): Promise<void> {
+    const slot = settings && keySlot(settings);
+    let saved = false;
+    try {
+      saved = Boolean(slot && (await appStorage.getItem<string>(slot, { encrypted: true })));
+    } catch {
+      saved = false;
+    }
+    // A read that settles after another change must not paint its answer on the new choice.
+    if (settings !== this.evaluator || saved === this.keySaved) return;
+    this.keySaved = saved;
+    this.settingsView.showKey(saved);
+  }
+
+  private async testEvaluator(): Promise<void> {
+    const settings = this.evaluator;
+    const config = settings && evaluatorConfig(settings);
+    if (!settings || !config) {
+      this.settingsView.focus(
+        fieldId(settings ? (firstMissing(settings) ?? "evModel") : "evProvider"),
+      );
+      return;
+    }
+    const slot = keySlot(settings);
+    const flushed = await this.flushKey(slot);
+    if (flushed !== "saved") {
+      this.evaluatorMessage(
+        flushed === "invalid"
+          ? "This API key is not valid."
+          : "The key could not be saved to encrypted storage.",
+      );
+      return;
+    }
+    const key =
+      (slot && (await appStorage.getItem<string>(slot, { encrypted: true }).catch(() => ""))) || "";
+    if (settings !== this.evaluator) return;
+    if (keyRequired(settings) && !key) {
+      this.settingsView.focus("autoKey");
+      return;
+    }
+    this.evaluatorMessage("Checking the connection…", "busy");
+    const verdict = await this.broker.checkEvaluator(config, key);
+    if (settings !== this.evaluator) return;
+    const [text, tone] =
+      verdict === "valid"
+        ? [`Connected. ${config.model} is available.`, "ok"]
+        : verdict === "invalid"
+          ? ["The evaluator refused this API key.", ""]
+          : verdict === "model-missing"
+            ? [`${config.model} is not available with these settings.`, ""]
+            : verdict === "outdated"
+              ? [
+                  "Restart the Gatekeeper server to choose an evaluator. It predates this plugin.",
+                  "",
+                ]
+              : ["The evaluator could not be reached. Try again.", ""];
+    this.evaluatorMessage(text, tone);
+  }
+
+  private async copyAgentPrompt(button: HTMLElement): Promise<void> {
+    const settings = this.evaluator;
+    const prompt = settings && agentPrompt(settings);
+    // No runnable command for an evaluator not yet complete: the page opens on what it lacks.
+    if (!settings || !prompt) {
+      this.settingsView.focus(
+        fieldId(settings ? (firstMissing(settings) ?? "evModel") : "evProvider"),
+      );
       return;
     }
     try {
-      await appStorage.setItem(AUTO_KEY, key, { encrypted: true });
-      if (this.autoEnabled) this.autoKey = key;
-      this.keySaved = true;
-      say("Key saved.", true);
+      await clipboard.writeText(prompt);
+      this.evaluatorMessage("Prompt copied.", "ok");
     } catch {
-      say("The key could not be saved to encrypted storage.");
+      this.evaluatorMessage("The prompt could not be copied.");
     }
+    button.focus();
+  }
+
+  private renderRecipient(): void {
+    const text = recipient(this.evaluator);
+    for (const el of this.root.querySelectorAll<HTMLElement>("[data-auto-recipient]"))
+      el.textContent = text;
   }
 
   // `auto` false: a human approval stopped before the SQL ran. That is no Auto mode hold, so it
@@ -2620,6 +2933,9 @@ export class Gatekeeper {
 
   private async evaluateNext(): Promise<void> {
     if (!this.autoEnabled || this.autoBusy || this.autoRuns >= AUTO_RUNS_MAX) return;
+    // Captured once: this attempt is judged against the choice Auto mode was switched on with.
+    const rule = this.autoRule;
+    if (!rule) return;
     const card = this.cards.find((c) => this.autoWillTake(c));
     if (!card) return;
     const generation = this.autoGeneration;
@@ -2656,18 +2972,25 @@ export class Gatekeeper {
     };
     const timer = window.setTimeout(() => {
       controller.abort();
-      if (valid()) this.reviewCard(card, "Evaluation timed out. Approve manually");
+      if (valid()) {
+        // Once the read left, this deadline is the evaluator not answering in time, whatever
+        // the broker saw of the cancellation.
+        if (card.autoSent) card.autoFailure = { stage: "timeout" };
+        this.reviewCard(card, "Evaluation timed out. Approve manually");
+      }
       free();
       void this.evaluateNext();
     }, 15000);
     let run: Promise<void> | undefined;
     try {
-      card.autoStatus = "Evaluating with Jev";
+      card.autoStatus = AUTO_EVALUATING;
+      card.autoModel = rule.config.model;
+      card.autoFailure = undefined;
       this.renderQueue();
       if (!(await this.checkConnection()) || !valid() || controller.signal.aborted) return;
       // Waited for before anything leaves for the provider, so auto-deny, which reserves a heavy
       // card in the tick its check settles, decides first. A Heavy query alert alone holds
-      // nothing: the read goes on to the evaluation and runs if Jev clears it.
+      // nothing: the read goes on to the evaluation and runs if the evaluator clears it.
       const load = card.load;
       await load;
       if (!valid() || controller.signal.aborted || card.load !== load) return;
@@ -2689,14 +3012,16 @@ export class Gatekeeper {
         this.autoKey,
         analysis.input,
         controller.signal,
+        rule,
       );
       if (!valid() || controller.signal.aborted) return;
-      if (!validEvaluation(evaluation)) {
+      if (!validEvaluation(evaluation, rule)) {
+        card.autoFailure = { stage: "response" };
         this.reviewCard(card, "Invalid evaluator response or stale policy/model");
         return;
       }
       card.evaluation = evaluation;
-      if (!currentEvaluation(evaluation)) {
+      if (!currentEvaluation(evaluation, rule)) {
         this.reviewCard(card, refusalReason(evaluation));
         return;
       }
@@ -2705,12 +3030,17 @@ export class Gatekeeper {
       // evaluator for the next read while this one executes.
       this.autoRuns++;
       run = this.approve(card.id, false, evaluation);
-    } catch {
-      if (valid()) this.reviewCard(card, "Evaluator or metadata unavailable. Approve manually");
+    } catch (err) {
+      // Whoever aborted this attempt (the deadline, a disable) already said why; a late error
+      // must not rewrite it.
+      if (valid() && !controller.signal.aborted) {
+        if (err instanceof EvaluatorFailure) card.autoFailure = err.failure;
+        this.reviewCard(card, "Evaluator or metadata unavailable. Approve manually");
+      }
     } finally {
       window.clearTimeout(timer);
       free();
-      if (card.state === "ready" && card.autoStatus === "Evaluating with Jev")
+      if (card.state === "ready" && card.autoStatus === AUTO_EVALUATING)
         this.reviewCard(card, "Evaluation cancelled or authority changed");
       void this.evaluateNext();
     }
@@ -3195,8 +3525,7 @@ export class Gatekeeper {
       return;
     if (this.autoCard === card) this.autoAbort?.abort();
     // The audit row and history record why Auto mode stopped, never the evaluation it cut short.
-    if (card.autoStatus === "Evaluating with Jev")
-      card.autoStatus = `Needs review: ${HEAVY_REASON}`;
+    if (card.autoStatus === AUTO_EVALUATING) card.autoStatus = `Needs review: ${HEAVY_REASON}`;
     // Reserved before the await, like a click on Reject, so nothing else can take the card.
     this.setCardState(card.id, "rejecting");
     const sent = agentMessage(AUTO_DENY_MESSAGE, planLoad(card.sql, this.databaseType).hints);
@@ -3428,6 +3757,8 @@ export class Gatekeeper {
     // this.autoAbort moves on to the next read's evaluation once this card is reserved, so
     // keep the signal of the evaluation that cleared this one.
     const autoSignal = evaluation ? this.autoAbort?.signal : undefined;
+    // The rule in force as the decision is taken; a change since bumps the generation too.
+    const rule = evaluation ? this.autoRule : undefined;
     const gen = this.connGeneration;
     const active = this.activeGen;
     const auto = this.autoGeneration;
@@ -3449,7 +3780,8 @@ export class Gatekeeper {
           auto === this.autoGeneration &&
           this.mode === "read" &&
           !autoSignal?.aborted &&
-          currentEvaluation(evaluation)));
+          rule !== undefined &&
+          currentEvaluation(evaluation, rule)));
     // Reserve synchronously, before the host round-trip, for both approval sources.
     card.executionNotice = undefined;
     this.setCardState(id, "approving");
@@ -3848,7 +4180,13 @@ export class Gatekeeper {
     if (card.evaluation && reason === refusalReason(card.evaluation)) {
       return undefined;
     }
-    return { sent: Boolean(card.autoSent), reason: reason.slice(0, 200) };
+    if (!card.autoSent) return { sent: false, reason: reason.slice(0, 200) };
+    return {
+      sent: true,
+      reason: reason.slice(0, 200),
+      ...(card.autoFailure ? { failure: card.autoFailure } : {}),
+      ...(card.autoModel ? { model: card.autoModel } : {}),
+    };
   }
 
   private async postResult(card: Card, body: Record<string, unknown>): Promise<boolean> {

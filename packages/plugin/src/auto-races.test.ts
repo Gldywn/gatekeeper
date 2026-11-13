@@ -25,9 +25,12 @@ vi.mock("./anim", () => ({ enter: vi.fn(), reveal: vi.fn(), pulse: vi.fn() }));
 import { log } from "@beekeeperstudio/plugin";
 import { SchemaAnnotator } from "./annotate";
 import { Gatekeeper } from "./app";
-import { AUTO_APPROVED, SAVED_KEY_MASK } from "./render/auto";
+import { activeEvaluator, DEFAULT_SETTINGS, settingsFor } from "./evaluator";
+import { EvaluatorFailure } from "./net/broker";
+import { AUTO_APPROVED } from "./render/auto";
 import { ConfirmModal } from "./render/confirm";
-import { cardHtml } from "./render/queue";
+import { AUTO_EVALUATING, cardHtml } from "./render/queue";
+import { AUTO_MODEL, AUTO_THRESHOLDS as PLUGIN_CUTOFFS } from "./sql/auto";
 import type { LoadResult } from "./sql/load";
 import { catalogRows } from "./sql/pg/catalog-fixture";
 import { planRead } from "./sql/read-analysis";
@@ -46,10 +49,12 @@ const LIGHT: LoadResult = { lines: [], notes: [], estimates: [], heavy: false, c
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((r) => {
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((r, j) => {
     resolve = r;
+    reject = j;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 // On a stoppable connection the approved statement leaves behind a comment tag
@@ -89,6 +94,21 @@ function harness() {
     autoGeneration: 1,
     autoEnabled: true,
     autoKey: "synthetic-key",
+    evaluator: DEFAULT_SETTINGS,
+    autoRule: activeEvaluator(DEFAULT_SETTINGS),
+    autoSlot: "gatekeeper.typesafe-key",
+    settingsView: {
+      openEvaluator: vi.fn(),
+      refresh: vi.fn(),
+      focus: vi.fn(),
+      back: vi.fn(),
+      showKey: vi.fn(),
+    },
+    keyOps: Promise.resolve(true),
+    keySeq: 0,
+    keyIssues: new Map(),
+    keyLatest: new Map(),
+    setSettingsOpen: vi.fn(),
     autoDeferred: new Set<string>(),
     autoBusy: false,
     autoRuns: 0,
@@ -118,7 +138,7 @@ function harness() {
       executing: vi.fn(async () => true),
       result: vi.fn(async () => true),
       withdrawExecution: vi.fn(async () => true),
-      checkKey: vi.fn(async () => "valid"),
+      checkEvaluator: vi.fn(async () => "valid"),
       evaluate: vi.fn(),
       renew: vi.fn(),
     },
@@ -233,6 +253,40 @@ describe("shared manual/automatic execution authority", () => {
     expect(query).toHaveBeenLastCalledWith(executed(sql));
     expect(app.broker.executing).toHaveBeenCalledOnce();
   });
+  it("keeps why the evaluator gave no verdict, and which model was asked, on the hold", async () => {
+    const { app, card } = harness();
+    const sql = "SELECT quantity FROM public.products WHERE sku = 'synthetic-item' LIMIT 5";
+    card.sql = sql;
+    mockCatalog(sql, { "public.products": { quantity: "int4", sku: "text" } });
+    app.broker.evaluate.mockRejectedValue(new EvaluatorFailure({ stage: "http", status: 401 }));
+    await app.evaluateNext();
+    expect(card.autoFailure).toEqual({ stage: "http", status: 401 });
+    expect(app.broker.executing).not.toHaveBeenCalled();
+    await app.reject(card.id);
+    expect(app.broker.result).toHaveBeenCalledWith(
+      card.id,
+      card.leaseId,
+      expect.objectContaining({
+        autoHold: {
+          sent: true,
+          reason: "Evaluator or metadata unavailable. Approve manually",
+          failure: { stage: "http", status: 401 },
+          model: AUTO_MODEL,
+        },
+      }),
+    );
+  });
+  it("calls an answer this plugin cannot use an invalid answer, not a refusal", async () => {
+    const { app, card } = harness();
+    const sql = "SELECT quantity FROM public.products WHERE sku = 'synthetic-item' LIMIT 5";
+    card.sql = sql;
+    mockCatalog(sql, { "public.products": { quantity: "int4", sku: "text" } });
+    app.broker.evaluate.mockResolvedValue({ ...evaluation(), model: "jev-latest" });
+    await app.evaluateNext();
+    expect(card.autoFailure).toEqual({ stage: "response" });
+    expect(card.evaluation).toBeUndefined();
+    expect(app.broker.executing).not.toHaveBeenCalled();
+  });
   it.each(["disable", "lease", "reject", "schema"])(
     "stops joined-source inspection after %s while metadata is pending",
     async (change) => {
@@ -328,39 +382,50 @@ describe("shared manual/automatic execution authority", () => {
     expect(app.mode).toBe("read");
     expect(focus).toHaveBeenCalledOnce();
   });
-  it("opens Settings without enabling when the popover has no saved key", async () => {
+  it("opens the evaluator page on the key without enabling when no key is saved", async () => {
     const { app } = harness();
     app.autoEnabled = false;
-    app.openAutoSettings = vi.fn();
     storageRead.mockResolvedValue(null);
     await app.toggleAuto({ ...control(), closest: () => ({ querySelector: () => null }) });
-    expect(app.openAutoSettings).toHaveBeenCalledOnce();
+    expect(app.settingsView.openEvaluator).toHaveBeenCalledWith("autoKey");
     expect(app.autoEnabled).toBe(false);
     expect(app.broker.evaluate).not.toHaveBeenCalled();
   });
-  it("checks the saved key with TypeSafe before enabling from the popover", async () => {
+  it("opens the evaluator page on the first empty cutoff, with no word and no check", async () => {
+    const { app } = harness();
+    app.autoEnabled = false;
+    app.evaluator = { ...settingsFor("custom", "kev-4b"), baseUrl: "http://127.0.0.1:8080" };
+    await app.toggleAuto({ ...control(), closest: () => ({ querySelector: () => null }) });
+    expect(app.settingsView.openEvaluator).toHaveBeenCalledWith("evCut-personal_disclosure");
+    expect(app.broker.checkEvaluator).not.toHaveBeenCalled();
+    expect(app.autoEnabled).toBe(false);
+  });
+  it("checks the saved key with the evaluator before enabling from the popover", async () => {
     const { app } = harness();
     app.autoEnabled = false;
     app.cards = [];
-    app.openAutoSettings = vi.fn();
     storageRead.mockResolvedValue("saved-key");
     app.confirmModal = { cancel: vi.fn() };
     const popover = { ...control(), closest: () => ({ querySelector: () => null }) };
-    app.broker.checkKey.mockResolvedValueOnce("invalid");
+    app.broker.checkEvaluator.mockResolvedValueOnce("invalid");
     await app.toggleAuto(popover);
-    expect(app.broker.checkKey).toHaveBeenCalledWith("saved-key");
-    expect(app.openAutoSettings).toHaveBeenCalledOnce();
+    expect(app.broker.checkEvaluator).toHaveBeenCalledWith(
+      { provider: "typesafe", model: "jev-1.13.0" },
+      "saved-key",
+    );
+    expect(app.settingsView.openEvaluator).toHaveBeenCalledWith("autoKey");
     expect(app.autoEnabled).toBe(false);
-    app.broker.checkKey.mockResolvedValueOnce("outdated");
+    app.broker.checkEvaluator.mockResolvedValueOnce("outdated");
     await app.toggleAuto(popover);
     expect(app.autoEnabled).toBe(false);
-    app.broker.checkKey.mockResolvedValueOnce("unavailable");
+    app.broker.checkEvaluator.mockResolvedValueOnce("unavailable");
     await app.toggleAuto(popover);
-    expect(app.openAutoSettings).toHaveBeenCalledOnce();
+    expect(app.settingsView.openEvaluator).toHaveBeenCalledOnce();
     expect(app.autoEnabled).toBe(false);
     await app.toggleAuto(popover);
     expect(app.autoEnabled).toBe(true);
     expect(app.autoKey).toBe("saved-key");
+    expect(app.autoRule).toEqual(activeEvaluator(DEFAULT_SETTINGS));
   });
   it("waits for the connection's preferences before enabling, so auto-deny is never skipped", async () => {
     const { app } = harness();
@@ -388,10 +453,9 @@ describe("shared manual/automatic execution authority", () => {
     await app.toggleAuto(popover);
     expect(app.autoEnabled).toBe(true);
   });
-  it("does not open Settings for a stale credential lookup", async () => {
+  it("does not open the evaluator page for a stale credential lookup", async () => {
     const { app } = harness();
     app.autoEnabled = false;
-    app.openAutoSettings = vi.fn();
     const gate = deferred<null>();
     storageRead.mockReturnValue(gate.promise);
     const pending = app.toggleAuto({
@@ -401,23 +465,192 @@ describe("shared manual/automatic execution authority", () => {
     app.resetAuto("Connection changed");
     gate.resolve(null);
     await pending;
-    expect(app.openAutoSettings).not.toHaveBeenCalled();
+    expect(app.settingsView.openEvaluator).not.toHaveBeenCalled();
     expect(app.autoEnabled).toBe(false);
+  });
+  it("never enables under an evaluator changed during its check", async () => {
+    const { app } = harness();
+    app.autoEnabled = false;
+    app.autoRule = undefined;
+    app.confirmModal = { cancel: vi.fn() };
+    storageRead.mockResolvedValue("saved-key");
+    const verdict = deferred<string>();
+    app.broker.checkEvaluator.mockReturnValueOnce(verdict.promise);
+    const pending = app.toggleAuto({ ...control(), closest: () => null });
+    await vi.waitFor(() => expect(app.broker.checkEvaluator).toHaveBeenCalledOnce());
+    app.evaluator = { ...DEFAULT_SETTINGS, builtIn: false };
+    verdict.resolve("valid");
+    await pending;
+    expect(app.autoEnabled).toBe(false);
+    expect(app.autoRule).toBeUndefined();
   });
   it("saves a replacement key while enabled and uses it for the next evaluation", async () => {
     const { app } = harness();
     storageWrite.mockReset().mockResolvedValue(undefined);
-    const input = { value: " new-key ", closest: () => null };
-    await app.saveAutoKey(input);
+    app.pendingKey = { slot: "gatekeeper.typesafe-key", key: "new-key" };
+    await app.flushKey();
     expect(storageWrite).toHaveBeenCalledWith("gatekeeper.typesafe-key", "new-key", {
       encrypted: true,
     });
     expect(app.autoKey).toBe("new-key");
     storageWrite.mockClear();
-    await app.saveAutoKey({ value: "bad key", closest: () => null });
-    await app.saveAutoKey({ value: SAVED_KEY_MASK, closest: () => null });
+    app.pendingKey = { slot: "gatekeeper.typesafe-key", key: "bad key" };
+    await app.flushKey();
+    app.pendingKey = { slot: "gatekeeper.typesafe-key", key: "" };
+    await app.flushKey();
     expect(storageWrite).not.toHaveBeenCalled();
     expect(app.autoKey).toBe("new-key");
+  });
+  it("activates with the key a timer-started save is still writing, never the previous one", async () => {
+    const { app } = harness();
+    app.autoEnabled = false;
+    app.autoRule = undefined;
+    app.confirmModal = { cancel: vi.fn() };
+    const write = deferred<void>();
+    storageWrite.mockReset().mockReturnValue(write.promise);
+    let stored = "old-key";
+    storageRead.mockImplementation(async () => stored);
+    app.pendingKey = { slot: "gatekeeper.typesafe-key", key: "new-key" };
+    const saving = app.flushKey();
+    const enabling = app.toggleAuto({ ...control(), closest: () => null });
+    await Promise.resolve();
+    expect(app.broker.checkEvaluator).not.toHaveBeenCalled();
+    stored = "new-key";
+    write.resolve();
+    await saving;
+    await enabling;
+    expect(app.broker.checkEvaluator).toHaveBeenCalledWith(expect.anything(), "new-key");
+    expect(app.autoKey).toBe("new-key");
+  });
+  it("stops activation when the key on screen could not be saved", async () => {
+    const { app } = harness();
+    app.autoEnabled = false;
+    app.autoRule = undefined;
+    storageWrite.mockReset().mockRejectedValue(new Error("storage"));
+    storageRead.mockResolvedValue("old-key");
+    app.pendingKey = { slot: "gatekeeper.typesafe-key", key: "new-key" };
+    const message = { textContent: "", dataset: {} as Record<string, string> };
+    await app.toggleAuto({
+      ...control(),
+      closest: () => ({ querySelector: () => message }),
+    });
+    expect(app.autoEnabled).toBe(false);
+    expect(app.broker.checkEvaluator).not.toHaveBeenCalled();
+    expect(message.textContent).toBe("The key could not be saved to encrypted storage.");
+  });
+  it("never blames one destination's failed save on another", async () => {
+    const { app } = harness();
+    app.autoEnabled = false;
+    app.autoRule = undefined;
+    app.confirmModal = { cancel: vi.fn() };
+    storageWrite.mockReset().mockRejectedValueOnce(new Error("storage"));
+    app.pendingKey = { slot: "gatekeeper.typesafe-key", key: "new-key" };
+    expect(await app.flushKey("gatekeeper.typesafe-key")).toBe("failed");
+    // A keyless Custom server, cutoffs all set: its activation is judged on its own.
+    app.evaluator = {
+      ...settingsFor("custom", "kev-4b"),
+      baseUrl: "http://127.0.0.1:8080",
+      cutoffs: { ...PLUGIN_CUTOFFS },
+    };
+    storageRead.mockResolvedValue(null);
+    await app.toggleAuto({ ...control(), closest: () => null });
+    expect(app.broker.checkEvaluator).toHaveBeenCalledWith(
+      { provider: "custom", model: "kev-4b", baseUrl: "http://127.0.0.1:8080" },
+      "",
+    );
+    expect(app.autoEnabled).toBe(true);
+  });
+  it("remembers an invalid key the debounce already took, so activation stops on it", async () => {
+    const { app } = harness();
+    app.autoEnabled = false;
+    app.autoRule = undefined;
+    storageWrite.mockReset().mockResolvedValue(undefined);
+    storageRead.mockResolvedValue("old-key");
+    app.pendingKey = { slot: "gatekeeper.typesafe-key", key: "bad key" };
+    await app.flushKey();
+    expect(storageWrite).not.toHaveBeenCalled();
+    await app.toggleAuto({ ...control(), closest: () => null });
+    expect(app.autoEnabled).toBe(false);
+    expect(app.broker.checkEvaluator).not.toHaveBeenCalled();
+    expect(app.settingsView.openEvaluator).toHaveBeenCalledWith("autoKey");
+    // A valid key typed next clears it.
+    app.pendingKey = { slot: "gatekeeper.typesafe-key", key: "good-key" };
+    expect(await app.flushKey("gatekeeper.typesafe-key")).toBe("saved");
+  });
+  it("keeps an invalid key typed during an older save, until a newer edit clears it", async () => {
+    const { app } = harness();
+    app.autoEnabled = false;
+    app.autoRule = undefined;
+    const slot = "gatekeeper.typesafe-key";
+    const older = deferred<void>();
+    storageWrite.mockReset().mockReturnValueOnce(older.promise).mockResolvedValue(undefined);
+    storageRead.mockResolvedValue("key-a");
+    app.pendingKey = { slot, key: "key-a" };
+    const saving = app.flushKey(slot);
+    app.pendingKey = { slot, key: "bad key" };
+    const invalid = app.flushKey(slot);
+    older.resolve();
+    await saving;
+    expect(await invalid).toBe("invalid");
+    await app.toggleAuto({ ...control(), closest: () => null });
+    expect(app.autoEnabled).toBe(false);
+    expect(app.broker.checkEvaluator).not.toHaveBeenCalled();
+    // A save started after the invalid draft is newer and clears it.
+    app.pendingKey = { slot, key: "key-c" };
+    expect(await app.flushKey(slot)).toBe("saved");
+  });
+  it("orders a removal after a save still running, so the key stays removed", async () => {
+    const { app } = harness();
+    const custom = { ...settingsFor("custom", "kev-4b"), baseUrl: "http://127.0.0.1:8080" };
+    const slot = "gatekeeper.evaluator-key.custom.http://127.0.0.1:8080";
+    app.evaluator = custom;
+    app.autoSlot = slot;
+    app.keySaved = true;
+    const first = deferred<void>();
+    const writes: string[] = [];
+    storageWrite.mockReset().mockImplementation(async (_slot: string, value: string) => {
+      writes.push(value);
+      if (value === "replacement") await first.promise;
+    });
+    app.pendingKey = { slot, key: "replacement" };
+    const saving = app.flushKey();
+    const removing = app.removeKey();
+    first.resolve();
+    await Promise.all([saving, removing]);
+    expect(writes).toEqual(["replacement", ""]);
+    expect(app.autoKey).toBe("");
+    expect(app.keySaved).toBe(false);
+    expect(app.settingsView.showKey).toHaveBeenLastCalledWith(false);
+  });
+  it("keeps a key in the slot it was typed for, whatever is chosen when it saves", async () => {
+    const { app } = harness();
+    storageWrite.mockReset().mockResolvedValue(undefined);
+    const custom = "gatekeeper.evaluator-key.custom.http://127.0.0.1:8080";
+    app.pendingKey = { slot: custom, key: "server-key" };
+    await app.flushKey();
+    expect(storageWrite).toHaveBeenCalledWith(custom, "server-key", { encrypted: true });
+    // Auto mode runs on TypeSafe's slot: a key for another destination never becomes its key.
+    expect(app.autoKey).toBe("synthetic-key");
+  });
+  it("turns Auto mode off at the first edit of the evaluator, before it saves", async () => {
+    const { app, card } = harness();
+    const answer = deferred<AutoEvaluation>();
+    app.broker.evaluate.mockReturnValue(answer.promise);
+    vi.spyOn(app.annotator, "inspectRead").mockResolvedValue({
+      complete: true,
+      reasons: [],
+      input: { dialect: "postgresql", sql: card.sql, dependencies: [] },
+    });
+    app.checkConnection = vi.fn(async () => true);
+    app.pokePoll = vi.fn();
+    const evaluating = app.evaluateNext();
+    await vi.waitFor(() => expect(app.broker.evaluate).toHaveBeenCalledOnce());
+    app.invalidateAuto();
+    answer.resolve(evaluation());
+    await evaluating;
+    expect(app.autoEnabled).toBe(false);
+    expect(app.broker.executing).not.toHaveBeenCalled();
+    expect(card.state).toBe("ready");
   });
   it("evaluates only the reads that arrive after activation", async () => {
     const { app, card } = harness();
@@ -606,7 +839,11 @@ describe("shared manual/automatic execution authority", () => {
         card.id,
         card.leaseId,
         expect.objectContaining({
-          autoHold: { sent: true, reason: "Auto mode disabled while evaluating" },
+          autoHold: {
+            sent: true,
+            reason: "Auto mode disabled while evaluating",
+            model: AUTO_MODEL,
+          },
         }),
       );
     },
@@ -736,7 +973,7 @@ describe("shared manual/automatic execution authority", () => {
       expect(app.mode).toBe(next);
       expect(app.autoKey).toBe("");
       expect(app.reportConnection).toHaveBeenCalledOnce();
-      expect(app.broker.checkKey).not.toHaveBeenCalled();
+      expect(app.broker.checkEvaluator).not.toHaveBeenCalled();
     },
   );
   it("never restores previous write authority when Auto mode is toggled off", async () => {
@@ -787,7 +1024,7 @@ describe("Auto mode queue while an approved read executes", () => {
     expect(card.state).toBe("executing");
     expect(card.autoStatus).toBe(AUTO_APPROVED);
     const html = cardHtml(card, "postgresql", new Map());
-    expect(html).not.toContain("Evaluating with Jev");
+    expect(html).not.toContain("Auto mode is evaluating");
     expect(html).toContain("This read was approved automatically");
     first.resolve(empty);
     await pending;
@@ -927,6 +1164,32 @@ describe("Auto mode queue while an approved read executes", () => {
       expect(query).not.toHaveBeenCalled();
     });
 
+    it("keeps the timeout when the evaluator's error arrives after the deadline", async () => {
+      const { app, card } = harness();
+      vi.spyOn(app.annotator, "inspectRead").mockResolvedValue({
+        complete: true,
+        reasons: [],
+        input: { dialect: "postgresql", sql: card.sql, dependencies: [] },
+      });
+      const answer = deferred<AutoEvaluation>();
+      app.broker.evaluate.mockReturnValue(answer.promise);
+      const pending = app.evaluateNext();
+      await vi.waitFor(() => expect(app.broker.evaluate).toHaveBeenCalledOnce());
+      await vi.advanceTimersByTimeAsync(15_000);
+      answer.reject(new EvaluatorFailure({ stage: "http", status: 503 }));
+      await pending;
+      expect(card.autoStatus).toBe("Needs review: Evaluation timed out. Approve manually");
+      expect(card.autoFailure).toEqual({ stage: "timeout" });
+      await app.reject(card.id);
+      expect(app.broker.result).toHaveBeenCalledWith(
+        card.id,
+        card.leaseId,
+        expect.objectContaining({
+          autoHold: expect.objectContaining({ failure: { stage: "timeout" } }),
+        }),
+      );
+    });
+
     // Held by the evaluator, the queued read would never be evaluated nor left to a human, so its
     // alert would stay owed to Auto mode for good.
     it("frees the evaluator at the deadline when a host call never answers", async () => {
@@ -943,7 +1206,7 @@ describe("Auto mode queue while an approved read executes", () => {
       await vi.advanceTimersByTimeAsync(15_000);
       expect(card.autoStatus).toBe("Needs review: Evaluation timed out. Approve manually");
       await vi.waitFor(() => expect(inspect).toHaveBeenCalledTimes(2));
-      expect(queued.autoStatus).toBe("Evaluating with Jev");
+      expect(queued.autoStatus).toBe(AUTO_EVALUATING);
       // The first evaluation settling late leaves the one now running alone.
       stuck.resolve(null);
       await first;
@@ -1763,7 +2026,7 @@ describe("load check binding", () => {
     const { app, card } = harness();
     app.broker.result.mockResolvedValueOnce(false);
     const { settled } = start(app, card);
-    card.autoStatus = "Evaluating with Jev";
+    card.autoStatus = AUTO_EVALUATING;
     settled.resolve(HEAVY);
     await flush();
     expect(card.state).toBe("ready");
@@ -1992,7 +2255,7 @@ describe("the poll's report to the broker", () => {
     const { app, sent } = polling([
       { autoAttempt: 1, autoStatus: "Needs review: Sensitive source or alias: email" },
       {},
-      { autoAttempt: 1, autoStatus: "Evaluating with Jev" },
+      { autoAttempt: 1, autoStatus: AUTO_EVALUATING },
       { sql: "DELETE FROM public.products" },
     ]);
     app.autoCard = app.cards[2];
@@ -2004,7 +2267,7 @@ describe("the poll's report to the broker", () => {
   });
 
   it("names a card whose evaluation timed out, before its calls settle", async () => {
-    const { app, sent } = polling([{ autoAttempt: 1, autoStatus: "Evaluating with Jev" }]);
+    const { app, sent } = polling([{ autoAttempt: 1, autoStatus: AUTO_EVALUATING }]);
     app.autoCard = app.cards[0];
     app.autoAbort = new AbortController();
     app.autoAbort.abort();

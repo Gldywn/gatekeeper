@@ -1,4 +1,9 @@
-import type { AutoEvaluation, EvaluationInput, KeyStatus } from "@gatekeeper/shared";
+import type {
+  AutoEvaluation,
+  EvaluationInput,
+  EvaluatorStatus,
+  KeyStatus,
+} from "@gatekeeper/shared";
 import { z } from "zod";
 
 export const AUTO_MODEL = "jev-1.13.0";
@@ -92,20 +97,94 @@ export const evaluationInput = z
   })
   .strict();
 
+// The evaluators Auto mode can ask. Model names are each provider's own; a Custom server is
+// any System One server the user points Auto mode at.
+const CUSTOM_MODEL = /^[A-Za-z0-9._:@/-]{1,100}$/;
+export const PROVIDERS = ["typesafe", "custom"] as const;
+export const evaluatorConfig = z.discriminatedUnion("provider", [
+  z.object({ provider: z.literal("typesafe"), model: z.literal(AUTO_MODEL) }).strict(),
+  z
+    .object({
+      provider: z.literal("custom"),
+      model: z.string().regex(CUSTOM_MODEL),
+      baseUrl: z.string().max(2048),
+    })
+    .strict(),
+]);
+export type EvaluatorConfig = z.infer<typeof evaluatorConfig>;
+export const DEFAULT_EVALUATOR: EvaluatorConfig = { provider: "typesafe", model: AUTO_MODEL };
+
+// Plain http only to a loopback literal: anywhere else, anyone on the path could read the input
+// or answer in the server's place. No credentials, query or fragment, since the URL identifies
+// the evaluator and its origin is kept with each decision.
+export function canonicalBaseUrl(raw: string): string | undefined {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return undefined;
+  }
+  if (url.username || url.password || url.search || url.hash) return undefined;
+  const loopback = url.hostname === "127.0.0.1" || url.hostname === "[::1]";
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) return undefined;
+  return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
+}
+
+const TYPESAFE_API = "https://api.typesafe.ai";
+interface Endpoint {
+  infer: string;
+  check: string;
+}
+
+export function endpointOf(config: EvaluatorConfig): Endpoint | undefined {
+  if (config.provider === "typesafe")
+    return { infer: `${TYPESAFE_API}/v1/systemone`, check: `${TYPESAFE_API}/v1/models` };
+  const base = canonicalBaseUrl(config.baseUrl);
+  return base && base === config.baseUrl
+    ? { infer: `${base}/v1/systemone`, check: `${base}/v1/models` }
+    : undefined;
+}
+
+export interface EvaluationRequest {
+  evaluator: EvaluatorConfig;
+  cutoffs: Cutoffs;
+  builtIn: boolean;
+}
+
 export type Evaluator = (
   input: EvaluationInput,
   key: string,
   signal: AbortSignal,
   sqlDigest: string,
+  request?: EvaluationRequest,
 ) => Promise<AutoEvaluation>;
 
 export class EvaluationError extends Error {
   constructor(
-    readonly stage: "network" | "http" | "response" | "cancelled",
+    readonly stage: "input" | "network" | "http" | "response" | "cancelled",
     readonly status?: number,
   ) {
     super(stage === "cancelled" ? "Evaluation cancelled" : "Evaluator unavailable");
   }
+}
+
+// Never relay provider bodies: they can echo the key or input.
+async function readBounded(response: Response, limit = 32000): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("Empty evaluator response");
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > limit) {
+      await reader.cancel();
+      throw new Error("Invalid evaluator response");
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 export async function evaluateProbabilities(
@@ -113,17 +192,19 @@ export async function evaluateProbabilities(
   key: string,
   signal: AbortSignal,
   questions = evaluationQuestions,
+  config: EvaluatorConfig = DEFAULT_EVALUATOR,
 ): Promise<Record<string, number>> {
-  const response = await fetch("https://api.typesafe.ai/v1/systemone", {
+  const endpoint = endpointOf(config);
+  const body = JSON.stringify({ model: config.model, state: input, questions });
+  if (!endpoint) throw new EvaluationError("input");
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (key) headers.Authorization = `Bearer ${key}`;
+  const response = await fetch(endpoint.infer, {
     method: "POST",
     redirect: "error",
     signal,
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: AUTO_MODEL,
-      state: input,
-      questions,
-    }),
+    headers,
+    body,
   }).catch(() => {
     throw new EvaluationError(signal.aborted ? "cancelled" : "network");
   });
@@ -132,30 +213,14 @@ export async function evaluateProbabilities(
     throw new EvaluationError("http", response.status);
   }
   try {
-    // Never relay provider bodies: they can echo the key or input.
-    const reader = response.body?.getReader();
-    if (!reader) throw new Error("Empty evaluator response");
-    const chunks: Uint8Array[] = [];
-    let size = 0;
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > 32000) {
-        await reader.cancel();
-        throw new Error("Invalid evaluator response");
-      }
-      chunks.push(value);
-    }
-    const body = Buffer.concat(chunks).toString("utf8");
     const result = z
       .object({
-        model: z.literal(AUTO_MODEL),
+        model: z.literal(config.model),
         answers: z.record(
           z.object({ type: z.literal("noul"), noul: z.number().finite().min(0).max(1) }).strict(),
         ),
       })
-      .parse(JSON.parse(body));
+      .parse(JSON.parse(await readBounded(response)));
     if (signal.aborted) throw new Error("Evaluation cancelled");
     const probabilities: Record<string, number> = {};
     for (const id of Object.keys(questions)) {
@@ -171,21 +236,61 @@ export async function evaluateProbabilities(
   }
 }
 
-// Fixed cutoffs are conservative candidates, not empirically calibrated guarantees.
-export const evaluate: Evaluator = async (input, key, signal, sqlDigest) => {
-  const probabilities = await evaluateProbabilities(input, key, signal);
-  const reasons = (Object.keys(AUTO_THRESHOLDS) as (keyof typeof AUTO_THRESHOLDS)[])
-    .filter((id) => probabilities[id] > AUTO_THRESHOLDS[id])
+export type Cutoffs = Record<keyof typeof AUTO_THRESHOLDS, number>;
+
+const inUnitRange = (v: unknown): v is number =>
+  typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1;
+
+// The one decision every evaluator goes through. Exactly the four axes, each with its own
+// probability and cutoff in [0,1]: a missing, extra or invalid one never reads as a pass,
+// whatever produced the numbers.
+export function decide(
+  probabilities: Record<string, number>,
+  cutoffs: Cutoffs,
+): { eligible: boolean; reasons: string[] } {
+  const axes = Object.keys(reasonsByAxis) as (keyof Cutoffs)[];
+  const exact = (o: object) =>
+    Object.keys(o).length === axes.length && axes.every((id) => Object.hasOwn(o, id));
+  if (
+    !exact(probabilities) ||
+    !exact(cutoffs) ||
+    !axes.every((id) => inUnitRange(probabilities[id]) && inUnitRange(cutoffs[id]))
+  )
+    return { eligible: false, reasons: ["Invalid evaluator response or stale policy/model"] };
+  const reasons = axes
+    .filter((id) => probabilities[id] > cutoffs[id])
     .map((id) => reasonsByAxis[id]);
+  return { eligible: reasons.length === 0, reasons };
+}
+
+// The built-in cutoffs are conservative candidates measured for jev-1.13.0, not calibrated
+// guarantees; any other cutoffs are the user's. The record keeps the cutoffs in force and
+// whether they were the built-in ones, so history grades each decision by its own rule.
+export const evaluate: Evaluator = async (input, key, signal, sqlDigest, request) => {
+  const { evaluator, cutoffs, builtIn } = request ?? {
+    evaluator: DEFAULT_EVALUATOR,
+    cutoffs: AUTO_THRESHOLDS,
+    builtIn: true,
+  };
+  const probabilities = await evaluateProbabilities(
+    input,
+    key,
+    signal,
+    evaluationQuestions,
+    evaluator,
+  );
   return {
-    provider: "typesafe",
-    model: AUTO_MODEL,
+    provider: evaluator.provider,
+    model: evaluator.model,
     policy: AUTO_POLICY,
     evaluatedAt: Date.now(),
     sqlDigest,
-    eligible: reasons.length === 0,
-    reasons,
+    ...decide(probabilities, cutoffs),
     probabilities,
+    thresholds: { ...cutoffs },
+    builtIn,
+    // The origin only: a path can carry what does not belong in a kept record.
+    ...(evaluator.provider === "custom" ? { endpoint: new URL(evaluator.baseUrl).origin } : {}),
   };
 };
 
@@ -211,6 +316,46 @@ export const checkKey: KeyChecker = async (key, signal) => {
   } catch (err) {
     const code = (err as { cause?: { code?: string } }).cause?.code;
     console.error(`[gatekeeper] TypeSafe key check failed: ${code ?? (err as Error).name}`);
+    return "unavailable";
+  }
+};
+
+export type EvaluatorChecker = (
+  config: EvaluatorConfig,
+  key: string,
+  signal: AbortSignal,
+) => Promise<EvaluatorStatus>;
+
+const modelList = z
+  .object({ models: z.array(z.object({ name: z.string() }).passthrough()) })
+  .passthrough();
+
+// Metadata calls only, so a test sends no user data. TypeSafe keeps checkKey's any-2xx meaning:
+// whether its list names jev-1.13.0 exactly is unverified, so requiring it could lock users out.
+export const checkEvaluator: EvaluatorChecker = async (config, key, signal) => {
+  if (config.provider === "typesafe") return checkKey(key, signal);
+  const endpoint = endpointOf(config);
+  if (!endpoint) return "unavailable";
+  try {
+    const response = await fetch(endpoint.check, {
+      redirect: "error",
+      signal,
+      headers: key ? { Authorization: `Bearer ${key}` } : {},
+    });
+    if (response.status === 401 || response.status === 403) {
+      await response.body?.cancel();
+      return "invalid";
+    }
+    if (!response.ok) {
+      await response.body?.cancel();
+      console.error(`[gatekeeper] Evaluator check answered HTTP ${response.status}`);
+      return "unavailable";
+    }
+    const { models } = modelList.parse(JSON.parse(await readBounded(response)));
+    return models.some((m) => m.name === config.model) ? "valid" : "model-missing";
+  } catch (err) {
+    const code = (err as { cause?: { code?: string } }).cause?.code;
+    console.error(`[gatekeeper] Evaluator check failed: ${code ?? (err as Error).name}`);
     return "unavailable";
   }
 };
@@ -294,6 +439,29 @@ export const autoHoldRecord = z
         const diagnostic = reason.replace(/^Needs review:\s*/, "").split(":")[0];
         return holdReasons.has(diagnostic) ? diagnostic : "Automatic review required";
       }),
+    // Why the evaluator gave no verdict, in the broker's own diagnostic terms, and the model
+    // that was asked: never a provider's text. A malformed one reads as not recorded and leaves
+    // the hold, and the decision it rides with, standing.
+    failure: z
+      .object({
+        stage: z.enum(["timeout", "network", "http", "response", "input", "cancelled", "internal"]),
+        status: z.number().int().min(100).max(599).optional(),
+      })
+      .strict()
+      .optional()
+      .catch(undefined),
+    model: z.string().regex(CUSTOM_MODEL).optional().catch(undefined),
+  })
+  .strict();
+
+const probability = z.number().finite().min(0).max(1);
+// Exactly the four axes: a record cannot carry a looser rule by leaving one out.
+export const recordedCutoffs = z
+  .object({
+    personal_disclosure: probability,
+    organization_disclosure: probability,
+    secret_disclosure: probability,
+    insufficient_context: probability,
   })
   .strict();
 
@@ -302,8 +470,8 @@ export const approvalAttribution = z
     source: z.enum(["human", "automatic"]),
     evaluation: z
       .object({
-        provider: z.literal("typesafe"),
-        model: z.literal(AUTO_MODEL),
+        provider: z.enum(PROVIDERS),
+        model: z.string().regex(CUSTOM_MODEL),
         policy: z.enum([
           "auto-beta-1",
           "auto-beta-2",
@@ -319,7 +487,11 @@ export const approvalAttribution = z
         sqlDigest: z.string().regex(/^[a-f0-9]{64}$/),
         eligible: z.boolean(),
         reasons: z.array(z.string().max(200)).max(10),
-        probabilities: z.record(z.number().finite().min(0).max(1)),
+        probabilities: z.record(probability),
+        // Absent from records made before cutoffs and evaluator choice were recorded.
+        thresholds: recordedCutoffs.optional(),
+        builtIn: z.boolean().optional(),
+        endpoint: z.string().max(300).optional(),
       })
       .strict()
       .optional(),

@@ -8,17 +8,72 @@ calibration. The [evaluation bench](../packages/server/evals/README.md) holds th
 and replays recorded probabilities against thresholds without further inference.
 
 Auto mode is off after loading Gatekeeper. Hover or focus the lightning icon beside the
-Schema access icon, or use the Auto mode switch in Settings. The popover explains
-provider sharing and offers activation with an existing key. Clicking the icon, or
-activating without a saved key, opens the Auto mode section of Settings with the key
-field focused. Credentials are entered only in Settings, never in the compact popover.
-The key field saves as you type, whether Auto mode is on or off, and a running Auto
-mode uses a replaced key from its next evaluation.
+Schema access icon, or use the Auto mode switch in Settings. The popover names who receives
+the evaluator input and offers activation with what is already set up. Clicking the icon
+opens the Auto mode section of Settings. Activating while something is missing (a key, a
+server URL, a cutoff) opens the evaluator page on the first missing field, without a message:
+the evaluator line already says what it needs. Credentials are entered only on the evaluator
+page, never in the compact popover. A key field saves as you type, whether Auto mode is on or
+off, and a running Auto mode uses a replaced key from its next evaluation.
 The installed Beekeeper SDK supports
-`appStorage.getItem/setItem(..., { encrypted: true })`. The key is stored there, scoped to
-the plugin. It is never placed in MCP arguments, broker storage, logs or result records.
+`appStorage.getItem/setItem(..., { encrypted: true })`. Keys and the evaluator choice are
+stored there, scoped to the plugin. A key is never placed in MCP arguments, broker storage,
+logs or result records.
 No account or live inference is
 configured by the repository.
+
+## Evaluator
+
+Settings' Auto mode box names the evaluator in one line: the model, its provider, and the
+state of its cutoffs (Built-in cutoffs, Your cutoffs, Cutoffs needed). Change opens the
+evaluator page in the same dialog; Escape or the back arrow returns to Settings.
+
+| Provider | Models | Address | Key |
+| :--- | :--- | :--- | :--- |
+| TypeSafe | `jev-1.13.0` | `https://api.typesafe.ai/v1/systemone` | required |
+| Custom server | any System One model | `<server URL>/v1/systemone` | optional |
+
+Both receive the same input and the same four questions and answer with one probability of
+yes per question. A Custom server is any server speaking TypeSafe's System One protocol, such
+as [Kev](https://github.com/jaredpalmer/kev); its URL is https, or plain http only to
+`127.0.0.1` or `[::1]` (a typed `localhost` is saved as `127.0.0.1`), with no credentials,
+query or fragment. Its path is kept, and the record keeps only its origin. A Custom server
+must refuse a request too long for it rather than cut it; Gatekeeper cannot verify that.
+
+**Cutoffs.** Gatekeeper's built-in cutoffs (the table under "Provider boundary") exist only
+for `jev-1.13.0`, as policy `auto-v10` measured them, and are checked by default. Every
+other model starts with empty cutoffs: Auto mode cannot turn on until all four are set, and
+an empty cutoff never counts as zero. A read passes when every probability is at or below its
+cutoff. Cutoffs the user sets are the user's delegation, not a Gatekeeper measurement; the
+record keeps them and whether they were built in, and the detail says "with your cutoffs".
+The four questions stay Gatekeeper's and are not configurable.
+
+**Measuring cutoffs.** The evaluator page copies a prompt for the user's agent, which runs the
+[evaluation bench](../packages/server/evals/README.md) against the chosen evaluator: a live
+development run, `--propose` to derive four cutoffs, then one validation run replayed with
+those cutoffs unchanged. The prompt carries no key and the agent never edits Settings.
+
+**Changes.** Any edit of the provider, model, URL, a cutoff or the built-in box turns Auto
+mode off at the first keystroke, and the evaluation in flight can no longer approve anything:
+Auto mode freezes the evaluator and cutoffs it is switched on with and judges each answer
+against them. Replacing a key does not turn it off. Each key is stored for the destination it
+was typed for (TypeSafe, a Custom server's full URL) and never sent to another one. A damaged stored choice leaves Auto mode without an evaluator
+rather than falling back to TypeSafe.
+
+**Clef.** Cloudflare's Clef models are not offered. Workers AI cuts a text state longer than
+the model reads instead of refusing it (Cloudflare's model pages say so), and an answer about
+a cut state is not about the read. Our development requests left no evidence of where that cut
+falls, since their four questions outweigh their state, so no size check could keep a cut
+read from approving itself (operator decision, 2026-11-13).
+
+**Connection test.** Test connection, and each activation, use a metadata call only: TypeSafe's
+`GET /v1/models` (any 2xx accepted, as before), and a Custom server's `GET /v1/models`, which
+must list the model.
+
+**Versions.** An older plugin's request still evaluates with TypeSafe and the built-in
+cutoffs. A newer plugin on an older server says "Restart the Gatekeeper server to choose an
+evaluator. It predates this plugin." Records from before this change carry no cutoffs; they
+display as before.
 
 Enabling first forces Read only and cancels an open mode confirmation. Write and
 Destructive remain selectable. Confirming either mode disables Auto mode before granting
@@ -290,16 +345,16 @@ to the whole plugin.
 
 ## Load check
 
-Before the read analysis, and so before anything is sent to TypeSafe, Auto mode waits for
+Before the read analysis, and so before anything is sent to the evaluator, Auto mode waits for
 the card's [load check](../SECURITY.md#load-check), so that Auto-deny heavy queries, when on,
 rejects a flagged read on arrival before Auto mode can take it. A Heavy query alert does not
-hold the read: it goes on to the usual evaluation and runs if Jev clears it. With Auto-deny
-heavy queries off (the default), a heavy read can therefore run without a human; the decision
-records that it was flagged, and Recently resolved and the Audit Trail show its gauge. Auto
-mode cannot be enabled while the connection's own settings are still loading, so the setting
-is never skipped. A check that could not finish (no row estimate, index list unavailable,
-statistics late or unavailable) changes nothing either. Passing the check does not make a read
-cheap, because a range on an indexed column can still scan most of a table.
+hold the read: it goes on to the usual evaluation and runs if the evaluator clears it. With
+Auto-deny heavy queries off (the default), a heavy read can therefore run without a human; the
+decision records that it was flagged, and Recently resolved and the Audit Trail show its gauge.
+Auto mode cannot be enabled while the connection's own settings are still loading, so the
+setting is never skipped. A check that could not finish (no row estimate, index list
+unavailable, statistics late or unavailable) changes nothing either. Passing the check does not
+make a read cheap, because a range on an indexed column can still scan most of a table.
 
 ## Provider boundary
 
@@ -313,16 +368,17 @@ of the same literal kind share a parameter. Structural numbers such as `ORDER BY
 `GROUP BY 1`, `LIMIT 5` and `OFFSET 2` stay visible, as do JSON keys and paths after
 screening. The original SQL remains unchanged
 for execution. Only that SQL structure and the
-referenced schema/table/column names, types and usages go to TypeSafe.
+referenced schema/table/column names, types and usages go to the evaluator.
 No query result rows, agent intent, connection name, database name or unreferenced column
 metadata are sent. Names themselves can still contain confidential information. These
 checks do not guarantee anonymization. The activation disclosure is explicit consent
 to this sharing and to returning automatically approved results to the requesting agent.
 
-Each activation first checks the key with `GET /v1/models`, which lists the models
-available to the account and evaluates nothing, so it carries only the key. A 401 or 403
-opens the Auto mode section of Settings with the reason under the key field. Any other
-failure leaves Auto mode off and says TypeSafe could not be reached. The route and the
+Each activation first runs the connection test described under "Evaluator", which evaluates
+nothing, so it carries only the key. A 401 or 403 opens the evaluator page with "The evaluator
+refused this API key." under the key. A Custom server that does not list the model opens the
+page on the model with "<model> is not available with these settings." Any other failure leaves
+Auto mode off and says the evaluator could not be reached. For TypeSafe, the route and the
 meaning of 401/403 come from TypeSafe's JavaScript SDK (v0.6.0), not from a live call.
 
 Inference uses the authenticated local plugin channel and native `fetch` in the broker.
@@ -331,8 +387,9 @@ disallows redirects, checks the live request/lease/connection before and after i
 and never forwards provider error bodies. The plugin aborts outstanding evaluation on
 deactivation and applies its own 15-second deadline. There is no retry or provider fallback.
 
-The native endpoint is `POST https://api.typesafe.ai/v1/systemone`, using Bearer auth and
-`model`, `state`, `questions`. Model `jev-1.13.0` and policy `auto-v10` are pinned.
+TypeSafe's native endpoint is `POST https://api.typesafe.ai/v1/systemone`, using Bearer auth
+and `model`, `state`, `questions`; every evaluator receives that same body. With TypeSafe,
+model `jev-1.13.0` and policy `auto-v10`'s built-in cutoffs are the default.
 Four focused Noul questions are batched: personal disclosure, organization disclosure,
 access secret disclosure and insufficient context. Noul is a probability of yes, not a
 Choice/Score confidence value. All four conditions must pass:
@@ -424,9 +481,14 @@ own work can still take the remaining connections.
 
 History records Approved automatically or Approved by you. Available evaluator output,
 provider, pinned model, policy, evaluation time and SQL digest are retained in `policy_json`
-and shown in details and Audit Trail. They survive result-row purging and remain indefinitely
-with the decided request. Older records without attribution are
-not retroactively labelled as human approvals.
+and shown in details and Audit Trail, together with the cutoffs in force, which grade the
+displayed probabilities rather than appear as numbers. They survive result-row purging and
+remain indefinitely with the decided request. Older records without attribution
+are not retroactively labelled as human approvals. A detail grades each probability against
+the cutoffs its record carries; a record from before cutoffs were kept is graded against
+`auto-v10`'s only when it names that exact provider, model and policy, and malformed recorded
+cutoffs leave the numbers ungraded. Recorded cutoffs never grant authority: the plugin and the
+broker still require the issued evaluation and the cutoffs they enforce themselves.
 
 On macOS, a read submitted while Auto mode is on raises no alert until Auto mode leaves it to
 you: a hold, a refusal, a failed or timed-out evaluation, or Auto mode switched off. The plugin
@@ -435,8 +497,8 @@ Auto mode approves stays silent, unless the plugin stopped reporting for 15 seco
 the read was still waiting at half its life (for instance behind long automatic runs). See
 [Desktop notifications](CONFIGURATION.md#desktop-notifications-macos).
 
-The plugin can attach `autoHold: { sent: boolean, reason: string }` to `POST /result`
-when a read held by Auto mode is resolved. The broker stores it atomically alongside
+The plugin can attach `autoHold: { sent: boolean, reason: string, failure?, model? }` to
+`POST /result` when a read held by Auto mode is resolved. The broker stores it atomically alongside
 approval and evaluation in `policy_json` and exposes it only in the host-side
 `ActivityEntry`, independently of result-row purging. The record is optional for
 older plugins. Its presence records a hold, not authority to execute.
@@ -455,6 +517,18 @@ is missing from that list. A catalog query the host rejects is recorded as
 fail validation, stay `Metadata unavailable`. This result-time record does not cover a card
 lost to a crash, cancellation or expiry before the plugin posts its outcome.
 
+When a read left and the evaluator gave no verdict, the hold also says why and which model
+was asked: `failure` is the broker's own diagnostic stage (`timeout`, `network`, `http`,
+`response`, `input`, `cancelled`, `internal`) with the provider's HTTP status when there is
+one, and `model` the model Auto mode was switched on with. The plugin records a timeout when
+its own 15-second deadline passes after submission, and `response` when it refuses an answer
+the broker returned. A malformed `failure` or `model` reads as not recorded and leaves the
+hold standing. Neither keeps the provider's reply, a key, a server address or a policy: a
+Custom model named twice on two servers is not told apart. The history and the Markdown
+export say the outcome in one sentence (see `packages/plugin/DESIGN.md`); a refusal names the
+questions that went over their recorded cutoffs, since the evaluator answers with one
+probability per question and no explanation.
+
 ## Verification and limits
 
 The measured evidence is the live run described under "Provider boundary". Those
@@ -469,7 +543,7 @@ rules, not that the metadata query returns what a real server holds.
 ### Real catalog check
 
 This check has not been run yet. It needs a human with Beekeeper on the synthetic test
-database, never a real one, and no Auto mode or TypeSafe call:
+database, never a real one, and no Auto mode or evaluator call:
 
 1. Start the synthetic databases with `pnpm db:up` if they are not running. Do not recreate
    volumes.
@@ -508,4 +582,4 @@ JavaScript checks. Use a database role with only the privileges you intend to de
 Regression tests cover missing keys, stale credential lookups, immediate disable, matching
 server/plugin probability cutoffs, and old-policy invalidation without blocking human
 approval. The plugin integration tests mock catalog
-metadata and the evaluator. They do not execute database queries or call TypeSafe.
+metadata and the evaluator. They do not execute database queries or call an evaluator.

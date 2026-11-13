@@ -30,7 +30,7 @@ import { countsRows } from "../sql/inspect";
 import type { ActivityEntry, Card, HistItem, Presence, SessionRoster } from "../types";
 import { autoIcon } from "./auto";
 import { CANCELLED_NOTE, EXECUTION_UNKNOWN, NOT_DELIVERED_NOTE } from "./detail";
-import { AUTO_EVALUATING, busyLabel } from "./queue";
+import { AUTO_EVALUATING, busyLabel, evalNote } from "./queue";
 import { rosterRow } from "./roster";
 import { statusIcon } from "./status";
 
@@ -73,7 +73,7 @@ export function queueRowHtml(
     card.state !== "ready"
       ? '<span class="spin" aria-hidden="true"></span>'
       : evaluating
-        ? '<span class="ix-dot eval" aria-hidden="true"></span><span class="sr-only">Auto mode is evaluating this read with Jev.</span>'
+        ? `<span class="ix-dot eval" aria-hidden="true"></span><span class="sr-only">${escapeHtml(evalNote(card.autoModel))}</span>`
         : '<span class="ix-dot" aria-hidden="true"></span>';
   let side: string;
   if (card.state === "executing" && card.run) {
@@ -123,7 +123,7 @@ export function rowFact(item: HistItem, databaseType: string): string {
 function rowGlyph(item: HistItem): string {
   const glyph = (cls: string, icon: string, label: string) =>
     `<span class="hstate ${cls}" title="${label}" aria-label="${label}">${icon}</span>`;
-  if (item.status === "approved" && item.approval?.source === "automatic") {
+  if (item.status === "approved" && item.approval?.source === "automatic" && !item.autoHold) {
     return glyph("auto", autoIcon, "Approved automatically");
   }
   // The load check declined it, not you: its gauge, as Auto mode's approvals show its bolt.
@@ -144,18 +144,24 @@ function rowGlyph(item: HistItem): string {
 // When Auto mode approved it, the row's own glyph is already the bolt.
 function autoFlag(item: Pick<HistItem, "status" | "approval" | "evaluation" | "autoHold">): string {
   const evaluation = item.approval?.evaluation ?? item.evaluation;
-  if (item.approval?.source === "automatic" || (!evaluation && !item.autoHold)) {
+  // The final hold outranks an automatic approval a withdrawn attempt left on record.
+  if (
+    (item.approval?.source === "automatic" && !item.autoHold) ||
+    (!evaluation && !item.autoHold)
+  ) {
     return "";
   }
   // Only what the record establishes: a human approval names its decider, an attempted
-  // submission is not a local stop.
-  const label = evaluation
-    ? item.status === "approved" && item.approval?.source === "human"
-      ? "Evaluated by Auto mode, decided by you"
-      : "Evaluated by Auto mode"
-    : item.autoHold?.sent
-      ? "Auto mode did not finish evaluating this read"
-      : "Auto mode stopped this read before evaluation";
+  // submission is not a local stop, and a failure outranks an answer this plugin refused.
+  const label = item.autoHold?.failure
+    ? "Auto mode did not finish evaluating this read"
+    : evaluation
+      ? item.status === "approved" && item.approval?.source === "human"
+        ? "Evaluated by Auto mode, decided by you"
+        : "Evaluated by Auto mode"
+      : item.autoHold?.sent
+        ? "Auto mode did not finish evaluating this read"
+        : "Auto mode stopped this read before evaluation";
   return `<span class="act-flag auto" title="${label}" aria-label="${label}">${autoIcon}</span>`;
 }
 

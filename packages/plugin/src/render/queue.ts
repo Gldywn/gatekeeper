@@ -10,6 +10,7 @@ import {
   warnIcon,
   xCircleIcon,
 } from "../icons";
+
 import { classifyQuery, type RiskClass, rank } from "../sql/classify";
 import { formatSql } from "../sql/format";
 import { highlight } from "../sql/highlight";
@@ -19,7 +20,14 @@ import { modeRank, type RiskMode } from "../sql/mode";
 import { visibleControls } from "../sql/sanitize";
 import type { SchemaContext } from "../sql/schema";
 import type { Card, CardState, RunState } from "../types";
-import { AUTO_APPROVED, AUTO_LEADS, autoIcon, holdText } from "./auto";
+import {
+  AUTO_APPROVED,
+  AUTO_LEADS,
+  autoIcon,
+  autoOutcome,
+  heldLocally,
+  NOTHING_SENT,
+} from "./auto";
 
 const WRITE_MODE_NOTE = "Write mode is required to approve this query.";
 const DESTRUCTIVE_MODE_NOTE = "Destructive mode is required to approve this query.";
@@ -92,8 +100,12 @@ function unparsedNote(gate: CardGate): string {
   return `<div class="cs-unparsed">${warnIcon}This statement could not be parsed. The ${gate.cls} classification is a guess. Waiting for your review.</div>`;
 }
 
-export const AUTO_EVALUATING = "Evaluating with Jev";
-const EVAL_NOTE = "Auto mode is evaluating this read with Jev.";
+// A state, never shown: the sentence below is what a reader sees and hears. Posted as a hold
+// reason it is no known diagnostic, so the server keeps "Automatic review required".
+export const AUTO_EVALUATING = "Evaluating";
+// Plain text: every place that shows it escapes it, since the model comes from settings.
+export const evalNote = (model?: string) =>
+  `Auto mode is evaluating this read with ${model || "the evaluator"}.`;
 
 // One line that names Auto mode first and says where the read was held. Whether the query
 // ever left the machine is the part a human must not guess.
@@ -108,7 +120,15 @@ function autoNote(card: Card): string {
   if (card.autoStatus === AUTO_APPROVED) {
     return `<div class="cs-unparsed auto" role="status">${autoIcon}<span><b>Auto mode:</b> ${AUTO_LEADS.automatic}.</span></div>`;
   }
-  return `<div class="cs-unparsed auto" role="status">${autoIcon}<span><b>Auto mode:</b> ${holdText(Boolean(card.autoSent), " Waiting for your review.")}</span></div>`;
+  // The hold the record will keep, its reason cut where a source name would start.
+  const hold = {
+    sent: Boolean(card.autoSent),
+    reason: card.autoStatus.replace(/^Needs review:\s*/, ""),
+    ...(card.autoFailure ? { failure: card.autoFailure } : {}),
+    ...(card.autoModel ? { model: card.autoModel } : {}),
+  };
+  const local = heldLocally(card.evaluation, hold) ? ` ${NOTHING_SENT}` : "";
+  return `<div class="cs-unparsed auto" role="status">${autoIcon}<span><b>Auto mode:</b> ${escapeHtml(autoOutcome(card.evaluation, hold))} Waiting for your review.${local}</span></div>`;
 }
 
 // Why the last human approval did not run, in its own words: never an Auto mode fact.
@@ -136,7 +156,7 @@ export function cardGateFor(
 ): CardGate {
   const gate = cardGate(card.sql, databaseType, mode, connReadOnly);
   return card.state === "ready" && card.autoStatus === AUTO_EVALUATING
-    ? { ...gate, approveEnabled: false, note: EVAL_NOTE }
+    ? { ...gate, approveEnabled: false, note: evalNote(card.autoModel) }
     : gate;
 }
 

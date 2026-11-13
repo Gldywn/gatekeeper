@@ -3,6 +3,7 @@
 process.env.TZ = "UTC";
 
 import { describe, expect, it, vi } from "vitest";
+import { AUTO_POLICY } from "../sql/auto";
 import { textSchema } from "../sql/output";
 import type { ActivityEntry } from "../types";
 import {
@@ -364,6 +365,99 @@ describe("render/activity", () => {
     );
     expect(held).toContain('class="act-flag auto"');
     expect(held).toContain('<span class="hstate rejected"');
+
+    // An answer this plugin refused: the row says the evaluation did not finish, as the detail
+    // does, rather than "Evaluated by Auto mode".
+    const invalid = activityEntryHtml(
+      {
+        ...base,
+        state: "rejected",
+        evaluation,
+        autoHold: {
+          sent: true,
+          reason: "Invalid evaluator response",
+          failure: { stage: "response" },
+        },
+      },
+      false,
+      "postgresql",
+    );
+    expect(invalid).toContain('title="Auto mode did not finish evaluating this read"');
+
+    // An automatic approval a withdrawn attempt left behind does not hide the final failure.
+    const stale = activityEntryHtml(
+      {
+        ...base,
+        state: "rejected",
+        approval: { source: "automatic", evaluation },
+        autoHold: {
+          sent: true,
+          reason: "Evaluator or metadata unavailable",
+          failure: { stage: "network" },
+        },
+      },
+      false,
+      "postgresql",
+    );
+    expect(stale).toContain('title="Auto mode did not finish evaluating this read"');
+    expect(stale).not.toContain('title="Approved automatically"');
+  });
+
+  it("exports a refused read's evaluation and why, as the detail says it", () => {
+    const refused = {
+      id: "r9",
+      createdAt: Date.UTC(2026, 0, 1, 10),
+      decidedAt: Date.UTC(2026, 0, 1, 10, 1),
+      sessionId: "s1",
+      harness: null,
+      project: null,
+      sessionLabel: null,
+      sql: "SELECT email FROM customers",
+      intent: "Customer emails",
+      state: "rejected" as const,
+      reason: null,
+      error: null,
+      rowCount: null,
+      affectedRows: null,
+      evaluation: {
+        provider: "typesafe" as const,
+        model: "jev-1.13.0",
+        policy: AUTO_POLICY,
+        evaluatedAt: 1,
+        sqlDigest: "a".repeat(64),
+        eligible: false,
+        reasons: ["Potential personal disclosure"],
+        probabilities: {
+          personal_disclosure: 0.91,
+          organization_disclosure: 0.06,
+          secret_disclosure: 0.01,
+          insufficient_context: 0.3,
+        },
+      },
+    };
+    const md = activityMarkdownDays([refused], "prod", new Map());
+    expect(md).toContain('- Evaluation: {"provider":"typesafe","model":"jev-1.13.0"');
+    expect(md).toContain(
+      "- Auto mode: jev-1.13.0 did not clear this read: it may reveal personal data.",
+    );
+    const failed = activityMarkdownDays(
+      [
+        {
+          ...refused,
+          evaluation: undefined,
+          autoHold: {
+            sent: true,
+            reason: "Evaluator or metadata unavailable",
+            failure: { stage: "http" as const, status: 503 },
+            model: "kev-latest",
+          },
+        },
+      ],
+      "prod",
+      new Map(),
+    );
+    expect(failed).toContain("- Auto mode: kev-latest answered with an error (HTTP 503).");
+    expect(failed).not.toContain("evaluation unfinished");
   });
 });
 

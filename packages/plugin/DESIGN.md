@@ -94,6 +94,13 @@ Inside prose, things are named in their own style:
   the agent to avoid context pollution.").
 - On a card or a detail, timers say what they measure ("Expires in 4:26", "Requested 40s
   ago"). A list row keeps its compact clock, which its place in the row explains.
+- Auto mode's evaluator gets one generic label per field and one generic sentence per
+  situation, the same for every provider and model, with only the model id filled in ("API
+  key", "The evaluator refused this API key.", "jev-1.13.0 did not clear this read: ..."). The
+  one sentence that names the recipient is the sharing disclosure, since enabling Auto mode
+  consents to it. A server the user points Auto mode at is a "Custom server"; cutoffs read
+  "Built-in cutoffs", "Your cutoffs" or "Cutoffs needed". A message never repeats a state the
+  screen already shows (operator decisions, 2026-11-12).
 
 ## Shell and context
 
@@ -216,9 +223,25 @@ first line, the tables, what the SQL marks, the SQL, then the decision.
   the row's glyph instead. The detail adds "Flagged heavy by the load check" under who decided,
   except when the load check is who declined it, and its request line carries the card's Heavy
   query badge. No reason or estimate: they never leave the plugin.
-- An Auto mode hold says where it happened, on this machine before evaluation or at Jev, then
-  "Waiting for your review."; a hold on this machine adds "Nothing was sent to TypeSafe." No
-  reason chips.
+- An Auto mode hold says where it happened and why, in its sentence, then "Waiting for your
+  review." (operator's direction B, 2026-11-13). The same sentence on the card, in the history
+  and in the Markdown export (`autoOutcome` in `render/auto.ts`). No reason chips.
+  - Refused by its cutoffs: "jev-1.13.0 did not clear this read: it may reveal personal
+    data." One fixed phrase per question went over, never a number on the card: "it may
+    reveal personal data", "it may reveal a client company", "it may reveal access secrets",
+    "the meaning of a returned value is unclear". The evaluator answers with probabilities
+    only, so these are Gatekeeper's own four questions, not the model's words.
+  - No verdict, named by the model asked: "did not answer in time", "could not be reached",
+    "answered with an error (HTTP 503)", "returned an invalid answer"; otherwise "The
+    evaluation did not finish." A failure is never called a refusal, and a keyless Custom
+    server is never told about a key.
+  - Cleared, then held: "jev-1.13.0 cleared this read, then it was held: <reason>."
+  - On this machine: "Held on this machine before evaluation: <reason>." then "Nothing was
+    sent to the evaluator." A reason stops at its first colon, where a source name would start.
+- A decided Auto mode trace names who evaluated it ("Evaluated by jev-1.13.0 on TypeSafe."),
+  from the record, never from today's settings, and grades each probability against the
+  cutoffs the record carries, under the evaluator page's labels: `Personal data 0.91 > 0.2`
+  in amber, `Company identity 0.06 ≤ 0.15` plain, the number alone when no cutoff is on record.
 - A blocking reason sits above the actions, tied to the disabled action it blocks
   (`aria-describedby`), not only in a tooltip. Nothing ever says "nothing blocks".
 - While Auto mode evaluates, the row's dot turns `--auto` and pulses, with no word, and a ring
@@ -290,7 +313,22 @@ own buttons: Escape does not dismiss it. Their frame reads solid over the Inbox'
 outer line, a light inner line, a shadow, and an engraved Settings head (`.detail > .detail-card`).
 
 Escape removes one layer per press: an open confirm first, then the export, then an open menu or
-popover, then the enlarged rows, then Settings, then the Queue's open item.
+popover, then the enlarged rows, then Settings' evaluator page (back to Settings), then
+Settings, then the Queue's open item.
+
+**The evaluator page** (operator's direction C, 2026-11-12). Settings' Auto mode box keeps its
+switch and one evaluator line instead of a key field: a sunken well, the whole of it a button,
+with the model id in mono, "on" its provider, the header's hairline divider (`.dsep`), the state
+of the cutoffs ("Built-in cutoffs", "Your cutoffs", or "Cutoffs needed" in amber) and "Change"
+at the right. Under 340px the facts stack and the divider leaves, so Change never wraps alone.
+Change replaces Settings' content in the same dialog with the evaluator page: a back arrow
+before the title, then the provider as the export dialog's rows (TypeSafe "Hosted", Custom
+server "Self-hosted"), the model, the provider's own fields, the API key, Test
+connection with its answer on the status line, and the cutoffs. jev-1.13.0 shows "Use the
+built-in cutoffs", checked by default, its fields filled and disabled; any other model shows
+"No built-in cutoffs for this model.", empty fields, one note and "Copy prompt for your agent".
+Back or Escape returns to Settings with the focus on the evaluator line. A redraw after a change
+waits for the focus to land, and a later key update touches only the key's own controls.
 
 **Enlarged rows.** Enlarge moves the decided request's own result bar and grid into a dialog
 over the whole tab, past the shell's width cap: the grid keeps its sort, page, page size and
