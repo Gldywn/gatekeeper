@@ -21,6 +21,8 @@ const claimed = new Map<string, Proposal>();
 const sealed = new Map<string, string>();
 const seeded = keptResults();
 const archive = new ResultArchive();
+// As the real broker keeps it: a heavy flag posted with /executing survives a /result without one.
+const heavy = new Set<string>();
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -75,11 +77,13 @@ async function route(url: URL, init?: RequestInit): Promise<Response> {
     return json({ leaseExpiresAt: Date.now() + 30_000 });
   }
   if (method === "POST" && (path === "/executing" || path === "/execution/withdraw")) {
+    if (body.heavy === true) heavy.add(body.id);
     return json({ ok: true });
   }
   if (method === "POST" && path === "/result") {
     const p = claimed.get(body.id);
     claimed.delete(body.id);
+    if (body.heavy === true) heavy.add(body.id);
     if (p) {
       const state = body.status === "approved" ? (body.error ? "failed" : "approved") : "rejected";
       if (state === "approved" && typeof body.archive === "string") sealed.set(p.id, body.archive);
@@ -102,6 +106,7 @@ async function route(url: URL, init?: RequestInit): Promise<Response> {
         kept: sealed.has(p.id),
         ...(state === "rejected" && body.declinedBy ? { declinedBy: body.declinedBy } : {}),
         ...(state === "rejected" && body.reasonTyped === true ? { reasonTyped: true } : {}),
+        ...(heavy.has(p.id) ? { heavy: true } : {}),
       });
     }
     return json({ ok: true });

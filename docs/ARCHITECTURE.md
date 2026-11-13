@@ -119,9 +119,10 @@ The plugin also runs a local load check on each proposal (`sql/load.ts`, host ca
 `annotate.ts`). It never runs or explains the proposal. It reads the SQL with the engine's own
 walker (`sql/pg/load.ts` on PostgreSQL's tree, `sql/nsp/load.ts` on node-sql-parser's) into a
 plan no parser shapes (`sql/load-plan.ts`) and, on PostgreSQL, one Gatekeeper-built catalog
-query for row estimates. Its alert does not gate a manual
-approval. It holds Auto mode, and Auto-deny heavy queries rejects a flagged proposal on
-arrival. See [`SECURITY.md`](../SECURITY.md#load-check).
+query for row estimates. Its alert gates neither a manual approval nor Auto mode, which waits
+for the check only so that Auto-deny heavy queries, the one thing that blocks a flagged
+proposal, rejects it on arrival first. A decision posted while the card showed the alert
+records `heavy` (below). See [`SECURITY.md`](../SECURITY.md#load-check).
 
 ## Durability
 
@@ -221,7 +222,10 @@ recomputes the legend with the current rules. Each entry says whether its sealed
 (`kept`) and, for a decline, who declined (`declinedBy`: a person, the plugin's gate refusing to run
 an approved statement, or the load check turning down a heavy query) and whether a person's reason
 starts with words they typed (`reasonTyped`), since the reason is what the agent received, load
-check hints included; an unmarked older decline names no one. An entry opens in the same
+check hints included; an unmarked older decline names no one. `heavy: true` says the load check
+had flagged the query when a decision was posted (`/executing` or `/result`, only a literal
+`true`): it is never cleared, even by a withdrawn attempt or a recheck, and holds no estimate or
+table name; absent means not recorded, never light. An entry opens in the same
 detail as Recently resolved, its kept rows fetched and opened on demand. A separate partial index
 covers results awaiting purge.
 

@@ -2625,6 +2625,12 @@ export class Gatekeeper {
         return;
       }
       if (stale()) return;
+      // Auto-deny reads this connection's preferences when a card arrives and decides only then:
+      // enabled before they load, Auto mode could run a heavy read auto-deny should have rejected.
+      if (!this.settingsStore.loadedForConnection(this.connectionName)) {
+        fail("This connection's settings are still loading. Try again.");
+        return;
+      }
       this.confirmModal.cancel();
       this.applyMode("read");
       this.autoKey = key;
@@ -2982,15 +2988,12 @@ export class Gatekeeper {
       card.autoFailure = undefined;
       this.renderQueue();
       if (!(await this.checkConnection()) || !valid() || controller.signal.aborted) return;
-      // Checked before anything leaves for the provider. Only a finding holds the read, so a
-      // check that could not finish blocks nothing, with or without Auto mode.
+      // Waited for before anything leaves for the provider, so auto-deny, which reserves a heavy
+      // card in the tick its check settles, decides first. A Heavy query alert alone holds
+      // nothing: the read goes on to the evaluation and runs if the evaluator clears it.
       const load = card.load;
-      const loaded = await load;
+      await load;
       if (!valid() || controller.signal.aborted || card.load !== load) return;
-      if (loaded?.heavy) {
-        this.reviewCard(card, HEAVY_REASON);
-        return;
-      }
       const analysis = await this.annotator.inspectRead(
         sql,
         () => valid() && !controller.signal.aborted,
@@ -3472,7 +3475,7 @@ export class Gatekeeper {
     const id = CSS.escape(card.id);
     const load = { id: card.id, result: card.loadResult };
     const badge = this.root.querySelector<HTMLElement>(`#hb-${id}`);
-    if (badge) badge.innerHTML = heavyBadge(card.loadResult);
+    if (badge) badge.innerHTML = heavyBadge(card.loadResult?.heavy);
     const host = this.root.querySelector<HTMLElement>(`#cm-${id}`);
     const cause = this.root.querySelector<HTMLElement>(`#cl-${id}`);
     const regions = [host, cause].filter((n): n is HTMLElement => n !== null);
@@ -4143,6 +4146,12 @@ export class Gatekeeper {
     return recordedSensitivity(textSchema(card.sql, this.databaseType));
   }
 
+  // Sticky, like the broker's record of it: the alert a decision was taken under stays recorded.
+  private flagHeavy(card: Card): true | undefined {
+    if (card.loadResult?.heavy) card.flaggedHeavy = true;
+    return card.flaggedHeavy;
+  }
+
   private async postExecuting(card: Card): Promise<boolean> {
     try {
       card.decisionSensitivity = { value: this.sensitivity(card), standing: true };
@@ -4151,6 +4160,7 @@ export class Gatekeeper {
         card.leaseId,
         card.approval,
         card.decisionSensitivity.value,
+        this.flagHeavy(card),
       );
     } catch (err) {
       log.error(err instanceof Error ? err : String(err));
@@ -4189,6 +4199,7 @@ export class Gatekeeper {
         ...body,
         autoHold: this.autoHold(card),
         sensitivity: card.decisionSensitivity.value,
+        heavy: this.flagHeavy(card),
       });
     } catch (err) {
       log.error(err instanceof Error ? err : String(err));
@@ -4259,6 +4270,7 @@ export class Gatekeeper {
         autoHold: this.autoHold(card),
         ...(sent ? { sent } : {}),
         ...(autoDenied ? { autoDenied: true } : {}),
+        ...(card.flaggedHeavy ? { heavy: true } : {}),
         // The broker's snapshot for this decision; with none posted (an expiry), what the trail
         // falls back to: the SQL text alone.
         sensitivity: card.decisionSensitivity

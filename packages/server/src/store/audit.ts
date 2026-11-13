@@ -167,6 +167,7 @@ export function listActivity(
       ...(row.state === "rejected" && policy?.declinedBy === "human" && policy?.reasonTyped === true
         ? { reasonTyped: true }
         : {}),
+      ...(policy?.heavy === true ? { heavy: true as const } : {}),
     };
   });
 }

@@ -189,7 +189,7 @@ export function cardHtml(
   return `
       <div class="card ${cardClassFor(gate)}${run ? runClass(run) : ""}" data-card="${card.id}">
         <div class="top">
-          ${riskBadge(gate.cls)}<span class="heavy-slot" id="hb-${card.id}">${heavyBadge(card.loadResult)}</span><span class="intent">${escapeHtml(card.intent ? capitalize(card.intent) : card.id)}</span>
+          ${riskBadge(gate.cls)}<span class="heavy-slot" id="hb-${card.id}">${heavyBadge(card.loadResult?.heavy)}</span><span class="intent">${escapeHtml(card.intent ? capitalize(card.intent) : card.id)}</span>
         </div>
         <div class="meta">${escapeHtml(card.id)} &middot; Requested ${relAge(card.createdAt)}</div>
         <div class="cs-matrix" id="cm-${card.id}">${matrix}</div>
@@ -381,9 +381,9 @@ export interface LoadView {
 }
 
 // A second assessment beside the operation's class, never instead of it: neutral, so a heavy
-// read never reads as a write.
-export function heavyBadge(result: LoadResult | undefined): string {
-  return result?.heavy ? `<span class="risk-badge heavy">${gaugeIcon}Heavy query</span>` : "";
+// read never reads as a write. The decided detail shows it too, from the recorded flag.
+export function heavyBadge(heavy: boolean | undefined): string {
+  return heavy ? `<span class="risk-badge heavy">${gaugeIcon}Heavy query</span>` : "";
 }
 
 // Only an estimate tied to exactly one relation: two relations the SQL writes alike (a quoted

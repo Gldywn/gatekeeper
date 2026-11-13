@@ -79,6 +79,9 @@ export interface ActivityEntry {
   declinedBy?: DeclinedBy;
   // A person's decline whose reason starts with words they typed, not only load check hints.
   reasonTyped?: boolean;
+  // The load check had flagged the query when a decision was posted. Absent means not recorded,
+  // never light: no estimate or table name is kept.
+  heavy?: true;
 }
 
 // Who declined: a person, the plugin's own gate refusing to run an approved statement, or the

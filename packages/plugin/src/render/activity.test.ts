@@ -114,9 +114,33 @@ describe("render/activity", () => {
   it("renders a session-day CSV export: BOM, session_id first, flattened SQL", () => {
     const flags = new Map([["q_ab12", ["PII"]]]);
     expect(activityCsv([approved, rejected], flags)).toBe(
-      "﻿session_id,timestamp,status,latency_ms,intent,flags,request_id,rows_returned,rows_changed,reason,error,sql\r\n" +
-        "s1,2026-01-01T09:29:30.000Z,declined,,remove a user,,q_cd34,,,read-only only,,DELETE FROM audit.users WHERE id = 1\r\n" +
-        "s1,2026-01-01T09:30:00.000Z,approved,5000,list account contacts,PII,q_ab12,3,,,,SELECT email FROM audit.users\r\n",
+      "﻿session_id,timestamp,status,latency_ms,intent,flags,heavy,request_id,rows_returned,rows_changed,reason,error,sql\r\n" +
+        "s1,2026-01-01T09:29:30.000Z,declined,,remove a user,,,q_cd34,,,read-only only,,DELETE FROM audit.users WHERE id = 1\r\n" +
+        "s1,2026-01-01T09:30:00.000Z,approved,5000,list account contacts,PII,,q_ab12,3,,,,SELECT email FROM audit.users\r\n",
+    );
+  });
+
+  it("carries the load check's flag into every export, and never writes it as false", () => {
+    const heavy: ActivityEntry = { ...approved, heavy: true };
+    expect(activityCsv([heavy, rejected]).split("\r\n").slice(1, 3)).toEqual([
+      "s1,2026-01-01T09:29:30.000Z,declined,,remove a user,,,q_cd34,,,read-only only,,DELETE FROM audit.users WHERE id = 1",
+      "s1,2026-01-01T09:30:00.000Z,approved,5000,list account contacts,,true,q_ab12,3,,,,SELECT email FROM audit.users",
+    ]);
+    const [older, newer] = JSON.parse(activityJson([heavy, rejected]));
+    expect(newer.heavy).toBe(true);
+    expect("heavy" in older).toBe(false);
+    const md = activityMarkdownDays([heavy, rejected], "prod", new Map());
+    expect(md).toContain("- Request: q_ab12\n- Load check: flagged heavy\n- Rows returned: 3\n");
+    expect(md.match(/Load check/g)).toHaveLength(1);
+  });
+
+  it("marks a heavy query's row with the gauge only where it ran", () => {
+    const ran = activityEntryHtml({ ...approved, heavy: true }, false, "postgresql");
+    expect(ran).toContain('<span class="ix-risk heavy" title="Heavy query">');
+    expect(ran).toContain('<span class="sr-only">Heavy query</span>');
+    expect(activityEntryHtml(approved, false, "postgresql")).not.toContain("ix-risk heavy");
+    expect(activityEntryHtml({ ...rejected, heavy: true }, false, "postgresql")).not.toContain(
+      "ix-risk heavy",
     );
   });
 

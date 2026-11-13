@@ -123,7 +123,7 @@ function harness() {
       readOnly: false,
     },
     root: { querySelector: () => null },
-    settingsStore: { get: () => ({ confirmWrites: true }) },
+    settingsStore: { get: () => ({ confirmWrites: true }), loadedForConnection: () => true },
     confirmModal: { dismissFor: vi.fn() },
     archive: { seal: vi.fn(async () => "c2VhbGVk") },
     renderQueue: vi.fn(),
@@ -426,6 +426,32 @@ describe("shared manual/automatic execution authority", () => {
     expect(app.autoEnabled).toBe(true);
     expect(app.autoKey).toBe("saved-key");
     expect(app.autoRule).toEqual(activeEvaluator(DEFAULT_SETTINGS));
+  });
+  it("waits for the connection's preferences before enabling, so auto-deny is never skipped", async () => {
+    const { app } = harness();
+    app.autoEnabled = false;
+    app.cards = [];
+    storageRead.mockResolvedValue("saved-key");
+    app.confirmModal = { cancel: vi.fn() };
+    // A connection switch started loading "test"'s preferences; get() still holds the previous one's.
+    let loaded = false;
+    app.settingsStore = {
+      get: () => ({ confirmWrites: true, autoDenyHeavy: false }),
+      loadedForConnection: (name: string) => loaded && name === "test",
+    };
+    const message = { textContent: "", dataset: {} };
+    const popover = {
+      ...control(),
+      closest: () => ({
+        querySelector: (sel: string) => (sel === "[data-auto-message]" ? message : null),
+      }),
+    };
+    await app.toggleAuto(popover);
+    expect(app.autoEnabled).toBe(false);
+    expect(message.textContent).toBe("This connection's settings are still loading. Try again.");
+    loaded = true;
+    await app.toggleAuto(popover);
+    expect(app.autoEnabled).toBe(true);
   });
   it("does not open the evaluator page for a stale credential lookup", async () => {
     const { app } = harness();
@@ -1699,15 +1725,50 @@ describe("load check", () => {
     app.startLoad(card, true);
   }
 
-  it("holds a heavy read before anything leaves for the provider", async () => {
+  it("evaluates a heavy read and runs it once Jev clears it, with auto-deny off", async () => {
     const { app, card } = harness();
     card.load = Promise.resolve(HEAVY);
-    const inspect = vi.spyOn(app.annotator, "inspectRead");
+    card.loadResult = HEAVY;
+    mockCatalog(card.sql, { "public.products": { quantity: "int4" } });
+    app.broker.evaluate.mockResolvedValue(evaluation());
     await app.evaluateNext();
-    expect(card.autoStatus).toBe("Needs review: Heavy query");
+    expect(app.broker.evaluate).toHaveBeenCalledOnce();
+    expect(app.broker.executing).toHaveBeenCalledOnce();
+    expect(query).toHaveBeenLastCalledWith(executed(card.sql));
+    // The alert rides the decision so the trail keeps it once the card is gone.
+    expect(app.broker.executing.mock.calls[0][4]).toBe(true);
+    expect(app.broker.result.mock.calls[0][2]).toMatchObject({ status: "approved", heavy: true });
+    expect(app.broker.result.mock.calls[0][2].autoHold).toBeUndefined();
+  });
+
+  it("waits for a late check, then evaluates the heavy read when auto-deny is off", async () => {
+    const { app, card } = harness();
+    const settled = deferred<LoadResult | undefined>();
+    arrive(app, card, settled.promise, false);
+    const inspect = vi.spyOn(app.annotator, "inspectRead");
+    mockCatalog(card.sql, { "public.products": { quantity: "int4" } });
+    app.broker.evaluate.mockResolvedValue(evaluation());
+    const evaluating = app.evaluateNext();
+    await flush();
     expect(inspect).not.toHaveBeenCalled();
+    settled.resolve(HEAVY);
+    await evaluating;
+    expect(inspect).toHaveBeenCalledOnce();
+    expect(app.broker.executing).toHaveBeenCalledOnce();
+    expect(app.broker.result).toHaveBeenCalledOnce();
+    expect(app.broker.result.mock.calls[0][2]).toMatchObject({ status: "approved", heavy: true });
+  });
+
+  it("leaves a heavy read to you with Auto mode off", async () => {
+    const { app, card } = harness();
+    app.autoEnabled = false;
+    arrive(app, card, Promise.resolve(HEAVY), false);
+    await flush();
+    await app.evaluateNext();
     expect(app.broker.evaluate).not.toHaveBeenCalled();
-    expect(app.broker.executing).not.toHaveBeenCalled();
+    expect(app.broker.result).not.toHaveBeenCalled();
+    expect(card.state).toBe("ready");
+    expect(app.waitsForHuman(card)).toBe(true);
   });
 
   it.each([
@@ -1737,7 +1798,7 @@ describe("load check", () => {
       card.leaseId,
       expect.objectContaining({ status: "rejected", reason: sent }),
     );
-    expect(app.broker.result.mock.calls[0][2]).toMatchObject({ declinedBy: "load" });
+    expect(app.broker.result.mock.calls[0][2]).toMatchObject({ declinedBy: "load", heavy: true });
     expect(app.finish).toHaveBeenCalledWith(card.id, "rejected", "heavy query, auto-denied", {
       declinedBy: "load",
       recorded: true,
@@ -2060,6 +2121,41 @@ describe("decision-time flags", () => {
       value: false,
       client: false,
     });
+  });
+
+  it("keeps the heavy flag once posted, across a recheck and a withdrawn attempt", async () => {
+    const { app, card } = harness();
+    card.loadResult = { ...LIGHT, heavy: true };
+    await app.postExecuting(card);
+    expect(app.broker.executing.mock.calls[0][4]).toBe(true);
+    // A schema change restarts the check mid-run, then the execution is withdrawn.
+    card.loadResult = LIGHT;
+    card.decisionSensitivity!.standing = false;
+    card.sensitivity = { pii: true, value: false, client: false };
+    await app.postResult(card, { status: "rejected" });
+    expect(app.broker.result.mock.calls[0][2]).toMatchObject({
+      heavy: true,
+      sensitivity: { pii: true, value: false, client: false },
+    });
+    Object.assign(app, {
+      finish: Gatekeeper.prototype["finish" as keyof Gatekeeper],
+      decided: [],
+      unrecorded: new WeakSet(),
+      selection: {},
+      drop: vi.fn(),
+      refreshRecent: vi.fn(),
+      settingsStore: { get: () => ({ recentlyResolved: 20 }) },
+    });
+    app.finish(card.id, "rejected", "declined", { recorded: true });
+    expect(app.decided[0].heavy).toBe(true);
+  });
+
+  it("records no heavy flag for a card the load check never flagged", async () => {
+    const { app, card } = harness();
+    await app.postExecuting(card);
+    await app.postResult(card, { status: "approved" });
+    expect(app.broker.executing.mock.calls[0][4]).toBeUndefined();
+    expect(app.broker.result.mock.calls[0][2].heavy).toBeUndefined();
   });
 
   it("keeps the broker's flags when a withdrawn request expires with no new decision", () => {

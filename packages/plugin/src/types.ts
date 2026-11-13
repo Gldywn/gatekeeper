@@ -59,6 +59,9 @@ export interface Card extends Proposal {
   load?: Promise<LoadResult>;
   loadResult?: LoadResult;
   loadSession?: number;
+  // Set by the first decision posted while the card showed a Heavy query alert and never
+  // cleared: a recheck (a schema change) or a withdrawn attempt does not undo that it was flagged.
+  flaggedHeavy?: true;
 }
 
 // One approved execution, from the moment its SQL leaves for the host until it settles.
@@ -114,4 +117,6 @@ export interface HistItem {
   autoDenied?: boolean;
   // The flags recorded with the decision, so the local row shows the same chips as the trail.
   sensitivity?: import("@gatekeeper/shared").SensitivityRecord;
+  // The load check had flagged it when a decision was posted (Card.flaggedHeavy).
+  heavy?: true;
 }

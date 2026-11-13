@@ -326,6 +326,17 @@ describe("audit trail", () => {
     expect(store.readAudit(req.id).map((e) => e.event)).toContain("execution_unknown");
   });
 
+  it("keeps the load check's flag of an execution whose outcome was never recorded", () => {
+    const { store, clock } = makeStore();
+    const req = store.submit({ sessionId: "s1", sql: "SELECT 1" });
+    const claimed = store.claimNext("p", LEASE)!;
+    store.markExecuting(claimed.id, claimed.leaseId!, undefined, undefined, true);
+    clock.t += LEASE + 1;
+    store.sweep();
+    const entry = store.listActivity(null).find((e) => e.id === req.id);
+    expect(entry).toMatchObject({ state: "failed", heavy: true });
+  });
+
   it("never stores the raw SQL", () => {
     const { store } = makeStore();
     const req = store.submit({ sessionId: "s1", sql: "SELECT secret FROM users" });

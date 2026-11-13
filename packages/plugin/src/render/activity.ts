@@ -368,6 +368,7 @@ function entryMarkdown(e: ActivityEntry, flags: ActivityFlagMap): string[] {
       `- Auto mode: ${autoOutcome(evaluation, e.autoHold)}${heldLocally(evaluation, e.autoHold) ? " Nothing was sent to the evaluator." : ""}`,
     );
   if (e.autoHold) lines.push(`- Auto mode reason: ${e.autoHold.reason}`);
+  if (e.heavy) lines.push("- Load check: flagged heavy");
   if (e.state === "approved" && e.affectedRows != null) {
     lines.push(`- Rows changed: ${e.affectedRows}`);
   }
@@ -393,6 +394,7 @@ const CSV_HEADER = [
   "latency_ms",
   "intent",
   "flags",
+  "heavy",
   "request_id",
   "rows_returned",
   "rows_changed",
@@ -420,6 +422,8 @@ export function activityCsv(entries: ActivityEntry[], flags: ActivityFlagMap = n
       latency,
       e.intent?.trim() ?? "",
       (flags.get(e.id) ?? []).join("; "),
+      // Empty when not recorded, never "false": an older decision may have been heavy.
+      e.heavy ? "true" : "",
       e.id,
       e.rowCount != null ? `${e.rowCount}` : "",
       e.affectedRows != null ? `${e.affectedRows}` : "",
@@ -459,6 +463,7 @@ export function activityJson(entries: ActivityEntry[], flags: ActivityFlagMap = 
       ...(e.approval ? { approval: e.approval } : {}),
       ...(e.evaluation ? { evaluation: e.evaluation } : {}),
       ...(e.autoHold ? { autoHold: e.autoHold } : {}),
+      ...(e.heavy ? { heavy: true } : {}),
     };
   });
   return `${JSON.stringify(rows, null, 2)}\n`;

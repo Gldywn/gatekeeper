@@ -346,11 +346,15 @@ to the whole plugin.
 ## Load check
 
 Before the read analysis, and so before anything is sent to the evaluator, Auto mode waits for
-the card's [load check](../SECURITY.md#load-check). A read with a Heavy query alert stays for
-manual review with the reason `Heavy query`. A check that could not finish (no row estimate,
-index list unavailable, statistics late or unavailable) holds nothing, and the read goes on to
-the usual evaluation. Passing the check does not make a read cheap, because a range on an
-indexed column can still scan most of a table.
+the card's [load check](../SECURITY.md#load-check), so that Auto-deny heavy queries, when on,
+rejects a flagged read on arrival before Auto mode can take it. A Heavy query alert does not
+hold the read: it goes on to the usual evaluation and runs if the evaluator clears it. With
+Auto-deny heavy queries off (the default), a heavy read can therefore run without a human; the
+decision records that it was flagged, and Recently resolved and the Audit Trail show its gauge.
+Auto mode cannot be enabled while the connection's own settings are still loading, so the
+setting is never skipped. A check that could not finish (no row estimate, index list
+unavailable, statistics late or unavailable) changes nothing either. Passing the check does not
+make a read cheap, because a range on an indexed column can still scan most of a table.
 
 ## Provider boundary
 

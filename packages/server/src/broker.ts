@@ -321,7 +321,13 @@ async function handle(broker: Broker, req: IncomingMessage, res: ServerResponse)
           return;
         }
       }
-      store.markExecuting(String(body.id), String(body.leaseId), approval, sensitivity);
+      store.markExecuting(
+        String(body.id),
+        String(body.leaseId),
+        approval,
+        sensitivity,
+        body.heavy === true,
+      );
       broker.evaluations.delete(String(body.id));
       send(res, 200, { ok: true });
     });
@@ -520,7 +526,14 @@ async function handle(broker: Broker, req: IncomingMessage, res: ServerResponse)
     // An unreadable record is dropped, never a reason to refuse the decision it rides on.
     const sensitivity = sensitivityRecord.safeParse(body.sensitivity).data;
     guarded(res, () => {
-      store.resolve(String(body.id), String(body.leaseId), toOutcome(body), hold.data, sensitivity);
+      store.resolve(
+        String(body.id),
+        String(body.leaseId),
+        toOutcome(body),
+        hold.data,
+        sensitivity,
+        body.heavy === true,
+      );
       send(res, 200, { ok: true });
     });
     return;
