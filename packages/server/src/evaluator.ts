@@ -146,9 +146,9 @@ const CLEF_WINDOWS = { clef: 65_536, "clef-flash": 24_576 } as const;
 // Tokens kept free beyond the request's UTF-8 byte count, which bounds its tokens on a byte
 // level tokenizer. ponytail: a fixed reserve, an exact count needs Clef's own tokenizer.
 const CLEF_RESERVE = 2_048;
-// Closed until the operator's live bench run confirms the byte bound and reserve: until then a
-// read for Clef waits for a human rather than risk a cut state.
-export const CLEF_BOUND_VERIFIED = false;
+// Opened per model once a live bench run measured its tokens against our bytes: clef-flash on
+// 2026-11-13 (120 development requests, at least 4.9 bytes per token). clef waits for its own.
+export const CLEF_BOUND_VERIFIED = { clef: false, "clef-flash": true } as const;
 
 interface Endpoint {
   infer: string;
@@ -156,6 +156,8 @@ interface Endpoint {
   // Workers AI wraps a model's answer in its REST envelope.
   envelope: boolean;
   window?: number;
+  // Whether the byte bound has been measured for this model; until then its reads wait.
+  verified?: boolean;
 }
 
 export function endpointOf(config: EvaluatorConfig): Endpoint | undefined {
@@ -173,6 +175,7 @@ export function endpointOf(config: EvaluatorConfig): Endpoint | undefined {
       check: `${ai}/models/schema?model=${encodeURIComponent(model)}`,
       envelope: true,
       window: CLEF_WINDOWS[config.model],
+      verified: CLEF_BOUND_VERIFIED[config.model],
     };
   }
   const base = canonicalBaseUrl(config.baseUrl);
@@ -242,8 +245,7 @@ export async function evaluateProbabilities(
   // this read: hold it before anything leaves.
   if (
     !endpoint ||
-    (endpoint.window &&
-      ((!CLEF_BOUND_VERIFIED && !verify) || bytes > endpoint.window - CLEF_RESERVE))
+    (endpoint.window && ((!endpoint.verified && !verify) || bytes > endpoint.window - CLEF_RESERVE))
   )
     throw new EvaluationError("input");
   const headers: Record<string, string> = { "Content-Type": "application/json" };

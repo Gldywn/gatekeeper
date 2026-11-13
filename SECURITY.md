@@ -237,8 +237,9 @@ TypeSafe, Cloudflare (Clef) or a Custom server. See [Evaluator](docs/AUTO-MODE.m
 - **What Gatekeeper cannot verify.** That a Custom server runs the model it names, with the
   weights and precision its cutoffs were measured on, and reads the whole input instead of
   cutting it. Choosing a model is the user's statement about their own server.
-- **Clef.** Clef cuts a state longer than its window instead of refusing it. Its reads stay for
-  manual review until a live bench run confirms the bound the broker applies.
+- **Clef.** Clef cuts a state longer than its window instead of refusing it. The broker holds any
+  request that could reach the window, a bound measured per model by a live bench run:
+  `clef-flash` is measured (2026-11-13), `clef` is not, so its reads stay for manual review.
 
 ## Same-user trust boundary
 

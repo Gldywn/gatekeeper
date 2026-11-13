@@ -175,8 +175,8 @@ cutoff of another model passes for its own. Evaluator flags must match the provi
 is refused rather than sent to TypeSafe with another destination's key. `--propose` works only
 from the production questions and policy, where a higher probability always means review.
 Live Clef runs also keep, for each complete answer, the request's bytes
-and the input tokens Clef reported; the summary prints the largest gap, the evidence
-`CLEF_BOUND_VERIFIED` waits for before Clef can approve anything.
+and the input tokens Clef reported; the summary prints the largest gap, the evidence that opens
+a model in `CLEF_BOUND_VERIFIED` (tokens must stay well under the request's bytes).
 
 The default split is development. One System One request to the chosen evaluator batches
 the four production Noul questions per locally eligible case (a custom questions file sends

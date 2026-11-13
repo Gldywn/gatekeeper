@@ -496,7 +496,7 @@ export function summarize(raw: unknown, thresholds?: unknown): string {
     `# Auto evaluation (${report.split}, ${report.mode})`,
     "",
     `Evaluator: ${JSON.stringify(evaluator)}. Baseline policy: ${report.baselinePolicy}.`,
-    // The evidence CLEF_BOUND_VERIFIED waits for: tokens never above the request's bytes.
+    // The evidence that opens a model in CLEF_BOUND_VERIFIED: tokens well under the bytes.
     ...(measured.length
       ? [
           `Input bound over ${measured.length} complete answers: largest tokens minus bytes ${Math.max(...measured.map((r) => r.inputTokens! - r.bodyBytes!))}, largest request ${Math.max(...measured.map((r) => r.bodyBytes!))} bytes.`,

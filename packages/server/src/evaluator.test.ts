@@ -427,14 +427,33 @@ describe("evaluator choice", () => {
     });
   });
 
-  it("holds every Clef read while its bound is unverified, before anything leaves", async () => {
+  it("holds every read for a Clef model whose bound is unmeasured, before anything leaves", async () => {
     const fetch = vi.fn();
     vi.stubGlobal("fetch", fetch);
-    expect(CLEF_BOUND_VERIFIED).toBe(false);
+    expect(CLEF_BOUND_VERIFIED.clef).toBe(false);
     await expect(
-      evaluateProbabilities(input, "token", signal(), undefined, clef),
+      evaluateProbabilities(input, "token", signal(), undefined, { ...clef, model: "clef" }),
     ).rejects.toMatchObject({ stage: "input" });
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("asks clef-flash, measured on 2026-11-13, within its window", async () => {
+    expect(CLEF_BOUND_VERIFIED["clef-flash"]).toBe(true);
+    const answers = Object.fromEntries(ids.map((id) => [id, { type: "noul", noul: 0.001 }]));
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            success: true,
+            result: { model: "clef-flash", answers, usage: { input_tokens: 2400 } },
+          }),
+        ),
+    );
+    vi.stubGlobal("fetch", fetch);
+    expect(await evaluateProbabilities(input, "token", signal(), undefined, clef)).toEqual(
+      Object.fromEntries(ids.map((id) => [id, 0.001])),
+    );
+    expect(fetch).toHaveBeenCalledOnce();
   });
 
   describe("Workers AI, as the bench's verification run calls it", () => {

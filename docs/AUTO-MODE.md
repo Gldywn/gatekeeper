@@ -67,8 +67,11 @@ rather than falling back to TypeSafe.
 24,576 for `clef-flash`) instead of refusing it, and an answer about a cut state is not about
 the read. The broker holds a read whose request bytes, plus a 2,048-token reserve, exceed the
 window, and refuses an answer whose reported input tokens reach that edge. That bound assumes
-at most one token per byte, which is not verified yet: until a live bench run confirms it,
-`CLEF_BOUND_VERIFIED` keeps every Clef read for manual review before anything is sent.
+at most one token per byte, checked per model by a live bench run before the model may approve
+anything (`CLEF_BOUND_VERIFIED`). `clef-flash` was measured on 2026-11-13: all 120 development
+requests answered, at least 4.9 bytes per token, the largest request 11,779 bytes for 2,409
+tokens. `clef` has not been measured, so its reads stay for manual review before anything is
+sent.
 
 **Connection test.** Test connection, and each activation, use a metadata call only: TypeSafe's
 `GET /v1/models` (any 2xx accepted, as before), a Custom server's `GET /v1/models`, which must
