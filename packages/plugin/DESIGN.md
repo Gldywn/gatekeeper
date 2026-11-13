@@ -301,8 +301,8 @@ with the model id in mono, "on" its provider, the header's hairline divider (`.d
 of the cutoffs ("Built-in cutoffs", "Your cutoffs", or "Cutoffs needed" in amber) and "Change"
 at the right. Under 340px the facts stack and the divider leaves, so Change never wraps alone.
 Change replaces Settings' content in the same dialog with the evaluator page: a back arrow
-before the title, then the provider as the export dialog's rows (TypeSafe and Cloudflare
-"Hosted", Custom server "Self-hosted"), the model, the provider's own fields, the API key, Test
+before the title, then the provider as the export dialog's rows (TypeSafe "Hosted", Custom
+server "Self-hosted"), the model, the provider's own fields, the API key, Test
 connection with its answer on the status line, and the cutoffs. jev-1.13.0 shows "Use the
 built-in cutoffs", checked by default, its fields filled and disabled; any other model shows
 "No built-in cutoffs for this model.", empty fields, one note and "Copy prompt for your agent".

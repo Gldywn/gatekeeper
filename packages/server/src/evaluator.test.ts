@@ -6,7 +6,6 @@ import {
   AUTO_THRESHOLDS,
   approvalAttribution,
   autoHoldRecord,
-  CLEF_BOUND_VERIFIED,
   canonicalBaseUrl,
   checkEvaluator,
   checkKey,
@@ -15,7 +14,6 @@ import {
   type EvaluatorConfig,
   endpointOf,
   evaluate,
-  evaluateProbabilities,
   evaluatorConfig,
 } from "./evaluator.js";
 
@@ -348,11 +346,6 @@ describe("evaluator choice", () => {
     model: "kev-4b",
     baseUrl,
   });
-  const clef: EvaluatorConfig = {
-    provider: "cloudflare",
-    model: "clef-flash",
-    accountId: "abc123",
-  };
 
   it.each([
     ["https://kev.example.test/api/", "https://kev.example.test/api"],
@@ -381,21 +374,15 @@ describe("evaluator choice", () => {
     expect(endpointOf(custom("https://kev.example.test/api"))).toEqual({
       infer: "https://kev.example.test/api/v1/systemone",
       check: "https://kev.example.test/api/v1/models",
-      envelope: false,
     });
     expect(endpointOf(custom("https://kev.example.test/api/"))).toBeUndefined();
-    expect(endpointOf(clef)).toMatchObject({
-      infer:
-        "https://api.cloudflare.com/client/v4/accounts/abc123/ai/run/@cf/cloudflare/clef-flash",
-      check:
-        "https://api.cloudflare.com/client/v4/accounts/abc123/ai/models/schema?model=%40cf%2Fcloudflare%2Fclef-flash",
-      envelope: true,
-      window: 24_576,
-    });
   });
 
-  it("refuses an account id that could change the route", () => {
-    expect(evaluatorConfig.safeParse({ ...clef, accountId: "abc/../x" }).success).toBe(false);
+  it("refuses a model name that is not one word, and Cloudflare", () => {
+    expect(
+      evaluatorConfig.safeParse({ provider: "cloudflare", model: "clef-flash", accountId: "a" })
+        .success,
+    ).toBe(false);
     expect(
       evaluatorConfig.safeParse({ ...custom("http://127.0.0.1:8080"), model: "a b" }).success,
     ).toBe(false);
@@ -424,96 +411,6 @@ describe("evaluator choice", () => {
       builtIn: false,
       endpoint: "https://kev.example.test",
       eligible: true,
-    });
-  });
-
-  it("holds every read for a Clef model whose bound is unmeasured, before anything leaves", async () => {
-    const fetch = vi.fn();
-    vi.stubGlobal("fetch", fetch);
-    expect(CLEF_BOUND_VERIFIED.clef).toBe(false);
-    await expect(
-      evaluateProbabilities(input, "token", signal(), undefined, { ...clef, model: "clef" }),
-    ).rejects.toMatchObject({ stage: "input" });
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
-  it("asks clef-flash, measured on 2026-11-13, within its window", async () => {
-    expect(CLEF_BOUND_VERIFIED["clef-flash"]).toBe(true);
-    const answers = Object.fromEntries(ids.map((id) => [id, { type: "noul", noul: 0.001 }]));
-    const fetch = vi.fn(
-      async () =>
-        new Response(
-          JSON.stringify({
-            success: true,
-            result: { model: "clef-flash", answers, usage: { input_tokens: 2400 } },
-          }),
-        ),
-    );
-    vi.stubGlobal("fetch", fetch);
-    expect(await evaluateProbabilities(input, "token", signal(), undefined, clef)).toEqual(
-      Object.fromEntries(ids.map((id) => [id, 0.001])),
-    );
-    expect(fetch).toHaveBeenCalledOnce();
-  });
-
-  describe("Workers AI, as the bench's verification run calls it", () => {
-    const answer = (inner: object, envelope: object = {}) =>
-      new Response(
-        JSON.stringify({ success: true, result: inner, errors: [], messages: [], ...envelope }),
-      );
-    const clefAnswer = (tokens: number) => ({
-      ...response(),
-      model: "clef-flash",
-      usage: { input_tokens: tokens, output_tokens: 0 },
-    });
-    const run = (verify = vi.fn()) =>
-      evaluateProbabilities(input, "token", signal(), undefined, clef, verify);
-
-    it("unwraps the envelope and reports bytes and tokens", async () => {
-      vi.stubGlobal(
-        "fetch",
-        vi.fn(async () => answer(clefAnswer(900))),
-      );
-      const verify = vi.fn();
-      expect(await run(verify)).toEqual(Object.fromEntries(ids.map((id) => [id, 0.001])));
-      expect(verify).toHaveBeenCalledWith(expect.any(Number), 900);
-    });
-
-    it.each([
-      ["a failed envelope", answer(clefAnswer(900), { success: false })],
-      ["a list result", new Response(JSON.stringify({ success: true, result: [] }))],
-      ["no usage", answer({ ...response(), model: "clef-flash" })],
-      ["a count at the window's edge", answer(clefAnswer(24_576 - 2_048))],
-      ["another model", answer({ ...clefAnswer(900), model: "clef" })],
-    ])("rejects %s", async (_label, body) => {
-      vi.stubGlobal(
-        "fetch",
-        vi.fn(async () => body),
-      );
-      await expect(run()).rejects.toMatchObject({ stage: "response" });
-    });
-
-    it("holds a state too long for the window before sending it", async () => {
-      const fetch = vi.fn();
-      vi.stubGlobal("fetch", fetch);
-      const long = { ...input, sql: `SELECT ${"x".repeat(11_990)}` };
-      const many = Array.from({ length: 64 }, (_, i) => ({
-        ...input.dependencies[0],
-        column: `c${i}`.padEnd(63, "x"),
-        table: "t".repeat(63),
-        schema: "s".repeat(63),
-      }));
-      await expect(
-        evaluateProbabilities(
-          { ...long, dependencies: many },
-          "token",
-          signal(),
-          undefined,
-          clef,
-          vi.fn(),
-        ),
-      ).rejects.toMatchObject({ stage: "input" });
-      expect(fetch).not.toHaveBeenCalled();
     });
   });
 
@@ -552,21 +449,6 @@ describe("evaluator choice", () => {
       expect(await checkEvaluator(custom("http://127.0.0.1:8080"), "", signal())).toBe(
         "unavailable",
       );
-    });
-
-    it.each([
-      [200, { success: true, result: { input: {}, output: {} } }, "valid"],
-      [200, { success: false, result: { input: {}, output: {} } }, "unavailable"],
-      [200, { success: true }, "unavailable"],
-      [404, {}, "unavailable"],
-      [400, {}, "unavailable"],
-      [401, {}, "invalid"],
-    ])("reads Cloudflare's model schema: %s %o is %s", async (status, body, verdict) => {
-      vi.stubGlobal(
-        "fetch",
-        vi.fn(async () => new Response(JSON.stringify(body), { status })),
-      );
-      expect(await checkEvaluator(clef, "token", signal())).toBe(verdict);
     });
   });
 

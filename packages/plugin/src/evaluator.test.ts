@@ -35,14 +35,14 @@ describe("the stored evaluator", () => {
     { ...DEFAULT_SETTINGS, cutoffs: { ...AUTO_THRESHOLDS, insufficient_context: 2 } },
     // Built-in cutoffs exist only for jev-1.13.0, and only as shipped.
     { ...DEFAULT_SETTINGS, cutoffs: { ...AUTO_THRESHOLDS, personal_disclosure: 0.9 } },
-    { ...settingsFor("cloudflare", "clef"), builtIn: true, cutoffs: { ...AUTO_THRESHOLDS } },
+    { ...settingsFor("custom", "kev-4b"), builtIn: true, cutoffs: { ...AUTO_THRESHOLDS } },
     { ...DEFAULT_SETTINGS, baseUrl: "x".repeat(3000) },
   ])("treats a damaged entry as no choice, never as TypeSafe: %o", (raw) => {
     expect(parseSettings(raw)).toBeUndefined();
   });
 
   it("starts every model other than jev-1.13.0 with empty cutoffs", () => {
-    expect(settingsFor("cloudflare", "clef").cutoffs).toEqual({
+    expect(settingsFor("custom", "kev-4b").cutoffs).toEqual({
       personal_disclosure: null,
       organization_disclosure: null,
       secret_disclosure: null,
@@ -80,9 +80,6 @@ describe("a Custom server's address", () => {
 describe("keys and the choice in force", () => {
   it("gives each destination its own key slot, path prefix included", () => {
     expect(keySlot(DEFAULT_SETTINGS)).toBe("gatekeeper.typesafe-key");
-    expect(keySlot({ ...settingsFor("cloudflare", "clef"), accountId: "abc123" })).toBe(
-      "gatekeeper.evaluator-key.cloudflare.abc123",
-    );
     expect(keySlot(custom("https://kev.example.test/a"))).not.toBe(
       keySlot(custom("https://kev.example.test/b")),
     );
@@ -111,9 +108,9 @@ describe("keys and the choice in force", () => {
   });
 
   it("writes a prompt that names the bench and never a key", () => {
-    const prompt = agentPrompt({ ...settingsFor("cloudflare", "clef-flash"), accountId: "abc123" });
+    const prompt = agentPrompt(custom("https://kev.example.test"));
     expect(prompt).toContain(
-      "--provider cloudflare --model clef-flash --account-id abc123 --split development",
+      "--provider custom --model kev-4b --base-url https://kev.example.test --split development",
     );
     expect(prompt).toContain("GATEKEEPER_EVALUATOR_KEY");
     expect(prompt).toContain("TZ=UTC");
@@ -135,10 +132,11 @@ describe("the commands the prompt hands to an agent", () => {
 
   it("writes no command for an evaluator not yet complete", () => {
     expect(agentPrompt(custom(""))).toBeUndefined();
-    expect(agentPrompt(settingsFor("cloudflare", "clef"))).toBeUndefined();
   });
 
   it("refuses a stored hosted model its provider does not serve", () => {
-    expect(parseSettings({ ...settingsFor("cloudflare", "clef"), model: "gpt-6" })).toBeUndefined();
+    expect(
+      parseSettings({ ...DEFAULT_SETTINGS, builtIn: false, model: "jev-latest" }),
+    ).toBeUndefined();
   });
 });

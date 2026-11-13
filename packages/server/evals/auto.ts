@@ -119,9 +119,6 @@ const resultSchema = z
     localReason: z.string().optional(),
     probabilities: z.record(probability).optional(),
     elapsedMs: z.number().nonnegative().optional(),
-    // Clef only: the request's bytes and the tokens it reported, kept from complete answers.
-    bodyBytes: z.number().int().nonnegative().optional(),
-    inputTokens: z.number().int().nonnegative().optional(),
     error: z
       .object({
         stage: z.enum(["input", "network", "http", "response", "cancelled", "internal"]),
@@ -309,13 +306,10 @@ export async function runLive(
   if (report.mode !== "dry")
     throw new Error("Start a fresh run instead of overwriting observations");
   const config = report.evaluator ?? DEFAULT_EVALUATOR;
-  // Clef's runs are also the evidence its input bound waits for, so they measure it.
-  const measures = Boolean(endpointOf(config)?.window);
   report.mode = "live";
   for (const r of report.results) {
     if (!r.input || signal.aborted) continue;
     const started = performance.now();
-    let observed: { bodyBytes: number; inputTokens: number } | undefined;
     try {
       r.probabilities = await evaluateProbabilities(
         evaluationInput.parse(r.input),
@@ -323,14 +317,7 @@ export async function runLive(
         AbortSignal.any([signal, AbortSignal.timeout(12000)]),
         report.questions,
         config,
-        measures
-          ? (bodyBytes, inputTokens) => {
-              observed = { bodyBytes, inputTokens };
-            }
-          : undefined,
       );
-      // Kept only once the whole answer passed: a call that failed later is no evidence.
-      if (observed) Object.assign(r, observed);
     } catch (error) {
       r.error =
         error instanceof EvaluationError
@@ -489,19 +476,10 @@ export function summarize(raw: unknown, thresholds?: unknown): string {
     return `| ${c.id} | ${c.expected} | ${outcome} |`;
   });
   const evaluator = report.evaluator ?? DEFAULT_EVALUATOR;
-  const measured = report.results.flatMap((r) =>
-    r.bodyBytes !== undefined && r.inputTokens !== undefined ? [r] : [],
-  );
   return [
     `# Auto evaluation (${report.split}, ${report.mode})`,
     "",
     `Evaluator: ${JSON.stringify(evaluator)}. Baseline policy: ${report.baselinePolicy}.`,
-    // The evidence that opens a model in CLEF_BOUND_VERIFIED: tokens well under the bytes.
-    ...(measured.length
-      ? [
-          `Input bound over ${measured.length} complete answers: largest tokens minus bytes ${Math.max(...measured.map((r) => r.inputTokens! - r.bodyBytes!))}, largest request ${Math.max(...measured.map((r) => r.bodyBytes!))} bytes.`,
-        ]
-      : []),
     ...(report.analysis === ANALYSIS
       ? []
       : [
@@ -549,27 +527,19 @@ export function evaluatorFromFlags(values: {
   provider?: string;
   model?: string;
   "base-url"?: string;
-  "account-id"?: string;
 }): EvaluatorConfig {
   const url = values["base-url"];
-  const account = values["account-id"];
   // A flag the evaluator does not take is a mistake, and the key meant for one destination must
   // not reach the default: refuse rather than ignore.
   if (!values.provider) {
-    if (values.model !== undefined || url !== undefined || account !== undefined)
+    if (values.model !== undefined || url !== undefined)
       throw new Error("Name the evaluator with --provider");
     return DEFAULT_EVALUATOR;
   }
   if (url !== undefined && values.provider !== "custom")
     throw new Error("--base-url is for --provider custom");
-  if (account !== undefined && values.provider !== "cloudflare")
-    throw new Error("--account-id is for --provider cloudflare");
   const extra =
-    values.provider === "custom"
-      ? { baseUrl: canonicalBaseUrl(url ?? "") ?? url ?? "" }
-      : values.provider === "cloudflare"
-        ? { accountId: account ?? "" }
-        : {};
+    values.provider === "custom" ? { baseUrl: canonicalBaseUrl(url ?? "") ?? url ?? "" } : {};
   const config = evaluatorConfig.parse({
     provider: values.provider,
     model: values.model,
@@ -597,7 +567,6 @@ async function main() {
       provider: { type: "string" },
       model: { type: "string" },
       "base-url": { type: "string" },
-      "account-id": { type: "string" },
       propose: { type: "string" },
       help: { type: "boolean" },
     },
@@ -605,7 +574,7 @@ async function main() {
   if (values.help) {
     console.log(
       [
-        "eval:auto [--live] [--provider typesafe|cloudflare|custom --model <m> [--account-id <id>] [--base-url <url>]] [--corpus <json>] [--questions <json>] [--thresholds <json>] [--split development|validation] [--out <json>]",
+        "eval:auto [--live] [--provider typesafe|custom --model <m> [--base-url <url>]] [--corpus <json>] [--questions <json>] [--thresholds <json>] [--split development|validation] [--out <json>]",
         "eval:auto --propose <live development report> [--out <proposal json>]",
         "eval:auto --replay <json> [--thresholds <json or proposal>]",
         "Paths are repository-relative. Live runs read the key from GATEKEEPER_EVALUATOR_KEY (TYPESAFE_API_KEY still works for TypeSafe), provisioned by the operator; a Custom server may go without one.",

@@ -100,17 +100,9 @@ export const evaluationInput = z
 // The evaluators Auto mode can ask. Model names are each provider's own; a Custom server is
 // any System One server the user points Auto mode at.
 const CUSTOM_MODEL = /^[A-Za-z0-9._:@/-]{1,100}$/;
-export const PROVIDERS = ["typesafe", "cloudflare", "custom"] as const;
+export const PROVIDERS = ["typesafe", "custom"] as const;
 export const evaluatorConfig = z.discriminatedUnion("provider", [
   z.object({ provider: z.literal("typesafe"), model: z.literal(AUTO_MODEL) }).strict(),
-  z
-    .object({
-      provider: z.literal("cloudflare"),
-      model: z.enum(["clef", "clef-flash"]),
-      // An account id goes into the request path: nothing that could change the route.
-      accountId: z.string().regex(/^[A-Za-z0-9]{1,64}$/),
-    })
-    .strict(),
   z
     .object({
       provider: z.literal("custom"),
@@ -139,48 +131,17 @@ export function canonicalBaseUrl(raw: string): string | undefined {
 }
 
 const TYPESAFE_API = "https://api.typesafe.ai";
-const CLOUDFLARE_ACCOUNTS = "https://api.cloudflare.com/client/v4/accounts";
-// The context windows Cloudflare publishes for Clef, which cuts a longer text state silently
-// instead of refusing it (developers.cloudflare.com/workers-ai/models/clef, clef-flash).
-const CLEF_WINDOWS = { clef: 65_536, "clef-flash": 24_576 } as const;
-// Tokens kept free beyond the request's UTF-8 byte count, which bounds its tokens on a byte
-// level tokenizer. ponytail: a fixed reserve, an exact count needs Clef's own tokenizer.
-const CLEF_RESERVE = 2_048;
-// Opened per model once a live bench run measured its tokens against our bytes: clef-flash on
-// 2026-11-13 (120 development requests, at least 4.9 bytes per token). clef waits for its own.
-export const CLEF_BOUND_VERIFIED = { clef: false, "clef-flash": true } as const;
-
 interface Endpoint {
   infer: string;
   check: string;
-  // Workers AI wraps a model's answer in its REST envelope.
-  envelope: boolean;
-  window?: number;
-  // Whether the byte bound has been measured for this model; until then its reads wait.
-  verified?: boolean;
 }
 
 export function endpointOf(config: EvaluatorConfig): Endpoint | undefined {
   if (config.provider === "typesafe")
-    return {
-      infer: `${TYPESAFE_API}/v1/systemone`,
-      check: `${TYPESAFE_API}/v1/models`,
-      envelope: false,
-    };
-  if (config.provider === "cloudflare") {
-    const ai = `${CLOUDFLARE_ACCOUNTS}/${config.accountId}/ai`;
-    const model = `@cf/cloudflare/${config.model}`;
-    return {
-      infer: `${ai}/run/${model}`,
-      check: `${ai}/models/schema?model=${encodeURIComponent(model)}`,
-      envelope: true,
-      window: CLEF_WINDOWS[config.model],
-      verified: CLEF_BOUND_VERIFIED[config.model],
-    };
-  }
+    return { infer: `${TYPESAFE_API}/v1/systemone`, check: `${TYPESAFE_API}/v1/models` };
   const base = canonicalBaseUrl(config.baseUrl);
   return base && base === config.baseUrl
-    ? { infer: `${base}/v1/systemone`, check: `${base}/v1/models`, envelope: false }
+    ? { infer: `${base}/v1/systemone`, check: `${base}/v1/models` }
     : undefined;
 }
 
@@ -226,28 +187,16 @@ async function readBounded(response: Response, limit = 32000): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-const workersAiEnvelope = z.object({ success: z.literal(true), result: z.record(z.unknown()) });
-const usage = z.object({ input_tokens: z.number().int().nonnegative() }).passthrough();
-
 export async function evaluateProbabilities(
   input: EvaluationInput,
   key: string,
   signal: AbortSignal,
   questions = evaluationQuestions,
   config: EvaluatorConfig = DEFAULT_EVALUATOR,
-  // The bench's verification run only: it measures the bound the gate waits for.
-  verify?: (bodyBytes: number, inputTokens: number) => void,
 ): Promise<Record<string, number>> {
   const endpoint = endpointOf(config);
   const body = JSON.stringify({ model: config.model, state: input, questions });
-  const bytes = Buffer.byteLength(body);
-  // A state past the window would be cut, and probabilities about a cut state are not about
-  // this read: hold it before anything leaves.
-  if (
-    !endpoint ||
-    (endpoint.window && ((!endpoint.verified && !verify) || bytes > endpoint.window - CLEF_RESERVE))
-  )
-    throw new EvaluationError("input");
+  if (!endpoint) throw new EvaluationError("input");
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (key) headers.Authorization = `Bearer ${key}`;
   const response = await fetch(endpoint.infer, {
@@ -264,24 +213,14 @@ export async function evaluateProbabilities(
     throw new EvaluationError("http", response.status);
   }
   try {
-    let json: unknown = JSON.parse(await readBounded(response));
-    if (endpoint.envelope) json = workersAiEnvelope.parse(json).result;
     const result = z
       .object({
         model: z.literal(config.model),
         answers: z.record(
           z.object({ type: z.literal("noul"), noul: z.number().finite().min(0).max(1) }).strict(),
         ),
-        usage: endpoint.window ? usage : z.unknown(),
       })
-      .parse(json);
-    if (endpoint.window) {
-      const tokens = usage.parse(result.usage).input_tokens;
-      verify?.(bytes, tokens);
-      // A count at the window's edge may be what was left after a cut.
-      if (tokens >= endpoint.window - CLEF_RESERVE)
-        throw new Error("Possibly truncated evaluator input");
-    }
+      .parse(JSON.parse(await readBounded(response)));
     if (signal.aborted) throw new Error("Evaluation cancelled");
     const probabilities: Record<string, number> = {};
     for (const id of Object.keys(questions)) {
@@ -390,12 +329,6 @@ export type EvaluatorChecker = (
 const modelList = z
   .object({ models: z.array(z.object({ name: z.string() }).passthrough()) })
   .passthrough();
-const modelSchema = z
-  .object({
-    success: z.literal(true),
-    result: z.object({ input: z.record(z.unknown()), output: z.record(z.unknown()) }).passthrough(),
-  })
-  .passthrough();
 
 // Metadata calls only, so a test sends no user data. TypeSafe keeps checkKey's any-2xx meaning:
 // whether its list names jev-1.13.0 exactly is unverified, so requiring it could lock users out.
@@ -418,12 +351,7 @@ export const checkEvaluator: EvaluatorChecker = async (config, key, signal) => {
       console.error(`[gatekeeper] Evaluator check answered HTTP ${response.status}`);
       return "unavailable";
     }
-    const json: unknown = JSON.parse(await readBounded(response));
-    // Cloudflare's model schema proves the account reaches the model, not that the token may run
-    // it: a Read-only token passes here and its reads then wait for a human.
-    if (config.provider === "cloudflare")
-      return modelSchema.safeParse(json).success ? "valid" : "unavailable";
-    const { models } = modelList.parse(json);
+    const { models } = modelList.parse(JSON.parse(await readBounded(response)));
     return models.some((m) => m.name === config.model) ? "valid" : "model-missing";
   } catch (err) {
     const code = (err as { cause?: { code?: string } }).cause?.code;

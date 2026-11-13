@@ -214,15 +214,15 @@ use returns nothing (`WHERE false`). Both alert as a full read of the table.
 
 Auto mode sends the same minimized input (SQL structure with literals withheld, and the
 schema, table, column names, types and usages it reads) to the evaluator the user chose:
-TypeSafe, Cloudflare (Clef) or a Custom server. See [Evaluator](docs/AUTO-MODE.md#evaluator).
+TypeSafe or a Custom server. See [Evaluator](docs/AUTO-MODE.md#evaluator).
 
 - **Destination.** The sharing sentence names the recipient before activation; enabling
   consents to it. A Custom server's URL is https, or plain http only to `127.0.0.1` or `[::1]`,
   with no credentials, query or fragment, checked by the plugin and again by the broker.
   Requests never follow redirects and provider bodies are never relayed or logged.
 - **Keys.** Each key is stored in Beekeeper's encrypted storage for the destination it was
-  typed for (TypeSafe, a Cloudflare account, a Custom server's full URL) and is never sent to
-  another one. A Custom server may go without a key, and then receives no Authorization.
+  typed for (TypeSafe, a Custom server's full URL) and is never sent to another one. A Custom
+  server may go without a key, and then receives no Authorization.
 - **Cutoffs.** Only `jev-1.13.0` has Gatekeeper's built-in cutoffs. Cutoffs the user sets are a
   delegation by that user, not a Gatekeeper measurement; permissive cutoffs let more reads run
   without review. The local read-only analysis and sensitive-input checks apply whatever the
@@ -237,9 +237,8 @@ TypeSafe, Cloudflare (Clef) or a Custom server. See [Evaluator](docs/AUTO-MODE.m
 - **What Gatekeeper cannot verify.** That a Custom server runs the model it names, with the
   weights and precision its cutoffs were measured on, and reads the whole input instead of
   cutting it. Choosing a model is the user's statement about their own server.
-- **Clef.** Clef cuts a state longer than its window instead of refusing it. The broker holds any
-  request that could reach the window, a bound measured per model by a live bench run:
-  `clef-flash` is measured (2026-11-13), `clef` is not, so its reads stay for manual review.
+- **No Clef.** Cloudflare's Clef cuts a long state instead of refusing it, and where it cuts could
+  not be established, so it is not offered. See [Evaluator](docs/AUTO-MODE.md#evaluator).
 
 ## Same-user trust boundary
 

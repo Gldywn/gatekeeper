@@ -653,15 +653,11 @@ describe("exported investigation shapes (synthetic, literals and names replaced)
 
 describe("measuring another evaluator", () => {
   const questions = evaluationQuestions;
-  const clef = {
-    provider: "cloudflare" as const,
-    model: "clef-flash" as const,
-    accountId: "abc123",
-  };
+  const kev = { provider: "custom" as const, model: "kev-4b", baseUrl: "http://127.0.0.1:8080" };
   const axes = Object.keys(questions);
   // A live development report whose answers are set per expected label, no provider called.
   const live = (answer: (expected: string, id: string) => Record<string, number>) => {
-    const report = prepare(allCases, questions, "development", undefined, clef);
+    const report = prepare(allCases, questions, "development", undefined, kev);
     report.mode = "live";
     const cases = report.corpus.filter((c) => c.split === "development");
     report.results.forEach((r, i) => {
@@ -672,9 +668,9 @@ describe("measuring another evaluator", () => {
   const flat = (v: number) => Object.fromEntries(axes.map((a) => [a, v]));
 
   it("starts another model at zero, never with jev-1.13.0's cutoffs", () => {
-    const report = prepare(allCases, questions, "development", undefined, clef);
-    expect(report.evaluator).toEqual(clef);
-    expect(report.model).toBe("clef-flash");
+    const report = prepare(allCases, questions, "development", undefined, kev);
+    expect(report.evaluator).toEqual(kev);
+    expect(report.model).toBe("kev-4b");
     expect(report.thresholds).toEqual(flat(0));
   });
 
@@ -687,7 +683,7 @@ describe("measuring another evaluator", () => {
     expect(result.allowAdmitted).toBe(result.allowTotal);
     expect(result.proposal?.cutoffs).toEqual(flat(0.05));
     expect(result.minHoldingDistance).toBeCloseTo(0.85);
-    expect(result.proposal?.evaluator).toEqual(clef);
+    expect(result.proposal?.evaluator).toEqual(kev);
   });
 
   it("keeps out a safe read that would let a risky one through, and the margin counts", () => {
@@ -717,8 +713,8 @@ describe("measuring another evaluator", () => {
     delete first.probabilities;
     first.error = { stage: "network" };
     expect(() => propose(broken)).toThrow(/Incomplete observations/);
-    expect(() => propose(prepare(allCases, questions, "development", undefined, clef))).toThrow();
-    const validation = prepare(allCases, questions, "validation", undefined, clef);
+    expect(() => propose(prepare(allCases, questions, "development", undefined, kev))).toThrow();
+    const validation = prepare(allCases, questions, "validation", undefined, kev);
     validation.mode = "live";
     expect(() => propose(validation)).toThrow();
   });
@@ -727,39 +723,10 @@ describe("measuring another evaluator", () => {
     const report = live((e) => (e === "allow" ? flat(0.05) : flat(0.9)));
     const { proposal } = propose(report);
     expect(summarize(report, proposal)).toContain("Unsafe automatic approvals: 0.");
-    const other = { ...clef, model: "clef" as const };
-    expect(() => summarize({ ...report, model: "clef", evaluator: other }, proposal)).toThrow(
+    const other = { ...kev, model: "kev-9b" };
+    expect(() => summarize({ ...report, model: "kev-9b", evaluator: other }, proposal)).toThrow(
       /another evaluator/,
     );
-  });
-
-  it("measures Clef's input bound from complete answers only", async () => {
-    const report = prepare(allCases, questions, "development", undefined, clef);
-    let calls = 0;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (_url: string, init: RequestInit) => {
-        calls++;
-        const body = JSON.parse(init.body as string);
-        const answers = Object.fromEntries(
-          Object.keys(body.questions).map((id) => [id, { type: "noul", noul: 0.01 }]),
-        );
-        // The third answer misses an axis: no bound is kept for it.
-        if (calls === 3) delete answers.insufficient_context;
-        return new Response(
-          JSON.stringify({
-            success: true,
-            result: { model: "clef-flash", answers, usage: { input_tokens: 4000 } },
-          }),
-        );
-      }),
-    );
-    await runLive(report, "synthetic-key", new AbortController().signal, async () => {});
-    const evaluated = report.results.filter((r) => r.input);
-    expect(evaluated[0]).toMatchObject({ inputTokens: 4000, bodyBytes: expect.any(Number) });
-    expect(evaluated[2].inputTokens).toBeUndefined();
-    expect(evaluated[2].error).toEqual({ stage: "response" });
-    expect(summarize(report)).toMatch(/Input bound over 2 complete answers/);
   });
 
   it("reads the evaluator from the flags with the broker's URL rules", () => {
@@ -781,16 +748,8 @@ describe("measuring another evaluator", () => {
 
   it.each([
     { "base-url": "https://kev.example.test" },
-    { "account-id": "abc123" },
     { model: "kev-4b" },
     { provider: "typesafe", model: AUTO_MODEL, "base-url": "https://kev.example.test" },
-    {
-      provider: "custom",
-      model: "kev-4b",
-      "base-url": "https://kev.example.test",
-      "account-id": "x",
-    },
-    { provider: "cloudflare", model: "clef", "account-id": "abc", "base-url": "https://a.test" },
   ])("refuses a flag its evaluator does not take, before any key is used: %o", (flags) => {
     expect(() => evaluatorFromFlags(flags)).toThrow();
   });
@@ -801,7 +760,7 @@ describe("measuring another evaluator", () => {
     // Same axis names, other wording: the cutoffs would be for questions that never run.
     const reworded = structuredClone(evaluationQuestions);
     reworded.personal_disclosure.instructions += " Reworded.";
-    const other = prepare(allCases, reworded, "development", undefined, clef);
+    const other = prepare(allCases, reworded, "development", undefined, kev);
     other.mode = "live";
     for (const r of other.results) if (r.input) r.probabilities = flat(0.1);
     expect(() => propose(other)).toThrow(/production questions/);

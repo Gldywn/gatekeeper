@@ -3,7 +3,7 @@
 This development tool compares Jev questions and replays thresholds against recorded
 probabilities. It never executes SQL, connects to a database, reads result rows or
 changes the plugin's policy. It reuses `planRead`, `resolveRead` and the broker's own
-evaluator transport (TypeSafe, Cloudflare's Clef or a Custom server) without an additional
+evaluator transport (TypeSafe or a Custom server) without an additional
 dependency or service.
 
 ## Reference cases
@@ -165,18 +165,14 @@ Without flags the run asks TypeSafe's `jev-1.13.0`. Another evaluator is named w
 broker's own shapes and URL rules, and the report records it:
 
 ```bash
-TZ=UTC mise exec -- pnpm run eval:auto --live --provider cloudflare --model clef-flash --account-id <account> --out .orch/auto-evals/dev.json
 TZ=UTC mise exec -- pnpm run eval:auto --live --provider custom --model kev-4b --base-url http://127.0.0.1:8080 --out .orch/auto-evals/dev.json
 ```
 
 A model other than `jev-1.13.0` starts with zero cutoffs, which pass only an exact zero: no
 cutoff of another model passes for its own. Evaluator flags must match the provider: a
-`--base-url` without `--provider custom`, or an `--account-id` without `--provider cloudflare`,
-is refused rather than sent to TypeSafe with another destination's key. `--propose` works only
+`--base-url` without `--provider custom` is refused rather than sent to TypeSafe with another
+destination's key. `--propose` works only
 from the production questions and policy, where a higher probability always means review.
-Live Clef runs also keep, for each complete answer, the request's bytes
-and the input tokens Clef reported; the summary prints the largest gap, the evidence that opens
-a model in `CLEF_BOUND_VERIFIED` (tokens must stay well under the request's bytes).
 
 The default split is development. One System One request to the chosen evaluator batches
 the four production Noul questions per locally eligible case (a custom questions file sends

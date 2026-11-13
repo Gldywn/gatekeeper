@@ -328,7 +328,6 @@ describe("plugin-only automatic evaluation", () => {
       expect(evaluatorChecker).toHaveBeenCalledWith(custom, "", expect.any(AbortSignal));
       for (const body of [
         { evaluator: { ...custom, baseUrl: "http://10.0.0.5:8080" } },
-        { evaluator: { provider: "cloudflare", model: "clef", accountId: "abc" } },
         { evaluator: custom, extra: true },
       ])
         expect((await call("POST", "/evaluate/check", { token: TOKEN, body })).status).toBe(400);

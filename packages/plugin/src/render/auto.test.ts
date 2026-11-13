@@ -50,11 +50,11 @@ describe("Auto mode surfaces", () => {
       "Your cutoffs",
       false,
     ],
-    [settingsFor("cloudflare", "clef-flash"), "clef-flash", "Cloudflare", "Setup needed", true],
+    [settingsFor("custom", "kev-4b"), "kev-4b", "Custom server", "Setup needed", true],
     [
-      { ...settingsFor("cloudflare", "clef-flash"), accountId: "abc123" },
-      "clef-flash",
-      "Cloudflare",
+      { ...settingsFor("custom", "kev-4b"), baseUrl: "http://127.0.0.1:8080" },
+      "kev-4b",
+      "Custom server",
       "Cutoffs needed",
       true,
     ],
@@ -90,7 +90,6 @@ describe("Auto mode surfaces", () => {
     // Only a Custom server goes keyless, so only it offers to remove its key.
     expect(custom).toContain("data-key-remove");
     expect(custom).toContain("Plain http is accepted for 127.0.0.1 only.");
-    expect(evaluatorPageHtml(settingsFor("cloudflare"), false)).toContain('id="evAccountId"');
   });
   it.each([false, true])(
     "offers a confirmed switch out of Auto mode in the compact=%s menu",

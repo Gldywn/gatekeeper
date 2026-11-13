@@ -31,13 +31,11 @@ evaluator page in the same dialog; Escape or the back arrow returns to Settings.
 | Provider | Models | Address | Key |
 | :--- | :--- | :--- | :--- |
 | TypeSafe | `jev-1.13.0` | `https://api.typesafe.ai/v1/systemone` | required |
-| Cloudflare | `clef`, `clef-flash` | `https://api.cloudflare.com/client/v4/accounts/<account>/ai/run/@cf/cloudflare/<model>` | required |
 | Custom server | any System One model | `<server URL>/v1/systemone` | optional |
 
-All three receive the same input and the same four questions and answer with one
-probability of yes per question. Cloudflare wraps the answer in its REST envelope, which the
-broker unwraps. A Custom server is any server speaking TypeSafe's System One protocol, such as
-[Kev](https://github.com/jaredpalmer/kev); its URL is https, or plain http only to
+Both receive the same input and the same four questions and answer with one probability of
+yes per question. A Custom server is any server speaking TypeSafe's System One protocol, such
+as [Kev](https://github.com/jaredpalmer/kev); its URL is https, or plain http only to
 `127.0.0.1` or `[::1]` (a typed `localhost` is saved as `127.0.0.1`), with no credentials,
 query or fragment. Its path is kept, and the record keeps only its origin. A Custom server
 must refuse a request too long for it rather than cut it; Gatekeeper cannot verify that.
@@ -55,30 +53,22 @@ The four questions stay Gatekeeper's and are not configurable.
 development run, `--propose` to derive four cutoffs, then one validation run replayed with
 those cutoffs unchanged. The prompt carries no key and the agent never edits Settings.
 
-**Changes.** Any edit of the provider, model, account, URL, a cutoff or the built-in box turns
-Auto mode off at the first keystroke, and the evaluation in flight can no longer approve
-anything: Auto mode freezes the evaluator and cutoffs it is switched on with and judges each
-answer against them. Replacing a key does not turn it off. Each key is stored for the
-destination it was typed for (TypeSafe, a Cloudflare account, a Custom server's full URL)
-and never sent to another one. A damaged stored choice leaves Auto mode without an evaluator
+**Changes.** Any edit of the provider, model, URL, a cutoff or the built-in box turns Auto
+mode off at the first keystroke, and the evaluation in flight can no longer approve anything:
+Auto mode freezes the evaluator and cutoffs it is switched on with and judges each answer
+against them. Replacing a key does not turn it off. Each key is stored for the destination it
+was typed for (TypeSafe, a Custom server's full URL) and never sent to another one. A damaged stored choice leaves Auto mode without an evaluator
 rather than falling back to TypeSafe.
 
-**Clef.** Clef cuts a text state longer than its context window (65,536 tokens for `clef`,
-24,576 for `clef-flash`) instead of refusing it, and an answer about a cut state is not about
-the read. The broker holds a read whose request bytes, plus a 2,048-token reserve, exceed the
-window, and refuses an answer whose reported input tokens reach that edge. That bound assumes
-at most one token per byte, checked per model by a live bench run before the model may approve
-anything (`CLEF_BOUND_VERIFIED`). `clef-flash` was measured on 2026-11-13: all 120 development
-requests answered, at least 4.9 bytes per token, the largest request 11,779 bytes for 2,409
-tokens. `clef` has not been measured, so its reads stay for manual review before anything is
-sent.
+**Clef.** Cloudflare's Clef models are not offered. Workers AI cuts a text state longer than
+the model reads instead of refusing it (Cloudflare's model pages say so), and an answer about
+a cut state is not about the read. Our development requests left no evidence of where that cut
+falls, since their four questions outweigh their state, so no size check could keep a cut
+read from approving itself (operator decision, 2026-11-13).
 
 **Connection test.** Test connection, and each activation, use a metadata call only: TypeSafe's
-`GET /v1/models` (any 2xx accepted, as before), a Custom server's `GET /v1/models`, which must
-list the model, and Cloudflare's model schema
-(`GET .../ai/models/schema?model=@cf/cloudflare/<model>`), which needs Workers AI Read; running
-Clef needs Read and Edit, so a Read-only token passes the test and its reads then wait for a
-human.
+`GET /v1/models` (any 2xx accepted, as before), and a Custom server's `GET /v1/models`, which
+must list the model.
 
 **Versions.** An older plugin's request still evaluates with TypeSafe and the built-in
 cutoffs. A newer plugin on an older server says "Restart the Gatekeeper server to choose an

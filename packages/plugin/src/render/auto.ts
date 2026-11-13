@@ -116,7 +116,6 @@ export function evaluatorPageHtml(s: EvaluatorSettings | undefined, keySaved: bo
     provider: "typesafe",
     model: "",
     baseUrl: "",
-    accountId: "",
     builtIn: false,
     cutoffs: Object.fromEntries(AXES.map((id) => [id, null])) as EvaluatorSettings["cutoffs"],
   };
@@ -140,15 +139,7 @@ export function evaluatorPageHtml(s: EvaluatorSettings | undefined, keySaved: bo
               (m) => `<option value="${m}"${m === current.model ? " selected" : ""}>${m}</option>`,
             )
             .join("")}</select>`,
-        )}${
-          current.provider === "cloudflare"
-            ? field(
-                "Account ID",
-                "evAccountId",
-                textInput("evAccountId", "accountId", current.accountId, ' maxlength="64"'),
-              )
-            : ""
-        }`;
+        )}`;
   const key = `${field(
     "API key",
     "autoKey",

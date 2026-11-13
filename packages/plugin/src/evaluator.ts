@@ -14,20 +14,17 @@ export const AXIS_LABELS: Record<Axis, string> = {
 };
 export const PROVIDER_NAMES: Record<Provider, string> = {
   typesafe: "TypeSafe",
-  cloudflare: "Cloudflare",
   custom: "Custom server",
 };
 // The hosted models each provider names; a Custom server's model is whatever it serves.
-export const HOSTED_MODELS = { typesafe: [AUTO_MODEL], cloudflare: ["clef", "clef-flash"] };
+export const HOSTED_MODELS = { typesafe: [AUTO_MODEL] };
 const CUSTOM_MODEL = /^[A-Za-z0-9._:@/-]{1,100}$/;
-const ACCOUNT_ID = /^[A-Za-z0-9]{1,64}$/;
 
 // What Settings keeps. A cutoff left empty is null, never zero: it cannot authorize anything.
 export interface EvaluatorSettings {
   provider: Provider;
   model: string;
   baseUrl: string;
-  accountId: string;
   builtIn: boolean;
   cutoffs: Record<Axis, number | null>;
 }
@@ -42,7 +39,6 @@ export function settingsFor(provider: Provider, model = defaultModel(provider)):
     provider,
     model,
     baseUrl: "",
-    accountId: "",
     builtIn,
     cutoffs: builtIn ? { ...AUTO_THRESHOLDS } : emptyCutoffs(),
   };
@@ -61,10 +57,9 @@ export function parseSettings(raw: unknown): EvaluatorSettings | undefined {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return undefined;
   const r = raw as Record<string, unknown>;
   const provider = r.provider;
-  if (provider !== "typesafe" && provider !== "cloudflare" && provider !== "custom")
-    return undefined;
+  if (provider !== "typesafe" && provider !== "custom") return undefined;
   const text = (v: unknown, max: number) => typeof v === "string" && v.length <= max;
-  if (!text(r.model, 100) || !text(r.baseUrl, 2048) || !text(r.accountId, 64)) return undefined;
+  if (!text(r.model, 100) || !text(r.baseUrl, 2048)) return undefined;
   // A hosted provider only serves the models it names.
   if (provider !== "custom" && !(HOSTED_MODELS[provider] as string[]).includes(r.model as string))
     return undefined;
@@ -82,7 +77,6 @@ export function parseSettings(raw: unknown): EvaluatorSettings | undefined {
     provider,
     model: r.model as string,
     baseUrl: r.baseUrl as string,
-    accountId: r.accountId as string,
     builtIn: r.builtIn,
     cutoffs: Object.fromEntries(AXES.map((id) => [id, c[id]])) as Record<Axis, number | null>,
   };
@@ -122,10 +116,6 @@ export function canonicalBaseUrl(raw: string): string | undefined {
 export function evaluatorConfig(s: EvaluatorSettings): EvaluatorConfig | undefined {
   if (s.provider === "typesafe")
     return s.model === AUTO_MODEL ? { provider: "typesafe", model: AUTO_MODEL } : undefined;
-  if (s.provider === "cloudflare")
-    return (s.model === "clef" || s.model === "clef-flash") && ACCOUNT_ID.test(s.accountId)
-      ? { provider: "cloudflare", model: s.model, accountId: s.accountId }
-      : undefined;
   const baseUrl = canonicalBaseUrl(s.baseUrl);
   return baseUrl && baseUrl === s.baseUrl && CUSTOM_MODEL.test(s.model)
     ? { provider: "custom", model: s.model, baseUrl }
@@ -138,7 +128,6 @@ export function completeCutoffs(s: EvaluatorSettings): Cutoffs | undefined {
 
 // The field the evaluator page should open on when Auto mode cannot start yet.
 export function firstMissing(s: EvaluatorSettings): string | undefined {
-  if (s.provider === "cloudflare" && !ACCOUNT_ID.test(s.accountId)) return "accountId";
   if (s.provider === "custom" && canonicalBaseUrl(s.baseUrl) !== s.baseUrl) return "baseUrl";
   if (s.provider === "custom" && !CUSTOM_MODEL.test(s.model)) return "model";
   return AXES.find((id) => !inUnitRange(s.cutoffs[id]));
@@ -148,13 +137,12 @@ export function firstMissing(s: EvaluatorSettings): string | undefined {
 export function keySlot(s: EvaluatorSettings): string | undefined {
   if (s.provider === "typesafe") return AUTO_KEY;
   const config = evaluatorConfig(s);
-  if (!config) return undefined;
-  return config.provider === "cloudflare"
-    ? `gatekeeper.evaluator-key.cloudflare.${config.accountId}`
-    : `gatekeeper.evaluator-key.custom.${(config as { baseUrl: string }).baseUrl}`;
+  return config?.provider === "custom"
+    ? `gatekeeper.evaluator-key.custom.${config.baseUrl}`
+    : undefined;
 }
 
-export const keyRequired = (s: EvaluatorSettings) => s.provider !== "custom";
+export const keyRequired = (s: EvaluatorSettings) => s.provider === "typesafe";
 
 // Who receives the SQL structure: the one name the copy keeps, since enabling consents to it.
 export function recipient(s: EvaluatorSettings | undefined): string {
@@ -194,7 +182,6 @@ export function shellQuote(value: string): string {
 
 function benchFlags(config: EvaluatorConfig): string {
   const flags = ["--provider", config.provider, "--model", config.model];
-  if (config.provider === "cloudflare") flags.push("--account-id", config.accountId);
   if (config.provider === "custom") flags.push("--base-url", config.baseUrl);
   return flags.map(shellQuote).join(" ");
 }
@@ -205,11 +192,9 @@ export function agentPrompt(s: EvaluatorSettings): string | undefined {
   const config = evaluatorConfig(s);
   if (!config) return undefined;
   const where =
-    config.provider === "cloudflare"
-      ? `Cloudflare Workers AI, model ${config.model}, account ${config.accountId}`
-      : config.provider === "custom"
-        ? `a Custom server at ${config.baseUrl}, model ${config.model}`
-        : `TypeSafe, model ${config.model}`;
+    config.provider === "custom"
+      ? `a Custom server at ${config.baseUrl}, model ${config.model}`
+      : `TypeSafe, model ${config.model}`;
   const flags = benchFlags(config);
   return [
     "Measure the four Gatekeeper Auto mode cutoffs for my evaluator.",

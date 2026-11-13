@@ -180,7 +180,6 @@ const typedKey = (input?: HTMLInputElement | null): string => {
 };
 // The evaluator page's control for what is still missing from the choice.
 const FIELD_IDS: Record<string, string> = {
-  accountId: "evAccountId",
   baseUrl: "evBaseUrl",
   model: "evModel",
 };
@@ -2754,23 +2753,11 @@ export class Gatekeeper {
     else if (!prev) return;
     // A different evaluator never inherits the cutoffs measured, or set, for another one.
     else if (name === "model")
-      next = {
-        ...settingsFor(prev.provider, el.value.trim()),
-        baseUrl: prev.baseUrl,
-        accountId: prev.accountId,
-      };
+      next = { ...settingsFor(prev.provider, el.value.trim()), baseUrl: prev.baseUrl };
     else if (name === "baseUrl") {
       const baseUrl = canonicalBaseUrl(el.value) ?? el.value.trim();
       next =
-        baseUrl === prev.baseUrl
-          ? prev
-          : { ...settingsFor(prev.provider, prev.model), baseUrl, accountId: "" };
-    } else if (name === "accountId") {
-      const accountId = el.value.trim();
-      next =
-        accountId === prev.accountId
-          ? prev
-          : { ...settingsFor(prev.provider, prev.model), accountId };
+        baseUrl === prev.baseUrl ? prev : { ...settingsFor(prev.provider, prev.model), baseUrl };
     } else if (name === "builtIn" && el instanceof HTMLInputElement)
       next = el.checked
         ? { ...prev, builtIn: true, cutoffs: { ...AUTO_THRESHOLDS } }

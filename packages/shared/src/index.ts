@@ -123,7 +123,7 @@ export interface EvaluationInput {
 }
 
 export interface AutoEvaluation {
-  provider: "typesafe" | "cloudflare" | "custom";
+  provider: "typesafe" | "custom";
   model: string;
   policy:
     | "auto-beta-1"
@@ -151,7 +151,6 @@ export interface AutoEvaluation {
 /** Which evaluator Auto mode asks, as the plugin sends it to the broker. */
 export type EvaluatorConfig =
   | { provider: "typesafe"; model: "jev-1.13.0" }
-  | { provider: "cloudflare"; model: "clef" | "clef-flash"; accountId: string }
   | { provider: "custom"; model: string; baseUrl: string };
 
 export interface ApprovalAttribution {
