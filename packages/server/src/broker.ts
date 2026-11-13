@@ -429,7 +429,7 @@ async function handle(broker: Broker, req: IncomingMessage, res: ServerResponse)
     ) {
       send(res, 400, {
         error: "Invalid evaluation input",
-        diagnostic: { stage: "input", model: AUTO_MODEL, policy: AUTO_POLICY },
+        diagnostic: { stage: "input", policy: AUTO_POLICY },
       });
       return;
     }
@@ -455,7 +455,12 @@ async function handle(broker: Broker, req: IncomingMessage, res: ServerResponse)
     broker.evaluating = true;
     const connection = store.getConnection()!;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 12000);
+    // Our deadline is a timeout; an abort from the client going away stays a cancellation.
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, 12000);
     const closed = () => controller.abort();
     res.on("close", closed);
     try {
@@ -490,8 +495,9 @@ async function handle(broker: Broker, req: IncomingMessage, res: ServerResponse)
       send(res, 200, evaluation);
     } catch (error) {
       // Provider bodies and exceptions can contain credentials or query-derived data.
-      const diagnostic =
-        error instanceof EvaluationError
+      const diagnostic = timedOut
+        ? { stage: "timeout" }
+        : error instanceof EvaluationError
           ? { stage: error.stage, status: error.status }
           : { stage: "internal" };
       console.error(`[gatekeeper] Evaluation failed: ${JSON.stringify(diagnostic)}`);

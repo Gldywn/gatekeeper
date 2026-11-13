@@ -131,27 +131,46 @@ describe("Auto mode surfaces", () => {
     expect(evaluating).toContain('<div class="sql-ring">');
     expect(evaluating).toContain('data-approve="r1"');
     expect(evaluating).toContain('data-reject="r1"');
-    // A hold says only where it happened: never its stored reason, which may name a source.
+    // A hold says where it happened and why, cut before any source its reason may name.
     const local = cardHtml(
       { ...card, autoStatus: "Needs review: Sensitive source or alias: <email>" },
       "postgresql",
       new Map(),
     );
     expect(local).toContain(
-      'Held on this machine before evaluation. Waiting for your review. <b class="auto-strong">Nothing was sent to the evaluator.</b>',
+      'Held on this machine before evaluation: Sensitive source or alias. Waiting for your review. <b class="auto-strong">Nothing was sent to the evaluator.</b>',
     );
     expect(local).not.toContain("email");
-    const sent = cardHtml(
-      {
-        ...card,
-        autoStatus: "Needs review: Evaluation timed out. Approve manually",
-        autoSent: true,
-      },
-      "postgresql",
-      new Map(),
+    // A read that left and got no verdict is never told it was refused.
+    const sent = (extra: object) =>
+      cardHtml(
+        {
+          ...card,
+          autoStatus: "Needs review: Evaluator or metadata unavailable. Approve manually",
+          autoSent: true,
+          autoModel: "kev-<4b>",
+          ...extra,
+        },
+        "postgresql",
+        new Map(),
+      );
+    for (const [failure, text] of [
+      [{ stage: "timeout" }, "kev-&lt;4b&gt; did not answer in time."],
+      [{ stage: "network" }, "kev-&lt;4b&gt; could not be reached."],
+      [{ stage: "http", status: 401 }, "kev-&lt;4b&gt; answered with an error (HTTP 401)."],
+      [{ stage: "http" }, "kev-&lt;4b&gt; answered with an error."],
+      [{ stage: "response" }, "kev-&lt;4b&gt; returned an invalid answer."],
+      [{ stage: "cancelled" }, "The evaluation did not finish."],
+    ] as const) {
+      const html = sent({ autoFailure: failure });
+      expect(html).toContain(`${text} Waiting for your review.`);
+      expect(html).not.toContain("did not clear");
+      expect(html).not.toContain("API key");
+      expect(html).not.toContain("Nothing was sent");
+    }
+    expect(sent({})).toContain(
+      "The evaluation did not finish: Evaluator or metadata unavailable. Waiting for your review.",
     );
-    expect(sent).toContain("The evaluator did not clear this read. Waiting for your review.");
-    expect(sent).not.toContain("Nothing was sent");
     // An answer on record names the model that gave it, escaped like any recorded text.
     const refused = cardHtml(
       {
@@ -173,6 +192,61 @@ describe("Auto mode surfaces", () => {
       new Map(),
     );
     expect(refused).toContain("jev-&lt;1&gt; did not clear this read. Waiting for your review.");
+    // With cutoffs it can grade by, the card says which questions went over, in words.
+    const graded = (probabilities: Record<string, number>) =>
+      cardHtml(
+        {
+          ...card,
+          autoStatus: "Needs review: Potential personal disclosure",
+          autoSent: true,
+          evaluation: {
+            provider: "typesafe",
+            model: "jev-1.13.0",
+            policy: AUTO_POLICY,
+            evaluatedAt: 1,
+            sqlDigest: "a".repeat(64),
+            eligible: false,
+            reasons: ["Potential personal disclosure"],
+            probabilities,
+          },
+        },
+        "postgresql",
+        new Map(),
+      );
+    const axes = { organization_disclosure: 0.06, secret_disclosure: 0.01 };
+    expect(graded({ ...axes, personal_disclosure: 0.91, insufficient_context: 0.3 })).toContain(
+      "jev-1.13.0 did not clear this read: it may reveal personal data. Waiting",
+    );
+    expect(graded({ ...axes, personal_disclosure: 0.91, insufficient_context: 0.68 })).toContain(
+      "jev-1.13.0 did not clear this read: it may reveal personal data and the meaning of a returned value is unclear. Waiting",
+    );
+    // A probability at its cutoff passes, as in the decision itself.
+    expect(graded({ ...axes, personal_disclosure: 0.2, insufficient_context: 0.68 })).toContain(
+      "did not clear this read: the meaning of a returned value is unclear.",
+    );
+    // A read cleared, then held for another reason, says both.
+    const later = cardHtml(
+      {
+        ...card,
+        autoStatus: "Needs review: Connection or approval authority changed",
+        autoSent: true,
+        evaluation: {
+          provider: "typesafe",
+          model: "jev-1.13.0",
+          policy: AUTO_POLICY,
+          evaluatedAt: 1,
+          sqlDigest: "a".repeat(64),
+          eligible: true,
+          reasons: [],
+          probabilities: { personal_disclosure: 0.01 },
+        },
+      },
+      "postgresql",
+      new Map(),
+    );
+    expect(later).toContain(
+      "jev-1.13.0 cleared this read, then it was held: Connection or approval authority changed. Waiting",
+    );
   });
   it("distinguishes human and automatic history and includes durable details", () => {
     const approval: ApprovalAttribution = {
@@ -255,7 +329,7 @@ describe("the resolved Auto trace", () => {
       evaluation: { ...current, policy: "auto-beta-8" },
     });
     expect(older).toContain("policy auto-beta-8");
-    expect(older).toContain("personal_disclosure 0.9");
+    expect(older).toContain(">Personal data 0.9<");
     expect(older).not.toContain("metric over");
   });
 
@@ -282,7 +356,7 @@ describe("the resolved Auto trace", () => {
       source: "human",
       evaluation: { ...refusal([]), policy: AUTO_POLICY, thresholds } as never,
     });
-    expect(html).toContain("personal_disclosure 0.9");
+    expect(html).toContain(">Personal data 0.9<");
     expect(html).not.toContain("metric over");
   });
 
@@ -296,24 +370,83 @@ describe("the resolved Auto trace", () => {
     expect(html).not.toContain("&middot;");
   });
 
-  it("says where a hold happened, and lets a cleared evaluation speak for itself", () => {
+  it("labels each question and grades it against its own cutoff", () => {
+    const html = approvalHtml({
+      source: "human",
+      evaluation: {
+        ...refusal([]),
+        policy: AUTO_POLICY,
+        eligible: false,
+        probabilities: {
+          personal_disclosure: 0.91,
+          organization_disclosure: 0.15,
+          secret_disclosure: 0.01,
+          insufficient_context: 0.68,
+        },
+      },
+    });
+    expect(html).toContain(
+      "jev-1.13.0 did not clear this read: it may reveal personal data and the meaning of a returned value is unclear.",
+    );
+    expect(html).toContain(
+      '<span class="auto-reason metric over">Personal data 0.91 &gt; 0.2</span>',
+    );
+    expect(html).toContain('<span class="auto-reason metric">Company identity 0.15 ≤ 0.15</span>');
+    expect(html).toContain(
+      '<span class="auto-reason metric over">Unclear meaning 0.68 &gt; 0.45</span>',
+    );
+  });
+
+  it("says where a hold happened and why, and keeps a later hold beside a cleared evaluation", () => {
     expect(
       approvalHtml(undefined, undefined, { sent: false, reason: "Unsupported projection" }),
     ).toContain(
-      'Held on this machine before evaluation. <b class="auto-strong">Nothing was sent to the evaluator.</b>',
+      'Held on this machine before evaluation: Unsupported projection. <b class="auto-strong">Nothing was sent to the evaluator.</b>',
     );
+    // An older record has no diagnosis: it is never read as a refusal or a timeout.
+    const unfinished = approvalHtml(undefined, undefined, {
+      sent: true,
+      reason: "Evaluation timed out. Approve manually",
+    });
+    expect(unfinished).toContain("The evaluation did not finish: Evaluation timed out.");
+    expect(unfinished).not.toContain("did not clear");
     expect(
       approvalHtml(undefined, undefined, {
         sent: true,
         reason: "Evaluation timed out. Approve manually",
+        failure: { stage: "timeout" },
+        model: "kev-latest",
       }),
-    ).toContain("The evaluator did not clear this read.");
+    ).toContain("kev-latest did not answer in time.");
     const both = approvalHtml(
       { source: "human", evaluation: { ...refusal([]), eligible: true } },
       undefined,
       { sent: true, reason: "Execution stopped before SQL ran. Approval authority changed" },
     );
-    expect(both).toContain("The evaluation cleared this read.");
+    expect(both).toContain(
+      "jev-1.13.0 cleared this read, then it was held: Execution stopped before SQL ran.",
+    );
     expect(both).not.toContain("did not clear");
+    // An answer this plugin refused is an invalid answer, not the verdict the broker kept.
+    const refusedHere = approvalHtml(
+      undefined,
+      { ...refusal([]), eligible: true },
+      {
+        sent: true,
+        reason: "Invalid evaluator response or stale policy/model",
+        failure: { stage: "response" },
+        model: "jev-1.13.0",
+      },
+    );
+    expect(refusedHere).toContain("jev-1.13.0 returned an invalid answer.");
+    expect(refusedHere).not.toContain("cleared");
+    // The final hold outranks an automatic approval an earlier, withdrawn attempt left behind.
+    const stale = approvalHtml(
+      { source: "automatic", evaluation: { ...refusal([]), eligible: true } },
+      undefined,
+      { sent: true, reason: "Evaluator or metadata unavailable", failure: { stage: "network" } },
+    );
+    expect(stale).toContain("jev-1.13.0 could not be reached.");
+    expect(stale).not.toContain("approved automatically");
   });
 });

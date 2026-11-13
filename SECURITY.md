@@ -219,7 +219,9 @@ TypeSafe or a Custom server. See [Evaluator](docs/AUTO-MODE.md#evaluator).
 - **Destination.** The sharing sentence names the recipient before activation; enabling
   consents to it. A Custom server's URL is https, or plain http only to `127.0.0.1` or `[::1]`,
   with no credentials, query or fragment, checked by the plugin and again by the broker.
-  Requests never follow redirects and provider bodies are never relayed or logged.
+  Requests never follow redirects and provider bodies are never relayed or logged. A failed
+  evaluation keeps only the broker's own stage, the provider's HTTP status and the model asked,
+  on the read's hold record.
 - **Keys.** Each key is stored in Beekeeper's encrypted storage for the destination it was
   typed for (TypeSafe, a Custom server's full URL) and is never sent to another one. A Custom
   server may go without a key, and then receives no Authorization.

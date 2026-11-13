@@ -31,6 +31,8 @@ export interface Card extends Proposal {
   autoSent?: boolean;
   /** The model Auto mode is asking about this card, named while it evaluates. */
   autoModel?: string;
+  /** Why that model gave no verdict, as this plugin or the broker observed it. */
+  autoFailure?: import("@gatekeeper/shared").EvaluationFailure;
   evaluation?: import("@gatekeeper/shared").AutoEvaluation;
   approval?: import("@gatekeeper/shared").ApprovalAttribution;
   authorityLost?: boolean;

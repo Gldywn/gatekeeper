@@ -4,6 +4,7 @@ import type {
   ApprovalAttribution,
   AutoEvaluation,
   ConnectionInput,
+  EvaluationFailure,
   EvaluationInput,
   EvaluatorConfig,
   EvaluatorStatus,
@@ -13,6 +14,38 @@ import type {
 import type { ActiveEvaluator } from "../evaluator";
 import { AUTO_POLICY } from "../sql/auto";
 import type { ActivityEntry, Proposal, SessionRoster } from "../types";
+
+const STAGES = new Set([
+  "timeout",
+  "network",
+  "http",
+  "response",
+  "input",
+  "cancelled",
+  "internal",
+]);
+
+// The broker's own diagnostic of a failed evaluation; anything else is no diagnosis. Its status
+// is the provider's, never the 503 that carried it.
+export function evaluationFailure(body: unknown): EvaluationFailure | undefined {
+  const d = (body as { diagnostic?: unknown } | null)?.diagnostic as
+    | { stage?: unknown; status?: unknown }
+    | undefined;
+  if (typeof d !== "object" || d === null || !STAGES.has(d.stage as string)) return undefined;
+  const stage = d.stage as EvaluationFailure["stage"];
+  const status = d.status;
+  return typeof status === "number" && Number.isInteger(status) && status >= 100 && status <= 599
+    ? { stage, status }
+    : { stage };
+}
+
+export class EvaluatorFailure extends Error {
+  readonly failure: EvaluationFailure;
+  constructor(failure: EvaluationFailure) {
+    super("Evaluator unavailable");
+    this.failure = failure;
+  }
+}
 
 export interface BrokerConfig {
   baseUrl: string;
@@ -246,7 +279,12 @@ export class BrokerClient {
         builtIn: active.builtIn,
       }),
     });
-    if (!res.ok) throw new Error("Evaluator unavailable or lease lost");
+    if (!res.ok) {
+      const failure = evaluationFailure(await res.json().catch(() => undefined));
+      throw failure
+        ? new EvaluatorFailure(failure)
+        : new Error("Evaluator unavailable or lease lost");
+    }
     return (await res.json()) as AutoEvaluation;
   }
 

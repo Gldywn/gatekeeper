@@ -1,7 +1,9 @@
-import type { ApprovalAttribution, AutoEvaluation } from "@gatekeeper/shared";
+import type { ApprovalAttribution, AutoEvaluation, EvaluationFailure } from "@gatekeeper/shared";
 import {
   AXES,
+  AXIS_CONCERNS,
   AXIS_LABELS,
+  type Axis,
   builtInAvailable,
   type EvaluatorSettings,
   firstMissing,
@@ -32,15 +34,67 @@ export const AUTO_LEADS = {
 } as const;
 export const NOTHING_SENT = '<b class="auto-strong">Nothing was sent to the evaluator.</b>';
 
-// Names the model only when an answer from it is on record; a timeout or an error has none.
-function refusedLead(model?: string): string {
-  return `${model ? escapeHtml(model) : "The evaluator"} did not clear this read`;
+// The cutoffs a record is graded by: its own, else the built-in ones for the exact evaluator and
+// policy they were written for. Anything else, malformed recorded cutoffs included, has none.
+function cutoffsOf(e: AutoEvaluation): Record<string, number> | undefined {
+  return e.thresholds !== undefined
+    ? recordedCutoffs(e.thresholds)
+    : e.provider === "typesafe" && e.model === AUTO_MODEL && e.policy === AUTO_POLICY
+      ? (AUTO_THRESHOLDS as Record<string, number>)
+      : undefined;
 }
 
-// A hold says where it happened, and a local one that nothing left the machine.
-export function holdText(sent: boolean, tail = "", model?: string): string {
-  return `${sent ? refusedLead(model) : AUTO_LEADS.held}.${tail}${sent ? "" : ` ${NOTHING_SENT}`}`;
+// The questions that went over their cutoff, as the decision itself compares: strictly above.
+function concerns(e: AutoEvaluation): string | undefined {
+  const cutoffs = cutoffsOf(e);
+  const over = AXES.filter((id) => {
+    const p = e.probabilities[id];
+    return cutoffs?.[id] !== undefined && typeof p === "number" && p > cutoffs[id];
+  });
+  return over.length
+    ? new Intl.ListFormat("en", { type: "conjunction" }).format(over.map((id) => AXIS_CONCERNS[id]))
+    : undefined;
 }
+
+// A reason up to its first colon, as the record keeps it: what follows may name a source.
+const firstSentence = (reason: string) =>
+  reason
+    .split(":")[0]
+    .split(/\.\s/)[0]
+    .replace(/[.\s]+$/, "");
+
+function failureText(model: string | undefined, f: EvaluationFailure): string {
+  const who = model ?? "The evaluator";
+  if (f.stage === "timeout") return `${who} did not answer in time.`;
+  if (f.stage === "network") return `${who} could not be reached.`;
+  if (f.stage === "http")
+    return `${who} answered with an error${f.status ? ` (HTTP ${f.status})` : ""}.`;
+  if (f.stage === "response") return `${who} returned an invalid answer.`;
+  return "The evaluation did not finish.";
+}
+
+/** What Auto mode did with a read, as plain text (escape it where it meets HTML): the same
+ *  sentence on the pending card, in the history and in the export. The evaluator gives a
+ *  probability per question and no words, so the reason is the questions it went over. */
+export function autoOutcome(evaluation?: AutoEvaluation, hold?: AutoHold): string {
+  if (hold?.failure) return failureText(hold.model ?? evaluation?.model, hold.failure);
+  if (evaluation) {
+    if (!evaluation.eligible || evaluation.reasons.length) {
+      const why = concerns(evaluation);
+      return `${evaluation.model} did not clear this read${why ? `: ${why}` : ""}.`;
+    }
+    return hold
+      ? `${evaluation.model} cleared this read, then it was held: ${firstSentence(hold.reason)}.`
+      : `${AUTO_LEADS.cleared}.`;
+  }
+  if (hold?.sent)
+    return `The evaluation did not finish${hold.reason ? `: ${firstSentence(hold.reason)}` : ""}.`;
+  return `${AUTO_LEADS.held}${hold?.reason ? `: ${firstSentence(hold.reason)}` : ""}.`;
+}
+
+// Nothing left the machine: the one fact a local hold adds after its sentence.
+export const heldLocally = (evaluation?: AutoEvaluation, hold?: AutoHold) =>
+  !evaluation && !hold?.sent;
 
 // Card status once the evaluator cleared a read and Gatekeeper took it to execution; it
 // replaces the evaluating state, which would otherwise stay up for the whole run.
@@ -202,33 +256,27 @@ export function approvalHtml(
   hold?: AutoHold,
 ): string {
   const e = approval?.evaluation ?? evaluation;
-  // With an evaluation its verdict is the sentence, so a read Jev cleared and a later check
-  // held never reads as both cleared and not.
   if (!e) {
     return hold
-      ? `<div class="auto-trace"><div class="auto-trace-line">${autoIcon}<span><b>Auto mode:</b> ${holdText(hold.sent)}</span></div></div>`
+      ? `<div class="auto-trace"><div class="auto-trace-line">${autoIcon}<span><b>Auto mode:</b> ${escapeHtml(autoOutcome(undefined, hold))}${heldLocally(undefined, hold) ? ` ${NOTHING_SENT}` : ""}</span></div></div>`
       : "";
   }
+  // The hold rides the final decision, so it outranks an automatic approval left on record by
+  // an earlier, withdrawn attempt.
   const lead =
-    approval?.source === "automatic"
+    approval?.source === "automatic" && !hold
       ? `${AUTO_LEADS.automatic}.`
-      : e.eligible && !e.reasons.length
-        ? `${AUTO_LEADS.cleared}.`
-        : `${refusedLead(e.model)}.`;
-  // Cutoffs only mean something for the rule they were recorded with: the record's own, else
-  // the built-in ones for the exact evaluator and policy they were written for. Anything else,
-  // malformed recorded cutoffs included, keeps its numbers without a verdict painted on them.
-  const cutoffs =
-    e.thresholds !== undefined
-      ? recordedCutoffs(e.thresholds)
-      : e.provider === "typesafe" && e.model === AUTO_MODEL && e.policy === AUTO_POLICY
-        ? (AUTO_THRESHOLDS as Record<string, number>)
-        : undefined;
+      : escapeHtml(autoOutcome(e, hold));
+  // Cutoffs only mean something for the rule they were recorded with; without one, the numbers
+  // stand without a verdict painted on them.
+  const cutoffs = cutoffsOf(e);
   const axes = Object.entries(e.probabilities)
     .map(([id, value]) => {
       const cutoff = cutoffs?.[id];
       const over = cutoff !== undefined && value > cutoff;
-      return `<span class="auto-reason metric${over ? " over" : ""}">${escapeHtml(id)} ${escapeHtml(String(value))}</span>`;
+      const label = Object.hasOwn(AXIS_LABELS, id) ? AXIS_LABELS[id as Axis] : id;
+      const graded = cutoff === undefined ? "" : ` ${over ? ">" : "≤"} ${cutoff}`;
+      return `<span class="auto-reason metric${over ? " over" : ""}">${escapeHtml(`${label} ${value}${graded}`)}</span>`;
     })
     .join("");
   const provider = Object.hasOwn(PROVIDER_NAMES, e.provider)

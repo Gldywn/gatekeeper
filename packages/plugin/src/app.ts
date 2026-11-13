@@ -65,7 +65,7 @@ import {
   xIcon,
 } from "./icons";
 import { takeOver } from "./modal";
-import { BrokerClient } from "./net/broker";
+import { BrokerClient, EvaluatorFailure } from "./net/broker";
 import { connectionScopeKey } from "./net/scope";
 import { SingleInstance, type SingleInstanceWire } from "./net/singleinstance";
 import { overlayScroll } from "./overlay-scroll";
@@ -2966,7 +2966,12 @@ export class Gatekeeper {
     };
     const timer = window.setTimeout(() => {
       controller.abort();
-      if (valid()) this.reviewCard(card, "Evaluation timed out. Approve manually");
+      if (valid()) {
+        // Once the read left, this deadline is the evaluator not answering in time, whatever
+        // the broker saw of the cancellation.
+        if (card.autoSent) card.autoFailure = { stage: "timeout" };
+        this.reviewCard(card, "Evaluation timed out. Approve manually");
+      }
       free();
       void this.evaluateNext();
     }, 15000);
@@ -2974,6 +2979,7 @@ export class Gatekeeper {
     try {
       card.autoStatus = AUTO_EVALUATING;
       card.autoModel = rule.config.model;
+      card.autoFailure = undefined;
       this.renderQueue();
       if (!(await this.checkConnection()) || !valid() || controller.signal.aborted) return;
       // Checked before anything leaves for the provider. Only a finding holds the read, so a
@@ -3007,6 +3013,7 @@ export class Gatekeeper {
       );
       if (!valid() || controller.signal.aborted) return;
       if (!validEvaluation(evaluation, rule)) {
+        card.autoFailure = { stage: "response" };
         this.reviewCard(card, "Invalid evaluator response or stale policy/model");
         return;
       }
@@ -3020,8 +3027,13 @@ export class Gatekeeper {
       // evaluator for the next read while this one executes.
       this.autoRuns++;
       run = this.approve(card.id, false, evaluation);
-    } catch {
-      if (valid()) this.reviewCard(card, "Evaluator or metadata unavailable. Approve manually");
+    } catch (err) {
+      // Whoever aborted this attempt (the deadline, a disable) already said why; a late error
+      // must not rewrite it.
+      if (valid() && !controller.signal.aborted) {
+        if (err instanceof EvaluatorFailure) card.autoFailure = err.failure;
+        this.reviewCard(card, "Evaluator or metadata unavailable. Approve manually");
+      }
     } finally {
       window.clearTimeout(timer);
       free();
@@ -4158,7 +4170,13 @@ export class Gatekeeper {
     if (card.evaluation && reason === refusalReason(card.evaluation)) {
       return undefined;
     }
-    return { sent: Boolean(card.autoSent), reason: reason.slice(0, 200) };
+    if (!card.autoSent) return { sent: false, reason: reason.slice(0, 200) };
+    return {
+      sent: true,
+      reason: reason.slice(0, 200),
+      ...(card.autoFailure ? { failure: card.autoFailure } : {}),
+      ...(card.autoModel ? { model: card.autoModel } : {}),
+    };
   }
 
   private async postResult(card: Card, body: Record<string, unknown>): Promise<boolean> {

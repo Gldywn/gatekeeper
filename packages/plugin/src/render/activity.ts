@@ -14,7 +14,7 @@ import { textSchema } from "../sql/output";
 import { visibleControls } from "../sql/sanitize";
 import { type SchemaContext, sensitivityOf } from "../sql/schema";
 import type { ActivityEntry } from "../types";
-import { approvalLabel } from "./auto";
+import { approvalLabel, autoOutcome, heldLocally } from "./auto";
 import { auditItem, doneRowHtml } from "./inbox";
 
 // The Audit Trail in the Inbox's left pane: its rows, then the tail that loads older days.
@@ -359,16 +359,15 @@ function entryMarkdown(e: ActivityEntry, flags: ActivityFlagMap): string[] {
     lines.push(`- Latency: ${latency}`);
   }
   lines.push(`- Request: ${e.id}`);
-  if (e.approval)
+  if (e.approval) lines.push(`- Approval: ${approvalLabel(e.approval)}`);
+  // A refused read keeps its evaluation outside any approval: it is written all the same.
+  const evaluation = e.approval?.evaluation ?? e.evaluation;
+  if (e.approval || evaluation) lines.push(`- Evaluation: ${JSON.stringify(evaluation ?? null)}`);
+  if (e.autoHold || (evaluation && e.approval?.source !== "automatic"))
     lines.push(
-      `- Approval: ${approvalLabel(e.approval)}`,
-      `- Evaluation: ${JSON.stringify(e.approval.evaluation ?? null)}`,
+      `- Auto mode: ${autoOutcome(evaluation, e.autoHold)}${heldLocally(evaluation, e.autoHold) ? " Nothing was sent to the evaluator." : ""}`,
     );
-  if (e.autoHold)
-    lines.push(
-      `- Auto mode: ${e.autoHold.sent ? "sent, evaluation unfinished" : "stopped locally, nothing sent"}`,
-      `- Auto mode reason: ${e.autoHold.reason}`,
-    );
+  if (e.autoHold) lines.push(`- Auto mode reason: ${e.autoHold.reason}`);
   if (e.state === "approved" && e.affectedRows != null) {
     lines.push(`- Rows changed: ${e.affectedRows}`);
   }

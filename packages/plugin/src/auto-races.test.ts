@@ -26,10 +26,11 @@ import { log } from "@beekeeperstudio/plugin";
 import { SchemaAnnotator } from "./annotate";
 import { Gatekeeper } from "./app";
 import { activeEvaluator, DEFAULT_SETTINGS, settingsFor } from "./evaluator";
+import { EvaluatorFailure } from "./net/broker";
 import { AUTO_APPROVED } from "./render/auto";
 import { ConfirmModal } from "./render/confirm";
 import { AUTO_EVALUATING, cardHtml } from "./render/queue";
-import { AUTO_THRESHOLDS as PLUGIN_CUTOFFS } from "./sql/auto";
+import { AUTO_MODEL, AUTO_THRESHOLDS as PLUGIN_CUTOFFS } from "./sql/auto";
 import type { LoadResult } from "./sql/load";
 import { catalogRows } from "./sql/pg/catalog-fixture";
 import { planRead } from "./sql/read-analysis";
@@ -48,10 +49,12 @@ const LIGHT: LoadResult = { lines: [], notes: [], estimates: [], heavy: false, c
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((r) => {
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((r, j) => {
     resolve = r;
+    reject = j;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 // On a stoppable connection the approved statement leaves behind a comment tag
@@ -249,6 +252,40 @@ describe("shared manual/automatic execution authority", () => {
     ]);
     expect(query).toHaveBeenLastCalledWith(executed(sql));
     expect(app.broker.executing).toHaveBeenCalledOnce();
+  });
+  it("keeps why the evaluator gave no verdict, and which model was asked, on the hold", async () => {
+    const { app, card } = harness();
+    const sql = "SELECT quantity FROM public.products WHERE sku = 'synthetic-item' LIMIT 5";
+    card.sql = sql;
+    mockCatalog(sql, { "public.products": { quantity: "int4", sku: "text" } });
+    app.broker.evaluate.mockRejectedValue(new EvaluatorFailure({ stage: "http", status: 401 }));
+    await app.evaluateNext();
+    expect(card.autoFailure).toEqual({ stage: "http", status: 401 });
+    expect(app.broker.executing).not.toHaveBeenCalled();
+    await app.reject(card.id);
+    expect(app.broker.result).toHaveBeenCalledWith(
+      card.id,
+      card.leaseId,
+      expect.objectContaining({
+        autoHold: {
+          sent: true,
+          reason: "Evaluator or metadata unavailable. Approve manually",
+          failure: { stage: "http", status: 401 },
+          model: AUTO_MODEL,
+        },
+      }),
+    );
+  });
+  it("calls an answer this plugin cannot use an invalid answer, not a refusal", async () => {
+    const { app, card } = harness();
+    const sql = "SELECT quantity FROM public.products WHERE sku = 'synthetic-item' LIMIT 5";
+    card.sql = sql;
+    mockCatalog(sql, { "public.products": { quantity: "int4", sku: "text" } });
+    app.broker.evaluate.mockResolvedValue({ ...evaluation(), model: "jev-latest" });
+    await app.evaluateNext();
+    expect(card.autoFailure).toEqual({ stage: "response" });
+    expect(card.evaluation).toBeUndefined();
+    expect(app.broker.executing).not.toHaveBeenCalled();
   });
   it.each(["disable", "lease", "reject", "schema"])(
     "stops joined-source inspection after %s while metadata is pending",
@@ -776,7 +813,11 @@ describe("shared manual/automatic execution authority", () => {
         card.id,
         card.leaseId,
         expect.objectContaining({
-          autoHold: { sent: true, reason: "Auto mode disabled while evaluating" },
+          autoHold: {
+            sent: true,
+            reason: "Auto mode disabled while evaluating",
+            model: AUTO_MODEL,
+          },
         }),
       );
     },
@@ -1095,6 +1136,32 @@ describe("Auto mode queue while an approved read executes", () => {
       await pending;
       expect(app.broker.executing).not.toHaveBeenCalled();
       expect(query).not.toHaveBeenCalled();
+    });
+
+    it("keeps the timeout when the evaluator's error arrives after the deadline", async () => {
+      const { app, card } = harness();
+      vi.spyOn(app.annotator, "inspectRead").mockResolvedValue({
+        complete: true,
+        reasons: [],
+        input: { dialect: "postgresql", sql: card.sql, dependencies: [] },
+      });
+      const answer = deferred<AutoEvaluation>();
+      app.broker.evaluate.mockReturnValue(answer.promise);
+      const pending = app.evaluateNext();
+      await vi.waitFor(() => expect(app.broker.evaluate).toHaveBeenCalledOnce());
+      await vi.advanceTimersByTimeAsync(15_000);
+      answer.reject(new EvaluatorFailure({ stage: "http", status: 503 }));
+      await pending;
+      expect(card.autoStatus).toBe("Needs review: Evaluation timed out. Approve manually");
+      expect(card.autoFailure).toEqual({ stage: "timeout" });
+      await app.reject(card.id);
+      expect(app.broker.result).toHaveBeenCalledWith(
+        card.id,
+        card.leaseId,
+        expect.objectContaining({
+          autoHold: expect.objectContaining({ failure: { stage: "timeout" } }),
+        }),
+      );
     });
 
     // Held by the evaluator, the queued read would never be evaluated nor left to a human, so its

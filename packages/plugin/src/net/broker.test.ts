@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BrokerClient } from "./broker";
+import { BrokerClient, evaluationFailure } from "./broker";
 import { connectionScopeKey } from "./scope";
 
 // The encrypted store and the plaintext store the mocked appStorage keeps apart,
@@ -36,6 +36,22 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe("a failed evaluation's diagnostic", () => {
+  it.each([
+    [{ diagnostic: { stage: "http", status: 401 } }, { stage: "http", status: 401 }],
+    [{ diagnostic: { stage: "timeout" } }, { stage: "timeout" }],
+    // A status that is not a provider's HTTP status is no status.
+    [{ diagnostic: { stage: "http", status: "401" } }, { stage: "http" }],
+    [{ diagnostic: { stage: "http", status: 9999 } }, { stage: "http" }],
+    // Anything but the broker's own stages is no diagnosis, and no provider text survives.
+    [{ diagnostic: { stage: "the provider said: secret" } }, undefined],
+    [{ error: "Evaluation unavailable or lease lost" }, undefined],
+    [null, undefined],
+  ])("reads %o as %o", (body, failure) => {
+    expect(evaluationFailure(body)).toEqual(failure);
+  });
 });
 
 describe("token storage", () => {

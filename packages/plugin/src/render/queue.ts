@@ -20,7 +20,14 @@ import { modeRank, type RiskMode } from "../sql/mode";
 import { visibleControls } from "../sql/sanitize";
 import type { SchemaContext } from "../sql/schema";
 import type { Card, CardState, RunState } from "../types";
-import { AUTO_APPROVED, AUTO_LEADS, autoIcon, holdText } from "./auto";
+import {
+  AUTO_APPROVED,
+  AUTO_LEADS,
+  autoIcon,
+  autoOutcome,
+  heldLocally,
+  NOTHING_SENT,
+} from "./auto";
 
 const WRITE_MODE_NOTE = "Write mode is required to approve this query.";
 const DESTRUCTIVE_MODE_NOTE = "Destructive mode is required to approve this query.";
@@ -113,7 +120,15 @@ function autoNote(card: Card): string {
   if (card.autoStatus === AUTO_APPROVED) {
     return `<div class="cs-unparsed auto" role="status">${autoIcon}<span><b>Auto mode:</b> ${AUTO_LEADS.automatic}.</span></div>`;
   }
-  return `<div class="cs-unparsed auto" role="status">${autoIcon}<span><b>Auto mode:</b> ${holdText(Boolean(card.autoSent), " Waiting for your review.", card.evaluation?.model)}</span></div>`;
+  // The hold the record will keep, its reason cut where a source name would start.
+  const hold = {
+    sent: Boolean(card.autoSent),
+    reason: card.autoStatus.replace(/^Needs review:\s*/, ""),
+    ...(card.autoFailure ? { failure: card.autoFailure } : {}),
+    ...(card.autoModel ? { model: card.autoModel } : {}),
+  };
+  const local = heldLocally(card.evaluation, hold) ? ` ${NOTHING_SENT}` : "";
+  return `<div class="cs-unparsed auto" role="status">${autoIcon}<span><b>Auto mode:</b> ${escapeHtml(autoOutcome(card.evaluation, hold))} Waiting for your review.${local}</span></div>`;
 }
 
 // Why the last human approval did not run, in its own words: never an Auto mode fact.

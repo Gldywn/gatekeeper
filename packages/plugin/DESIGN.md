@@ -96,7 +96,7 @@ Inside prose, things are named in their own style:
   ago"). A list row keeps its compact clock, which its place in the row explains.
 - Auto mode's evaluator gets one generic label per field and one generic sentence per
   situation, the same for every provider and model, with only the model id filled in ("API
-  key", "The evaluator refused this API key.", "jev-1.13.0 did not clear this read."). The
+  key", "The evaluator refused this API key.", "jev-1.13.0 did not clear this read: ..."). The
   one sentence that names the recipient is the sharing disclosure, since enabling Auto mode
   consents to it. A server the user points Auto mode at is a "Custom server"; cutoffs read
   "Built-in cutoffs", "Your cutoffs" or "Cutoffs needed". A message never repeats a state the
@@ -215,12 +215,25 @@ first line, the tables, what the SQL marks, the SQL, then the decision.
   tables and columns stand out on the faint ground of tool names, unlike plain `code.name`. A
   table's estimated rows open on hover or focus of its name in the matrix, or in the reason when
   the card has no matrix. What the check could not establish is not shown: no estimate, no claim.
-- An Auto mode hold says where it happened, on this machine before evaluation or at the
-  evaluator (named by its model when its answer is on record), then "Waiting for your
-  review."; a hold on this machine adds "Nothing was sent to the evaluator." No reason chips.
+- An Auto mode hold says where it happened and why, in its sentence, then "Waiting for your
+  review." (operator's direction B, 2026-11-13). The same sentence on the card, in the history
+  and in the Markdown export (`autoOutcome` in `render/auto.ts`). No reason chips.
+  - Refused by its cutoffs: "jev-1.13.0 did not clear this read: it may reveal personal
+    data." One fixed phrase per question went over, never a number on the card: "it may
+    reveal personal data", "it may reveal a client company", "it may reveal access secrets",
+    "the meaning of a returned value is unclear". The evaluator answers with probabilities
+    only, so these are Gatekeeper's own four questions, not the model's words.
+  - No verdict, named by the model asked: "did not answer in time", "could not be reached",
+    "answered with an error (HTTP 503)", "returned an invalid answer"; otherwise "The
+    evaluation did not finish." A failure is never called a refusal, and a keyless Custom
+    server is never told about a key.
+  - Cleared, then held: "jev-1.13.0 cleared this read, then it was held: <reason>."
+  - On this machine: "Held on this machine before evaluation: <reason>." then "Nothing was
+    sent to the evaluator." A reason stops at its first colon, where a source name would start.
 - A decided Auto mode trace names who evaluated it ("Evaluated by jev-1.13.0 on TypeSafe."),
   from the record, never from today's settings, and grades each probability against the
-  cutoffs the record carries.
+  cutoffs the record carries, under the evaluator page's labels: `Personal data 0.91 > 0.2`
+  in amber, `Company identity 0.06 ≤ 0.15` plain, the number alone when no cutoff is on record.
 - A blocking reason sits above the actions, tied to the disabled action it blocks
   (`aria-describedby`), not only in a tooltip. Nothing ever says "nothing blocks".
 - While Auto mode evaluates, the row's dot turns `--auto` and pulses, with no word, and a ring

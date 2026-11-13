@@ -12,6 +12,14 @@ export const AXIS_LABELS: Record<Axis, string> = {
   secret_disclosure: "Access secrets",
   insufficient_context: "Unclear meaning",
 };
+// What each of Gatekeeper's four questions asks, said as the reason a read was not cleared:
+// the evaluator itself answers with a probability only.
+export const AXIS_CONCERNS: Record<Axis, string> = {
+  personal_disclosure: "it may reveal personal data",
+  organization_disclosure: "it may reveal a client company",
+  secret_disclosure: "it may reveal access secrets",
+  insufficient_context: "the meaning of a returned value is unclear",
+};
 export const PROVIDER_NAMES: Record<Provider, string> = {
   typesafe: "TypeSafe",
   custom: "Custom server",

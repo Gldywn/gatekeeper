@@ -104,6 +104,16 @@ export interface AutoHold {
   /** The plugin attempted provider submission, not proof of provider receipt. */
   sent: boolean;
   reason: string;
+  /** Why the evaluator gave no verdict, in the broker's diagnostic terms. */
+  failure?: EvaluationFailure;
+  /** The model that was asked. */
+  model?: string;
+}
+
+export interface EvaluationFailure {
+  stage: "timeout" | "network" | "http" | "response" | "input" | "cancelled" | "internal";
+  /** The provider's HTTP status, never the broker's own. */
+  status?: number;
 }
 
 export interface EvaluationInput {

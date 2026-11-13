@@ -493,8 +493,8 @@ Auto mode approves stays silent, unless the plugin stopped reporting for 15 seco
 the read was still waiting at half its life (for instance behind long automatic runs). See
 [Desktop notifications](CONFIGURATION.md#desktop-notifications-macos).
 
-The plugin can attach `autoHold: { sent: boolean, reason: string }` to `POST /result`
-when a read held by Auto mode is resolved. The broker stores it atomically alongside
+The plugin can attach `autoHold: { sent: boolean, reason: string, failure?, model? }` to
+`POST /result` when a read held by Auto mode is resolved. The broker stores it atomically alongside
 approval and evaluation in `policy_json` and exposes it only in the host-side
 `ActivityEntry`, independently of result-row purging. The record is optional for
 older plugins. Its presence records a hold, not authority to execute.
@@ -512,6 +512,18 @@ is missing from that list. A catalog query the host rejects is recorded as
 `Metadata query failed`; catalog SQL the analysis cannot build, or main catalog rows that
 fail validation, stay `Metadata unavailable`. This result-time record does not cover a card
 lost to a crash, cancellation or expiry before the plugin posts its outcome.
+
+When a read left and the evaluator gave no verdict, the hold also says why and which model
+was asked: `failure` is the broker's own diagnostic stage (`timeout`, `network`, `http`,
+`response`, `input`, `cancelled`, `internal`) with the provider's HTTP status when there is
+one, and `model` the model Auto mode was switched on with. The plugin records a timeout when
+its own 15-second deadline passes after submission, and `response` when it refuses an answer
+the broker returned. A malformed `failure` or `model` reads as not recorded and leaves the
+hold standing. Neither keeps the provider's reply, a key, a server address or a policy: a
+Custom model named twice on two servers is not told apart. The history and the Markdown
+export say the outcome in one sentence (see `packages/plugin/DESIGN.md`); a refusal names the
+questions that went over their recorded cutoffs, since the evaluator answers with one
+probability per question and no explanation.
 
 ## Verification and limits
 

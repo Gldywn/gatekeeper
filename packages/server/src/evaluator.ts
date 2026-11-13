@@ -439,6 +439,18 @@ export const autoHoldRecord = z
         const diagnostic = reason.replace(/^Needs review:\s*/, "").split(":")[0];
         return holdReasons.has(diagnostic) ? diagnostic : "Automatic review required";
       }),
+    // Why the evaluator gave no verdict, in the broker's own diagnostic terms, and the model
+    // that was asked: never a provider's text. A malformed one reads as not recorded and leaves
+    // the hold, and the decision it rides with, standing.
+    failure: z
+      .object({
+        stage: z.enum(["timeout", "network", "http", "response", "input", "cancelled", "internal"]),
+        status: z.number().int().min(100).max(599).optional(),
+      })
+      .strict()
+      .optional()
+      .catch(undefined),
+    model: z.string().regex(CUSTOM_MODEL).optional().catch(undefined),
   })
   .strict();
 

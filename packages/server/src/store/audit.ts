@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { autoHoldRecord } from "../evaluator.js";
 import type { StoreContext } from "./db.js";
 import { knownCount, outcomeFacts, type RawAudit, toAudit } from "./rows.js";
 import type { ActivityEntry, AuditEntry, RequestState } from "./types.js";
@@ -156,7 +157,8 @@ export function listActivity(
       affectedRows: facts.affectedRows,
       approval: policy?.approval,
       evaluation: policy?.evaluation,
-      autoHold: policy?.autoHold,
+      // Any token holder can write it: a malformed one reads as not recorded.
+      autoHold: autoHoldRecord.safeParse(policy?.autoHold).data,
       // A malformed stored record reads as not recorded, never as an all-clear.
       sensitivity: sensitivityRecord.safeParse(policy?.sensitivity).data,
       kept: row.state === "approved" && row.kept === 1,

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createBroker } from "./broker.js";
 import { PAIRING_CODE_TTL_MS, PAIRING_IDLE_MS } from "./config.js";
 import { connectionScopeKey } from "./connection.js";
-import { EvaluationError } from "./evaluator.js";
+import { AUTO_POLICY, EvaluationError } from "./evaluator.js";
 import { RequestStore } from "./store.js";
 
 const TOKEN = "test-capability-token";
@@ -315,6 +315,8 @@ describe("plugin-only automatic evaluation", () => {
     ])("refuses %s before any inference", async (_label, over) => {
       const reply = await call("POST", "/evaluate", { token: TOKEN, body: chosen(over) });
       expect(reply.status).toBe(400);
+      // A refused body names no model: it could not establish which one was asked.
+      expect(JSON.parse(reply.body).diagnostic).toEqual({ stage: "input", policy: AUTO_POLICY });
       expect(evaluator).not.toHaveBeenCalled();
     });
     it("tests a connection with metadata only, and refuses what it would refuse to evaluate", async () => {
@@ -372,6 +374,45 @@ describe("plugin-only automatic evaluation", () => {
       expect(evaluator).not.toHaveBeenCalled();
     },
   );
+  it("keeps why the evaluator gave no verdict, and which model was asked", async () => {
+    const body = payload();
+    const autoHold = {
+      sent: true,
+      reason: "Evaluator or metadata unavailable. Approve manually",
+      failure: { stage: "http", status: 401 },
+      model: "kev-latest",
+    };
+    const reply = await call("POST", "/result", {
+      token: TOKEN,
+      body: { id: body.id, leaseId: body.leaseId, status: "rejected", autoHold },
+    });
+    expect(reply.status).toBe(200);
+    const activity = await call("GET", "/activity", { token: TOKEN });
+    expect(JSON.parse(activity.body).activity[0].autoHold).toMatchObject({
+      sent: true,
+      failure: { stage: "http", status: 401 },
+      model: "kev-latest",
+    });
+  });
+  it.each([
+    { failure: { stage: "provider said no" } },
+    { failure: { stage: "http", status: 9999 } },
+    { failure: { stage: "http", text: "private value" } },
+    { model: "private value; rm -rf" },
+  ])("drops a malformed diagnostic, keeping the hold and the decision: %o", async (extra) => {
+    const body = payload();
+    const autoHold = { sent: true, reason: "Metadata unavailable", ...extra };
+    const reply = await call("POST", "/result", {
+      token: TOKEN,
+      body: { id: body.id, leaseId: body.leaseId, status: "rejected", autoHold },
+    });
+    expect(reply.status).toBe(200);
+    expect(store.get(body.id)?.state).toBe("rejected");
+    expect(store.get(body.id)?.policy).toMatchObject({
+      autoHold: { sent: true, reason: "Metadata unavailable" },
+    });
+    expect(JSON.stringify(store.get(body.id)?.policy)).not.toMatch(/private value|9999|said no/);
+  });
   it.each([
     null,
     { sent: "false", reason: "Metadata unavailable" },
@@ -438,6 +479,28 @@ describe("plugin-only automatic evaluation", () => {
         expect(store.get(body.id)?.state).toBe("leased");
       }
     } finally {
+      log.mockRestore();
+    }
+  });
+  it("reports its own deadline as a timeout, not a cancellation", async () => {
+    const body = payload();
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      evaluator.mockImplementation(
+        (_input, _key, signal: AbortSignal) =>
+          new Promise((_resolve, reject) => {
+            signal.addEventListener("abort", () => reject(new EvaluationError("cancelled")));
+          }),
+      );
+      const pending = call("POST", "/evaluate", { token: TOKEN, body });
+      await vi.waitFor(() => expect(evaluator).toHaveBeenCalledOnce());
+      vi.advanceTimersByTime(12000);
+      const result = await pending;
+      expect(result.status).toBe(503);
+      expect(JSON.parse(result.body).diagnostic).toEqual({ stage: "timeout" });
+    } finally {
+      vi.useRealTimers();
       log.mockRestore();
     }
   });
