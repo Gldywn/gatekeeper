@@ -7,7 +7,8 @@ cd "$(dirname "$0")/.."
 SRC="notifier"
 OUT="notifier.noindex/Gatekeeper.app"
 BIN="gatekeeper-notify"
-BUILD="$(mktemp -d)"
+# An explicit template: macOS mktemp without one ignores $TMPDIR, which sandboxes rely on.
+BUILD="$(mktemp -d "${TMPDIR:-/tmp}/gatekeeper-notifier.XXXXXX")"
 trap 'rm -rf "$BUILD"' EXIT
 
 rm -rf "$OUT"
