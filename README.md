@@ -1,299 +1,107 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Gldywn/gatekeeper/main/docs/assets/gatekeeper-logo.svg" alt="Gatekeeper" width="112">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Gldywn/gatekeeper/main/docs/assets/gatekeeper-lockup-dark.png">
+    <img src="docs/assets/gatekeeper-lockup-light.png" alt="Gatekeeper" width="529">
+  </picture>
 </p>
 
-<h1 align="center">Gatekeeper</h1>
-
-<p align="center"><b>Your agents propose the SQL. You approve what runs.</b></p>
+<p align="center"><b>The database harness for AI agents.</b><br>Stop <em>gambling</em> with your production database.</p>
 
 <p align="center">
-  <a href="https://github.com/Gldywn/gatekeeper/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Gldywn/gatekeeper/ci.yml?branch=main&label=ci" alt="CI"></a>
-  <a href="https://github.com/Gldywn/gatekeeper/releases"><img src="https://img.shields.io/github/v/release/Gldywn/gatekeeper" alt="Release"></a>
-  <a href="https://github.com/Gldywn/gatekeeper/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Gldywn/gatekeeper" alt="License"></a>
+  <a href="https://github.com/Gldywn/gatekeeper/releases"><img src="https://img.shields.io/github/v/release/Gldywn/gatekeeper?style=flat-square&labelColor=1c1e22&color=e8b94a&label=release" alt="Release"></a>
+  <a href="https://github.com/Gldywn/gatekeeper/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Gldywn/gatekeeper/ci.yml?branch=main&style=flat-square&labelColor=1c1e22&label=ci" alt="CI"></a>
+  <a href="https://github.com/Gldywn/gatekeeper/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Gldywn/gatekeeper?style=flat-square&labelColor=1c1e22&color=e8b94a&label=license" alt="License"></a>
+  <a href="https://www.beekeeperstudio.io"><img src="https://img.shields.io/badge/Beekeeper_Studio-plugin-e8b94a?style=flat-square&labelColor=1c1e22" alt="Beekeeper Studio plugin"></a>
+  <a href="https://www.npmjs.com/package/@gldywn/gatekeeper-mcp-server"><img src="https://img.shields.io/badge/MCP-server-e8b94a?style=flat-square&labelColor=1c1e22" alt="MCP server"></a>
 </p>
 
-<p align="center">
-  <a href="#getting-started"><img src="https://img.shields.io/badge/Claude_Code-D97757?logo=claudecode&logoColor=white" alt="Works with Claude Code"></a>
-  <a href="#getting-started"><img src="https://img.shields.io/badge/Codex_CLI-555555" alt="Works with Codex CLI"></a>
-  <a href="#getting-started"><img src="https://img.shields.io/badge/OpenCode-000000?logo=opencode&logoColor=white" alt="Works with OpenCode"></a>
-</p>
+<p align="center"><sub>Works with Claude Code, Codex, OpenCode and other MCP clients.</sub></p>
 
-Gatekeeper is a human-approved bridge between AI agents and your database. An agent proposes
-a query over MCP; by default, nothing runs until you approve it in
-[Beekeeper Studio](https://www.beekeeperstudio.io), on the SQL text, before execution. The
-query then runs on the connection Beekeeper already holds, and the rows return to the agent.
+Gatekeeper is a database harness for AI agents. A coding harness like Claude Code checks the commands an agent runs. Gatekeeper checks the queries it sends to your database.
 
-**Read-only by default.** A write runs only under a mode you arm yourself in the plugin, and
-that mode is ephemeral. The agent never holds your database credentials.
+An agent proposes a query over MCP. Gatekeeper classifies it and checks it against the mode you armed. The query runs once you approve it, or once Auto mode approves an eligible read. It runs on the connection [Beekeeper Studio](https://www.beekeeperstudio.io) already holds, and the rows go back to the agent. The agent never holds your database credentials.
+
+Turn on **Auto mode** and eligible reads run without a click. Writes always wait for you.
 
 https://github.com/user-attachments/assets/b6dd8629-da87-4671-a3df-26507742b085
+
 <details>
 <summary>Music from #Uppbeat</summary>
-Shine by Swoop: https://uppbeat.io/t/swoop/shine
+
+[Shine by Swoop](https://uppbeat.io/t/swoop/shine)
+
 </details>
-
-> [!TIP]
-> **Auto mode:** explicitly enable automatic approval for a narrow PostgreSQL read subset. Local checks and Jev must both pass. See [Auto mode](docs/AUTO-MODE.md) for setup, provider sharing and limitations.
-
-## The three pieces
-
-| Piece | What it does | Where it runs |
-|---|---|---|
-| **Beekeeper Studio plugin** | Shows each proposed query, classifies its risk, executes it on your connection once you approve | Inside Beekeeper Studio |
-| **MCP server** | The agent-facing side: the tools an agent calls to propose a query and collect its result | On your machine, started by your agent |
-| **Agent skill** | Teaches any agent to drive those tools well | In your agent's skills folder |
-
-They ship together under one version, and they are useful together: the plugin without the
-server has nothing to approve, the server without the plugin has no one to ask.
-
-## Why
-
-- **Manual approval by default.** Auto mode is optional and ephemeral. The approval
-  source and available evaluator attribution are recorded.
-- **No database credentials leave Beekeeper.** Queries run through its already-authenticated
-  connection. Point Beekeeper at a read replica or a read-only role for a hard backstop.
-- **Risk is classified, not assumed.** A dialect-aware parser sorts each query into read,
-  write or destructive, and the Approve button stays blocked until the matching mode is
-  armed.
 
 ## How it works
 
-```
-  MCP client                     Gatekeeper server (127.0.0.1)          Beekeeper Studio
- ┌────────────────────┐   MCP    ┌───────────────────────────┐  fetch   ┌────────────────────┐
- │ submit_query(sql)  │ ───────► │ MCP server + HTTP broker  │ ◄─────── │ Plugin (iframe)    │
- │ get_query_result() │ ◄─────── │ SQLite lease queue + audit│  poll    │ 1. show SQL        │
- │ cancel_query()     │          │ /pending /executing       │ ───────► │ 2. human approves  │
- │                    │          │ /result  /lease/renew     │  result  │ 3. runQuery()      │
- └────────────────────┘          └───────────────────────────┘          │ 4. post result     │
-                                                                        └────────────────────┘
-```
+An agent connected straight to a database over MCP, with its SQL calls preapproved, can run whatever its database role allows. Gatekeeper adds a decision in between, so a query runs only after Gatekeeper has checked it and you or Auto mode have approved it.
 
-1. The agent submits a proposal and gets a request id back immediately. Nothing blocks.
-2. The plugin polls the local broker, claims the proposal under a lease, and renders the SQL.
-3. You approve or reject. On approval Beekeeper runs the query on your connection.
-4. The plugin posts the outcome back, and the agent collects it when it is ready.
+<p align="center"><img src="docs/assets/readme-flow.svg" alt="Your agent proposes SQL over MCP. Gatekeeper classifies it, checks the armed mode and flags likely sensitive data. Auto mode approves eligible reads, and you review the rest. Beekeeper Studio runs an approved query on your connection, and the result goes back to the agent." width="100%"></p>
 
-The plugin runs in a sandboxed iframe, so it can never receive an inbound connection: it
-polls the broker instead. That single constraint explains the whole shape. Full detail in
-[Architecture](https://github.com/Gldywn/gatekeeper/blob/main/docs/ARCHITECTURE.md).
+| | Direct MCP access, SQL preapproved | Through Gatekeeper |
+|---|---|---|
+| **Credentials** | The connector holds them | They stay in Beekeeper Studio |
+| **What runs** | Whatever the database role allows | Each query, once approved |
+| **Writes** | Run like any other query | Statements classified as writes need a mode you arm, and your approval |
+
+## Auto mode
+
+Auto mode lets your agent read without waiting for you. It checks each new PostgreSQL read on your machine, sends the eligible ones to an evaluator, and runs the reads that pass both without a click.
+
+<p align="center"><img src="docs/assets/readme-auto-mode.svg" alt="A new PostgreSQL read goes through a local analysis on your machine, then an evaluator that gets the query's structure but never result rows. When both clear it, it runs without a click. Held reads wait for your review." width="100%"></p>
+
+- **Reads only.** It never approves a write, and arming Write or Destructive mode turns it off.
+- **PostgreSQL today.** It handles a restricted set of single `SELECT` statements over named tables.
+- **What the evaluator sees.** It receives the SQL structure and the names and types the query refers to, never the result rows.
+- **Audit Trail.** Every automatic approval is recorded with the evaluator's answers.
+- **Heavy reads too.** It also runs reads the load check flags as heavy, unless you turn on Auto-deny heavy queries in Settings.
+- **Off until you turn it on.** A reload, a re-pair or a connection switch turns it off again.
+
+You can use TypeSafe's hosted evaluator or a compatible Custom server, and [Auto mode](docs/AUTO-MODE.md) covers the setup, the cutoffs and the limits.
+
+## Safety layers
+
+<p align="center"><img src="docs/assets/readme-plugin.png" alt="The Gatekeeper plugin in Beekeeper Studio. A proposed UPDATE waits, and the card says Write mode is required to approve this query. The queue lists pending proposals and recent decisions, some approved automatically." width="100%"></p>
+<p align="center"><sub>Here a write waits until you arm Write mode, and the reads Auto mode approved carry a lightning mark.</sub></p>
+
+- **Read-only by default.** A statement classified as a write runs only in a mode you arm, and each one still needs your approval. A read can still call a function with side effects, so connect Beekeeper with a role that has only the privileges you intend to delegate, or to a read replica.
+- **Approval on the exact SQL.** The card shows the query formatted, with hidden characters made visible.
+- **No credentials in the agent.** Queries run on the connection Beekeeper Studio already holds.
+- **Sensitive data flagged.** Likely personal and client data in what a query returns is flagged before you decide.
+- **Every decision recorded.** The Audit Trail keeps each decision with its SQL and outcome, and exports to Markdown, CSV or JSON.
+- **Heavy queries flagged.** The card warns when a query could load or lock the database.
+- **Stop a running query.** Ask the database to stop a long query, on supported PostgreSQL and MySQL versions.
+- **Loopback only.** The plugin and the server talk over `127.0.0.1`, with a token on every query.
+
+The threat model and its limits are in [Security](SECURITY.md).
 
 ## Getting started
 
-**Prerequisites:** Beekeeper Studio >= 5.4 and Node >= 22. If you run Claude Code or Codex
-CLI you already have Node. There is no background service to install: your agent starts the
-server when its session opens, and it exits when that session ends.
+Gatekeeper needs Beekeeper Studio 5.4 or later and Node 22 or later, and is developed and tested on macOS.
 
-> [!WARNING]
-> **macOS only, for now.** Gatekeeper is developed and tested on macOS. **Windows and Linux
-> are not yet tested**, so treat them as unsupported until someone reports back. Nothing in
-> the shipped code is macOS-specific (the server resolves paths from your home directory, the
-> plugin is a standard Beekeeper webview), so both are expected to work, but expected is not
-> verified. Reports from either platform are very welcome.
+**1. Add the plugin.** In Beekeeper Studio, open **Tools > Manage Plugins**, find Gatekeeper and click Install. If Gatekeeper is missing in Beekeeper Studio 6.2 or later, turn on **Community Plugins** in the same window. Some older versions need a setting or the release zip, as [Install](docs/INSTALL.md) explains.
 
-### Fast install
-
-A dedicated skill sets everything up for you: the plugin, the MCP server, the companion skill and the pairing. Add the skills to your agent:
+**2. Set up your agent.** Add Gatekeeper's skills to your agent, then ask it to install Gatekeeper.
 
 ```bash
 npx skills add Gldywn/gatekeeper
 ```
 
-Then ask your agent to install Gatekeeper, or run the skill directly:
+The `install-gatekeeper` skill registers the MCP server, adds the companion skill and walks you through pairing, after which your agent can propose queries.
 
-```text
-/install-gatekeeper
-```
+[Install](docs/INSTALL.md) covers the manual setup for Claude Code, Codex, OpenCode and any client that reads `.mcp.json`, along with pairing and troubleshooting. Gatekeeper is free and open source under the [MIT license](LICENSE).
 
-It does every step your environment allows and hands you a short checklist for the rest, like restarting Beekeeper. Later, `/update-gatekeeper` checks all three pieces and updates only what is behind.
+## For agents
 
-### Manual install
+If you are an AI agent, the full reference is in these files.
 
-Prefer to do it by hand, or want to see exactly what happens?
-
-> [!IMPORTANT]
-> **Not in Beekeeper's plugin registry yet.** A submission is in progress with the Beekeeper
-> maintainers. Until it is merged, Manage Plugins will not list Gatekeeper and the one-click
-> install is unavailable, so step 1 below is the manual route. Nothing else differs.
-
-**1. Install the plugin in Beekeeper Studio.** Download `gatekeeper-<version>.zip` from the
-[latest release](https://github.com/Gldywn/gatekeeper/releases/latest), extract it into
-Beekeeper's plugins folder, and restart Beekeeper:
-
-| OS | Plugins folder |
+| To | Read |
 |---|---|
-| macOS | `~/Library/Application Support/beekeeper-studio/plugins/` |
-| Linux | `~/.config/beekeeper-studio/plugins/` |
-| Windows | `%APPDATA%\beekeeper-studio\plugins\` |
-
-> **The extracted folder must be named exactly `gatekeeper`.** The zip expands to
-> `gatekeeper-<version>/`, so rename it after extracting. Beekeeper matches the folder name
-> against the plugin id and **skips any folder that disagrees without saying a word**: no
-> error, no entry in Manage Plugins, nothing to click. This is the single most common reason
-> a manual install appears to do nothing.
-
-**2. Register the MCP server with your agent.** This is also the server install: `npx`
-downloads and caches it on first launch.
-
-```bash
-# Claude Code
-claude mcp add gatekeeper --scope user -- npx -y @gldywn/gatekeeper-mcp-server
-```
-
-```toml
-# Codex CLI, in ~/.codex/config.toml
-[mcp_servers.gatekeeper]
-command = "npx"
-args = ["-y", "@gldywn/gatekeeper-mcp-server"]
-```
-
-**Prefer pnpm?** `pnpm dlx @gldywn/gatekeeper-mcp-server` is the direct equivalent of the
-`npx` line. To resolve the package once rather than at every agent launch, install it with
-`pnpm add -g @gldywn/gatekeeper-mcp-server` and point your client at the
-`gatekeeper-mcp-server` binary it puts on your `PATH`.
-
-Any client that reads `.mcp.json` can use
-[`.mcp.json.example`](https://github.com/Gldywn/gatekeeper/blob/main/.mcp.json.example) as-is.
-Pin the version (`@gldywn/gatekeeper-mcp-server@<version>`) if you would rather audit upgrades
-than receive them: unpinned, `npx` re-resolves the latest release on every agent launch,
-which keeps you current but means a process with a path to your database changes under you.
-
-**3. Install the agent skill.**
-
-```bash
-npx skills add Gldywn/gatekeeper
-```
-
-The CLI is interactive: it asks which agents to install for and whether to install globally.
-It works across Claude Code, Codex, Cursor and the rest.
-
-**4. Pair the plugin, once per machine.** Start your agent, then ask it for anything that
-needs the database. Until the plugin is paired every Gatekeeper tool answers with a 6-digit
-code: type that code into the plugin (Tools -> Gatekeeper). The code is single-use and lasts
-about five minutes, and `http://127.0.0.1:9999/pair` always shows the current one. The
-capability token it hands over is kept in Beekeeper's encrypted storage.
-
-Nothing answers on that port until your agent has started the server at least once. Open the
-plugin before that and it tells you so, rather than showing a pairing field it cannot honour.
-
-**5. Use it.** Ask your agent for something that needs the database. It proposes SQL, the
-query appears in the plugin, you approve, and the rows return to the agent. Reads work
-straight away; a write runs only once you arm Write or Destructive mode.
-
-Building from source is documented in
-[Development](https://github.com/Gldywn/gatekeeper/blob/main/docs/DEVELOPMENT.md).
-
-### If the plugin never shows up
-
-Beekeeper ships with its plugin system locked down, so a fresh install can ignore a
-third-party plugin entirely. Three things to check, in order:
-
-**1. The folder name.** Exactly `gatekeeper`, not `gatekeeper-0.1.1`. A mismatch is skipped
-silently, as above.
-
-**2. The plugin system is enabled.** Beekeeper's shipped defaults set
-`pluginSystem.disabled = true`, with an allowlist that contains only its own two plugins.
-Add this to your user config, then restart:
-
-```ini
-[pluginSystem]
-disabled = false
-```
-
-**3. Community plugins are enabled.** `communityDisabled = true` is a shipped default too,
-and it disables any plugin Beekeeper lists as community. If the plugin manager shows
-"Community plugins are disabled via configuration", add `communityDisabled = false` in the
-same block.
-
-| OS | User config file |
-|---|---|
-| macOS | `~/Library/Application Support/beekeeper-studio/user.config.ini` |
-| Linux | `~/.config/beekeeper-studio/user.config.ini` |
-| Windows | `%APPDATA%\beekeeper-studio\user.config.ini` |
-
-## Access modes
-
-By default, every query requires a human click on its text. Execution mode decides which
-risk classes can run. Auto mode is separate and forces Read only while enabled.
-
-| Mode | Approves | Armed by |
-|---|---|---|
-| **Read** (default) | `SELECT` and friends | Nothing to do |
-| **Write** | `INSERT`, `UPDATE` | You, in the plugin, with a second confirmation |
-| **Destructive** | `DELETE`, `DROP`, `TRUNCATE`, `ALTER` | You, in the plugin, with a second confirmation |
-
-The armed mode is in-memory only, never persisted, and resets to read-only on a connection
-switch or a re-pair. The plugin re-classifies and re-checks at the moment of execution, so
-arming and disarming take effect immediately.
-
-**The card reads the query for you**, so deciding takes a glance instead of a careful parse.
-The SQL arrives formatted and highlighted, with invisible and direction-flipping characters
-shown as explicit markers, so what you read is what runs. A write or destructive statement
-carries a coloured class badge and names its verb and its target tables, and a statement the
-parser cannot read says so in standing text and is treated as destructive.
-
-Above the SQL, an annotation names the tables the query reads and flags what will leave the
-database for the agent: the person data in one accent and the company and commercial data in
-another among the columns, aliases and JSON keys the statement returns, with a `SELECT *`
-expanded against the real columns so nothing hides behind the star. A column used only to
-filter, join or sort is not flagged, nor is a value the agent wrote into its own query: it
-already knows it. When part of what a statement returns cannot be traced (a table function, a
-recursive query, `SHOW`, a JSON function), the card says so instead of showing an all-clear. A dot on the header's database icon shows
-whether the last connection check passed, and the icon opens the details: that check, then
-the three read-only layers (the armed mode, the Beekeeper connection and the database
-endpoint). The robot beside it shows the link to the Gatekeeper server that your agents send
-their queries to. It is green while the server answers, amber while connecting, and crossed
-out in red when unreachable, and hovering it shows when the server last answered.
-
-Each detector is a toggle in the plugin settings, they all run on your machine, and none of
-what they surface is ever sent to the agent. They match column names and value shapes, so
-treat them as a fast pointer at what deserves a second look, not as proof that a query is
-clean. No flags can also mean the annotation never resolved.
-
-## Security
-
-- **The gate lives where execution lives.** The plugin is the only component that can run a
-  query, so that is where the classifier and the mode check sit.
-- **Capability token on every request.** The broker answers `401` without it. It is generated
-  on first run, stored `0600` under `~/.gatekeeper`, and held by the plugin in Beekeeper's
-  encrypted storage.
-- **Pairing by code.** The broker cannot tell the plugin apart from any web page you visit,
-  so the token crosses on a channel a page cannot observe: a single-use 6-digit code you read
-  with your own eyes, valid five minutes, killed after five wrong guesses.
-- **Loopback only.** The broker binds `127.0.0.1` and rejects unexpected `Host` headers, so a
-  DNS-rebinding page gets a `421`.
-- **Capped results, minimal audit.** Forwarded rows are capped by count and bytes so a bulk
-  read never floods the agent context. The agent-facing audit keeps the decision and a SQL
-  digest, never raw SQL and never rows.
-
-Read is not a guarantee of zero side effects: a `SELECT` can call a volatile function, which
-is exactly why approval happens on the visible SQL.
-[`SECURITY.md`](https://github.com/Gldywn/gatekeeper/blob/main/SECURITY.md) has the threat
-model, the same-user trust boundary, the retention windows and the supply-chain policy.
-
-## Documentation
-
-| Document | What is in it |
-|---|---|
-| [Architecture](https://github.com/Gldywn/gatekeeper/blob/main/docs/ARCHITECTURE.md) | The two channels, the approval loop, the lease queue, result caps |
-| [MCP tools](https://github.com/Gldywn/gatekeeper/blob/main/docs/MCP-TOOLS.md) | Every tool an agent can call, the ticket shape, the waiting contract |
-| [Configuration](https://github.com/Gldywn/gatekeeper/blob/main/docs/CONFIGURATION.md) | Environment variables and desktop notifications |
-| [Security](https://github.com/Gldywn/gatekeeper/blob/main/SECURITY.md) | Threat model, trust boundary, retention, supply chain |
-| [Development](https://github.com/Gldywn/gatekeeper/blob/main/docs/DEVELOPMENT.md) | Build from source, dev wiring, repo layout, tech stack |
-| [Releasing](https://github.com/Gldywn/gatekeeper/blob/main/docs/RELEASING.md) | How a commit becomes a plugin release and an npm package |
-
-## Development
-
-```bash
-pnpm install
-pnpm build     # both packages
-pnpm ci        # typecheck + build + test
-```
-
-`pnpm dev:link` points Beekeeper at your checkout and `pnpm dev` starts the plugin UI with
-hot reload. The full setup, including the test databases, is in
-[Development](https://github.com/Gldywn/gatekeeper/blob/main/docs/DEVELOPMENT.md).
-
-## License
-
-[MIT](https://github.com/Gldywn/gatekeeper/blob/main/LICENSE)
+| Install, update or repair Gatekeeper | [`install-gatekeeper`](skills/install-gatekeeper/SKILL.md), [`update-gatekeeper`](skills/update-gatekeeper/SKILL.md), [Install](docs/INSTALL.md) |
+| Propose queries and wait for decisions | [`gatekeeper` skill](skills/gatekeeper/SKILL.md), [MCP tools](docs/MCP-TOOLS.md) |
+| Know what Auto mode accepts and shares | [Auto mode](docs/AUTO-MODE.md) |
+| Understand the design | [Architecture](docs/ARCHITECTURE.md) |
+| Configure the server | [Configuration](docs/CONFIGURATION.md) |
+| Assess the risks | [Security](SECURITY.md) |
+| Change the code | [AGENTS.md](AGENTS.md), [Development](docs/DEVELOPMENT.md) |
+| Ship a release | [Releasing](docs/RELEASING.md) |

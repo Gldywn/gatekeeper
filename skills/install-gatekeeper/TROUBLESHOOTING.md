@@ -1,21 +1,24 @@
 # Gatekeeper install troubleshooting
 
-Read this only when something misbehaves during an install. It is the companion to `SKILL.md` next to it, and nothing here is part of the normal path.
+Read this only when something misbehaves during an install. It is the companion to `SKILL.md` next to it. The normal path needs nothing here, since step 1 of `SKILL.md` carries the Beekeeper settings it relies on.
 
 ## When the plugin never shows up
 
-Beekeeper ships with its plugin system locked down, so a fresh install can ignore a third-party plugin entirely. Three checks, in order.
+Beekeeper ships with third-party plugins turned off, so a fresh install can ignore Gatekeeper entirely. Check the folder name, then go by the Beekeeper version step 0 recorded.
 
-**1. The folder name.** Exactly `gatekeeper`, not `gatekeeper-0.1.1`, with `manifest.json` directly inside it. A mismatch is skipped in silence.
+**1. The folder name** (manual installs only). Exactly `gatekeeper`, not `gatekeeper-0.1.1`, with `manifest.json` directly inside it. A mismatch is skipped in silence.
 
-**2. The plugin system is enabled.** The shipped default is `pluginSystem.disabled = true`, with an allowlist holding only Beekeeper's own two plugins. Add to the user config, then restart:
+**2. Community plugins are on (Beekeeper 6.2 and later).** These versions ship with `communityDisabled = true`. The human turns on **Community Plugins** in Tools > Manage Plugins, then restarts. The switch writes `communityDisabled = false` under `[pluginSystem]` in the user config below. A hand-installed Gatekeeper counts as a community plugin only once Beekeeper can fetch its community registry and match the folder to the entry, so it shows as unlisted until that restart. If it is still unlisted after the restart, the registry could not be reached, and the human turns on **Unlisted Plugins** there too. Without an Ultimate licence these versions allow at most two plugins besides the two bundled with Beekeeper, and a plugin turned off in the config still counts toward an install. If Install refuses with "You have reached the maximum of 2 plugins", or Gatekeeper shows as disabled for that reason, the human uninstalls another plugin first.
+
+**3. The plugin system is on (Beekeeper 5.7 to 6.1).** These versions ship with `pluginSystem.disabled = true` and `communityDisabled = true`, with an allowlist holding only Beekeeper's own two plugins, and their plugin manager has no switch for it. Add both settings to the user config, then restart (a hand-installed Gatekeeper needs only `disabled = false`):
 
 ```ini
 [pluginSystem]
 disabled = false
+communityDisabled = false
 ```
 
-**3. Community plugins are enabled.** `communityDisabled = true` is a shipped default too. If the plugin manager says "Community plugins are disabled via configuration", add `communityDisabled = false` in the same block.
+**4. No community registry (Beekeeper 5.4 and 5.5).** Their plugin manager reads only Beekeeper's official list, so Gatekeeper never appears there. Use the manual route in `SKILL.md`.
 
 | OS | User config file |
 |---|---|

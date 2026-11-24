@@ -155,35 +155,21 @@ Once the plugin is installed from the release, Settings > Version shows the rele
 on the Plugin row, never `dev`. The bottom-left indicator sums up plugin and server
 together, so it can read `dev` or a mismatch when the server comes from a checkout.
 
-## Submitting to the Beekeeper Studio plugin registry
+## The Beekeeper Studio plugin registry
 
-One-off, after the first release is published. The plugin manager reads its index from
-[`beekeeper-studio/beekeeper-studio-plugins`](https://github.com/beekeeper-studio/beekeeper-studio-plugins).
+Gatekeeper is listed in Beekeeper's community registry, `community-plugins.json` in
+[`beekeeper-studio/beekeeper-studio-plugins`](https://github.com/beekeeper-studio/beekeeper-studio-plugins)
+(added on 2026-08-29). The plugin manager reads that file and installs from this repo's
+latest release, so a new release reaches users without touching the registry.
 
-**Which file: unresolved, and worth asking in the PR.** That repo holds two indexes, and
-the app source reads both, tagging entries `official` or `community`
-(`fetchOfficial()` / `fetchCommunity()` in `PluginRepositoryService.ts`):
-
-- `plugins.json` currently lists the two first-party plugins (`bks-ai-shell`,
-  `bks-er-diagram`). The [official publishing
-  guide](https://docs.beekeeperstudio.io/plugin_development/publishing-plugins/) tells
-  third parties to add their entry *here*.
-- `community-plugins.json` is currently `[]` and has never listed anything, but its name
-  and the app's `community` origin tag suggest it is where a third-party plugin belongs.
-
-Follow the published instructions and open the PR against `plugins.json`, then say
-explicitly in the PR body that you are happy to move the entry to
-`community-plugins.json` if the maintainers prefer. The two files take an identical entry
-shape, so moving it is a one-line change.
-
-The entry to add:
+The entry, for reference:
 
 ```json
 {
   "id": "gatekeeper",
   "name": "Gatekeeper",
   "author": "Gldywn",
-  "description": "Human-approved SQL bridge between AI agents and Beekeeper Studio: read-only by default, with ephemeral human-armed write modes.",
+  "description": "Human-approved SQL for AI agents: an agent proposes a query, you approve it in Beekeeper Studio before it runs, read-only by default.",
   "repo": "Gldywn/gatekeeper"
 }
 ```
@@ -191,10 +177,26 @@ The entry to add:
 `id` must match `packages/plugin/manifest.json`'s `id` exactly. The plugin manager installs
 into a directory named after the registry `id` and refuses the install if the manifest
 disagrees. `repo` points at this monorepo: nothing in the download contract cares about
-repo layout, only about the release assets.
+repo layout, only about the release assets. Changing the name or the description is a pull
+request to that registry.
 
-Before opening the PR, confirm the repo is public, a published release carries both assets,
-and the README renders well, since the plugin manager fetches and displays it.
+The plugin manager fetches the root `README.md` and displays it. It renders Markdown with
+`marked`, GitHub alerts, line breaks kept (`breaks: true`) and no heading ids, and from
+Beekeeper 6.2 it rewrites relative links and images to this repo's default branch. So the
+README keeps one line per paragraph, uses relative paths for repo files, and links to its own
+headings through absolute GitHub URLs.
+
+**Community plugins are off by default.** What a user sees depends on the Beekeeper version:
+
+- 6.2 and later ship with official and community plugins turned off, and the user turns on
+  Community Plugins in Tools > Manage Plugins. A plugin extracted by hand counts as a community
+  plugin once Beekeeper fetches the community registry and matches its folder to the entry.
+  Until then it shows as unlisted.
+- 5.7 to 6.1 ship with the whole plugin system off (`pluginSystem.disabled = true` and
+  `communityDisabled = true` in the shipped config), with no switch in the app.
+- 5.4 and 5.5 read only `plugins.json`, so their plugin manager never lists Gatekeeper.
+
+`docs/INSTALL.md` and the `install-gatekeeper` skill cover each case.
 
 ## From community plugin to official plugin
 

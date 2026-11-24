@@ -1,65 +1,38 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Gldywn/gatekeeper/main/docs/assets/gatekeeper-logo.svg" alt="Gatekeeper" width="96">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Gldywn/gatekeeper/main/docs/assets/gatekeeper-lockup-dark.png">
+    <img src="https://raw.githubusercontent.com/Gldywn/gatekeeper/main/docs/assets/gatekeeper-lockup-light.png" alt="Gatekeeper" width="440">
+  </picture>
 </p>
 
-<h1 align="center">@gldywn/gatekeeper-mcp-server</h1>
-
-<p align="center"><b>Your agents propose the SQL. You approve what runs.</b></p>
+<p align="center"><b>The database harness for AI agents.</b><br>This package is its MCP server, <code>@gldywn/gatekeeper-mcp-server</code>.</p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/@gldywn/gatekeeper-mcp-server"><img src="https://img.shields.io/npm/v/@gldywn/gatekeeper-mcp-server" alt="npm"></a>
-  <a href="https://github.com/Gldywn/gatekeeper/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Gldywn/gatekeeper/ci.yml?branch=main&label=ci" alt="CI"></a>
-  <a href="https://github.com/Gldywn/gatekeeper/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Gldywn/gatekeeper" alt="License"></a>
+  <a href="https://www.npmjs.com/package/@gldywn/gatekeeper-mcp-server"><img src="https://img.shields.io/npm/v/@gldywn/gatekeeper-mcp-server?style=flat-square&labelColor=1c1e22&color=e8b94a&label=npm" alt="npm"></a>
+  <a href="https://github.com/Gldywn/gatekeeper/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Gldywn/gatekeeper/ci.yml?branch=main&style=flat-square&labelColor=1c1e22&label=ci" alt="CI"></a>
+  <a href="https://github.com/Gldywn/gatekeeper/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Gldywn/gatekeeper?style=flat-square&labelColor=1c1e22&color=e8b94a&label=license" alt="License"></a>
+  <a href="https://www.beekeeperstudio.io"><img src="https://img.shields.io/badge/Beekeeper_Studio-plugin-e8b94a?style=flat-square&labelColor=1c1e22" alt="Beekeeper Studio plugin"></a>
 </p>
 
-The MCP server half of [Gatekeeper](https://github.com/Gldywn/gatekeeper): a human-approved
-bridge between AI agents and your database. An agent proposes a query through this server;
-the Gatekeeper plugin inside Beekeeper Studio shows the SQL to a human, who approves or
-rejects it. On approval the query runs on the connection Beekeeper already holds and the rows
-flow back to the agent.
+Your agent proposes SQL through this server. Once you or Auto mode approve a query in the
+Gatekeeper plugin for Beekeeper Studio, Beekeeper runs it on the connection it already holds
+and returns the result to the agent.
 
-The agent never holds database credentials. Approval is manual by default. A human can
-explicitly enable Auto mode in the plugin for a restricted PostgreSQL read subset,
-using local checks and TypeSafe's pinned Jev evaluator. The API key and evaluator controls
-are plugin-only, never MCP tools. Writes always require a human to arm the corresponding
-ephemeral Execution mode and approve the query.
-
-## This package is one of three pieces
-
-| Piece | Where it goes |
-|---|---|
-| **This MCP server** | Registered with your agent, started by it, `npx` fetches it |
-| **Beekeeper Studio plugin** | Installed in Beekeeper Studio, where you approve queries |
-| **Agent skill** | `npx skills add Gldywn/gatekeeper`, teaches an agent to drive the tools |
-
-The server on its own has no one to ask. Start from the
-[repo README](https://github.com/Gldywn/gatekeeper) for the full setup.
-
-## Not a daemon
-
-This is a short-lived stdio child of your agent. Your MCP client starts it when the session
-opens and it exits when that session's stdio pipe closes. There is no background service to
-install, enable, or keep running.
-
-While it runs it also serves a loopback-only HTTP broker on `127.0.0.1:9999` that the plugin
-polls. If several agents run at once, the first one owns the broker and the rest share the
-same local queue; the role fails over automatically when the owner exits.
+The server itself never runs the agent's SQL against your database and never holds database
+credentials. Approval, Auto mode and the Write and Destructive modes are controlled only from
+the plugin, never through an MCP tool.
 
 ## Install
 
-Nothing to clone or build. Register it with your agent and `npx` fetches it on first launch:
+The [Gatekeeper README](https://github.com/Gldywn/gatekeeper#getting-started) explains how to
+install the plugin and use the `install-gatekeeper` skill to register this server. You can also
+register it by hand. With Claude Code, run this command.
 
 ```bash
-# Claude Code
 claude mcp add gatekeeper --scope user -- npx -y @gldywn/gatekeeper-mcp-server
-
-# Codex CLI (~/.codex/config.toml)
-# [mcp_servers.gatekeeper]
-# command = "npx"
-# args = ["-y", "@gldywn/gatekeeper-mcp-server"]
 ```
 
-Any client that reads `.mcp.json`:
+Any client that reads `.mcp.json` takes this entry.
 
 ```json
 {
@@ -72,48 +45,25 @@ Any client that reads `.mcp.json`:
 }
 ```
 
-Append `@<version>` to pin (`npx -y @gldywn/gatekeeper-mcp-server@0.1.0`). Unpinned, `npx`
-re-resolves the latest release on every agent launch: current, but a process with a path to
-your database changes under you.
+[Install](https://github.com/Gldywn/gatekeeper/blob/main/docs/INSTALL.md) covers Codex,
+OpenCode, version pinning and pairing. The server requires Node 22 or later.
 
-Requires **Node >= 22**. The only native dependency is `better-sqlite3`, which ships prebuilt
-binaries for Node 22, 24, 25 and 26, so a normal install needs no C++ toolchain. On Node 20 or
-21 there is no prebuild and npm falls back to compiling from source.
+## What it runs
 
-## Pair once per machine
+The server runs as a stdio child process of your agent, from the moment the session opens until
+it closes. Meanwhile it serves a loopback-only broker that the plugin polls, on
+`127.0.0.1:9999` by default, and when several agents run at once, one instance serves the broker
+while the others share the local queue.
 
-The broker cannot tell the plugin apart from any web page you visit, so the capability token
-crosses on a channel a page cannot observe: your eyes.
+## Reference
 
-Start your agent and ask it for anything that needs the database. Until the plugin is paired,
-every Gatekeeper tool answers with a **6-digit code** instead of running. Type that code into
-the Gatekeeper tab in Beekeeper Studio (Tools menu). The code is single-use, lasts five
-minutes, and dies after five wrong guesses; `http://127.0.0.1:9999/pair` always shows the
-current one.
-
-The plugin then keeps the token it receives in Beekeeper's encrypted storage, so this happens
-once per machine.
-
-## MCP tools
-
-`submit_query`, `get_query_result`, `poll_results`, `cancel_query`, `run_query`,
-`set_session_label`, `get_connection_info`, `get_schema`. See
-[MCP tools](https://github.com/Gldywn/gatekeeper/blob/main/docs/MCP-TOOLS.md) for the full
-contract, and the companion agent skill (`npx skills add Gldywn/gatekeeper`) that teaches an
-agent to drive them well.
-
-## Configuration
-
-`GATEKEEPER_TOKEN`, `GATEKEEPER_BROKER_PORT`, `GATEKEEPER_DB` and `GATEKEEPER_NOTIFY`, all
-documented in
-[Configuration](https://github.com/Gldywn/gatekeeper/blob/main/docs/CONFIGURATION.md)
-alongside the macOS desktop notifications.
-
-## Security
-
-The broker binds `127.0.0.1`, requires a bearer token on every request, and rejects
-unexpected `Host` headers. The risk gate itself lives in the plugin, where execution happens.
-[`SECURITY.md`](https://github.com/Gldywn/gatekeeper/blob/main/SECURITY.md) has the threat
-model, the same-user trust boundary, and the retention windows.
+- [MCP tools](https://github.com/Gldywn/gatekeeper/blob/main/docs/MCP-TOOLS.md) describes
+  `submit_query`, `get_query_result`, `poll_results`, `cancel_query`, `run_query`,
+  `set_session_label`, `get_connection_info` and `get_schema`.
+- [Configuration](https://github.com/Gldywn/gatekeeper/blob/main/docs/CONFIGURATION.md)
+  documents `GATEKEEPER_TOKEN`, `GATEKEEPER_BROKER_PORT`, `GATEKEEPER_DB` and
+  `GATEKEEPER_NOTIFY`.
+- [Security](https://github.com/Gldywn/gatekeeper/blob/main/SECURITY.md) covers the threat
+  model, the same-user trust boundary and the retention windows.
 
 MIT © Gldywn
