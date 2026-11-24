@@ -91,7 +91,7 @@ The `install-gatekeeper` skill registers the MCP server, adds the companion skil
 
 **3. Allow writes when you need them.** Beekeeper Studio 6.2 and later ticks **Read-Only** for every new plugin and then refuses any write it runs, so untick Read-Only for Gatekeeper in Tools > Manage Plugins before you use Write or Destructive mode.
 
-<p align="center"><img src="docs/assets/beekeeper-plugin-readonly.png" alt="Gatekeeper's page in Beekeeper Studio's plugin manager, with the Auto-update box ticked and the Read-Only box unticked." width="540"></p>
+<p align="center"><img src="docs/assets/beekeeper-plugin-readonly.png" alt="Gatekeeper's page in Beekeeper Studio's plugin manager, with Auto-update ticked and the Read-Only box highlighted and unticked." width="492"></p>
 
 [Install](docs/INSTALL.md) covers the manual setup for Claude Code, Codex, OpenCode and any client that reads `.mcp.json`, along with pairing and troubleshooting. Gatekeeper is free and open source under the [MIT license](LICENSE).
 
