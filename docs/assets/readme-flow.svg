@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 300" width="960" height="300" role="img" aria-labelledby="t d">
+  <title id="t">How a query runs through Gatekeeper</title>
+  <desc id="d">Your agent proposes SQL over MCP. Gatekeeper classifies it, checks the armed mode and flags likely sensitive data. Auto mode approves eligible reads, and you review the rest. Beekeeper Studio runs an approved query on your connection, and the result goes back to the agent, which never holds credentials.</desc>
+  <defs>
+    <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#8a8f97"/></marker>
+    <marker id="aa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#e8b94a"/></marker>
+    <marker id="ac" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#66d9df"/></marker>
+    <marker id="ao" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#5fc48a"/></marker>
+  </defs>
+  <style>
+    text { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    .h { font-size: 17px; font-weight: 650; fill: #e8eaed; }
+    .s { font-size: 13.5px; fill: #a3a7ad; }
+    .l { font-size: 13px; fill: #8a8f97; }
+  </style>
+  <rect x="0.5" y="0.5" width="959" height="299" rx="16" fill="#121316" stroke="#2a2d32"/>
+
+  <!-- Agent -->
+  <rect x="24" y="70" width="160" height="110" rx="12" fill="#1c1e22" stroke="#34373d"/>
+  <text class="h" x="104" y="108" text-anchor="middle">Your agent</text>
+  <text class="s" x="104" y="133" text-anchor="middle">MCP client</text>
+  <text class="s" x="104" y="155" text-anchor="middle">holds no credentials</text>
+
+  <!-- propose -->
+  <line x1="186" y1="125" x2="242" y2="125" stroke="#8a8f97" stroke-width="1.6" marker-end="url(#ag)"/>
+  <text class="l" x="214" y="114" text-anchor="middle">SQL</text>
+
+  <!-- Gatekeeper -->
+  <rect x="246" y="50" width="240" height="150" rx="12" fill="#1c1e22" stroke="#e8b94a" stroke-width="1.5"/>
+  <text class="h" x="268" y="84" style="fill:#e8b94a">Gatekeeper</text>
+  <circle cx="272" cy="113" r="3" fill="#e8b94a"/>
+  <text class="s" x="284" y="118">Classifies the query</text>
+  <circle cx="272" cy="140" r="3" fill="#e8b94a"/>
+  <text class="s" x="284" y="145">Checks the armed mode</text>
+  <circle cx="272" cy="167" r="3" fill="#e8b94a"/>
+  <text class="s" x="284" y="172">Flags likely sensitive data</text>
+
+  <!-- branch -->
+  <path d="M488 125 C510 125 508 83 528 83" fill="none" stroke="#66d9df" stroke-width="1.6" marker-end="url(#ac)"/>
+  <path d="M488 125 C510 125 508 167 528 167" fill="none" stroke="#e8b94a" stroke-width="1.6" marker-end="url(#aa)"/>
+
+  <!-- Auto mode -->
+  <rect x="532" y="58" width="180" height="50" rx="25" fill="#16292b" stroke="#66d9df" stroke-width="1.4"/>
+  <path d="M556 71 L548 85 H555 L553 95 L562 80 H555 Z" fill="#66d9df"/>
+  <text x="572" y="80" style="font-size:15px;font-weight:650;fill:#66d9df">Auto mode</text>
+  <text class="s" x="572" y="98">eligible reads</text>
+
+  <!-- You -->
+  <rect x="532" y="142" width="180" height="50" rx="25" fill="#2a2414" stroke="#e8b94a" stroke-width="1.4"/>
+  <path d="M549 160 L554 165 L563 154" fill="none" stroke="#e8b94a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="572" y="164" style="font-size:15px;font-weight:650;fill:#e8b94a">You review</text>
+  <text class="s" x="572" y="182">on the exact SQL</text>
+
+  <!-- merge -->
+  <path d="M714 83 C741 83 741 125 764 125" fill="none" stroke="#8a8f97" stroke-width="1.6"/>
+  <path d="M714 167 C741 167 741 125 764 125" fill="none" stroke="#8a8f97" stroke-width="1.6" marker-end="url(#ag)"/>
+
+  <!-- Beekeeper -->
+  <rect x="768" y="70" width="168" height="110" rx="12" fill="#1c1e22" stroke="#34373d"/>
+  <text class="h" x="852" y="108" text-anchor="middle">Beekeeper Studio</text>
+  <text class="s" x="852" y="133" text-anchor="middle">runs it on the</text>
+  <text class="s" x="852" y="155" text-anchor="middle">connection you have</text>
+
+  <!-- rows back -->
+  <path d="M852 182 V258 H104 V186" fill="none" stroke="#5fc48a" stroke-width="1.6" stroke-dasharray="5 5" marker-end="url(#ao)"/>
+  <rect x="374" y="246" width="212" height="24" rx="12" fill="#121316"/>
+  <text x="480" y="263" text-anchor="middle" style="font-size:13.5px;fill:#5fc48a">the result goes back to the agent</text>
+</svg>

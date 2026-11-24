@@ -2,7 +2,7 @@
   "name": "@gldywn/gatekeeper-mcp-server",
   "version": "0.3.1",
   "type": "module",
-  "description": "MCP server for Gatekeeper: proposes SQL to a human in Beekeeper Studio and returns the approved result to the agent.",
+  "description": "Gatekeeper's MCP server, the database harness for AI agents. Stop gambling with your production database.",
   "keywords": [
     "mcp",
     "modelcontextprotocol",

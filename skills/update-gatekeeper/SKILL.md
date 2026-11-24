@@ -59,6 +59,8 @@ The root files (`manifest.json`, `LICENSE`, `README.md`) keep stable names acros
 
 This one needs **a Beekeeper restart**, which is the human's. Beekeeper loads plugins at startup.
 
+**Writes and Beekeeper's Read-Only box.** Beekeeper 6.2 and later keeps a **Read-Only** box per plugin in Tools > Manage Plugins, ticked by default, and refuses every write the plugin runs while it is ticked, whatever mode Gatekeeper has armed. Updating Gatekeeper keeps the box as it was, but a human who has just moved Beekeeper itself to 6.2 or later starts with it ticked. If they use Write or Destructive mode and approved writes now fail, they untick Read-Only for Gatekeeper there.
+
 ## Piece 2: the MCP server
 
 There is nothing to compare here, because what matters is how it is registered rather than what is on disk. Read the entry, then answer for the setup you actually find. It lives in `~/.claude.json` for Claude Code at user scope (`claude mcp list` shows it), `~/.codex/config.toml` for Codex, `~/.config/opencode/opencode.json` for OpenCode, `~/.cursor/mcp.json` for Cursor, or a `.mcp.json` at the project root.

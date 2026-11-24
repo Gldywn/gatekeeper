@@ -6,7 +6,7 @@ version: 0.3.1 # x-release-please-version
 
 # Install Gatekeeper
 
-Gatekeeper is a human-approved bridge between an agent and a live database: the agent proposes SQL, a human approves it in Beekeeper Studio, and the rows come back. Nothing runs unapproved, and the agent never holds the credentials.
+Gatekeeper is the database harness for AI agents. The agent proposes SQL, which runs once a human approves it in Beekeeper Studio or Auto mode approves an eligible read, and the rows come back. The agent never holds the credentials.
 
 Installing it means putting four pieces in place on one machine. Do every piece your environment lets you do, verify each against something you can observe, and finish with a short, exact list of what only the human can do.
 
@@ -52,7 +52,30 @@ On Linux and Windows, ask the human for the version rather than hunting for it: 
 
 ## Step 1: the plugin
 
-**The easy path, if it exists yet.** If the human already has Beekeeper open, one look at Manage Plugins settles it: a Gatekeeper entry there installs in one click and this whole step disappears. The registry submission was still in progress when this was written, so expect it to be absent. Do not block on the answer: the manual route below works either way.
+**The easy path, Beekeeper's plugin manager.** Gatekeeper is listed in Beekeeper's community plugin registry, so the human can install it in one click. In **Tools > Manage Plugins**, they find Gatekeeper and click Install. That click is theirs to make, and it replaces the manual route below. What else they need depends on the Beekeeper version from step 0:
+
+- **6.2 and later.** Community plugins ship turned off, so they turn on **Community Plugins** in the plugin manager first if Gatekeeper is not listed.
+- **5.7 to 6.1.** The plugin system ships turned off and the plugin manager has no switch for it. The two settings below go into the user config first, then a restart, then the install.
+- **5.6.** Nothing to turn on. The plugin manager lists Gatekeeper.
+- **5.4 and 5.5.** The plugin manager reads only Beekeeper's official list and never shows Gatekeeper. Take the manual route.
+
+The 5.7 to 6.1 settings, in `user.config.ini` (a hand-installed Gatekeeper needs only the first one):
+
+```ini
+[pluginSystem]
+disabled = false
+communityDisabled = false
+```
+
+| OS | User config file |
+|---|---|
+| macOS | `~/Library/Application Support/beekeeper-studio/user.config.ini` |
+| Linux | `~/.config/beekeeper-studio/user.config.ini` |
+| Windows | `%APPDATA%\beekeeper-studio\user.config.ini` |
+
+Ask which way they prefer. If they cannot do it now, take the manual route below instead of the plugin manager.
+
+**What the manual route needs.** On 6.2 and later, a hand-installed Gatekeeper counts as a community plugin once Beekeeper fetches its community registry and matches the folder to the entry, so it loads once **Community Plugins** is on and Beekeeper has restarted. If it still shows as unlisted after that restart, the registry could not be reached, and turning on **Unlisted Plugins** lets it load. On 5.7 to 6.1 it needs `disabled = false`. Put what applies in the handoff, whichever route you take.
 
 **The manual route.** If a `gatekeeper/manifest.json` already sits in the plugins folder, this is not an install: at the latest version there is nothing to do here, so go to step 2; at an older one, hand the plugin to `update-gatekeeper`, which defers it until npm serves the matching server, then come back for step 2. Otherwise find the latest release, download the zip, and extract it straight into the plugins folder under the exact folder name `gatekeeper`:
 
@@ -169,7 +192,7 @@ Two restarts, and they cannot be worked around: Beekeeper loads plugins at start
 
 Tell the human, in this order:
 
-1. **Restart Beekeeper Studio.** Then Tools, Gatekeeper, and the plugin tab should open. If it is not there, read [TROUBLESHOOTING.md](TROUBLESHOOTING.md) before anything else.
+1. **Let Beekeeper load the plugin, then restart it.** On 6.2 and later, that is the **Community Plugins** switch in Tools > Manage Plugins. On 5.7 to 6.1, it is the `user.config.ini` settings from step 1. On 5.4 to 5.6 there is nothing to turn on. After the restart, Tools, Gatekeeper, and the plugin tab should open. If it is not there, read [TROUBLESHOOTING.md](TROUBLESHOOTING.md) before anything else.
 2. **Restart the agent session.** In this session the Gatekeeper tools do not exist yet, whatever the config says.
 
 Then pairing, which is a one-off per machine. In the new session, call any Gatekeeper tool (`get_connection_info` is the cheapest) or simply ask for something that needs the database. Until the plugin is paired, every tool answers with a 6-digit code. Give that code to the human and ask them to type it into the Gatekeeper tab in Beekeeper. It is single use, lasts about five minutes, and `http://127.0.0.1:9999/pair` always shows the current one. **Do not open that page yourself**: the code has to cross a channel a web page cannot observe, which is exactly what makes the pairing safe, and the human reading it with their own eyes is the point.
@@ -184,7 +207,7 @@ Pairing proves the channel. One approved query proves the whole loop, and it wal
 2. `get_connection_info`: expect `connected: true` and the connection the human has open in Beekeeper.
 3. Propose `SELECT 1` with the intent `Confirm the Gatekeeper approval loop works end to end after the install.` It appears in the plugin, the human approves, one row comes back.
 
-Then set expectations before handing back: reads are always allowed, a write only runs once the human arms Write mode in the plugin, and a destructive statement only under Destructive mode. Those modes are ephemeral and reset on a connection switch. On macOS the first pending query also raises a desktop notification, and macOS asks for permission the first time: allow it, or banners stop for good and the only symptom is a chime with nothing on screen.
+Then set expectations before handing back: reads are always allowed, a write only runs once the human arms Write mode in the plugin, and a destructive statement only under Destructive mode. On Beekeeper 6.2 and later, Beekeeper also keeps a **Read-Only** box per plugin, ticked by default, and refuses every write the plugin runs while it is ticked, whatever mode is armed. If the human wants Write or Destructive mode, they untick Read-Only for Gatekeeper in Tools > Manage Plugins. Those modes are ephemeral and reset on a connection switch. On macOS the first pending query also raises a desktop notification, and macOS asks for permission the first time: allow it, or banners stop for good and the only symptom is a chime with nothing on screen.
 
 ## Always finish with the handoff
 
@@ -199,7 +222,7 @@ Done
 - gatekeeper skill present at ~/.claude/skills/gatekeeper
 
 Your turn, in this order
-1. Restart Beekeeper Studio, then Tools > Gatekeeper. The tab should open.
+1. In Beekeeper Studio (6.2 or later), turn on Community Plugins (Tools > Manage Plugins), restart it, then Tools > Gatekeeper. The tab should open.
 2. Restart this agent session.
 3. Say "finish the Gatekeeper pairing" and I will get you the 6-digit code.
 
