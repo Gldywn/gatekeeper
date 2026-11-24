@@ -4,7 +4,7 @@
   "version": "0.3.1",
   "minAppVersion": "5.4.0",
   "manifestVersion": 1,
-  "description": "Human-approved SQL bridge between AI agents and Beekeeper Studio: read-only by default, with ephemeral human-armed write modes.",
+  "description": "The database harness for AI agents. Stop gambling with your production database.",
   "author": {
     "name": "Gldywn",
     "url": "https://github.com/Gldywn"

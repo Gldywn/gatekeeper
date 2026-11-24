@@ -6,7 +6,7 @@ version: 0.3.1 # x-release-please-version
 
 # Install Gatekeeper
 
-Gatekeeper is a human-approved bridge between an agent and a live database: the agent proposes SQL, a human approves it in Beekeeper Studio, and the rows come back. Nothing runs unapproved, and the agent never holds the credentials.
+Gatekeeper is the database harness for AI agents. The agent proposes SQL, which runs once a human approves it in Beekeeper Studio or Auto mode approves an eligible read, and the rows come back. The agent never holds the credentials.
 
 Installing it means putting four pieces in place on one machine. Do every piece your environment lets you do, verify each against something you can observe, and finish with a short, exact list of what only the human can do.
 
@@ -207,7 +207,7 @@ Pairing proves the channel. One approved query proves the whole loop, and it wal
 2. `get_connection_info`: expect `connected: true` and the connection the human has open in Beekeeper.
 3. Propose `SELECT 1` with the intent `Confirm the Gatekeeper approval loop works end to end after the install.` It appears in the plugin, the human approves, one row comes back.
 
-Then set expectations before handing back: reads are always allowed, a write only runs once the human arms Write mode in the plugin, and a destructive statement only under Destructive mode. Those modes are ephemeral and reset on a connection switch. On macOS the first pending query also raises a desktop notification, and macOS asks for permission the first time: allow it, or banners stop for good and the only symptom is a chime with nothing on screen.
+Then set expectations before handing back: reads are always allowed, a write only runs once the human arms Write mode in the plugin, and a destructive statement only under Destructive mode. On Beekeeper 6.2 and later, Beekeeper also keeps a **Read-Only** box per plugin, ticked by default, and refuses every write the plugin runs while it is ticked, whatever mode is armed. If the human wants Write or Destructive mode, they untick Read-Only for Gatekeeper in Tools > Manage Plugins. Those modes are ephemeral and reset on a connection switch. On macOS the first pending query also raises a desktop notification, and macOS asks for permission the first time: allow it, or banners stop for good and the only symptom is a chime with nothing on screen.
 
 ## Always finish with the handoff
 

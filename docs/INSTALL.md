@@ -115,6 +115,11 @@ default. A write needs Write or Destructive mode armed, and each write still nee
 approval. To turn on Auto mode, use the lightning icon in the plugin header or the switch in
 Settings.
 
+On Beekeeper Studio 6.2 and later, the plugin manager also has a **Read-Only** box for each
+plugin, ticked by default. While it is ticked, Beekeeper refuses every write Gatekeeper runs,
+whatever mode you armed. To use Write or Destructive mode, untick Read-Only for Gatekeeper in
+Tools > Manage Plugins.
+
 ## If the plugin never shows up
 
 Check the folder name first if you installed from the zip. Then check your Beekeeper Studio
