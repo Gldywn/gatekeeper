@@ -1,7 +1,7 @@
 {
   "id": "gatekeeper",
   "name": "Gatekeeper",
-  "version": "0.3.1",
+  "version": "1.0.0",
   "minAppVersion": "5.4.0",
   "manifestVersion": 1,
   "description": "The database harness for AI agents. Stop gambling with your production database.",

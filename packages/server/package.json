@@ -1,6 +1,6 @@
 {
   "name": "@gldywn/gatekeeper-mcp-server",
-  "version": "0.3.1",
+  "version": "1.0.0",
   "type": "module",
   "description": "Gatekeeper's MCP server, the database harness for AI agents. Stop gambling with your production database.",
   "keywords": [
