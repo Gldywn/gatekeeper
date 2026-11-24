@@ -124,15 +124,17 @@ Sometimes you need a release anyway. The npm package page renders the `README.md
 the published tarball**, not the one on `main`, so a fix to `packages/server/README.md` only
 reaches npm through a new version. Same for anything shipped in the plugin zip.
 
-To force one, put `Release-As: x.y.z` in the **body** of a commit that lands on `main`:
+To force one, end a commit message with `Release-As: x.y.z` as its **last paragraph**:
 
 ```bash
 git commit --allow-empty -m "chore: release 0.1.1" -m "Release-As: 0.1.1"
 ```
 
 `main` takes squash merges only, and this repo builds the squash message from the branch's
-commit messages, so the footer travels with the commit. Keep it in the commit body rather
-than the PR description, which is not what lands.
+commit messages. release-please reads `Release-As` only in the last paragraph of that squash
+message, so put it in a pull request with a single commit, or in the last commit of the
+branch, and check that it still ends the squash message before merging. A footer in an
+earlier commit ends up mid-message and is ignored, and the PR description does not land.
 
 ## Verifying a release
 
