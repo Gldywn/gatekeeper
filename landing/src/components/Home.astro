@@ -34,15 +34,24 @@ import WorksWith from "./WorksWith.astro";
         return id ? document.getElementById(id) : null;
       };
       const behavior = (smooth) => (smooth && !still.matches ? "smooth" : "auto");
-      // As after a jump to an anchor, the next Tab starts from el, not from where the visitor was.
-      // el is focusable only for this call, so a later click on its text works as usual.
+      // As after a jump to an anchor, focus (and a screen reader) lands on el and the next Tab
+      // starts there. el stays focusable only until the visitor moves on, so a later click on its
+      // text works as usual: the capture-phase pointerdown runs before the press moves focus.
       const startTabAt = (el) => {
-        const added = !el.hasAttribute("tabindex");
-        // Some engines keep focus on el after the attribute goes; the marker keeps it ringless.
+        // A landing point, not a control: no ring while it holds focus.
         el.dataset.jump = "";
-        if (added) el.setAttribute("tabindex", "-1");
+        if (el.hasAttribute("tabindex")) return el.focus({ preventScroll: true });
+        el.setAttribute("tabindex", "-1");
+        const drop = () => {
+          el.removeAttribute("tabindex");
+          el.removeEventListener("blur", drop);
+          removeEventListener("pointerdown", drop, true);
+        };
+        el.addEventListener("blur", drop);
+        addEventListener("pointerdown", drop, true);
         el.focus({ preventScroll: true });
-        if (added) el.removeAttribute("tabindex");
+        // An anchor that cannot take focus (an SVG mask, say) would never blur to clean up.
+        if (document.activeElement !== el) drop();
       };
       const show = (el, smooth, focus) => {
         el.scrollIntoView({ behavior: behavior(smooth), block: "start" });
@@ -50,8 +59,10 @@ import WorksWith from "./WorksWith.astro";
       };
       const go = (path, smooth, focus) => {
         const el = target(path);
-        if (el) show(el, smooth, focus);
-        else window.scrollTo({ top: 0, behavior: behavior(smooth) });
+        if (el) return show(el, smooth, focus);
+        window.scrollTo({ top: 0, behavior: behavior(smooth) });
+        // The top of the page has no section to land on: the next Tab starts from the top too.
+        if (focus) startTabAt(document.body);
       };
       // This script places the page on every history move, so the browser's own restore would fight it.
       history.scrollRestoration = "manual";
