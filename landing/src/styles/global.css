@@ -1,4 +1,7 @@
 @import "@gatekeeper/shared/tokens.css";
+/* Self-hosted, so a visit sends nothing to a font service. */
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
 
 /* Page tokens on top of the shared palette: a warm ground and card tone for the marketing
    surface, Geist for the page voice. The plugin samples keep the plugin's own system font. */
@@ -9,8 +12,8 @@
   --g-well: oklch(14% 0.008 70 / 0.72);
   --g-canvas: oklch(23% 0.025 65);
   --g-line: color-mix(in oklch, var(--text) 9%, transparent);
-  --g-sans: "Geist", var(--font-ui);
-  --g-mono: "Geist Mono", var(--font-mono);
+  --g-sans: "Geist Variable", var(--font-ui);
+  --g-mono: "Geist Mono Variable", var(--font-mono);
 }
 
 * {
