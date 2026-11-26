@@ -34,15 +34,18 @@ import WorksWith from "./WorksWith.astro";
         return id ? document.getElementById(id) : null;
       };
       const behavior = (smooth) => (smooth && !still.matches ? "smooth" : "auto");
-      const go = (path, smooth, focus) => {
-        const el = target(path);
-        if (!el) return window.scrollTo({ top: 0, behavior: behavior(smooth) });
+      const show = (el, smooth, focus) => {
         el.scrollIntoView({ behavior: behavior(smooth), block: "start" });
-        // As after a jump to an anchor, the next Tab starts from the section, not from the menu.
+        // As after a jump to an anchor, the next Tab starts from there, not from where the visitor was.
         if (focus) {
           if (!el.hasAttribute("tabindex")) el.setAttribute("tabindex", "-1");
           el.focus({ preventScroll: true });
         }
+      };
+      const go = (path, smooth, focus) => {
+        const el = target(path);
+        if (el) show(el, smooth, focus);
+        else window.scrollTo({ top: 0, behavior: behavior(smooth) });
       };
       // This script places the page on every history move, so the browser's own restore would fight it.
       history.scrollRestoration = "manual";
@@ -74,15 +77,27 @@ import WorksWith from "./WorksWith.astro";
         go(path, true, true);
       });
 
-      addEventListener("popstate", (e) => {
-        if (location.hash) {
-          // An entry made by an in-page anchor: the browser does not restore it, so go to it here.
-          const el = document.getElementById(location.hash.slice(1));
-          el?.scrollIntoView({ behavior: behavior(true), block: "start" });
-          return;
+      // As the browser resolves an anchor: the decoded id, or the raw one if it does not decode.
+      const anchor = () => {
+        const raw = location.hash.slice(1);
+        try {
+          return document.getElementById(decodeURIComponent(raw));
+        } catch {
+          return document.getElementById(raw);
         }
-        if (target(location.pathname)) go(location.pathname, true);
-        else window.scrollTo({ top: typeof e.state?.y === "number" ? e.state.y : 0, behavior: behavior(true) });
+      };
+
+      addEventListener("popstate", (e) => {
+        // An entry made by an in-page anchor is not restored by the browser either, so go to it here.
+        const el = location.hash ? anchor() : target(location.pathname);
+        if (el) return show(el, true, true);
+        // An anchor that names nothing leaves the page, and the next Tab, where they are.
+        if (location.hash) return;
+        // No section to land on: the next Tab starts from the top, as on a fresh visit, not from a
+        // section an earlier jump focused (a blur would leave the browser starting from there).
+        document.body.setAttribute("tabindex", "-1");
+        document.body.focus({ preventScroll: true });
+        window.scrollTo({ top: typeof e.state?.y === "number" ? e.state.y : 0, behavior: behavior(true) });
       });
     }
   </script>

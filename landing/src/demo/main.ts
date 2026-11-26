@@ -78,16 +78,23 @@ const touched = () => {
   const since = Date.now() - touchedAt;
   return since < QUIET_MS || (since < HELD_MS && busy());
 };
+// Capture phase: the plugin stops some keys (Escape in the reason field) before they bubble.
 for (const type of ["pointerdown", "keydown"]) {
-  html.addEventListener(type, (e) => {
-    if (e.isTrusted) touchedAt = Date.now();
-  });
+  html.addEventListener(
+    type,
+    (e) => {
+      if (e.isTrusted) touchedAt = Date.now();
+    },
+    true,
+  );
 }
-// The plugin focuses a control it re-renders, for keyboard users. In this frame, a focus the
-// visitor did not just cause would take the keyboard and the scroll from the landing page.
+// The plugin focuses a control it re-renders, for keyboard users. That stays for a visitor
+// working in the frame; it must never take the keyboard from the landing page, nor scroll it to
+// the demo unless the visitor just acted.
 const focus = HTMLElement.prototype.focus;
 HTMLElement.prototype.focus = function (options?: FocusOptions) {
-  if (Date.now() - touchedAt < 1_000) focus.call(this, options);
+  if (!document.hasFocus()) return;
+  focus.call(this, Date.now() - touchedAt < 1_000 ? options : { ...options, preventScroll: true });
 };
 const closeHints = (keep?: Element | null) => {
   for (const wrap of html.querySelectorAll<HTMLElement>("[data-demo-open]")) {
