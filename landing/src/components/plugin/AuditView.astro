@@ -1,0 +1,92 @@
+---
+import PluginView from "./PluginView.astro";
+
+type Row = {
+  state: "approved" | "auto" | "rejected" | "expired";
+  title: string;
+  time: string;
+  fact: string;
+  write?: boolean;
+  pii?: boolean;
+};
+const groups: { badge: string; name: string; task: string; rows: Row[] }[] = [
+  {
+    badge: "cc",
+    name: "billing-api",
+    task: "Investigate duplicate invoices",
+    rows: [
+      {
+        state: "approved",
+        title: "Find duplicate invoice numbers this month",
+        time: "10:35 AM",
+        fact: "39 rows",
+        pii: true,
+      },
+      {
+        state: "approved",
+        title: "Mark the two duplicate invoices as void",
+        time: "10:33 AM",
+        fact: "2 affected",
+        write: true,
+      },
+      {
+        state: "rejected",
+        title: "Void the duplicate invoices",
+        time: "10:28 AM",
+        fact: "Declined",
+      },
+    ],
+  },
+  {
+    badge: "cx",
+    name: "analytics",
+    task: "Weekly retention report",
+    rows: [
+      {
+        state: "auto",
+        title: "Active customers per week in August",
+        time: "10:31 AM",
+        fact: "5 rows",
+      },
+      { state: "approved", title: "Cohort sizes since August", time: "10:12 AM", fact: "3 rows" },
+      {
+        state: "expired",
+        title: "Churned customers with their last order",
+        time: "10:05 AM",
+        fact: "Expired",
+      },
+    ],
+  },
+];
+const glyph = {
+  approved: ["approved", "Approved", "check"],
+  auto: ["auto", "Approved automatically", "bolt"],
+  rejected: ["rejected", "Declined", "xc"],
+  expired: ["expired", "Expired", "clk"],
+} as const;
+const count = groups.reduce((n, g) => n + g.rows.length, 0);
+---
+<PluginView class="audit-view">
+  <section class="pane pane-list">
+    <div class="pane-head"><div class="pane-tabs" role="tablist" aria-label="Lists"><button class="pane-tab" role="tab" type="button" aria-selected="false">Queue<span class="n">0</span></button><button class="pane-tab" role="tab" type="button" aria-selected="true"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#hist"/></svg>Audit Trail</button></div><span class="pane-actions"><button class="detail-close ex-trigger" type="button" aria-label="Export the Audit Trail"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#dl"/></svg></button></span></div>
+    <div class="pane-body"><div class="act-body">
+      <section class="act-day">
+        <button class="act-day-head" type="button" aria-expanded="true"><span class="act-day-tile">28</span><span class="act-day-text"><span class="act-day-label">Today<span class="act-day-sub">Wed, Oct</span></span><span class="act-day-count">{count} queries, {groups.length} sessions</span></span><span class="act-day-chev"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#chev"/></svg></span></button>
+        <div class="act-day-body">
+          {groups.map((g) => (
+            <section class="act-group">
+              <div class="act-group-head"><span class="harness-badge"><svg viewBox="0 0 24 24"><use href={`#${g.badge}`}/></svg></span><span class="act-sess-name">{g.name}</span><span class="act-sess-title">{g.task}</span></div>
+              <div class="act-entries">
+                {g.rows.map((r) => (
+                  <button class="ix-row done grouped" type="button"><span class="ix-mark"><span class={`hstate ${glyph[r.state][0]}`} title={glyph[r.state][1]}><svg viewBox="0 0 24 24" aria-hidden="true"><use href={`#${glyph[r.state][2]}`}/></svg></span></span><span class="ix-title">{r.title}</span><span class="ix-top">{r.write && <span class="ix-risk write" title="Write"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#pen"/></svg></span>}{r.pii && <span class="act-flags"><span class="act-flag pii">PII</span></span>}<span class="act-time">{r.time}</span></span><span class="ix-fact">{r.fact}</span></button>
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
+      </section>
+      <section class="act-day collapsed"><button class="act-day-head" type="button" aria-expanded="false"><span class="act-day-tile">27</span><span class="act-day-text"><span class="act-day-label">Yesterday<span class="act-day-sub">Tue, Oct</span></span><span class="act-day-count">3 queries, 3 sessions</span></span><span class="act-day-chev"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#chev"/></svg></span></button><div class="act-day-body"></div></section>
+    </div></div>
+  </section>
+  <slot />
+</PluginView>

@@ -1,0 +1,315 @@
+---
+// Six everyday situations, each with the query it comes down to as the plugin's own Queue row.
+// Below them, more situations keep fading in and out, so the list reads as one that never ends.
+import QueueRow from "./how/QueueRow.astro";
+import PluginView from "./plugin/PluginView.astro";
+
+type Row = Parameters<typeof QueueRow>[0];
+type Case = { kind: string; t: string; row: Row };
+
+const cases: Case[] = [
+  {
+    kind: "An import failed",
+    t: "Find the failed jobs before a retry.",
+    row: {
+      state: "approved",
+      title: "Failed import jobs since 09:00",
+      who: "ops",
+      badge: "cx",
+      fact: "12 rows",
+      time: "2m ago",
+    },
+  },
+  {
+    kind: "An order question",
+    t: "Check one order's status and contact.",
+    row: {
+      state: "approved",
+      title: "Order status and email",
+      who: "support",
+      badge: "cc",
+      fact: "1 row",
+      pii: true,
+      time: "1m ago",
+    },
+  },
+  {
+    kind: "A product review",
+    t: "See how often the new export is used.",
+    row: {
+      state: "auto",
+      title: "Exports per day this week",
+      who: "product",
+      badge: "oc",
+      fact: "4 rows",
+      time: "15s ago",
+    },
+  },
+  {
+    kind: "A migration check",
+    t: "Find orphan rows before the foreign key.",
+    row: {
+      state: "approved",
+      title: "Orders without a customer",
+      who: "web-app",
+      badge: "cx",
+      fact: "0 rows",
+      time: "6m ago",
+    },
+  },
+  {
+    kind: "A payout to reconcile",
+    t: "Match a bank payout to its transactions.",
+    row: {
+      state: "auto",
+      title: "Transactions in one payout",
+      who: "finance",
+      badge: "oc",
+      fact: "36 rows",
+      time: "40s ago",
+    },
+  },
+  {
+    kind: "A stock recount",
+    t: "Read the correction before it runs.",
+    row: {
+      state: "pend",
+      title: "Correct two stock counts",
+      who: "inventory",
+      badge: "cc",
+      time: "4:12",
+      write: true,
+    },
+  },
+];
+
+// Three slots of four; each slot shows one situation at a time.
+const more: Case[][] = [
+  [
+    {
+      kind: "A bug report",
+      t: "See the exact record behind the bug.",
+      row: {
+        state: "auto",
+        title: "Webhook attempts for order 9312",
+        who: "web-app",
+        badge: "cc",
+        fact: "4 rows",
+        time: "30s ago",
+      },
+    },
+    {
+      kind: "A stuck queue",
+      t: "Find the jobs that stopped moving.",
+      row: {
+        state: "approved",
+        title: "Jobs waiting over an hour",
+        who: "worker",
+        badge: "cx",
+        fact: "23 rows",
+        time: "1m ago",
+      },
+    },
+    {
+      kind: "A security review",
+      t: "List this week's new admins.",
+      row: {
+        state: "approved",
+        title: "Admins added this week",
+        who: "platform",
+        badge: "cc",
+        fact: "5 rows",
+        pii: true,
+        time: "6m ago",
+      },
+    },
+    {
+      kind: "A spike in declines",
+      t: "See why cards were declined today.",
+      row: {
+        state: "auto",
+        title: "Card declines by reason",
+        who: "payments",
+        badge: "cx",
+        fact: "7 rows",
+        time: "20s ago",
+      },
+    },
+  ],
+  [
+    {
+      kind: "A weekly number",
+      t: "Today's figures, not last week's export.",
+      row: {
+        state: "auto",
+        title: "Revenue by plan this month",
+        who: "growth",
+        badge: "oc",
+        fact: "4 rows",
+        time: "12s ago",
+      },
+    },
+    {
+      kind: "A refund backlog",
+      t: "See which refunds are still pending.",
+      row: {
+        state: "approved",
+        title: "Refunds still pending",
+        who: "support",
+        badge: "cc",
+        fact: "9 rows",
+        time: "3m ago",
+      },
+    },
+    {
+      kind: "A duplicate account",
+      t: "Spot accounts that share an email.",
+      row: {
+        state: "approved",
+        title: "Accounts sharing an email",
+        who: "support",
+        badge: "cc",
+        fact: "2 rows",
+        pii: true,
+        time: "2m ago",
+      },
+    },
+    {
+      kind: "A trial review",
+      t: "See which trials end this week.",
+      row: {
+        state: "auto",
+        title: "Trials ending this week, by plan",
+        who: "growth",
+        badge: "oc",
+        fact: "3 rows",
+        time: "25s ago",
+      },
+    },
+  ],
+  [
+    {
+      kind: "An unfamiliar schema",
+      t: "Let the agent learn the tables first.",
+      row: {
+        state: "approved",
+        title: "Columns in the orders table",
+        who: "web-app",
+        badge: "cc",
+        fact: "18 rows",
+        time: "5m ago",
+      },
+    },
+    {
+      kind: "A cleanup",
+      t: "Read the UPDATE before tickets close.",
+      row: {
+        state: "pend",
+        title: "Close 14 stale tickets",
+        who: "support",
+        badge: "cc",
+        time: "3:40",
+        write: true,
+      },
+    },
+    {
+      kind: "A late shipment",
+      t: "Find the shipments running late.",
+      row: {
+        state: "approved",
+        title: "Shipments marked delayed",
+        who: "ops",
+        badge: "cx",
+        fact: "27 rows",
+        time: "4m ago",
+      },
+    },
+    {
+      kind: "A churn question",
+      t: "See why customers left this month.",
+      row: {
+        state: "auto",
+        title: "Cancellations by reason this month",
+        who: "growth",
+        badge: "oc",
+        fact: "6 rows",
+        time: "35s ago",
+      },
+    },
+  ],
+];
+
+const rowCss = `.pane{width:100%}.ix-row svg{width:13px;height:13px}`;
+// Each situation holds 5 s and fades out before the next one fades in. Reduced motion keeps the
+// first of each slot, still, under the fade.
+const moreCss = `${rowCss}
+.slot{display:grid}
+.it{grid-area:1/1;display:grid;grid-template-rows:auto 1fr auto;gap:12px;opacity:0;animation:cyc 20s var(--ease-in-out) infinite;animation-delay:calc(var(--i) * 5s - var(--o))}
+.kind{font:500 11.5px/1 var(--g-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--amber)}
+.t{margin:0 0 8px;font:600 clamp(1.15rem,1.7vw,1.4rem)/1.18 var(--g-sans);letter-spacing:-.03em;color:var(--text);text-wrap:balance}
+@keyframes cyc{0%{opacity:0;translate:0 10px}4%{opacity:1;translate:0 0}20%{opacity:1;translate:0 0}24%{opacity:0;translate:0 -10px}100%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.it{animation:none}.it:first-child{opacity:1}}`;
+---
+<section class="w section" id="fit">
+  <div class="section-head">
+    <span class="eyebrow">Where it fits</span>
+    <h2 class="headline"><em>For anyone</em> nervous about an agent near the live database.</h2>
+  </div>
+  <div class="cases">
+    {cases.map((c) => (
+      <article>
+        <span class="kind">{c.kind}</span>
+        <h3>{c.t}</h3>
+        <PluginView>
+          <style is:inline set:html={rowCss}></style>
+          <div class="pane"><QueueRow {...c.row} /></div>
+        </PluginView>
+      </article>
+    ))}
+  </div>
+  <div class="more" aria-hidden="true">
+    {more.map((slot, s) => (
+      <div class="cell" style={`--o:${s * 1.7}s`}>
+        <PluginView>
+          <style is:inline set:html={moreCss}></style>
+          <div class="slot">
+            {slot.map((c, i) => (
+              <div class="it" style={`--i:${i}`}>
+                <span class="kind">{c.kind}</span>
+                <span class="t">{c.t}</span>
+                <div class="pane"><QueueRow {...c.row} /></div>
+              </div>
+            ))}
+          </div>
+        </PluginView>
+      </div>
+    ))}
+  </div>
+</section>
+
+<style>
+  .headline { max-width: 22ch; }
+  .cases, .more { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .cases { border-top: 1px solid var(--g-line); }
+  article, .cell { padding: 28px 28px 30px; }
+  article { display: grid; grid-template-rows: auto 1fr auto; gap: 12px; border-bottom: 1px solid var(--g-line); }
+  :is(article, .cell):nth-child(3n + 1) { padding-left: 0; }
+  :is(article, .cell):nth-child(3n) { padding-right: 0; }
+  :is(article, .cell):not(:nth-child(3n + 1)) { border-left: 1px solid var(--g-line); }
+  /* The list carries on below the six and fades out, column lines included. */
+  .more { mask-image: linear-gradient(180deg, #000 35%, transparent 92%); }
+  .kind { font: 500 11.5px / 1 var(--g-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--amber); }
+  h3 { margin: 0 0 8px; font-size: clamp(1.15rem, 1.7vw, 1.4rem); line-height: 1.18; font-weight: 600; letter-spacing: -0.03em; text-wrap: balance; }
+  @media (max-width: 1000px) {
+    .cases, .more { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    article, .cell, :is(article, .cell):nth-child(n) { padding: 26px 24px 28px; border-left: 0; }
+    :is(article, .cell):nth-child(odd) { padding-left: 0; }
+    :is(article, .cell):nth-child(even) { padding-right: 0; border-left: 1px solid var(--g-line); }
+    .cell:nth-child(3) { display: none; }
+  }
+  @media (max-width: 640px) {
+    .cases, .more { grid-template-columns: minmax(0, 1fr); }
+    article, .cell, :is(article, .cell):nth-child(n) { padding: 22px 0 24px; border-left: 0; }
+    .cell:nth-child(n + 2) { display: none; }
+  }
+</style>

@@ -1,0 +1,79 @@
+---
+import Base from "../layouts/Base.astro";
+import "../styles/sections.css";
+import Footer from "./Footer.astro";
+import Hero from "./Hero.astro";
+import HowItWorks from "./HowItWorks.astro";
+import Install from "./Install.astro";
+import Nav from "./Nav.astro";
+import Showcase from "./Showcase.astro";
+import { sections } from "./sections";
+import WhereItFits from "./WhereItFits.astro";
+import Why from "./Why.astro";
+import WorksWith from "./WorksWith.astro";
+---
+<Base>
+  <Nav />
+  <main>
+    <Hero />
+    <Showcase />
+    <WorksWith />
+    <Why />
+    <HowItWorks />
+    <WhereItFits />
+    <Install />
+  </main>
+  <Footer />
+  <!-- Inline so it runs before the visitor sees the top of the page on a section's address. -->
+  <script is:inline define:vars={{ sections }}>
+    {
+      const still = matchMedia("(prefers-reduced-motion: reduce)");
+      const slug = (path) => path.replace(/^\/|\/$/g, "");
+      const target = (path) => {
+        const id = sections[slug(path)];
+        return id ? document.getElementById(id) : null;
+      };
+      const behavior = (smooth) => (smooth && !still.matches ? "smooth" : "auto");
+      const go = (path, smooth) => {
+        const el = target(path);
+        if (el) el.scrollIntoView({ behavior: behavior(smooth), block: "start" });
+        else window.scrollTo({ top: 0, behavior: behavior(smooth) });
+      };
+      // This script places the page on every history move, so the browser's own restore would fight it.
+      history.scrollRestoration = "manual";
+      addEventListener("pagehide", () => history.replaceState({ ...history.state, y: scrollY }, ""));
+
+      if (!location.hash) {
+        if (target(location.pathname)) go(location.pathname, false);
+        else if (typeof history.state?.y === "number") scrollTo(0, history.state.y);
+        // Web fonts can shift the layout once they arrive; re-place the page if the visitor has not moved.
+        const placed = scrollY;
+        const settle = () => {
+          if (Math.abs(scrollY - placed) < 2 && target(location.pathname)) go(location.pathname, false);
+        };
+        document.fonts?.ready.then(settle);
+        addEventListener("load", settle, { once: true });
+      }
+
+      document.addEventListener("click", (e) => {
+        if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        const a = e.target instanceof Element ? e.target.closest("a[href]") : null;
+        if (!a || a.target === "_blank" || a.origin !== location.origin || a.hash) return;
+        const path = a.pathname;
+        if (slug(path) !== "" && !target(path)) return;
+        e.preventDefault();
+        if (path !== location.pathname || location.hash) {
+          history.replaceState({ ...history.state, y: scrollY }, "");
+          history.pushState({}, "", path);
+        }
+        go(path, true);
+      });
+
+      addEventListener("popstate", (e) => {
+        if (location.hash) return;
+        if (target(location.pathname)) go(location.pathname, true);
+        else window.scrollTo({ top: typeof e.state?.y === "number" ? e.state.y : 0, behavior: behavior(true) });
+      });
+    }
+  </script>
+</Base>

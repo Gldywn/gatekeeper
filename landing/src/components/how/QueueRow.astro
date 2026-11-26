@@ -1,0 +1,21 @@
+---
+// One Queue row in the plugin's own markup. Use inside a PluginView.
+interface Props {
+  state: "pend" | "eval" | "auto" | "approved" | "rejected";
+  title: string;
+  who: string;
+  badge: "cc" | "cx" | "oc";
+  fact?: string;
+  time?: string;
+  pii?: boolean;
+  write?: boolean;
+  class?: string;
+}
+const { state, title, who, badge, fact, time = "now", pii, write, class: cls } = Astro.props;
+const icon = { auto: "#bolt", approved: "#check", rejected: "#xc" };
+---
+{state === "pend" || state === "eval" ? (
+  <div class:list={["ix-row", "pend", cls]}><span class="ix-mark"><span class:list={["ix-dot", { eval: state === "eval" }]}></span></span><span class="ix-main"><span class="ix-title">{title}</span><span class="ix-meta"><span class="harness-badge"><svg viewBox="0 0 24 24"><use href={`#${badge}`}/></svg></span><span class="ix-who">{who}</span></span></span><span class="ix-end">{write && <span class="ix-risk write"><svg viewBox="0 0 24 24"><use href="#pen"/></svg></span>}{pii && <span class="act-flags"><span class="act-flag pii">PII</span></span>}<span class="ix-side">{time}</span></span></div>
+) : (
+  <div class:list={["ix-row", "done", cls]}><span class="ix-mark"><span class:list={["hstate", state]}><svg viewBox="0 0 24 24"><use href={icon[state]}/></svg></span></span><span class="ix-title">{title}</span><span class="ix-top">{write && <span class="ix-risk write"><svg viewBox="0 0 24 24"><use href="#pen"/></svg></span>}{pii && <span class="act-flags"><span class="act-flag pii">PII</span></span>}<span class="hage">{time}</span></span><span class="ix-meta"><span class="harness-badge"><svg viewBox="0 0 24 24"><use href={`#${badge}`}/></svg></span><span class="ix-who">{who}</span></span><span class="ix-fact">{fact}</span></div>
+)}

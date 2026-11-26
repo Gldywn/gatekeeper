@@ -1,0 +1,91 @@
+---
+// The Audit Trail, the plugin's own view on sample data, with its export opening on a loop.
+import AuditView from "../plugin/AuditView.astro";
+
+// One 9 s loop: the export button is pressed, the plugin's export dialog opens and stays about
+// five seconds, then closes, and the next press comes two seconds later.
+const exportCss = `:host{position:relative}
+.ex-trigger{animation:press 9s linear infinite}
+.detail.export-overlay{position:absolute;inset:0;z-index:5;overflow:hidden;display:grid;place-items:start center;padding:14px;animation:dlg 9s var(--ease-out) infinite}
+.export-card{width:100%;max-width:420px;animation:card 9s var(--ease-out) infinite}
+@keyframes press{0%,9%,15%,100%{background:transparent;scale:1}11%,13%{background:var(--hi);scale:.88}}
+@keyframes dlg{0%,14%{opacity:0;visibility:hidden}17%,72%{opacity:1;visibility:visible}76%,100%{opacity:0;visibility:hidden}}
+@keyframes card{0%,14%{translate:0 10px}19%,100%{translate:0 0}}
+@media (prefers-reduced-motion:reduce){.ex-trigger,.detail.export-overlay,.export-card{animation:none}.detail.export-overlay{visibility:hidden}}`;
+const dl =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" x2="12" y1="15" y2="3"></line></svg>';
+const periods = [
+  ["Today", "Wed, Oct 28"],
+  ["Last 7 days", "Oct 22 to Oct 28"],
+  ["This month", "Oct 1 to Oct 28"],
+  ["Everything", "Oct 6 to Oct 28"],
+  ["Choose days", ""],
+];
+const formats = [
+  ["Markdown", ".md"],
+  ["CSV", ".csv"],
+  ["JSON", ".json"],
+];
+---
+<div class="part" id="audit">
+  <div class="trail">
+    <div class="section-head">
+      <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>Audit Trail &amp; Export</span>
+      <h3 class="part-title"><em>Open</em> any query from the past and see why it ran.</h3>
+      <ul>
+        <li>Each entry keeps the SQL, the intent and the outcome.</li>
+        <li>Automatic approvals are recorded with the evaluator's answers.</li>
+        <li>A period exports as Markdown, CSV or JSON, without result rows.</li>
+      </ul>
+    </div>
+    <div class="shot">
+      <AuditView>
+        <style is:inline set:html={exportCss}></style>
+        <div class="detail export-overlay">
+          <div class="detail-card export-card" role="dialog" aria-label="Export the Audit Trail">
+            <div class="panel-head"><span class="panel-head-ico" set:html={dl} /><span class="panel-title">Export the Audit Trail</span><button class="detail-close" type="button" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></button></div>
+            <fieldset class="ex-form">
+              <div class="ex-sec">
+                <span class="set-group-name">Period</span>
+                <div class="ex-opts">
+                  {periods.map(([name, when], i) => (
+                    <label class="ex-opt"><input class="ex-radio" type="radio" name="exPeriod" checked={i === 1} /><span class="ex-name">{name}</span><span class="ex-when">{when}</span></label>
+                  ))}
+                </div>
+              </div>
+              <div class="ex-sec">
+                <span class="set-group-name">Format</span>
+                <div class="ex-fmts">
+                  {formats.map(([name, ext], i) => (
+                    <label class="ex-fmt"><input class="ex-radio" type="radio" name="exFormat" checked={i === 0} />{name}<span class="ex-ext">{ext}</span></label>
+                  ))}
+                </div>
+                <p class="set-note">Each query with its SQL, intent, session and outcome. Result rows are never included.</p>
+              </div>
+            </fieldset>
+            <div class="ex-status"><p class="ex-scope"><span><b>9</b> queries over <b>2</b> days, from <b>3</b> sessions.</span></p></div>
+            <div class="confirm-actions">
+              <button class="confirm-cancel" type="button">Cancel</button>
+              <button class="confirm-go write" type="button">Export 9 queries</button>
+            </div>
+          </div>
+        </div>
+      </AuditView>
+    </div>
+  </div>
+</div>
+
+<style>
+  .part-title { max-width: 18ch; }
+  /* Built like the Auto mode chip, in amber: a label for this part, not a section eyebrow. */
+  .chip { justify-self: start; display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px 4px 8px; border-radius: 7px; font-size: 11.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--amber); background: color-mix(in oklch, var(--amber) 13%, transparent); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--amber) 35%, transparent); }
+  .chip svg { width: 14px; height: 14px; }
+  .trail { display: grid; grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr); gap: 32px clamp(32px, 6vw, 80px); align-items: center; }
+  .trail .section-head { margin: 0; }
+  .trail ul { margin: 10px 0 0; padding: 0; list-style: none; display: grid; }
+  .trail li { padding-block: 14px; border-top: 1px solid var(--g-line); font-size: 16.5px; color: var(--muted); }
+  .shot { min-width: 0; border-radius: 16px; padding: 14px; background: radial-gradient(90% 90% at 100% 0%, color-mix(in oklch, var(--amber) 16%, transparent), transparent 60%), var(--g-canvas); box-shadow: 0 30px 80px oklch(0% 0 0 / 0.35); }
+  @media (max-width: 900px) {
+    .trail { grid-template-columns: minmax(0, 1fr); }
+  }
+</style>

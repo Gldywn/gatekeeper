@@ -7,11 +7,13 @@ import SpeedInsights from "@vercel/speed-insights/astro";
 
 // Meta title + description mirror the hero headline and lead so search and social
 // previews say exactly what the page says.
-const title = "Gatekeeper: Your agents propose the SQL. You approve what runs.";
+const title = "Gatekeeper: The database harness for AI agents";
 const description =
-  "Gatekeeper is a human-approved, read-only-by-default bridge between AI agents and your database. Nothing runs until you approve it, and the agent never holds your credentials.";
+  "Agents propose SQL over MCP and approved queries run on your Beekeeper Studio connection. With Auto mode on, eligible reads run without a click and writes always wait for you. The agent never holds your database credentials.";
 const site = "https://trygatekeeper.dev";
 const ogImage = `${site}/og.png`;
+const ogAlt =
+  "The Gatekeeper headline, The database harness for AI agents, among query cards from the plugin.";
 ---
 <!doctype html>
 <html lang="en">
@@ -30,17 +32,26 @@ const ogImage = `${site}/og.png`;
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:image" content={ogImage} />
-    <meta property="og:image:width" content="2560" />
-    <meta property="og:image:height" content="1280" />
-    <meta property="og:image:alt" content="A proposed SQL query in Beekeeper Studio, flagged for possible PII, awaiting human approval." />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content={ogAlt} />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={ogImage} />
+    <meta name="twitter:image:alt" content={ogAlt} />
 
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="icon" href="/icon-32.png" sizes="32x32" type="image/png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon-256.png" />
+
+    <!-- Animations run only once this flag is set: without JavaScript there is no pause control. -->
+    <script is:inline>document.documentElement.setAttribute("data-js", "");</script>
+
+    <!-- Geist from Google Fonts while the design iterates; self-hosting is an open decision. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" />
 
     <Analytics />
     <SpeedInsights />

@@ -1,0 +1,11 @@
+---
+// The same one-page site at each section's own address, so a shared /why lands on Why. Every copy
+// keeps the canonical link to "/" (Base.astro), so search engines see one page.
+import Home from "../components/Home.astro";
+import { sections } from "../components/sections";
+
+export function getStaticPaths() {
+  return Object.keys(sections).map((section) => ({ params: { section } }));
+}
+---
+<Home />
