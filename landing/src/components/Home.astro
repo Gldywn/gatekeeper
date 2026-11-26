@@ -77,7 +77,7 @@ import WorksWith from "./WorksWith.astro";
       addEventListener("popstate", (e) => {
         if (location.hash) {
           // An entry made by an in-page anchor: the browser does not restore it, so go to it here.
-          const el = document.getElementById(decodeURIComponent(location.hash.slice(1)));
+          const el = document.getElementById(location.hash.slice(1));
           el?.scrollIntoView({ behavior: behavior(true), block: "start" });
           return;
         }
