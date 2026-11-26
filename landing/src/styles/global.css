@@ -50,7 +50,7 @@ p {
   border-radius: 6px;
 }
 /* A jump's destination takes focus only to anchor the next Tab; it draws no ring. */
-[tabindex="-1"]:focus {
+[data-jump]:focus {
   outline: none;
 }
 ::selection {

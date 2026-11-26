@@ -92,8 +92,11 @@ for (const type of ["pointerdown", "keydown"]) {
 // working in the frame; it must never take the keyboard from the landing page, nor scroll it to
 // the demo unless the visitor just acted.
 const focus = HTMLElement.prototype.focus;
+// The frame holds the page's focus whether or not the window does, so a visitor who switched
+// apps keeps their row.
+const frame = window.frameElement;
 HTMLElement.prototype.focus = function (options?: FocusOptions) {
-  if (!document.hasFocus()) return;
+  if (frame && parent.document.activeElement !== frame) return;
   focus.call(this, Date.now() - touchedAt < 1_000 ? options : { ...options, preventScroll: true });
 };
 const closeHints = (keep?: Element | null) => {

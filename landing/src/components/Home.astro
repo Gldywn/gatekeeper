@@ -34,13 +34,19 @@ import WorksWith from "./WorksWith.astro";
         return id ? document.getElementById(id) : null;
       };
       const behavior = (smooth) => (smooth && !still.matches ? "smooth" : "auto");
+      // As after a jump to an anchor, the next Tab starts from el, not from where the visitor was.
+      // el is focusable only for this call, so a later click on its text works as usual.
+      const startTabAt = (el) => {
+        const added = !el.hasAttribute("tabindex");
+        // Some engines keep focus on el after the attribute goes; the marker keeps it ringless.
+        el.dataset.jump = "";
+        if (added) el.setAttribute("tabindex", "-1");
+        el.focus({ preventScroll: true });
+        if (added) el.removeAttribute("tabindex");
+      };
       const show = (el, smooth, focus) => {
         el.scrollIntoView({ behavior: behavior(smooth), block: "start" });
-        // As after a jump to an anchor, the next Tab starts from there, not from where the visitor was.
-        if (focus) {
-          if (!el.hasAttribute("tabindex")) el.setAttribute("tabindex", "-1");
-          el.focus({ preventScroll: true });
-        }
+        if (focus) startTabAt(el);
       };
       const go = (path, smooth, focus) => {
         const el = target(path);
@@ -66,7 +72,9 @@ import WorksWith from "./WorksWith.astro";
       document.addEventListener("click", (e) => {
         if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
         const a = e.target instanceof Element ? e.target.closest("a[href]") : null;
-        if (!a || a.target === "_blank" || a.origin !== location.origin || a.hash) return;
+        if (!a || a.target === "_blank" || a.origin !== location.origin) return;
+        // The browser follows an anchor itself; Back then returns to where the visitor was.
+        if (a.hash) return history.replaceState({ ...history.state, y: scrollY }, "");
         const path = a.pathname;
         if (slug(path) !== "" && !target(path)) return;
         e.preventDefault();
@@ -95,8 +103,7 @@ import WorksWith from "./WorksWith.astro";
         if (location.hash) return;
         // No section to land on: the next Tab starts from the top, as on a fresh visit, not from a
         // section an earlier jump focused (a blur would leave the browser starting from there).
-        document.body.setAttribute("tabindex", "-1");
-        document.body.focus({ preventScroll: true });
+        startTabAt(document.body);
         window.scrollTo({ top: typeof e.state?.y === "number" ? e.state.y : 0, behavior: behavior(true) });
       });
     }
