@@ -2,11 +2,9 @@
 import "../../../packages/plugin/node_modules/tabulator-tables/dist/css/tabulator_midnight.min.css";
 import "../../../packages/plugin/src/style.css";
 import type { Proposal } from "@gatekeeper/shared";
-import { Gatekeeper } from "../../../packages/plugin/src/app";
-import { loadPgParser } from "../../../packages/plugin/src/sql/pg/parse";
-import { wasmBytes } from "../../../packages/plugin/src/sql/pg/wasm";
-import { isOpen, offer } from "./broker";
-import { ARRIVALS, arrival, askedAgain, type Read, waiting } from "./scenario";
+import type * as Broker from "./broker";
+import type * as Scenario from "./scenario";
+import type { Read } from "./scenario";
 
 // The real plugin, driven like a person would: Auto mode and Schema access are turned on with
 // their own toggles and each arriving read is opened, so the plugin itself shows the
@@ -37,7 +35,7 @@ const between = ([lo, hi]: [number, number]) => lo + Math.random() * (hi - lo);
 // A read is not asked again before five others have come.
 const asked: Read[] = [];
 function nextRead(): Read {
-  const pool = ARRIVALS.filter((r) => !asked.includes(r));
+  const pool = scenario.ARRIVALS.filter((r) => !asked.includes(r));
   const read = pool[Math.floor(Math.random() * pool.length)];
   asked.push(read);
   if (asked.length > 5) asked.shift();
@@ -54,6 +52,12 @@ async function until<T extends Element>(find: () => T | null, ms = 10_000): Prom
 
 let visible = false;
 let touchedAt = 0;
+// Set once the replay has turned Auto mode on with the plugin's own toggle.
+let auto = false;
+// Loaded with the plugin once the frame is on screen: the fake host they reach pulls in the
+// plugin's SQL analysis, most of the demo's weight.
+let broker: typeof Broker;
+let scenario: typeof Scenario;
 const shown: (() => void)[] = [];
 new IntersectionObserver(([entry]) => {
   visible = entry.isIntersecting;
@@ -79,11 +83,11 @@ for (const type of ["pointerdown", "keydown"]) {
     if (e.isTrusted) touchedAt = Date.now();
   });
 }
-// The plugin focuses a control it re-renders, for keyboard users; in this frame that also scrolls
-// the landing page to the demo. A focus the visitor did not just cause leaves the page alone.
+// The plugin focuses a control it re-renders, for keyboard users. In this frame, a focus the
+// visitor did not just cause would take the keyboard and the scroll from the landing page.
 const focus = HTMLElement.prototype.focus;
 HTMLElement.prototype.focus = function (options?: FocusOptions) {
-  focus.call(this, Date.now() - touchedAt < 1_000 ? options : { ...options, preventScroll: true });
+  if (Date.now() - touchedAt < 1_000) focus.call(this, options);
 };
 const closeHints = (keep?: Element | null) => {
   for (const wrap of html.querySelectorAll<HTMLElement>("[data-demo-open]")) {
@@ -127,13 +131,13 @@ const waits: Proposal[] = [];
 const endedAt = new Map<number, number>();
 function askAgain(): void {
   waits.forEach((p, slot) => {
-    if (isOpen(p.id)) return;
+    if (broker.isOpen(p.id)) return;
     const since = endedAt.get(slot) ?? Date.now();
     endedAt.set(slot, since);
     if (Date.now() - since < ASK_AGAIN_MS) return;
     endedAt.delete(slot);
-    waits[slot] = askedAgain(p);
-    offer(waits[slot]);
+    waits[slot] = scenario.askedAgain(p);
+    broker.offer(waits[slot]);
   });
 }
 
@@ -152,11 +156,13 @@ async function replay(el: HTMLDivElement): Promise<void> {
   try {
     (await until(() => q("#autoHint .sa-off [data-auto-toggle]"))).click();
     await until(() => q(".armed-chip.auto"));
+    auto = true;
     (await until(() => q("#schemaHint .sa-off [data-schema-toggle]"))).click();
     await until(() => q('#schemaHint[data-on="true"]'));
-    // The plugin keeps focus on a toggle it re-renders, which holds its popover open.
-    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     await open(waits[0].id);
+  } catch (err) {
+    // The plugin's markup no longer matches the script: reads still arrive for a person to decide.
+    report("setup failed")(err);
   } finally {
     html.dataset.ready = "";
   }
@@ -168,18 +174,21 @@ async function replay(el: HTMLDivElement): Promise<void> {
     // Under reduced motion nothing arrives; the loop only keeps the waiting requests.
     if (still.matches) continue;
     const burst = (Math.random() < PAIR_ODDS ? [nextRead(), nextRead()] : [nextRead()]).map(
-      arrival,
+      scenario.arrival,
     );
     try {
-      offer(burst[0]);
+      broker.offer(burst[0]);
       const opened = open(burst[0].id);
       if (burst[1]) {
         await sleep(between(PAIR_MS));
-        offer(burst[1]);
+        // The second read of a pair passes the same checks as the first, after its delay.
+        if (visible && !touched() && !still.matches) broker.offer(burst[1]);
+        else burst.pop();
       }
       await opened;
-      // Auto mode evaluates one read at a time, so the second of a pair waits its turn.
-      for (const p of burst) await until(() => row(p.id, true), 30_000);
+      // Auto mode evaluates one read at a time, so the second of a pair waits its turn. Without
+      // Auto mode the reads wait for a person, so the loop does not wait on them.
+      if (auto) for (const p of burst) await until(() => row(p.id, true), 30_000);
     } catch {
       // A read that never settles in time is left to the plugin; the next one comes anyway.
     }
@@ -199,14 +208,29 @@ async function replay(el: HTMLDivElement): Promise<void> {
   }
 }
 
-// Mounted once the frame is on screen, so the waiting requests count down from then.
+// The fake SDK's logger keeps nothing, so failures go to the frame's console.
+const report = (step: string) => (err: unknown) => console.error(`Gatekeeper demo: ${step}`, err);
+
+// Mounted once the frame is on screen, so the waiting requests count down from then. The plugin,
+// the fake host and the PostgreSQL grammar (most of the demo's weight) load only then.
 if (root) {
-  void onScreen().then(async () => {
-    // As in the plugin's own entry point: the grammar loads before anything is parsed.
-    await loadPgParser(wasmBytes);
-    waits.push(...waiting());
-    for (const p of waits) offer(p);
-    void new Gatekeeper(root).start();
-    void replay(root);
-  });
+  void onScreen()
+    .then(async () => {
+      const [{ Gatekeeper }, { loadPgParser }, { wasmBytes }, b, s] = await Promise.all([
+        import("../../../packages/plugin/src/app"),
+        import("../../../packages/plugin/src/sql/pg/parse"),
+        import("../../../packages/plugin/src/sql/pg/wasm"),
+        import("./broker"),
+        import("./scenario"),
+      ]);
+      broker = b;
+      scenario = s;
+      // As in the plugin's own entry point: the grammar loads before anything is parsed.
+      if (!(await loadPgParser(wasmBytes))) report("parser")("failed to load");
+      waits.push(...scenario.waiting());
+      for (const p of waits) broker.offer(p);
+      new Gatekeeper(root).start().catch(report("plugin start failed"));
+      replay(root).catch(report("replay stopped"));
+    })
+    .catch(report("failed to load"));
 }

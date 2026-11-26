@@ -34,10 +34,15 @@ import WorksWith from "./WorksWith.astro";
         return id ? document.getElementById(id) : null;
       };
       const behavior = (smooth) => (smooth && !still.matches ? "smooth" : "auto");
-      const go = (path, smooth) => {
+      const go = (path, smooth, focus) => {
         const el = target(path);
-        if (el) el.scrollIntoView({ behavior: behavior(smooth), block: "start" });
-        else window.scrollTo({ top: 0, behavior: behavior(smooth) });
+        if (!el) return window.scrollTo({ top: 0, behavior: behavior(smooth) });
+        el.scrollIntoView({ behavior: behavior(smooth), block: "start" });
+        // As after a jump to an anchor, the next Tab starts from the section, not from the menu.
+        if (focus) {
+          if (!el.hasAttribute("tabindex")) el.setAttribute("tabindex", "-1");
+          el.focus({ preventScroll: true });
+        }
       };
       // This script places the page on every history move, so the browser's own restore would fight it.
       history.scrollRestoration = "manual";
@@ -66,11 +71,16 @@ import WorksWith from "./WorksWith.astro";
           history.replaceState({ ...history.state, y: scrollY }, "");
           history.pushState({}, "", path);
         }
-        go(path, true);
+        go(path, true, true);
       });
 
       addEventListener("popstate", (e) => {
-        if (location.hash) return;
+        if (location.hash) {
+          // An entry made by an in-page anchor: the browser does not restore it, so go to it here.
+          const el = document.getElementById(decodeURIComponent(location.hash.slice(1)));
+          el?.scrollIntoView({ behavior: behavior(true), block: "start" });
+          return;
+        }
         if (target(location.pathname)) go(location.pathname, true);
         else window.scrollTo({ top: typeof e.state?.y === "number" ? e.state.y : 0, behavior: behavior(true) });
       });

@@ -46,6 +46,10 @@ p {
   outline-offset: 3px;
   border-radius: 6px;
 }
+/* A section takes focus after a menu jump only to anchor the next Tab; it draws no ring. */
+section[tabindex="-1"]:focus {
+  outline: none;
+}
 ::selection {
   background: color-mix(in oklch, var(--amber) 35%, transparent);
 }

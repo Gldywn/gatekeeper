@@ -197,7 +197,7 @@ const place = (c: Card, i: number) => {
 };
 
 // The page's reduced-motion rule cannot cross the shadow boundary, so the root carries its own.
-// The fade is a transition because the no-JS and Pause rules hold every animation.
+// The fade is a transition because the no-JS rule holds every animation.
 const float = `:host{position:absolute;inset:0}
 .fc{position:absolute;width:288px;opacity:.55;transition:opacity .9s .2s var(--ease);animation:fx var(--tx) var(--ease-in-out) var(--px) infinite alternate,fy var(--ty) var(--ease-in-out) var(--py) infinite alternate}
 .fc svg{width:13px;height:13px}
