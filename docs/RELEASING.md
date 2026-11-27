@@ -191,9 +191,9 @@ headings through absolute GitHub URLs.
 **Community plugins are off by default.** What a user sees depends on the Beekeeper version:
 
 - 6.2 and later ship with official and community plugins turned off, and the user turns on
-  Community Plugins in Tools > Manage Plugins. A plugin extracted by hand counts as a community
-  plugin once Beekeeper fetches the community registry and matches its folder to the entry.
-  Until then it shows as unlisted.
+  Community Plugins in Tools > Manage Plugins > Configure. A plugin extracted by hand counts as
+  a community plugin once Beekeeper fetches the community registry and matches its folder to the
+  entry. Until then it shows as unlisted.
 - 5.7 to 6.1 ship with the whole plugin system off (`pluginSystem.disabled = true` and
   `communityDisabled = true` in the shipped config), with no switch in the app.
 - 5.4 and 5.5 read only `plugins.json`, so their plugin manager never lists Gatekeeper.

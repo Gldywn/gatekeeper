@@ -79,7 +79,7 @@ The threat model and its limits are in [Security](SECURITY.md).
 
 Gatekeeper needs Beekeeper Studio 5.4 or later and Node 22 or later, and is developed and tested on macOS.
 
-**1. Add the plugin.** In Beekeeper Studio, open **Tools > Manage Plugins**, find Gatekeeper and click Install. If Gatekeeper is missing in Beekeeper Studio 6.2 or later, turn on **Community Plugins** in the same window. Some older versions need a setting or the release zip, as [Install](docs/INSTALL.md) explains.
+**1. Add the plugin.** In Beekeeper Studio 6.2 and later, turn on **Community Plugins** in **Tools > Manage Plugins > Configure**. Then open **Tools > Manage Plugins > Browse**, find Gatekeeper and click Install. Some older versions need a setting or the release zip, as [Install](docs/INSTALL.md) explains.
 
 **2. Set up your agent.** Add Gatekeeper's skills to your agent, then ask it to install Gatekeeper.
 
