@@ -23,15 +23,6 @@ An agent proposes a query over MCP. Gatekeeper classifies it and checks it again
 
 Turn on **Auto mode** and eligible reads run without a click. Writes always wait for you.
 
-https://github.com/user-attachments/assets/b6dd8629-da87-4671-a3df-26507742b085
-
-<details>
-<summary>Music from #Uppbeat</summary>
-
-[Shine by Swoop](https://uppbeat.io/t/swoop/shine)
-
-</details>
-
 ## How it works
 
 An agent connected straight to a database over MCP, with its SQL calls preapproved, can run whatever its database role allows. Gatekeeper adds a decision in between, so a query runs only after Gatekeeper has checked it and you or Auto mode have approved it.
