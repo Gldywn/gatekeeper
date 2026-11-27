@@ -20,8 +20,14 @@ const cmd = "npx skills add Gldywn/gatekeeper";
         <span class="n" aria-hidden="true">1</span>
         <div class="b">
           <h3>Add the plugin <span class="where">in <a class="bks" href="https://www.beekeeperstudio.io/" target="_blank" rel="noopener">Beekeeper Studio<span class="bks-mark" set:html={beekeeperMark} /></a></span></h3>
-          <ul class="menu-path"><li>Tools</li><li>Manage Plugins</li><li>Gatekeeper</li><li>Install</li></ul>
-          <p>Not listed? Turn on Community Plugins in the same window.</p>
+          <ul class="menu-path"><li>Tools</li><li>Manage Plugins</li><li>Browse</li><li>Gatekeeper</li><li>Install</li></ul>
+          <div class="first" role="note">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+            <div>
+              <p>Don't forget to turn on Community&nbsp;Plugins</p>
+              <ul class="menu-path"><li>Manage Plugins</li><li>Configure</li><li>Community Plugins</li></ul>
+            </div>
+          </div>
         </div>
       </li>
       <li>
@@ -53,7 +59,7 @@ const cmd = "npx skills add Gldywn/gatekeeper";
 </script>
 
 <style>
-  .panel { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 28px clamp(32px, 6vw, 88px); padding: clamp(28px, 5vw, 64px); border-radius: 28px; background: radial-gradient(80% 110% at 0% 0%, color-mix(in oklch, var(--amber) 13%, transparent), transparent 62%), var(--g-card); box-shadow: inset 0 0 0 1px var(--g-line); }
+  .panel { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 9fr); gap: 28px clamp(32px, 4vw, 56px); padding: clamp(28px, 5vw, 64px); border-radius: 28px; background: radial-gradient(80% 110% at 0% 0%, color-mix(in oklch, var(--amber) 13%, transparent), transparent 62%), var(--g-card); box-shadow: inset 0 0 0 1px var(--g-line); }
   .pitch { display: grid; gap: 18px; align-content: center; justify-items: start; }
   .pitch img { width: 56px; height: 56px; filter: drop-shadow(0 12px 28px oklch(0% 0 0 / 0.5)); }
   .pitch .headline { font-size: clamp(2rem, 3.6vw, 3rem); max-width: 12ch; }
@@ -61,7 +67,7 @@ const cmd = "npx skills add Gldywn/gatekeeper";
   .pitch .lede a { color: var(--text); text-decoration: underline; text-decoration-color: color-mix(in oklch, currentColor 40%, transparent); text-underline-offset: 3px; }
   .links { display: flex; flex-wrap: wrap; gap: 10px; }
   .steps { margin: 0; padding: 0; list-style: none; display: grid; align-content: center; }
-  .steps > li { display: grid; grid-template-columns: 56px minmax(0, 1fr); padding-block: 26px; }
+  .steps > li { display: grid; grid-template-columns: 48px minmax(0, 1fr); padding-block: 26px; }
   .steps > li + li { border-top: 1px solid var(--g-line); }
   .n { font: 400 44px / 1 var(--g-mono); letter-spacing: -0.04em; color: var(--amber); }
   .b { display: grid; gap: 14px; min-width: 0; }
@@ -74,6 +80,15 @@ const cmd = "npx skills add Gldywn/gatekeeper";
   .bks-mark { display: inline-block; width: 1.05em; height: 1.05em; margin-left: 0.3em; vertical-align: -0.17em; }
   .bks-mark :global(svg) { display: block; width: 100%; height: 100%; }
   .b p { font-size: 14.5px; color: var(--muted); }
+  /* Secondary to the install path above it: a tinted box, smaller chips, no solid amber chip. */
+  .first { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 8px; justify-self: start; max-width: 100%; padding: 8px 12px 10px 10px; border-radius: 10px; background: color-mix(in oklch, var(--amber) 3.5%, transparent); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--amber) 14%, transparent); }
+  .first > svg { width: 14px; height: 14px; margin-top: 2px; color: var(--amber); }
+  .first > div { display: grid; gap: 7px; min-width: 0; }
+  .first p { font-size: 13px; font-weight: 500; line-height: 1.4; color: var(--text); }
+  .first .menu-path { gap: 6px 16px; font-size: 12px; color: var(--muted); }
+  .first .menu-path li { padding: 2px 7px; border-radius: 5px; }
+  .first .menu-path li + li::before { left: -10px; }
+  .first .menu-path li:last-child { background: color-mix(in oklch, var(--amber) 14%, transparent); color: var(--amber); font-weight: 500; box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--amber) 30%, transparent); }
   .req { grid-column: 1 / -1; padding-top: 20px; border-top: 1px solid var(--g-line); font-size: 13.5px; color: var(--faint); }
   @media (max-width: 900px) {
     .panel { grid-template-columns: minmax(0, 1fr); border-radius: 20px; }

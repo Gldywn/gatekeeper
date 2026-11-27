@@ -27,7 +27,7 @@ Beekeeper Studio version.
 
 | Beekeeper Studio | How to install Gatekeeper |
 |---|---|
-| 6.2 and later | Open **Tools > Manage Plugins**, find Gatekeeper and click Install. Community plugins are off by default, so turn on **Community Plugins** in the plugin manager first if Gatekeeper is not listed. |
+| 6.2 and later | Community plugins are off by default, so first turn on **Community Plugins** in **Tools > Manage Plugins > Configure**. Then open **Tools > Manage Plugins > Browse**, find Gatekeeper and click Install. |
 | 5.7 to 6.1 | The plugin system ships turned off. Add the two settings under [If the plugin never shows up](#if-the-plugin-never-shows-up) to your user config, restart Beekeeper, then install from **Tools > Manage Plugins**. |
 | 5.4 to 5.6 | Install from **Tools > Manage Plugins** if it lists Gatekeeper. Versions 5.4 and 5.5 only list Beekeeper's own plugins, so use the release zip there. |
 
@@ -125,12 +125,12 @@ Tools > Manage Plugins.
 Check the folder name first if you installed from the zip. Then check your Beekeeper Studio
 version.
 
-- **6.2 and later.** Turn on **Community Plugins** in Tools > Manage Plugins, then restart. If a
-  hand-installed Gatekeeper still shows as an unlisted plugin after the restart, Beekeeper could
-  not reach its registry, so turn on **Unlisted Plugins** too. Without an Ultimate licence,
-  these versions allow at most two plugins besides the two bundled with Beekeeper, and a plugin
-  you turned off still counts. If Install refuses because that limit is reached, or Gatekeeper
-  shows as disabled for that reason, uninstall another plugin first.
+- **6.2 and later.** Turn on **Community Plugins** in Tools > Manage Plugins > Configure, then
+  restart. If a hand-installed Gatekeeper still shows as an unlisted plugin after the restart,
+  Beekeeper could not reach its registry, so turn on **Unlisted Plugins** too. Without an
+  Ultimate licence, these versions allow at most two plugins besides the two bundled with
+  Beekeeper, and a plugin you turned off still counts. If Install refuses because that limit is
+  reached, or Gatekeeper shows as disabled for that reason, uninstall another plugin first.
 - **5.7 to 6.1.** The plugin system and community plugins ship turned off. Add both settings to
   your user config, then restart Beekeeper. A hand-installed Gatekeeper needs only
   `disabled = false`.
