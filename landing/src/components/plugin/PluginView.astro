@@ -1,0 +1,32 @@
+---
+import tabulatorCss from "../../../../packages/plugin/node_modules/tabulator-tables/dist/css/tabulator_midnight.min.css?url";
+// The plugin's own stylesheet, applied inside a declarative shadow root: the samples render
+// exactly like the plugin, and its .card/.sql/.btn rules never leak into the landing.
+import pluginCss from "../../../../packages/plugin/src/style.css?url";
+import PluginSprite from "./PluginSprite.astro";
+
+interface Props {
+  class?: string;
+}
+const { class: className } = Astro.props;
+
+// The plugin's body rules (font, size, line height) cannot reach a shadow host.
+const host = `:host{display:block;font-family:var(--font-ui);font-size:13.5px;line-height:1.5;color:var(--text);-webkit-font-smoothing:antialiased;text-align:left;letter-spacing:normal}
+*{box-sizing:border-box}svg{display:block}
+*,*::before,*::after{animation-play-state:var(--gk-play,running)!important}
+.stack{display:flex;flex-direction:column;gap:8px}
+.bar,.pane{border-radius:var(--r)}
+.pane-body{overflow:visible}
+.agents-strip{border-radius:var(--r);border:1px solid var(--edge)}
+.agents-strip .chips{flex-wrap:wrap;overflow:visible;min-width:0}.agent-chip{max-width:100%}
+.lg-hint{display:inline-flex;margin-left:4px;opacity:.7}.lg-hint svg{width:11px;height:11px}`;
+---
+<div class:list={["pv", className]} inert>
+  <template shadowrootmode="open">
+    <link rel="stylesheet" href={pluginCss} />
+    <link rel="stylesheet" href={tabulatorCss} />
+    <style is:inline set:html={host}></style>
+    <PluginSprite />
+    <slot />
+  </template>
+</div>

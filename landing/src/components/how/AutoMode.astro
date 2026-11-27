@@ -1,0 +1,307 @@
+---
+// A read crosses the local analysis and the evaluator, whose scores fill under their cutoffs, and
+// comes out approved; a read that returns emails fails a local check and waits. CSS only.
+import typesafe from "../../assets/typesafe-mark.svg?raw";
+import { agents, githubMark } from "../agents";
+import PluginView from "../plugin/PluginView.astro";
+import Row from "./QueueRow.astro";
+
+// One 12 s loop. Positions are the card's left edge; --cw is the card's width.
+const g1 = "calc(34% - var(--cw) / 2)";
+const g2 = "calc(66% - var(--cw) / 2)";
+const end = "calc(100% - var(--cw))";
+const show = (name: string, from: number, to: number) =>
+  `@keyframes ${name}{0%,${from}%{opacity:0}${from + 1.5}%,${to}%{opacity:1}${to + 1.5}%,100%{opacity:0}}`;
+const stage = `:host{position:absolute;inset:0}
+.c{position:absolute;width:var(--cw);display:grid}
+.c>*{grid-area:1/1;border-radius:var(--r);background:var(--surface);box-shadow:var(--elev-2),inset 0 0 0 1px var(--edge)}
+.c svg{width:13px;height:13px}
+.a{top:var(--ya);left:${end};animation:a 12s var(--ease-in-out) infinite}
+.b{top:var(--yb);left:${g1};animation:b 12s var(--ease-in-out) infinite}
+.a .p,.a .e,.b .p{opacity:0}
+.a .p{animation:ap 12s linear infinite}.a .e{animation:ae 12s linear infinite}.a .d{animation:ad 12s linear infinite}
+.b .p{animation:bp 12s linear infinite}.b .h{animation:bh 12s linear infinite}
+@keyframes a{0%{left:0;opacity:0}3%{left:0;opacity:1}15%,29%{left:${g1}}41%,57%{left:${g2}}69%,95%{left:${end};opacity:1}100%{left:${end};opacity:0}}
+@keyframes b{0%,8%{left:0;opacity:0}11%{left:0;opacity:1}23%,95%{left:${g1};opacity:1}100%{left:${g1};opacity:0}}
+@keyframes ap{0%,14%{opacity:1}15.5%,100%{opacity:0}}${show("ae", 14, 61)}
+@keyframes ad{0%,62.5%{opacity:0}64%,100%{opacity:1}}
+@keyframes bp{0%,30%{opacity:1}31.5%,100%{opacity:0}}
+@keyframes bh{0%,30%{opacity:0}31.5%,100%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.c,.c *{animation:none}}`;
+
+// The evaluator's answers for this read: sample values under the built-in cutoffs
+// (docs/AUTO-MODE.md). The track runs from 0 to 0.5, so a cutoff of 0.20 sits at 40 %.
+const scores = [
+  { q: "Personal data", v: 0.03, cut: 0.2 },
+  { q: "Organization data", v: 0.02, cut: 0.15 },
+  { q: "Access secrets", v: 0.01, cut: 0.15 },
+  { q: "Missing context", v: 0.12, cut: 0.45 },
+];
+const pct = (n: number) => `${n * 200}%`;
+// What the local analysis checks on your machine before anything leaves it (docs/AUTO-MODE.md,
+// "Supported SQL"): the read that runs passes all four, the held read fails the last one.
+const checks = [
+  "A single SELECT",
+  "Tables named explicitly",
+  "Functions found in the catalog",
+  "No sensitive column or value",
+];
+const tick =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
+const cross =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
+// Works with draws the same marks; Gemini's carries a mask by id, so this copy gets its own ids.
+const own = (svg: string) =>
+  svg.replace(/\bid="([^"]+)"/g, 'id="am-$1"').replace(/url\(#([^)]+)\)/g, "url(#am-$1)");
+const db =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>';
+const bolt =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m13 3-9 11h7l-1 7 10-12h-7z"/></svg>';
+---
+<div class="part" id="auto-mode">
+  <div class="section-head c">
+    <span class="chip"><span set:html={bolt} />Auto mode</span>
+    <h3 class="part-title">A read that passes two checks <em>runs without a click.</em></h3>
+    <p class="lede">Your agent gets its answer in seconds and you only see the reads that need a person.</p>
+  </div>
+
+  <div class="bench">
+    <div class="stage" role="img" aria-label="A read passes the four local checks, then the evaluator on the provider you choose, Jev by TypeSafe here, whose four scores stay under their cutoffs, and runs with 7 rows. A read that returns emails fails the last local check and waits for review.">
+      <div class="gate one"><strong>Local analysis</strong><span>On your machine</span></div>
+      <div class="gate two"><strong>Evaluator</strong><span>On the provider you choose</span><span class="trust">Sees the structure, never the rows</span></div>
+      <span class="tag from">
+        {agents.map(([name, svg], i) => (
+          <span class="who" style={`--n:${i}`}><span class="mark" set:html={own(svg)} />{name} proposes</span>
+        ))}
+      </span>
+      <span class="tag to"><span class="db" set:html={db} />Your database</span>
+      <span class="held">Held for your review</span>
+      <PluginView>
+        <style is:inline set:html={stage}></style>
+        <div class="c a">
+          <Row class="p" state="pend" title="Orders per day this week" who="analytics" badge="cx" time="4:58" />
+          <Row class="e" state="eval" title="Orders per day this week" who="analytics" badge="cx" time="4:57" />
+          <Row class="d" state="auto" title="Orders per day this week" who="analytics" badge="cx" fact="7 rows" time="1s ago" />
+        </div>
+        <div class="c b">
+          <Row class="p" state="pend" title="Churned customer emails" who="crm" badge="cc" time="4:55" />
+          <Row class="h" state="pend" title="Churned customer emails" who="crm" badge="cc" time="4:51" pii />
+        </div>
+      </PluginView>
+    </div>
+    <div class="checks" aria-hidden="true">
+      <span class="sc-h">Local checks</span>
+      <ul>
+        {checks.map((c, i) => (
+          <li style={`--i:${i}`}>
+            <span class="q">{c}</span>
+            <span class="ok" set:html={tick} />
+            {i === checks.length - 1 && <span class="no" set:html={cross} />}
+            <span class="track"><i></i></span>
+          </li>
+        ))}
+      </ul>
+    </div>
+    <div class="providers">
+      <span class="pv-h">Choose the evaluator</span>
+      <ul>
+        <li class="on"><i></i><span class="pm" set:html={typesafe} /><a href="https://docs.typesafe.ai/models" target="_blank" rel="noopener">Jev by TypeSafe</a></li>
+        <li><i></i>A custom server, such as <span class="pm" set:html={githubMark} /><a href="https://github.com/jaredpalmer/kev" target="_blank" rel="noopener">Kev</a></li>
+      </ul>
+    </div>
+    <div class="scores" aria-hidden="true">
+      <span class="sc-h">Evaluator scores</span>
+      <span class="sc-p">Sees the structure, never the rows.</span>
+      <ul>
+        {scores.map((s, i) => (
+          <li style={`--i:${i}`}>
+            <span class="q">{s.q}</span>
+            <span class="num">{s.v.toFixed(2)}</span>
+            <span class="track"><i style={`--v:${pct(s.v)}`}></i><b style={`left:${pct(s.cut)}`}><em>{s.cut.toFixed(2)}</em></b></span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  </div>
+
+  <p class="only"><span set:html={bolt} />Auto mode only ever approves reads.</p>
+  <p class="off"><span class="sw"></span>Off by default</p>
+</div>
+
+<style>
+  .section-head.c .part-title { max-width: 22ch; }
+  .section-head.c .part-title em { display: block; }
+  /* The plugin's armed Auto mode chip, as in the hero's pill. */
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px 4px 8px; border-radius: 7px; font-size: 11.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--auto-ink); background: var(--auto); }
+  .chip :global(svg) { width: 14px; height: 14px; }
+  .chip > span { display: inline-flex; }
+
+  .bench { position: relative; }
+  .stage { --cw: 264px; --ya: 96px; --yb: 178px; position: relative; height: 516px; isolation: isolate; }
+  /* The two checks are bands the rows travel across. Each lights up while it works. */
+  .gate { position: absolute; top: 0; bottom: 0; width: 256px; margin-left: -128px; padding: 16px 14px; display: grid; gap: 3px; align-content: start; justify-items: center; text-align: center; border-radius: 14px; background: linear-gradient(180deg, color-mix(in oklch, var(--auto) 13%, transparent), transparent); }
+  .gate::after { content: ""; position: absolute; inset: 0; border-radius: 14px; background: linear-gradient(180deg, color-mix(in oklch, var(--auto) 26%, transparent), color-mix(in oklch, var(--auto) 6%, transparent)); opacity: 0; animation-play-state: var(--gk-play, running); }
+  /* The lanes stop at the Evaluator card and carry on after it, so its contents sit on a clear field. */
+  .stage::before, .stage::after { --gap: 128px; content: ""; position: absolute; z-index: -1; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, var(--g-line) calc(66% - var(--gap)), transparent 0 calc(66% + var(--gap)), var(--g-line) 0); }
+  .stage::before { top: calc(var(--ya) + 26px); }
+  /* The held read's line runs on to the end, like the approved one: it is the same path. */
+  .stage::after { top: calc(var(--yb) + 26px); }
+  /* Local analysis takes the green of its checks; cyan stays the evaluator's. */
+  .gate.one { left: 34%; background: linear-gradient(180deg, color-mix(in oklch, var(--ok) 10%, transparent), transparent); }
+  .gate.one::after { background: linear-gradient(180deg, color-mix(in oklch, var(--ok) 19%, transparent), color-mix(in oklch, var(--ok) 4%, transparent)); }
+  .gate.one strong { color: var(--ok); }
+  .gate.one::after { animation: lit1 12s linear infinite; }
+  .gate.two { left: 66%; }
+  .gate.two::after { animation: lit2 12s linear infinite; }
+  .gate strong, .gate span { position: relative; z-index: 1; }
+  .gate strong { font-size: 15.5px; font-weight: 600; letter-spacing: -0.015em; color: var(--auto); }
+  .gate span { font-size: 12.5px; line-height: 1.3; color: var(--muted); }
+  .gate .trust { margin-top: 2px; font-size: 11.5px; color: var(--text); opacity: 0.72; }
+  /* The evaluator choice fills the band between the lane and the scores. */
+  .providers { position: absolute; top: 166px; left: 66%; width: 240px; margin-left: -120px; padding: 12px 10px 13px; border-radius: 10px; background: color-mix(in oklch, var(--g-ground) 55%, transparent); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--auto) 22%, transparent); }
+  .pv-h { display: block; margin-bottom: 10px; font: 500 11px / 1 var(--g-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--auto); }
+  .providers ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 9px; }
+  .providers li { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); white-space: nowrap; }
+  .pm { display: inline-flex; flex: none; }
+  .pm :global(svg) { width: 14px; height: 14px; }
+  .pm :global(svg), .pm :global(svg *) { fill: currentColor; }
+  .providers a { color: inherit; text-decoration: underline; text-decoration-color: color-mix(in oklch, currentColor 40%, transparent); text-underline-offset: 3px; }
+  .providers a:hover { color: var(--auto); }
+  .providers i { flex: none; width: 13px; height: 13px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px color-mix(in oklch, var(--text) 35%, transparent); }
+  .providers .on { color: var(--text); }
+  .providers .on i { box-shadow: inset 0 0 0 1.5px var(--auto), inset 0 0 0 4px var(--g-ground), inset 0 0 0 7px var(--auto); }
+  @keyframes lit1 {
+    0%, 14%, 31%, 100% { opacity: 0; }
+    17%, 28% { opacity: 1; }
+  }
+  @keyframes lit2 {
+    0%, 40%, 59%, 100% { opacity: 0; }
+    43%, 56% { opacity: 1; }
+  }
+  .tag { position: absolute; top: 54px; display: grid; font-size: 14px; font-weight: 500; letter-spacing: -0.01em; color: var(--text); white-space: nowrap; }
+  .who, .tag.to { display: inline-flex; align-items: center; gap: 9px; }
+  /* Six agents, 4 s each, in the amber of Works with: whichever agent proposes, the path is the same. */
+  .who { grid-area: 1 / 1; opacity: 0; animation: who 24s linear infinite; animation-delay: calc(var(--n) * 4s); animation-play-state: var(--gk-play, running); }
+  @keyframes who {
+    0% { opacity: 0; translate: 0 4px; }
+    1.5%, 15% { opacity: 1; translate: 0 0; }
+    16.5%, 100% { opacity: 0; }
+  }
+  .mark, .db { display: inline-flex; flex: none; }
+  .mark :global(svg), .db :global(svg) { width: 20px; height: 20px; }
+  .mark :global(svg), .mark :global(svg *) { fill: var(--amber); }
+  .mark :global(svg [fill="#fff"]), .mark :global(svg [fill="#027aff"]) { fill: var(--g-ground); }
+  .db { color: var(--amber); }
+  .tag.to { right: 0; }
+  .held { position: absolute; top: calc(var(--yb) + 62px); left: 34%; translate: -50% 0; white-space: nowrap; font-size: 13px; font-weight: 500; color: var(--amber); animation: held 12s linear infinite; animation-play-state: var(--gk-play, running); }
+  @keyframes held {
+    0%, 31% { opacity: 0; }
+    33%, 95% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+
+  /* Each band shows its own work under the lanes: the local checks tick while it is lit, then the
+     evaluator's scores fill. Both start below the held read's line. */
+  .scores, .checks { position: absolute; top: 284px; width: 224px; margin-left: -112px; }
+  .scores { left: 66%; }
+  .checks { left: 34%; }
+  .sc-h, .sc-p { display: none; }
+  :is(.scores, .checks) ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 20px; }
+  :is(.scores, .checks) li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; align-items: baseline; }
+  .q { font-size: 13.5px; color: var(--text); }
+  .num { font: 500 12.5px / 1 var(--g-mono); color: var(--auto); animation: num 12s linear infinite; animation-delay: calc(var(--i) * 0.15s); animation-play-state: var(--gk-play, running); }
+  .track { grid-column: 1 / -1; position: relative; height: 5px; border-radius: 3px; background: color-mix(in oklch, var(--text) 9%, transparent); }
+  .track i { position: absolute; inset: 0 auto 0 0; width: 0; min-width: 3px; border-radius: 3px; background: var(--auto); animation: fill 12s var(--ease-out) infinite; animation-delay: calc(var(--i) * 0.15s); animation-play-state: var(--gk-play, running); }
+  /* The cutoff: the score must stay to its left. */
+  .track b { position: absolute; top: -4px; bottom: -4px; width: 1.5px; background: var(--text); }
+  .track em { position: absolute; top: 9px; left: 5px; font: 400 10.5px / 1 var(--g-mono); font-style: normal; color: var(--faint); }
+  @keyframes fill {
+    0%, 43% { width: 0; }
+    52%, 95% { width: var(--v); }
+    100% { width: 0; }
+  }
+  .ok { display: inline-flex; color: var(--ok); opacity: 0; animation: ok 12s linear infinite; animation-delay: calc(var(--i) * 0.15s); animation-play-state: var(--gk-play, running); }
+  .ok :global(svg), .no :global(svg) { width: 14px; height: 14px; }
+  .ok, .no { grid-area: 1 / 2; }
+  .no { display: inline-flex; color: var(--danger); opacity: 0; animation: no 12s linear infinite; animation-play-state: var(--gk-play, running); }
+  /* Checks pass in green and fail in red: cyan belongs to the evaluator. */
+  .checks .track i { animation-name: pass; background: var(--ok); }
+  /* Once the read that runs leaves the band, it shows the held read: its emails fail the last check. */
+  .checks li:last-child .ok { animation-name: ok-last; animation-delay: 0s; }
+  .checks li:last-child .track i { animation-name: pass, warn; animation-delay: calc(var(--i) * 0.15s), 0s; }
+  .checks li:last-child .q { animation: warn-text 12s linear infinite; animation-play-state: var(--gk-play, running); }
+  @keyframes ok-last {
+    0%, 23.5% { opacity: 0; }
+    27.5%, 28.5% { opacity: 1; }
+    29.5%, 100% { opacity: 0; }
+  }
+  @keyframes no {
+    0%, 29.5% { opacity: 0; }
+    31%, 95% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+  @keyframes warn {
+    0%, 29% { background: var(--ok); }
+    31%, 95% { background: var(--danger); }
+    100% { background: var(--ok); }
+  }
+  @keyframes warn-text {
+    0%, 29% { color: var(--text); }
+    31%, 95% { color: var(--danger); }
+    100% { color: var(--text); }
+  }
+  @keyframes pass {
+    0%, 16% { width: 0; }
+    23%, 95% { width: 100%; }
+    100% { width: 0; }
+  }
+  @keyframes ok {
+    0%, 20% { opacity: 0; }
+    24%, 95% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+  @keyframes num {
+    0%, 44% { opacity: 0; }
+    50%, 95% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+
+  .only { margin-top: 28px; display: flex; justify-content: center; align-items: center; gap: 10px; font-size: clamp(1.15rem, 1.9vw, 1.45rem); font-weight: 600; letter-spacing: -0.02em; color: var(--text); text-align: center; }
+  .only :global(svg) { width: 20px; height: 20px; color: var(--auto); }
+  .only > span { display: inline-flex; }
+  /* A switch in the off position, so the default reads at a glance. */
+  .off { margin: 16px auto 0; width: fit-content; display: flex; align-items: center; gap: 10px; padding: 8px 16px 8px 10px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--edge-strong); font-size: 15px; font-weight: 600; color: var(--text); }
+  .sw { position: relative; width: 28px; height: 16px; border-radius: 999px; background: color-mix(in oklch, var(--text) 16%, transparent); }
+  .sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--muted); }
+
+  @media (max-width: 760px) {
+    .stage { --cw: 196px; height: 268px; }
+    .gate { width: 104px; margin-left: -52px; padding: 12px 6px; }
+    .gate.two { width: 104px; margin-left: -52px; }
+    .stage::before, .stage::after { --gap: 52px; }
+    .gate strong { font-size: 13px; }
+    .gate span { font-size: 11px; }
+    .gate .trust { display: none; }
+    .providers { position: static; width: auto; margin: 12px 0 0; padding: 18px 16px; border-radius: 14px; box-shadow: none; background: linear-gradient(180deg, color-mix(in oklch, var(--auto) 10%, transparent), transparent); }
+    .sc-p { display: block; margin: -6px 0 14px; font-size: 13px; line-height: 1.4; color: var(--muted); }
+    .tag, .tag.to { display: none; }
+    .scores, .checks { position: static; width: auto; margin: 12px 0 0; padding: 18px 16px; border-radius: 14px; background: linear-gradient(180deg, color-mix(in oklch, var(--auto) 10%, transparent), transparent); }
+    .checks { margin-top: 24px; background: linear-gradient(180deg, color-mix(in oklch, var(--ok) 9%, transparent), transparent); }
+    .checks .sc-h { color: var(--ok); }
+    .sc-h { display: block; margin-bottom: 14px; font-size: 14px; font-weight: 600; color: var(--auto); }
+    .only { font-size: 1.1rem; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .gate::after, .held, .num, .ok, .who, .track i { animation: none; }
+    .who:first-child { opacity: 1; }
+    .held, .num, .ok { opacity: 1; }
+    .track i { width: var(--v); }
+    .checks .track i { width: 100%; }
+    /* The still frame holds the read that waits in the band, so its failed check shows. */
+    .no, .checks li:last-child .q { animation: none; }
+    .no { opacity: 1; }
+    .checks li:last-child .ok { opacity: 0; }
+    .checks li:last-child .q { color: var(--danger); }
+    .checks li:last-child .track i { background: var(--danger); }
+  }
+</style>

@@ -1,0 +1,116 @@
+---
+// Approaches, never products. "part" means it depends on the client, the connector or what you
+// build. Pasting by hand is the page's one joke: its cells spell a question instead of a mark.
+type Mark = "yes" | "part" | "no" | "ask";
+const wants = [
+  "No database credentials in the agent",
+  "Can read without a click",
+  "Writes need your approval",
+  "Sensitive data flagged",
+  "Query and outcome recorded",
+];
+const ways: { name: string; how: string; marks: Mark[]; gk?: boolean }[] = [
+  {
+    name: "Paste results by hand",
+    how: "You run each query and copy the rows back",
+    marks: ["ask", "ask", "ask", "ask", "ask"],
+  },
+  {
+    name: "SQL from the terminal",
+    how: "The agent runs a database client, with a login in its environment",
+    marks: ["no", "yes", "part", "no", "part"],
+  },
+  {
+    name: "Direct SQL over MCP",
+    how: "An MCP server holds the connection and runs whatever SQL the agent sends",
+    marks: ["part", "yes", "part", "part", "part"],
+  },
+  {
+    name: "Predefined query tools",
+    how: "The agent fills in queries someone wrote in advance",
+    marks: ["yes", "yes", "part", "part", "part"],
+  },
+  {
+    name: "Gatekeeper",
+    how: "Each query checked, then approved by you or Auto mode",
+    marks: ["yes", "yes", "yes", "yes", "yes"],
+    gk: true,
+  },
+];
+const word = { yes: "Yes", part: "Partly", no: "No", ask: "Who knows" };
+const asked = ["you", "really", "do", "that", "?"];
+---
+<section class="w section" id="why-gatekeeper">
+  <div class="section-head">
+    <span class="eyebrow">Why Gatekeeper</span>
+    <h2 class="headline">The usual ways make you choose between <em>fast and safe.</em></h2>
+    <p class="lede">Common ways to let an agent query your database <span class="vs">vs.</span> <span class="gk-name"><img src="/gatekeeper-icon.svg" alt="" width="20" height="20" />Gatekeeper</span></p>
+  </div>
+
+  <div class="grid" role="table" aria-label="Ways to give an agent database access">
+    <div class="row head" role="row">
+      <span role="columnheader" class="corner"><span class="sr-only">Approach</span></span>
+      {wants.map((w) => <span role="columnheader" class="want">{w}</span>)}
+    </div>
+    {ways.map((w) => (
+      <div class:list={["row", { gk: w.gk, ask: w.marks[0] === "ask" }]} role="row">
+        <div class="way" role="rowheader">
+          <strong>{w.gk && <img src="/gatekeeper-icon.svg" alt="" width="20" height="20" />}{w.name}</strong>
+          <span>{w.how}</span>
+        </div>
+        {w.marks.map((m, i) => (
+          <span class:list={["cell", m]} role="cell"><i aria-hidden="true">{m === "ask" && asked[i]}</i><span class="lbl">{wants[i]}</span><span class="sr-only">: {word[m]}</span></span>
+        ))}
+      </div>
+    ))}
+  </div>
+</section>
+
+<style>
+  .headline { max-width: 20ch; }
+  /* Marks, not words: a filled square, a half square, an empty one. */
+  .grid { border-top: 1px solid var(--g-line); }
+  .row { display: grid; grid-template-columns: minmax(0, 1.5fr) repeat(5, minmax(0, 1fr)); align-items: center; border-bottom: 1px solid var(--g-line); }
+  .row.head { align-items: end; border-bottom-color: var(--edge-strong); }
+  .want { padding: 14px 10px; font-size: 13px; line-height: 1.3; color: var(--muted); text-align: center; text-wrap: balance; }
+  .way { display: grid; gap: 2px; padding: 18px 16px 18px 0; }
+  .way strong { display: flex; align-items: center; gap: 8px; font-size: 17px; font-weight: 600; letter-spacing: -0.02em; }
+  .way span { font-size: 13.5px; color: var(--faint); }
+  /* Each mark sits under the centre of its header. */
+  .cell { display: flex; justify-content: center; align-items: center; padding: 0 10px; }
+  .cell i { flex: none; width: 18px; height: 18px; border-radius: 5px; box-shadow: inset 0 0 0 1.5px color-mix(in oklch, var(--text) 16%, transparent); }
+  .cell.yes i { background: var(--text); box-shadow: none; }
+  .cell.part i { background: linear-gradient(90deg, color-mix(in oklch, var(--text) 55%, transparent) 50%, transparent 50%); box-shadow: inset 0 0 0 1.5px color-mix(in oklch, var(--text) 40%, transparent); }
+  /* Pasting by hand: the cells ask a question, one word each, set a little off the line. */
+  .cell.ask i { width: auto; height: auto; border-radius: 0; box-shadow: none; font-size: 19px; font-weight: 600; font-style: italic; letter-spacing: -0.02em; color: var(--muted); rotate: -6deg; translate: 0 -3px; }
+  .cell.ask:nth-child(odd) i { rotate: 5deg; translate: 0 4px; }
+  .cell.ask:last-child i { font: 600 26px / 1 var(--g-mono); color: var(--text); rotate: 12deg; }
+  .lede .vs { margin-inline: 0.1em; padding: 0.15em 0.45em; border-radius: 6px; font: 500 0.78em / 1 var(--g-mono); color: var(--amber); background: color-mix(in oklch, var(--amber) 13%, transparent); vertical-align: 0.1em; }
+  .gk-name { white-space: nowrap; font-weight: 600; color: var(--text); }
+  .gk-name img { display: inline; width: 1.05em; height: 1.05em; margin-right: 0.3em; vertical-align: -0.17em; }
+  /* Hidden on screen but read aloud: a mark alone says nothing to a screen reader. */
+  .lbl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .row.gk { margin-inline: -16px; padding-inline: 16px; border-radius: 14px; border-bottom-color: transparent; background: color-mix(in oklch, var(--amber) 10%, transparent); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--amber) 38%, transparent); }
+  .row.gk .way strong { color: var(--amber); }
+  .row.gk .way strong img { width: 20px; height: 20px; }
+  .row.gk .way span { color: var(--muted); }
+  .row.gk .cell.yes i { background: var(--amber); }
+
+  @media (max-width: 860px) {
+    .row.head { display: none; }
+    .row { grid-template-columns: minmax(0, 1fr); padding-block: 16px; gap: 6px; }
+    .way { padding: 0 0 6px; }
+    .cell { justify-content: flex-start; padding: 0; gap: 10px; font-size: 14.5px; color: var(--muted); }
+    .cell.no { color: var(--faint); }
+    .cell.yes { color: var(--text); }
+    .cell i { width: 14px; height: 14px; border-radius: 4px; }
+    .lbl { position: static; width: auto; height: auto; overflow: visible; clip-path: none; white-space: normal; }
+    .row.gk { margin-inline: -12px; padding-inline: 12px; }
+    /* The question reads on one line here; its column names stay for screen readers only. */
+    .row.ask { grid-template-columns: repeat(5, auto); justify-content: start; column-gap: 9px; }
+    .row.ask .way { grid-column: 1 / -1; }
+    .row.ask .lbl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    .cell.ask i { font-size: 17px; }
+    .cell.ask:last-child i { font-size: 22px; }
+  }
+</style>

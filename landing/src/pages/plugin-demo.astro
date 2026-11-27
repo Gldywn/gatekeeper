@@ -1,0 +1,27 @@
+---
+// The real plugin UI replaying a scripted session, framed by the showcase section. Its own
+// page, so the plugin's global stylesheet never meets the landing's.
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Gatekeeper plugin replay</title>
+    <style id="app-theme"></style>
+    <style is:inline>
+      body { opacity: 0; transition: opacity 0.4s ease; }
+      html[data-ready] body { opacity: 1; }
+      @media (prefers-reduced-motion: reduce) { body { transition: none; } }
+      /* The plugin opens Settings from these icons; the demo holds their popover open instead. */
+      .sa-hint-wrap[data-demo-open] .sa-pop { opacity: 1; transform: none; pointer-events: auto; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script>
+      import "../demo/main";
+    </script>
+  </body>
+</html>

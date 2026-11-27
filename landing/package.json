@@ -5,9 +5,12 @@
   "scripts": {
     "dev": "ASTRO_TELEMETRY_DISABLED=1 astro dev",
     "build": "ASTRO_TELEMETRY_DISABLED=1 astro build",
-    "preview": "ASTRO_TELEMETRY_DISABLED=1 astro preview"
+    "preview": "ASTRO_TELEMETRY_DISABLED=1 astro preview",
+    "typecheck": "pnpm --filter @gatekeeper/plugin exec tsc --noEmit -p ../../landing/tsconfig.json"
   },
   "dependencies": {
+    "@fontsource-variable/geist": "5.3.0",
+    "@fontsource-variable/geist-mono": "5.3.0",
     "@vercel/analytics": "2.0.1",
     "@vercel/speed-insights": "2.0.0",
     "astro": "5.18.2"

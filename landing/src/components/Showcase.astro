@@ -1,0 +1,28 @@
+---
+// The real plugin on a test database (src/pages/plugin-demo.astro): it plays a scripted session
+// and visitors can use it; the script waits while they do.
+---
+<section class="w showcase" aria-label="The Gatekeeper plugin">
+  <p class="desc">A working demo of the Gatekeeper plugin in Beekeeper Studio, on a test database, with Auto mode on. A write waits for Write mode and a read that returns customer emails waits for review. New reads arrive and Auto mode evaluates and approves each one.</p>
+  <div class="frame">
+    <iframe src="/plugin-demo/" title="Gatekeeper plugin demo" loading="lazy"></iframe>
+  </div>
+</section>
+
+<style>
+  /* Says what the demo shows before a screen reader enters it; shown instead of the frame
+     without JavaScript, which the demo needs. */
+  .desc { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  :global(html:not([data-js])) .desc { position: static; width: auto; height: auto; overflow: visible; clip: auto; white-space: normal; max-width: 62ch; margin: 0 auto; text-align: center; color: var(--muted); }
+  :global(html:not([data-js])) .frame { display: none; }
+  .frame {
+    border-radius: 16px;
+    overflow: hidden;
+    background: var(--ground);
+    box-shadow:
+      0 0 0 1px var(--g-line),
+      0 30px 80px oklch(0% 0 0 / 0.45);
+  }
+  iframe { display: block; width: 100%; height: 700px; border: 0; }
+  @media (max-width: 700px) { iframe { height: 620px; } }
+</style>

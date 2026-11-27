@@ -1,0 +1,90 @@
+---
+// The plugin's real approval card, each part named in the margin. How it works opens on it.
+import PluginView from "../plugin/PluginView.astro";
+
+// y is the note's position down the card, in percent of the card's height.
+const notes = [
+  { side: "l", y: 5, t: "Who asks and why", d: "The agent session and the intent it stated." },
+  {
+    side: "l",
+    y: 30,
+    t: "What it touches",
+    d: "Each table and whether it is read, written or deleted from.",
+  },
+  { side: "l", y: 56, t: "The exact SQL", d: "Formatted, with hidden characters made visible." },
+  {
+    side: "r",
+    y: 45,
+    t: "What is sensitive",
+    d: "Likely personal and client data in what the query returns.",
+  },
+  {
+    side: "r",
+    y: 75,
+    t: "What Auto mode did",
+    d: "It held this read for you. Eligible reads run without a click.",
+  },
+  { side: "l", y: 91, t: "Your answer", d: "Approve, reject, or send the agent a note to revise." },
+];
+---
+<div class="card-part">
+  <div class="anatomy">
+    <div class="specimen">
+      <PluginView>
+        <section class="pane pane-detail"><div class="pane-body"><div class="queue" id="queue">
+          <div class="pd-who"><span class="harness-badge"><svg viewBox="0 0 24 24"><use href="#cx"/></svg></span><span class="pd-name">analytics</span><span class="pd-task">Weekly retention report</span></div>
+          <div class="card">
+            <div class="top"><span class="intent">Customers with an open ticket and their email</span></div>
+            <div class="meta">req_7c3e19a2b4d0 · Requested 12s ago</div>
+            <div class="cs-matrix"><table class="mx"><thead><tr><th scope="col">Table</th><th scope="col">Read</th><th scope="col">Write</th><th scope="col">Delete</th></tr></thead><tbody><tr><th scope="row" class="nm">customers</th><td class="mk on read"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#check"/></svg></td><td class="mk"></td><td class="mk"></td></tr><tr><th scope="row" class="nm">tickets</th><td class="mk on read"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#check"/></svg></td><td class="mk"></td><td class="mk"></td></tr></tbody></table></div>
+            <div class="cs-legend"><span class="lg-slot"><button class="lg pii" type="button"><span class="sw">Possible PII</span><span class="ct">1</span><span class="lg-hint"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#help"/></svg></span></button></span></div>
+            <pre class="sql"><code class="sql-body"><span class="kw">SELECT</span> c.id, c.<span class="pii-col">email</span>, t.subject
+<span class="kw">FROM</span> public.customers c
+<span class="kw">JOIN</span> public.tickets t <span class="kw">ON</span> t.customer_id = c.id
+<span class="kw">WHERE</span> t.status = <span class="st">'open'</span></code></pre>
+            <div class="cs-auto"><div class="cs-unparsed auto" role="status"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#bolt"/></svg><span><b>Auto mode:</b> Held on this machine before evaluation. Waiting for your review. <b class="auto-strong">Nothing was sent to the evaluator.</b></span></div></div>
+            <div class="dbar"><div class="actions">
+              <button class="btn approve" type="button">Approve</button>
+              <button class="btn reject" type="button">Reject</button>
+              <button class="deny-open" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#chat"/></svg>Request changes</button><span class="nb-due">Expires in <span class="lease">4:41</span></span>
+            </div></div>
+          </div>
+        </div></div></section>
+      </PluginView>
+    </div>
+    <ol class="notes">
+      {notes.map((n, i) => (
+        <li class={n.side} style={`--y:${n.y}%`}><span class="num">{String(i + 1).padStart(2, "0")}</span><h3>{n.t}</h3><p>{n.d}</p></li>
+      ))}
+    </ol>
+  </div>
+</div>
+
+<style>
+
+  /* The card sits in the middle column; each note hangs in a margin at the height of the part
+     it names, tied to the card's edge by a hairline. */
+  .anatomy { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 540px) minmax(0, 1fr); }
+  .specimen { grid-column: 2; border-radius: 14px; padding: 10px; background: radial-gradient(90% 70% at 50% 0%, color-mix(in oklch, var(--amber) 15%, transparent), transparent 65%), var(--g-canvas); box-shadow: 0 30px 80px oklch(0% 0 0 / 0.4); }
+  .notes { position: absolute; inset: 0; margin: 0; padding: 0; list-style: none; pointer-events: none; }
+  .notes li { position: absolute; top: var(--y); width: calc(50% - 270px); display: grid; gap: 4px; }
+  .notes li.l { left: 0; padding-right: 72px; text-align: right; justify-items: end; }
+  .notes li.r { right: 0; padding-left: 72px; }
+  .notes li::after { content: ""; position: absolute; top: 9px; width: 56px; height: 1px; background: color-mix(in oklch, var(--amber) 55%, transparent); }
+  .notes li.l::after { right: 4px; }
+  .notes li.r::after { left: 4px; }
+  .num { font: 500 12px / 18px var(--g-mono); color: var(--amber); }
+  .notes h3 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.02em; }
+  .notes p { max-width: 30ch; font-size: 14.5px; line-height: 1.45; color: var(--muted); }
+
+  @media (max-width: 1080px) {
+    .anatomy { grid-template-columns: minmax(0, 1fr); justify-items: center; gap: 28px; }
+    .specimen { grid-column: 1; width: 100%; max-width: 540px; }
+    .notes { position: static; pointer-events: auto; width: 100%; max-width: 540px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 24px; }
+    .notes li, .notes li.l, .notes li.r { position: static; width: auto; padding: 0; text-align: left; justify-items: start; }
+    .notes li::after { display: none; }
+  }
+  @media (max-width: 440px) {
+    .notes { grid-template-columns: minmax(0, 1fr); }
+  }
+</style>

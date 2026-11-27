@@ -1,0 +1,168 @@
+/* The pattern every section below the demo shares: eyebrow, large headline, one line under it. */
+.section {
+  padding-top: clamp(88px, 11vw, 144px);
+  scroll-margin-top: 40px;
+}
+/* A part inside a section (How it works holds three): a smaller title, a shorter gap above. */
+.part {
+  padding-top: clamp(72px, 9vw, 120px);
+  scroll-margin-top: 72px;
+}
+.part-title {
+  margin: 0;
+  max-width: 22ch;
+  font-size: clamp(1.6rem, 3vw, 2.4rem);
+  line-height: 1.08;
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+.part-title em {
+  font-style: normal;
+  color: var(--amber);
+}
+.section-head {
+  display: grid;
+  gap: 16px;
+  margin-bottom: clamp(36px, 4.5vw, 60px);
+}
+.section-head.c {
+  justify-items: center;
+  text-align: center;
+}
+.eyebrow {
+  font: 500 12px / 1 var(--g-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+.headline {
+  margin: 0;
+  max-width: 21ch;
+  font-size: clamp(2rem, 4.4vw, 3.5rem);
+  line-height: 1.04;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  text-wrap: balance;
+}
+.headline em {
+  font-style: normal;
+  color: var(--amber);
+}
+.lede {
+  max-width: 54ch;
+  font-size: clamp(1.05rem, 1.6vw, 1.25rem);
+  line-height: 1.45;
+  color: var(--muted);
+  text-wrap: pretty;
+}
+
+/* The agent command, with its copy button. */
+.cmd {
+  position: relative;
+  margin: 0;
+  padding: 16px 52px 16px 18px;
+  border-radius: 12px;
+  background: var(--g-well);
+  box-shadow: inset 0 0 0 1px var(--g-line);
+  font: 400 14.5px / 1.9 var(--g-mono);
+  color: var(--text);
+  text-align: left;
+  overflow-x: auto;
+  white-space: pre;
+}
+.cmd .p {
+  color: var(--amber);
+  user-select: none;
+}
+.cmd .c {
+  color: var(--faint);
+}
+.cmd-copy {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--text) 8%, transparent);
+  color: var(--muted);
+  cursor: pointer;
+}
+.cmd-copy:hover {
+  color: var(--text);
+  background: color-mix(in oklch, var(--text) 13%, transparent);
+}
+.cmd-copy svg {
+  width: 15px;
+  height: 15px;
+}
+.cmd-copy .ok,
+.cmd-copy[data-done] .cp {
+  display: none;
+}
+.cmd-copy[data-done] .ok {
+  display: block;
+  color: var(--ok);
+}
+
+/* A menu path in Beekeeper Studio. */
+.menu-path {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 24px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 14.5px;
+  line-height: 1.4;
+  color: var(--text);
+}
+.menu-path li {
+  position: relative;
+  padding: 5px 10px;
+  border-radius: 7px;
+  background: color-mix(in oklch, var(--text) 7%, transparent);
+  box-shadow: inset 0 0 0 1px var(--g-line);
+  white-space: nowrap;
+}
+.menu-path li:not(:last-child)::after {
+  content: "›";
+  position: absolute;
+  right: -15px;
+  color: var(--faint);
+  font-weight: 400;
+}
+.menu-path li:last-child {
+  background: var(--amber);
+  color: var(--amber-ink);
+  font-weight: 600;
+  box-shadow: none;
+}
+
+@media (max-width: 520px) {
+  .cmd {
+    font-size: 12.5px;
+    padding-right: 18px;
+  }
+  .cmd .c {
+    display: none;
+  }
+  .cmd-copy {
+    display: none;
+  }
+  .menu-path {
+    gap: 8px 20px;
+    font-size: 13.5px;
+  }
+  .menu-path li {
+    padding: 4px 8px;
+  }
+  .menu-path li:not(:last-child)::after {
+    right: -13px;
+  }
+}

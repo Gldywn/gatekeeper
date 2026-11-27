@@ -1,548 +1,278 @@
 ---
-// Hero: the demo video is the main visual, a poster-thumbnail that opens a cinema
-// lightbox. Below it, a live "pending approval" queue shows one card fully at a time.
-// It starts pre-populated (no empty 0 state), each new card collapses the current one
-// then arrives on top pushing it down, and the lease timer counts down live. Three
-// approval types cycle: read + PII, write + client, and destructive + PII (blocked).
-// No animation library, styles are scoped.
+import PluginView from "./plugin/PluginView.astro";
+
+// The background is the plugin's own Queue rows (inbox.ts markup, its stylesheet in a shadow
+// root): pending proposals with their clock, decided ones with their glyph and one fact. The
+// write waiting for approval stays lit because writes always wait for a human.
+type Agent = "cc" | "cx" | "oc";
+type Card = {
+  title: string;
+  agent: Agent;
+  who: string;
+  // Side of the copy, distance of the card's inner edge from the centre, and top (px).
+  side: "l" | "r";
+  e: number;
+  y: number;
+  depth?: "far" | "deep" | "lit";
+  write?: boolean;
+} & (
+  | { kind: "pend"; left: string; low?: boolean; evaluating?: boolean }
+  | {
+      kind: "done";
+      age: string;
+      fact: string;
+      glyph: "auto" | "approved" | "rejected";
+      flag?: "pii" | "client";
+    }
+);
+
+// Each side is an arc round the copy: the rows above the pill and below the buttons sit close to
+// the centre, the middle rows further out. Beside the headline and lead, never under 395px.
+const cards: Card[] = [
+  {
+    kind: "done",
+    glyph: "auto",
+    title: "Orders per day this week",
+    agent: "cx",
+    who: "analytics",
+    age: "0s ago",
+    fact: "7 rows",
+    depth: "far",
+    side: "l",
+    e: 270,
+    y: 10,
+  },
+  {
+    kind: "done",
+    glyph: "approved",
+    flag: "pii",
+    title: "Churned customer emails",
+    agent: "cc",
+    who: "crm",
+    age: "2m ago",
+    fact: "38 rows",
+    depth: "far",
+    side: "l",
+    e: 430,
+    y: 112,
+  },
+  {
+    kind: "pend",
+    title: "Customer emails on open tickets",
+    agent: "cx",
+    who: "support-desk",
+    left: "4:41",
+    side: "l",
+    e: 480,
+    y: 218,
+  },
+  {
+    kind: "done",
+    glyph: "auto",
+    title: "Signups by referral source",
+    agent: "oc",
+    who: "growth",
+    age: "40s ago",
+    fact: "9 rows",
+    depth: "deep",
+    side: "l",
+    e: 490,
+    y: 324,
+  },
+  {
+    kind: "done",
+    glyph: "approved",
+    write: true,
+    title: "Close resolved tickets",
+    agent: "cx",
+    who: "support-desk",
+    age: "1m ago",
+    fact: "9 affected",
+    depth: "far",
+    side: "l",
+    e: 440,
+    y: 430,
+  },
+  {
+    kind: "pend",
+    evaluating: true,
+    title: "Search latency by day",
+    agent: "oc",
+    who: "search",
+    left: "4:58",
+    side: "l",
+    e: 240,
+    y: 528,
+  },
+  {
+    kind: "done",
+    glyph: "auto",
+    title: "Revenue per plan in Q3",
+    agent: "cc",
+    who: "finance",
+    age: "20s ago",
+    fact: "4 rows",
+    depth: "far",
+    side: "r",
+    e: 255,
+    y: 10,
+  },
+  {
+    kind: "pend",
+    write: true,
+    low: true,
+    title: "Extend two trials by a week",
+    agent: "cc",
+    who: "billing-api",
+    left: "0:38",
+    side: "r",
+    e: 445,
+    y: 112,
+  },
+  {
+    kind: "done",
+    glyph: "approved",
+    flag: "client",
+    title: "Overdue by company",
+    agent: "oc",
+    who: "billing-api",
+    age: "5m ago",
+    fact: "12 rows",
+    depth: "far",
+    side: "r",
+    e: 470,
+    y: 218,
+  },
+  {
+    kind: "done",
+    glyph: "rejected",
+    title: "Drop the old sessions table",
+    agent: "cx",
+    who: "platform",
+    age: "3m ago",
+    fact: "Declined",
+    depth: "deep",
+    side: "r",
+    e: 500,
+    y: 324,
+  },
+  {
+    kind: "done",
+    glyph: "auto",
+    title: "Refunds issued since Monday",
+    agent: "cx",
+    who: "payments",
+    age: "1m ago",
+    fact: "31 rows",
+    depth: "far",
+    side: "r",
+    e: 430,
+    y: 430,
+  },
+  {
+    kind: "pend",
+    write: true,
+    depth: "lit",
+    title: "Void two duplicate invoices",
+    agent: "cc",
+    who: "billing-api",
+    left: "4:12",
+    side: "r",
+    e: 225,
+    y: 528,
+  },
+];
+
+const GLYPH = { auto: "#bolt", approved: "#check", rejected: "#xc" };
+
+// 312px is a card (288px) plus the room its float and a scrollbar need at the screen edge, so a
+// narrow screen pulls the arc in. Each card floats on its own path, never in lockstep.
+const place = (c: Card, i: number) => {
+  const inner = `min(${c.e}px, 50% - 312px)`;
+  const left = c.side === "l" ? `calc(50% - ${inner} - 288px)` : `calc(50% + ${inner})`;
+  return (
+    `left:${left};top:${c.y}px;--dx:${10 + ((i * 5) % 6)}px;--dy:${6 + ((i * 3) % 5)}px;` +
+    `--tx:${9 + ((i * 7) % 5)}s;--ty:${6 + ((i * 3) % 4)}s;--px:-${((i * 13) % 90) / 10}s;--py:-${((i * 9) % 60) / 10}s`
+  );
+};
+
+// The page's reduced-motion rule cannot cross the shadow boundary, so the root carries its own.
+// The fade is a transition because the no-JS rule holds every animation.
+const float = `:host{position:absolute;inset:0}
+.fc{position:absolute;width:288px;opacity:.55;transition:opacity .9s .2s var(--ease);animation:fx var(--tx) var(--ease-in-out) var(--px) infinite alternate,fy var(--ty) var(--ease-in-out) var(--py) infinite alternate}
+.fc svg{width:13px;height:13px}
+.fc.far{opacity:.4;scale:.92}
+.fc.deep{opacity:.28;scale:.85}
+.fc.lit{opacity:.95}
+.fc.mid{display:none}
+@media (min-width:1440px){.fc.mid{display:flex}}
+@starting-style{.fc,.fc.far,.fc.deep,.fc.lit{opacity:0}}
+@keyframes fx{from{translate:calc(var(--dx) * -1) 0}to{translate:var(--dx) 0}}
+@keyframes fy{from{transform:translateY(calc(var(--dy) * -1))}to{transform:translateY(var(--dy))}}
+@media (prefers-reduced-motion:reduce){.fc{animation:none;transition:none}}`;
 ---
-<section class="hero">
-  <div class="wrap">
-    <!-- The real plugin-header honeycomb deco, faded on every edge so it never cuts
-         off square (mirrors the plugin's screen-blend + diagonal-mask treatment). -->
-    <div class="hero-deco" aria-hidden="true"></div>
-    <div class="hero-grid">
-      <div class="hero-copy">
-        <div class="hero-tags">
-          <span class="h-tag primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 21 7v10l-9 5-9-5V7z"/></svg>Beekeeper Studio Plugin</span>
-          <span class="h-tag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="8" x="2" y="2" rx="2"/><rect width="20" height="8" x="2" y="14" rx="2"/><path d="M6 6h.01"/><path d="M6 18h.01"/></svg>MCP Server</span>
-        </div>
-        <h1><span class="hl-machine">Your agents <span class="hl-propose">propose</span> the SQL.</span> <span class="hl-human">You <span class="hl-approve">approve</span> what runs.</span></h1>
-        <p class="lead">Gatekeeper is a human-approved, read-only-by-default bridge between AI agents and your database. An agent proposes a query over MCP. Nothing runs until a human approves it in <a class="bk-link" href="https://www.beekeeperstudio.io" target="_blank" rel="noopener">Beekeeper Studio</a>. The agent never holds your credentials.</p>
-        <div class="hero-cta">
-          <a class="btn-lg btn-primary cta-go" href="https://github.com/Gldywn/gatekeeper#getting-started">
-            <svg class="gh-mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.42c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.34-1.3-1.7-1.3-1.7-1.06-.72.08-.71.08-.71 1.17.08 1.78 1.2 1.78 1.2 1.04 1.78 2.73 1.27 3.4.97.1-.75.4-1.27.73-1.56-2.56-.29-5.26-1.28-5.26-5.7 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11 11 0 0 1 5.8 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.43-2.7 5.4-5.28 5.69.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
-            View on GitHub
-          </a>
-          <a class="btn-lg btn-star" href="https://github.com/Gldywn/gatekeeper" aria-label="Star Gatekeeper on GitHub">
-            <svg class="star" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2.4l2.95 5.98 6.6.96-4.77 4.65 1.12 6.57L12 17.4l-5.9 3.16 1.12-6.57L2.45 9.34l6.6-.96z"/></svg>
-            Help us with a star
-          </a>
-        </div>
-        <div class="trust">
-          <span><svg class="t-ok" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>Read-only by default</span>
-          <span><svg class="t-amber" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Human-approved, pre-execution</span>
-          <span><svg class="t-blue" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>Every decision recorded</span>
-        </div>
-      </div>
-
-      <div class="hero-visual">
-        <!-- Demo video: a poster-thumbnail button that opens a cinema lightbox. -->
-        <div class="demo2-wrap">
-          <button class="demo2" id="hero-demo" type="button" aria-haspopup="dialog" aria-controls="demo-modal" aria-label="Play the Gatekeeper demo">
-            <img class="demo2-poster" src="/gatekeeper-demo-poster.jpg" alt="A proposed SQL query in Beekeeper Studio, flagged for client data and a sensitive value, awaiting human approval" width="2010" height="1012" />
-            <span class="demo2-play" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v16l13-8z"/></svg></span>
-          </button>
-          <a class="demo2-credit" href="https://uppbeat.io/t/swoop/shine" target="_blank" rel="noopener" aria-label="Music: Shine by Swoop, free via Uppbeat">
-            <svg class="demo2-credit-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
-            <span class="demo2-credit-pop" role="tooltip"><span class="cp-k">Music</span><span class="cp-t">Shine by Swoop</span><span class="cp-s">Free via Uppbeat</span></span>
-          </a>
-        </div>
-
-        <!-- Live pending-approval queue: one full card on top, older ones collapsed below. -->
-        <div class="pending-taste">
-          <div class="queue-label">Pending approval <span class="count-badge" id="pa-count">1</span></div>
-          <div class="pa-stack" id="pa-stack">
-            <!-- First card pre-rendered (full) so the queue is populated on arrival, never
-                 an empty 0 state. Read query touching PII; reads carry no risk badge. -->
-            <div class="card">
-              <div class="top">
-                <span class="intent">List enterprise contacts for the quarterly review</span>
-                <span class="lease">2:00</span>
-              </div>
-              <div class="meta">reporting-agent &middot; req_3a9f21 &middot; 2s ago</div>
-              <pre class="sql"><button class="copy-sql" type="button" aria-label="Copy SQL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg></button><code><span class="kw">SELECT</span> id, <span class="pii-col">email</span>, <span class="pii-col">phone</span>
-<span class="kw">FROM</span> customers
-<span class="kw">WHERE</span> plan = <span class="st">'enterprise'</span>
-<span class="kw">LIMIT</span> 200;</code></pre>
-              <div class="card-schema">
-                <div class="cs-line cs-pii"><span class="cs-warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>possible PII</span><span class="cs-list">email, phone</span></div>
-              </div>
-              <div class="actions">
-                <button class="btn approve" type="button">Approve</button>
-                <button class="btn reject" type="button">Reject</button>
-                <button class="deny-open" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Request changes</button>
-              </div>
+<section class="hero" id="top">
+  <div class="float" aria-hidden="true">
+    <PluginView>
+      <style is:inline set:html={float}></style>
+      {cards.map((c, i) => (
+        <div class:list={["pane", "fc", c.depth, { mid: c.e > 320 }]} style={place(c, i)}>
+          {c.kind === "pend" ? (
+            <div class="ix-row pend">
+              <span class="ix-mark"><span class:list={["ix-dot", { eval: c.evaluating }]}></span></span>
+              <span class="ix-main"><span class="ix-title">{c.title}</span><span class="ix-meta"><span class="harness-badge"><svg viewBox="0 0 24 24"><use href={`#${c.agent}`} /></svg></span><span class="ix-who">{c.who}</span></span></span>
+              <span class="ix-end">{c.write && <span class="ix-risk write"><svg viewBox="0 0 24 24"><use href="#pen" /></svg></span>}<span class:list={["ix-side", { low: c.low }]}>{c.left}</span></span>
             </div>
-          </div>
-
-          <div class="pa-pool" id="pa-pool" hidden>
-            <!-- Write touching client-confidential data -->
-            <div class="card write" data-pa>
-              <div class="top">
-                <span class="risk-badge write">Write</span>
-                <span class="intent">Update the renewal date on the Northwind account</span>
-                <span class="lease">1:32</span>
-              </div>
-              <div class="meta">crm-sync &middot; req_7f3c2a &middot; 3s ago</div>
-              <pre class="sql"><button class="copy-sql" type="button" aria-label="Copy SQL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg></button><code><span class="kw">UPDATE</span> accounts
-<span class="kw">SET</span> renews_at = <span class="st">'2027-01-01'</span>
-<span class="kw">WHERE</span> <span class="client-col">account_name</span> = <span class="sensitive-val">'Northwind Traders'</span>;</code></pre>
-              <div class="card-risk">
-                <div class="cs-writes write"><span class="cs-writes-k"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>Write</span><span class="tbl-chip">accounts</span></div>
-              </div>
-              <div class="card-schema">
-                <div class="cs-line cs-client"><span class="cs-warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/></svg>client data</span><span class="cs-list">account_name</span></div>
-              </div>
-              <div class="actions">
-                <span class="approve-slot">
-                  <button class="btn approve write" type="button" disabled>Approve write</button>
-                  <span class="approve-pop" role="tooltip"><svg viewBox="0 0 16 16" fill="none"><path d="M8 1.7 1 14h14L8 1.7Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 6.3v3.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.7" r=".8" fill="currentColor"/></svg>Write mode required to approve this query.</span>
-                </span>
-                <button class="btn reject" type="button">Reject</button>
-                <button class="deny-open" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Request changes</button>
-              </div>
+          ) : (
+            <div class="ix-row done">
+              <span class="ix-mark"><span class:list={["hstate", c.glyph]}><svg viewBox="0 0 24 24"><use href={GLYPH[c.glyph]} /></svg></span></span>
+              <span class="ix-title">{c.title}</span>
+              <span class="ix-top">{c.write && <span class="ix-risk write"><svg viewBox="0 0 24 24"><use href="#pen" /></svg></span>}{c.flag && <span class="act-flags"><span class:list={["act-flag", c.flag]}>{c.flag === "pii" ? "PII" : "Client"}</span></span>}<span class="hage">{c.age}</span></span>
+              <span class="ix-meta"><span class="harness-badge"><svg viewBox="0 0 24 24"><use href={`#${c.agent}`} /></svg></span><span class="ix-who">{c.who}</span></span>
+              <span class="ix-fact">{c.fact}</span>
             </div>
-
-            <!-- Destructive touching PII, blocked at read-only -->
-            <div class="card destructive" data-pa>
-              <div class="top">
-                <span class="risk-badge destructive">Destructive</span>
-                <span class="intent">Purge deactivated trial users</span>
-                <span class="lease low">0:41</span>
-              </div>
-              <div class="meta">cleanup-job &middot; req_b91e04 &middot; 6s ago</div>
-              <pre class="sql"><button class="copy-sql" type="button" aria-label="Copy SQL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg></button><code><span class="kw">DELETE FROM</span> users
-<span class="kw">WHERE</span> status = <span class="st">'deactivated'</span>
-  <span class="kw">AND</span> <span class="pii-col">email</span> <span class="kw">LIKE</span> <span class="st">'%@trial.io'</span>;</code></pre>
-              <div class="card-risk">
-                <div class="cs-writes destructive"><span class="cs-writes-k"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>Delete</span><span class="tbl-chip">users</span></div>
-              </div>
-              <div class="card-schema">
-                <div class="cs-line cs-pii"><span class="cs-warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>possible PII</span><span class="cs-list">email</span></div>
-              </div>
-              <div class="actions">
-                <span class="approve-slot">
-                  <button class="btn approve destructive" type="button" disabled>Approve destructive</button>
-                  <span class="approve-pop" role="tooltip"><svg viewBox="0 0 16 16" fill="none"><path d="M8 1.7 1 14h14L8 1.7Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 6.3v3.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.7" r=".8" fill="currentColor"/></svg>Destructive mode required to approve this query.</span>
-                </span>
-                <button class="btn reject" type="button">Reject</button>
-                <button class="deny-open" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Request changes</button>
-              </div>
-            </div>
-          </div>
+          )}
         </div>
-      </div>
-    </div>
+      ))}
+    </PluginView>
   </div>
-
-  <dialog class="demo-modal" id="demo-modal" aria-label="Gatekeeper demo">
-    <div class="demo-modal-inner">
-      <button class="demo-modal-close" type="button" aria-label="Close demo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
-      <video class="demo-modal-video" id="demo-video" controls playsinline preload="none" poster="/gatekeeper-demo-poster.jpg">
-        <source src="/gatekeeper-demo.mp4" type="video/mp4" />
-      </video>
+  <div class="w hero-in">
+    <a class="new" href="#auto-mode"><span class="auto"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m13 3-9 11h7l-1 7 10-12h-7z"/></svg>Auto mode</span>Now available<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></a>
+    <h1>The <em>database harness</em> for AI agents.</h1>
+    <p class="sub">Stop <em>gambling</em> with your production database.</p>
+    <p class="lead">Agents propose SQL over MCP and approved queries run on your Beekeeper Studio connection. With Auto mode on, eligible reads run without a click and writes always wait for you. The agent never holds your database credentials.</p>
+    <div class="cta">
+      <a class="btn amber" href="/install"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>Install Gatekeeper</a>
+      <a class="btn ghost" href="https://github.com/Gldywn/gatekeeper" target="_blank" rel="noopener"><svg class="star" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg>Star on GitHub</a>
     </div>
-  </dialog>
+    <p class="req">Requires Beekeeper Studio 5.4 or later</p>
+  </div>
 </section>
 
 <style>
-  /* Keep the left copy anchored to the top, level with the video, instead of drifting
-     down as the queue on the right grows taller. */
-  .hero-grid { align-items: start; }
+  .hero { position: relative; margin-top: clamp(0px, 2.5vw, 40px); padding-block: clamp(64px, 9vw, 96px) clamp(72px, 9vw, 128px); text-align: center; overflow: hidden; }
+  .float { position: absolute; inset: 0; pointer-events: none; }
 
-  /* Positioning badges: make "Beekeeper Studio plugin" + "MCP server" read instantly on arrival. */
-  .hero-tags { display: flex; flex-wrap: wrap; gap: 9px; }
-  .h-tag { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; letter-spacing: 0.005em; padding: 6px 13px; border-radius: 999px; border: 1px solid var(--edge-strong); color: var(--muted); background: color-mix(in oklch, var(--surface) 55%, transparent); }
-  .h-tag svg { width: 15px; height: 15px; flex: none; }
-  .h-tag.primary { color: var(--amber); border-color: color-mix(in oklch, var(--amber) 45%, var(--edge)); background: color-mix(in oklch, var(--amber) 12%, var(--surface)); }
-
-  /* Opposition by weight, accent colour and drawn underlines (no chip, no mono, no italic)
-     while staying bright, never dim grey. The machine side is white but a touch lighter
-     with a faint underline on "propose"; the human side is heavier white with "You" and
-     "approve" in amber and "approve" underlined amber, so "propose" -> "approve" reads as
-     the pivot pair. */
-  .hl-machine, .hl-human { display: block; text-wrap: balance; }
-  .hl-machine { color: var(--text); font-weight: 600; }
-  .hl-human { color: var(--text); font-weight: 800; }
-  .hl-propose {
-    text-decoration: underline;
-    text-decoration-color: color-mix(in oklch, var(--text) 26%, transparent);
-    text-decoration-thickness: 0.05em;
-    text-underline-offset: 0.15em;
+  .hero-in { position: relative; display: grid; justify-items: center; }
+  /* The plugin's armed Auto mode chip (style.css .armed-chip.auto), inside a pill whose radius
+     follows the chip's. */
+  .new { display: inline-flex; gap: 10px; align-items: center; font-size: 13.5px; color: var(--muted); padding: 4px 10px 4px 4px; border-radius: 10px; background: color-mix(in oklch, var(--auto) 7%, transparent); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--auto) 22%, transparent); transition: background var(--dur) var(--ease), color var(--dur) var(--ease); }
+  .new:hover { color: var(--text); background: color-mix(in oklch, var(--auto) 12%, transparent); }
+  .new .auto { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px 3px 6px; border-radius: 6px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--auto-ink); background: var(--auto); animation: auto-pulse 2s var(--ease-in-out) infinite; }
+  .new .auto svg { width: 13px; height: 13px; }
+  .new .chev { width: 13px; height: 13px; margin-left: -4px; color: var(--faint); }
+  @keyframes auto-pulse {
+    0% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--auto) 55%, transparent); }
+    70%, 100% { box-shadow: 0 0 0 6px color-mix(in oklch, var(--auto) 0%, transparent); }
   }
-  .hl-approve {
-    color: var(--amber);
-    text-decoration: underline;
-    text-decoration-color: color-mix(in oklch, var(--amber) 70%, transparent);
-    text-decoration-thickness: 0.055em;
-    text-underline-offset: 0.15em;
-  }
-
-  /* Plugin-authentic honeycomb: the same gatekeeper-deco.svg as the Beekeeper header,
-     screen-blended over the dark ground and dissolved on all edges with a radial mask. */
-  .hero-deco {
-    position: absolute;
-    top: -60px;
-    right: -8%;
-    width: 60%;
-    height: 520px;
-    background: url("/gatekeeper-deco.svg") center / cover no-repeat;
-    mix-blend-mode: screen;
-    opacity: 0.4;
-    pointer-events: none;
-    z-index: 0;
-    -webkit-mask-image: radial-gradient(78% 82% at 68% 34%, #000 32%, transparent 76%);
-    mask-image: radial-gradient(78% 82% at 68% 34%, #000 32%, transparent 76%);
-  }
-
-  /* One primary CTA carrying the GitHub mark (no arrow): a lift and a soft amber glow on
-     hover, with the mark giving a small kick. */
-  .cta-go {
-    display: inline-flex; align-items: center; gap: 0.6em;
-    transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
-  }
-  .cta-go .gh-mark { width: 1.15em; height: 1.15em; transition: transform var(--dur) var(--ease); }
-  .cta-go:hover { transform: translateY(-1px); box-shadow: 0 8px 24px color-mix(in oklch, var(--amber) 30%, transparent); }
-  .cta-go:hover .gh-mark { transform: scale(1.12); }
-
-  /* Beekeeper Studio called out in amber, linked to their site. */
-  .bk-link {
-    display: inline-block; white-space: nowrap;
-    color: var(--amber); font-weight: 600; text-decoration: none;
-    transition: color var(--dur) var(--ease);
-  }
-  /* External-link mark: inline-block inside the nowrap inline-block link, so it stays glued to
-     the last word and sits on the text baseline (can't wrap onto its own line). */
-  .bk-link::after {
-    content: ""; display: inline-block;
-    width: 0.6em; height: 0.6em; margin-left: 0.15em; vertical-align: 0.14em;
-    background-color: currentColor; opacity: 0.9;
-    -webkit-mask: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%23000'%20stroke-width='2.6'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M7%2017%2017%207'/%3E%3Cpath%20d='M9%207h8v8'/%3E%3C/svg%3E") center / contain no-repeat;
-    mask: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%23000'%20stroke-width='2.6'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M7%2017%2017%207'/%3E%3Cpath%20d='M9%207h8v8'/%3E%3C/svg%3E") center / contain no-repeat;
-  }
-  .bk-link:hover { color: color-mix(in oklch, var(--amber) 82%, var(--text)); }
-
-  .hero-visual { display: flex; flex-direction: column; gap: var(--s4); min-width: 0; }
-
-  /* Demo: a poster-thumbnail button that opens a cinema lightbox. */
-  .demo2 {
-    position: relative; display: block; width: 100%; padding: 0;
-    aspect-ratio: 16 / 9; border-radius: 12px;
-    background: var(--sunken); border: 1px solid var(--edge-strong);
-    box-shadow: var(--elev-pop), inset 0 1px 0 var(--hi);
-    overflow: hidden; cursor: pointer; appearance: none; -webkit-appearance: none;
-    transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
-  }
-  .demo2:hover { transform: translateY(-2px); box-shadow: var(--elev-pop), 0 14px 34px color-mix(in oklch, var(--amber) 22%, transparent); }
-  .demo2:focus-visible { outline: 2px solid var(--amber); outline-offset: 3px; }
-  .demo2-poster { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .demo2-play {
-    position: absolute; inset: 0; margin: auto; width: 66px; height: 66px; border-radius: 50%;
-    display: grid; place-items: center; background: var(--amber); color: var(--amber-ink);
-    box-shadow: 0 6px 18px oklch(0% 0 0 / 0.45), 0 0 0 10px color-mix(in oklch, var(--amber) 14%, transparent);
-    transition: transform var(--dur) var(--ease);
-  }
-  .demo2:hover .demo2-play { transform: scale(1.08); }
-  .demo2-play svg { width: 24px; height: 24px; margin-left: 3px; }
-  .demo2-wrap { position: relative; display: block; }
-  /* Small required-attribution badge (Uppbeat free tier). An info glyph, not a note
-     that reads as a mute button, with a designed popover on hover/focus. */
-  .demo2-credit {
-    position: absolute; right: 9px; bottom: 9px; z-index: 4;
-    display: inline-flex; align-items: center; justify-content: center;
-    width: 24px; height: 24px; border-radius: 7px;
-    background: color-mix(in oklch, var(--sunken) 58%, transparent);
-    border: 1px solid var(--edge); color: var(--muted);
-    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
-    transition: color var(--dur) var(--ease), background var(--dur) var(--ease), border-color var(--dur) var(--ease);
-  }
-  .demo2-credit:hover, .demo2-credit:focus-visible {
-    color: var(--amber); background: color-mix(in oklch, var(--sunken) 84%, transparent);
-    border-color: color-mix(in oklch, var(--amber) 34%, transparent); outline: none;
-  }
-  .demo2-credit-ico { width: 14px; height: 14px; display: block; }
-  .demo2-credit-pop {
-    position: absolute; right: 0; bottom: calc(100% + 8px);
-    display: flex; flex-direction: column; gap: 2px;
-    padding: 9px 11px; white-space: nowrap; text-align: left;
-    background: var(--surface); border: 1px solid var(--edge-strong); border-radius: 9px;
-    box-shadow: var(--elev-pop);
-    opacity: 0; transform: translateY(4px); pointer-events: none;
-    transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
-  }
-  .demo2-credit:hover .demo2-credit-pop, .demo2-credit:focus-visible .demo2-credit-pop { opacity: 1; transform: translateY(0); }
-  .cp-k { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.11em; text-transform: uppercase; color: var(--faint); }
-  .cp-t { font-size: 12.5px; font-weight: 600; color: var(--text); line-height: 1.25; }
-  .cp-s { font-size: 11px; color: var(--muted); }
-  @media (prefers-reduced-motion: reduce) { .demo2-credit-pop { transition: none; } }
-
-  /* Cinema lightbox for the demo video. */
-  .demo-modal { border: 0; padding: 0; margin: auto; width: 100vw; height: 100dvh; max-width: 100vw; max-height: 100dvh; background: transparent; overflow: hidden; }
-  .demo-modal::backdrop { background: oklch(0% 0 0 / 0.82); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
-  .demo-modal-inner { width: 100%; height: 100%; display: grid; place-items: center; padding: clamp(16px, 4vw, 48px); box-sizing: border-box; }
-  .demo-modal-video { width: min(92vw, calc(86dvh * 2010 / 1012)); max-height: 86dvh; border-radius: 12px; box-shadow: 0 30px 80px oklch(0% 0 0 / 0.6); background: #000; display: block; }
-  .demo-modal-close {
-    position: fixed; top: 18px; right: 20px; width: 42px; height: 42px; border-radius: 50%;
-    border: 1px solid var(--edge-strong); background: color-mix(in oklch, var(--surface) 82%, transparent);
-    color: var(--text); display: grid; place-items: center; cursor: pointer;
-    transition: background var(--dur) var(--ease);
-  }
-  .demo-modal-close:hover { background: var(--surface); }
-  .demo-modal-close svg { width: 20px; height: 20px; }
-  @media (prefers-reduced-motion: reduce) { .demo2, .demo2 .demo2-play { transition: none !important; } }
-
-  /* The pending panel as an opaque slice of the plugin body. */
-  .pending-taste {
-    background: var(--surface);
-    border: 1px solid var(--edge-strong);
-    border-radius: 11px;
-    box-shadow: var(--elev-2), inset 0 1px 0 var(--hi);
-    padding: var(--s3) var(--s4) var(--s4);
-  }
-  .pending-taste .queue-label { margin-top: 0; }
-  /* Same body background across every risk (the ported plugin CSS tints destructive). */
-  .pending-taste .card.destructive { background: var(--surface); }
-  /* The count sits in an eyebrow-tracked label; drop the inherited letter-spacing so
-     the digit centres in its circle instead of drifting left. */
-  .pending-taste .count-badge { letter-spacing: normal; padding: 0; }
-
-  /* Queue: one full card at the top, older ones collapsed to thin rows below. JS drives
-     max-height (collapse of the old, grow-in of the new) so pushes stay smooth. */
-  .pa-stack { display: flex; flex-direction: column; }
-  .pa-stack .card + .card { margin-top: var(--s2); }
-  .pa-stack .card { overflow: hidden; transition: max-height 460ms var(--ease), opacity 460ms var(--ease), margin-top 460ms var(--ease), padding 460ms var(--ease), border-width 460ms var(--ease); }
-  .pa-stack .card.enter { animation: pa-in 420ms var(--ease-out) backwards; }
-  .pa-stack .card.pa-mini { opacity: 0.6; padding-top: 9px; padding-bottom: 9px; }
-  .pa-stack .card.pa-mini .intent { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-
-  .count-badge.pulse { animation: pa-pulse 520ms var(--ease-out); }
-
-  @keyframes pa-in {
-    from { opacity: 0; }
-    to { opacity: 1; }
-  }
-  @keyframes pa-pulse {
-    0% { transform: scale(1); }
-    40% { transform: scale(1.32); }
-    100% { transform: scale(1); }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .pa-stack, .pa-stack .card, .count-badge.pulse, .cta-go, .cta-go .gh-mark { animation: none !important; transition: none !important; }
-  }
+  h1 { margin: 24px 0 0; font-size: clamp(2.4rem, 5vw, 4rem); line-height: 1.02; font-weight: 600; letter-spacing: -0.04em; max-width: 15ch; text-wrap: balance; }
+  h1 em { font-style: normal; color: var(--amber); }
+  @media (min-width: 640px) { h1 em { white-space: nowrap; } }
+  .sub { margin-top: 18px; font-size: clamp(1.15rem, 2vw, 1.35rem); line-height: 1.35; font-weight: 500; letter-spacing: -0.015em; color: var(--text); text-wrap: balance; }
+  .lead { margin-top: 14px; max-width: 58ch; font-size: 17px; color: var(--muted); }
+  .cta { margin-top: 28px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .btn .star { color: var(--amber); }
+  .req { margin-top: 14px; font-size: 14px; color: var(--faint); }
+  /* Under 1280px the arc would shrink to its four end cards; the copy stands alone there. */
+  @media (max-width: 1279px) { .float { display: none; } }
 </style>
-
-<script>
-  const stack = document.getElementById("pa-stack");
-  const pool = document.getElementById("pa-pool");
-  const countEl = document.getElementById("pa-count");
-
-  if (stack && pool && countEl) {
-    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const DWELL_MS = 5000; // how long each card stays fully readable
-    const MAX_DEPTH = 4; // the queue builds to this depth, then cleanly clears back to 1
-
-    // The first card is pre-rendered (read); clone it so it can return in the cycle.
-    // The pool holds the write + destructive scenarios.
-    const first = stack.firstElementChild;
-    const readTemplate = first ? first.cloneNode(true) : null;
-    const poolCards = Array.from(pool.querySelectorAll("[data-pa]"));
-    const types = readTemplate ? [readTemplate, ...poolCards] : poolCards;
-    let typeIdx = 0; // read (types[0]) is already on screen
-    let count = 1; // displayed pending number
-    let timer = 0;
-    let leaseTimer = 0;
-
-    // Only advance while the tab is actually visible and focused. A background tab still
-    // fires setTimeout but pauses rAF and transitionend, which let the queue prepend cards
-    // forever without ever draining. Pausing here (plus a hard depth cap in step) fixes it.
-    const active = () => !document.hidden && document.hasFocus();
-    const narrow = () => window.matchMedia("(max-width: 960px)").matches;
-
-    const setCount = (v) => {
-      countEl.textContent = String(v);
-      countEl.classList.remove("pulse");
-      void countEl.offsetWidth; // restart the pulse
-      countEl.classList.add("pulse");
-    };
-
-    const makeCard = (idx) => {
-      const c = types[idx % types.length].cloneNode(true);
-      c.removeAttribute("data-pa");
-      c.classList.remove("enter", "pa-mini");
-      c.style.maxHeight = "";
-      return c;
-    };
-
-    // Grow a card in on top from zero height (used for arrivals and for the reset).
-    const growIn = (card) => {
-      card.classList.add("enter");
-      card.style.maxHeight = "0px";
-      stack.prepend(card);
-      requestAnimationFrame(() => {
-        card.style.maxHeight = card.scrollHeight + "px";
-      });
-      card.addEventListener("transitionend", function done(e) {
-        if (e.propertyName !== "max-height") return;
-        card.style.maxHeight = "";
-        card.removeEventListener("transitionend", done);
-      });
-    };
-
-    // A new proposal grows in on top while the current one collapses to a mini in
-    // place, both over the same duration, so the panel only grows toward its steady
-    // height and never bounces. No per-step eviction, so nothing blinks out mid-cycle.
-    const step = () => {
-      if (!active()) { timer = window.setTimeout(step, DWELL_MS); return; }
-      if (narrow()) { timer = window.setTimeout(step, DWELL_MS); return; }
-      // Hard cap: recover instantly if a background tab ever let cards pile up.
-      while (stack.children.length > MAX_DEPTH) stack.lastElementChild.remove();
-      const oldTop = stack.firstElementChild;
-      if (oldTop && !oldTop.classList.contains("pa-mini")) {
-        oldTop.style.maxHeight = oldTop.scrollHeight + "px";
-        void oldTop.offsetHeight; // reflow so the collapse transitions
-      }
-      typeIdx += 1;
-      growIn(makeCard(typeIdx));
-      requestAnimationFrame(() => {
-        if (oldTop && !oldTop.classList.contains("pa-mini")) {
-          oldTop.classList.add("pa-mini");
-          oldTop.style.maxHeight = "42px";
-        }
-      });
-      count += 1;
-      setCount(count);
-      timer = window.setTimeout(count >= MAX_DEPTH ? clearAndRestart : step, DWELL_MS);
-    };
-
-    // Back to a single pending approval. The card on top is already the read (the first
-    // proposal comes round again), so nothing new is grown: only the minis below it
-    // drain away (height, margin and opacity together, each removed the instant it
-    // finishes). The count drops 4 -> 1 coherently and no card duplicates.
-    const clearAndRestart = () => {
-      if (!active()) { timer = window.setTimeout(clearAndRestart, DWELL_MS); return; }
-      const minis = Array.from(stack.querySelectorAll(".pa-mini"));
-      minis.forEach((c) => {
-        c.style.maxHeight = c.offsetHeight + "px";
-        c.style.marginTop = getComputedStyle(c).marginTop;
-      });
-      void stack.offsetHeight;
-      requestAnimationFrame(() => {
-        minis.forEach((c) => {
-          // Zero the whole box, not just max-height: with border-box a card floors at
-          // padding + border (~20px), which is what left the container stuck before it
-          // snapped away on removal.
-          c.style.maxHeight = "0px";
-          c.style.opacity = "0";
-          c.style.marginTop = "0px";
-          c.style.paddingTop = "0px";
-          c.style.paddingBottom = "0px";
-          c.style.borderTopWidth = "0px";
-          c.style.borderBottomWidth = "0px";
-        });
-      });
-      minis.forEach((c) => {
-        c.addEventListener("transitionend", function rem(e) {
-          if (e.propertyName !== "max-height") return;
-          c.remove();
-          c.removeEventListener("transitionend", rem);
-        });
-      });
-      typeIdx = 0; // the surviving top card is the read (types[0]); next arrival is write
-      count = 1;
-      setCount(1);
-      timer = window.setTimeout(step, DWELL_MS);
-    };
-
-    // Reserve the queue's tallest state on .hero-visual so the stack growing and draining
-    // never reflows the page below it. Measured (not a magic number), so it survives copy and
-    // breakpoint changes, and applied only in the animated branch (no dead space otherwise).
-    const heroVisual = stack.closest(".hero-visual");
-    const reserveHeight = () => {
-      if (!heroVisual) return;
-      if (narrow()) { heroVisual.style.minHeight = ""; return; }
-      const w = stack.clientWidth;
-      if (!w) return;
-      const probe = document.createElement("div");
-      probe.style.cssText = "position:absolute;left:-9999px;top:0;visibility:hidden;pointer-events:none;";
-      probe.style.width = w + "px";
-      document.body.appendChild(probe);
-      let tallest = 0;
-      types.forEach((t) => {
-        const c = t.cloneNode(true);
-        c.classList.remove("enter", "pa-mini");
-        c.style.maxHeight = "";
-        probe.appendChild(c);
-        tallest = Math.max(tallest, c.offsetHeight);
-        probe.removeChild(c);
-      });
-      document.body.removeChild(probe);
-      const gapProbe = document.createElement("div");
-      gapProbe.style.cssText = "position:absolute;visibility:hidden;margin-top:var(--s2);";
-      document.body.appendChild(gapProbe);
-      const gap = parseFloat(getComputedStyle(gapProbe).marginTop) || 8;
-      document.body.removeChild(gapProbe);
-      const maxStack = tallest + (MAX_DEPTH - 1) * (42 + gap);
-      heroVisual.style.minHeight = "";
-      const base = heroVisual.offsetHeight - stack.offsetHeight;
-      heroVisual.style.minHeight = Math.round(base + maxStack) + "px";
-    };
-
-    // Live countdown on the lease of whichever card is currently full on top.
-    const parseLease = (t) => {
-      const parts = (t || "0:00").trim().split(":");
-      return Number(parts[0]) * 60 + Number(parts[1]);
-    };
-    const fmtLease = (v) => `${Math.floor(v / 60)}:${String(v % 60).padStart(2, "0")}`;
-
-    if (!reduce) {
-      requestAnimationFrame(reserveHeight);
-      let resizeT = 0;
-      window.addEventListener("resize", () => { window.clearTimeout(resizeT); resizeT = window.setTimeout(reserveHeight, 200); });
-      leaseTimer = window.setInterval(() => {
-        if (!active()) return;
-        if (narrow()) return;
-        const top = stack.firstElementChild;
-        if (!top || top.classList.contains("pa-mini")) return;
-        const lease = top.querySelector(".lease");
-        if (!lease) return;
-        let v = parseLease(lease.textContent);
-        if (v <= 0) return;
-        v -= 1;
-        lease.textContent = fmtLease(v);
-        if (v <= 30) lease.classList.add("low");
-      }, 1000);
-      timer = window.setTimeout(step, DWELL_MS);
-    }
-    // reduced motion: the first card stays, static, no cycling or countdown.
-
-    // Dev-only guard: on hot-reload, stop the previous loop so its timers can't pile up
-    // (the production build runs this once, so the queue is naturally capped there).
-    if (import.meta.hot) {
-      import.meta.hot.dispose(() => {
-        clearTimeout(timer);
-        clearInterval(leaseTimer);
-      });
-    }
-  }
-</script>
-
-<script>
-  // Cinema lightbox: poster button opens a modal <dialog> with the demo video.
-  const demoBtn = document.getElementById("hero-demo");
-  const modal = document.getElementById("demo-modal");
-  const video = document.getElementById("demo-video");
-  if (demoBtn && modal && video && typeof modal.showModal === "function") {
-    const closeBtn = modal.querySelector(".demo-modal-close");
-    const open = () => { modal.showModal(); try { video.currentTime = 0; } catch {} video.volume = 0.2; video.play().catch(() => {}); };
-    const close = () => { video.pause(); if (modal.open) modal.close(); };
-    demoBtn.addEventListener("click", open);
-    closeBtn?.addEventListener("click", close);
-    modal.addEventListener("click", (e) => {
-      const t = e.target;
-      if (t === modal || (t instanceof Element && t.classList.contains("demo-modal-inner"))) close();
-    });
-    modal.addEventListener("close", () => video.pause());
-  }
-</script>

@@ -1,0 +1,122 @@
+---
+import Base from "../layouts/Base.astro";
+import "../styles/sections.css";
+import Footer from "./Footer.astro";
+import Hero from "./Hero.astro";
+import HowItWorks from "./HowItWorks.astro";
+import Install from "./Install.astro";
+import Nav from "./Nav.astro";
+import Showcase from "./Showcase.astro";
+import { sections } from "./sections";
+import WhereItFits from "./WhereItFits.astro";
+import Why from "./Why.astro";
+import WorksWith from "./WorksWith.astro";
+---
+<Base>
+  <Nav />
+  <main>
+    <Hero />
+    <Showcase />
+    <WorksWith />
+    <Why />
+    <HowItWorks />
+    <WhereItFits />
+    <Install />
+  </main>
+  <Footer />
+  <!-- Inline so it runs before the visitor sees the top of the page on a section's address. -->
+  <script is:inline define:vars={{ sections }}>
+    {
+      const still = matchMedia("(prefers-reduced-motion: reduce)");
+      const slug = (path) => path.replace(/^\/|\/$/g, "");
+      const target = (path) => {
+        const id = sections[slug(path)];
+        return id ? document.getElementById(id) : null;
+      };
+      const behavior = (smooth) => (smooth && !still.matches ? "smooth" : "auto");
+      // As after a jump to an anchor, focus (and a screen reader) lands on el and the next Tab
+      // starts there. el stays focusable only until the visitor moves on, so a later click on its
+      // text works as usual: the capture-phase pointerdown runs before the press moves focus.
+      const startTabAt = (el) => {
+        // A landing point, not a control: no ring while it holds focus.
+        el.dataset.jump = "";
+        if (el.hasAttribute("tabindex")) return el.focus({ preventScroll: true });
+        el.setAttribute("tabindex", "-1");
+        const drop = () => {
+          el.removeAttribute("tabindex");
+          el.removeEventListener("blur", drop);
+          removeEventListener("pointerdown", drop, true);
+        };
+        el.addEventListener("blur", drop);
+        addEventListener("pointerdown", drop, true);
+        el.focus({ preventScroll: true });
+        // An anchor that cannot take focus (an SVG mask, say) would never blur to clean up.
+        if (document.activeElement !== el) drop();
+      };
+      const show = (el, smooth, focus) => {
+        el.scrollIntoView({ behavior: behavior(smooth), block: "start" });
+        if (focus) startTabAt(el);
+      };
+      const go = (path, smooth, focus) => {
+        const el = target(path);
+        if (el) return show(el, smooth, focus);
+        window.scrollTo({ top: 0, behavior: behavior(smooth) });
+        // The top of the page has no section to land on: the next Tab starts from the top too.
+        if (focus) startTabAt(document.body);
+      };
+      // This script places the page on every history move, so the browser's own restore would fight it.
+      history.scrollRestoration = "manual";
+      addEventListener("pagehide", () => history.replaceState({ ...history.state, y: scrollY }, ""));
+
+      if (!location.hash) {
+        if (target(location.pathname)) go(location.pathname, false);
+        else if (typeof history.state?.y === "number") scrollTo(0, history.state.y);
+        // Web fonts can shift the layout once they arrive; re-place the page if the visitor has not moved.
+        const placed = scrollY;
+        const settle = () => {
+          if (Math.abs(scrollY - placed) < 2 && target(location.pathname)) go(location.pathname, false);
+        };
+        document.fonts?.ready.then(settle);
+        addEventListener("load", settle, { once: true });
+      }
+
+      document.addEventListener("click", (e) => {
+        if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        const a = e.target instanceof Element ? e.target.closest("a[href]") : null;
+        if (!a || a.target === "_blank" || a.origin !== location.origin) return;
+        // The browser follows an anchor itself; Back then returns to where the visitor was.
+        if (a.hash) return history.replaceState({ ...history.state, y: scrollY }, "");
+        const path = a.pathname;
+        if (slug(path) !== "" && !target(path)) return;
+        e.preventDefault();
+        if (path !== location.pathname || location.hash) {
+          history.replaceState({ ...history.state, y: scrollY }, "");
+          history.pushState({}, "", path);
+        }
+        go(path, true, true);
+      });
+
+      // As the browser resolves an anchor: the decoded id, or the raw one if it does not decode.
+      const anchor = () => {
+        const raw = location.hash.slice(1);
+        try {
+          return document.getElementById(decodeURIComponent(raw));
+        } catch {
+          return document.getElementById(raw);
+        }
+      };
+
+      addEventListener("popstate", (e) => {
+        // An entry made by an in-page anchor is not restored by the browser either, so go to it here.
+        const el = location.hash ? anchor() : target(location.pathname);
+        if (el) return show(el, true, true);
+        // An anchor that names nothing leaves the page, and the next Tab, where they are.
+        if (location.hash) return;
+        // No section to land on: the next Tab starts from the top, as on a fresh visit, not from a
+        // section an earlier jump focused (a blur would leave the browser starting from there).
+        startTabAt(document.body);
+        window.scrollTo({ top: typeof e.state?.y === "number" ? e.state.y : 0, behavior: behavior(true) });
+      });
+    }
+  </script>
+</Base>
